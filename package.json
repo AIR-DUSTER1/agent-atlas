@@ -6,6 +6,7 @@
   "scripts": {
     "models": "tsx scripts/list-models.ts",
     "web": "tsx src/server/index.ts",
+    "desktop": "electron desktop/main.cjs",
     "demo:1": "tsx src/cli.ts 1",
     "demo:2": "tsx src/cli.ts 2",
     "demo:3": "tsx src/cli.ts 3",
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "electron": "^44.8.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   }
