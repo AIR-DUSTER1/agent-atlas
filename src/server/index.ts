@@ -34,6 +34,7 @@ import { loadProjects, listProjects, getActiveProjectId, setActiveProject, addPr
 import { loadExternalAgents, listExternalAgents, getExternalAgent, addExternalAgent, updateExternalAgent, deleteExternalAgent, runExternalAgent } from "./external.js";
 import { listDir, readFileAuthorized, openRemoteRoot, storeUpload, resolveChatFiles, buildUserContent } from "./files.js";
 import type { ChatFileRef } from "./files.js";
+import { loadRag, getRagPublic, saveRagConfig, testRagConnection, searchRag, ingestFolder, ingestText, ingestChatAttachments, deleteRagDoc, clearRag } from "./rag.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -44,6 +45,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 await loadSettings();
 await loadProjects();
 await loadExternalAgents();
+await loadRag();
 void refreshModelInfo().catch(() => {});
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -179,6 +181,10 @@ async function handleChat(
   if (fileRefs.length) {
     const attachments = await resolveChatFiles(fileRefs, getActiveModality() === "vision"); // 无效引用会抛错 → 路由转 400
     fullMessage = buildUserContent(message, attachments, getActiveModality());
+    // RAG 自动入库：文本附件顺手送进外部知识库（best-effort，失败不影响对话）
+    void ingestChatAttachments(
+      attachments.filter((a) => a.kind === "text").map((a) => ({ name: a.name, content: a.content, truncated: a.truncated }))
+    );
   }
 
   // 登记本轮对话记录（流结束后由 streamToClient 回填事件 → 任意浏览器可回放历史）
@@ -643,6 +649,104 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/resume" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)) || "{}") as { sessionId?: string; decision?: unknown };
       await handleResume(res, req, body.sessionId ?? "", body);
+      return;
+    }
+
+    // ── RAG（外部知识库服务）：配置 / 测试 / 入库 / 检索 / 清空 ──
+    // 真实的向量存储与 embedding 由外部服务完成（契约见 src/server/rag.ts）
+    if (pathname === "/api/rag" && req.method === "GET") {
+      const rag = await getRagPublic();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(rag));
+      return;
+    }
+
+    if (pathname === "/api/rag/config" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}") as { baseURL?: string; apiKey?: unknown; collection?: unknown; topK?: unknown };
+      try {
+        const rag = await saveRagConfig({ ...body, baseURL: body.baseURL ?? "" });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, rag }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/rag/test" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}") as { baseURL?: string; apiKey?: unknown };
+      try {
+        const r = await testRagConnection({
+          baseURL: typeof body.baseURL === "string" && body.baseURL.trim() ? body.baseURL : undefined,
+          apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+        });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(r));
+      } catch (err) {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/rag/ingest" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}") as { path?: string; name?: string; content?: string };
+      try {
+        let summary: unknown;
+        if (typeof body.path === "string" && body.path.trim()) {
+          summary = await ingestFolder(body.path); // 文件夹扫描批量入库（授权路径内）
+        } else if (typeof body.content === "string" && typeof body.name === "string") {
+          await ingestText(body.name, body.content, "手动粘贴");
+          summary = { ingested: 1 };
+        } else {
+          throw new Error("需要 path（文件夹扫描入库）或 name + content（文本入库）");
+        }
+        const rag = await getRagPublic();
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, summary, rag }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/rag/search" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}") as { query?: string; topK?: number };
+      try {
+        const r = await searchRag(body.query ?? "", body.topK);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...r }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
+    if (ragDocMatch && req.method === "DELETE") {
+      try {
+        const rag = await deleteRagDoc(ragDocMatch[1]);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, rag }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/rag/clear" && req.method === "POST") {
+      try {
+        const rag = await clearRag();
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, rag }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
       return;
     }
 

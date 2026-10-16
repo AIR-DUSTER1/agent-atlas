@@ -6,7 +6,7 @@
 "use strict";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-09-12-16";
+const APP_VERSION = "web-2026-10-16-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -37,6 +37,7 @@ const state = {
   sessions: [],        // { id, kind, demo, agentId, projectId, title, createdAt, stale?, pendingApproval? }
   projects: [],        // [{id, name, type:"local"|"cloud", path, url?, builtin?}]
   externalAgents: [],  // [{id, name, url, command, args, ...}] 第三方接入的 Agent
+  rag: null,           // { configured, baseURL, apiKeyMasked, collection, topK, docs } 外部 RAG 状态
   projectView: "all",  // "all" | projectId（侧栏过滤 + 新建会话归属）
   currentId: null,
   blocks: {},          // sessionId -> [block]
@@ -110,7 +111,7 @@ const PROTOCOL_LABEL = {
   "anthropic": "Anthropic",
   "gemini": "Gemini",
 };
-const TOOL_ICONS = { calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧", delegate: "🧭" };
+const TOOL_ICONS = { calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧", delegate: "🧭", retrieve_docs: "📚" };
 const NODE_ICONS = { agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️" };
 
 /* ---------------------------------------------------------------------------
@@ -983,6 +984,8 @@ function updateToolCard(part) {
     status.innerHTML = part.result.isError ? "✕ 失败" : "✓ 完成";
     card.querySelector(".result-pre").textContent = part.result.content;
     card.querySelector(".result-pre").className = "result-pre" + (part.result.isError ? " err" : "");
+    // 知识检索专属：解析 JSON 结果，渲染「命中来源」卡片
+    if (part.name === "retrieve_docs") renderRagHitsInToolCard(part, card);
   }
 }
 
@@ -1894,6 +1897,241 @@ function setupDragDrop() {
 }
 
 /* ---------------------------------------------------------------------------
+ * 知识库（外部 RAG）：服务配置 / 文档入库 / 检索测试
+ * 契约见 server/rag.ts —— 本地不存向量，只有「送出去过什么」的登记。
+ * ------------------------------------------------------------------------- */
+function setKbStatus(text, kind) {
+  const el = $("kb-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "settings-status" + (kind ? " " + kind : "");
+}
+
+function updateKbBadge() {
+  const el = $("kb-entry-state");
+  if (!el) return;
+  const ready = Boolean(state.rag?.configured);
+  el.textContent = ready ? "已连接" : "未配置";
+  el.className = "kb-entry-state" + (ready ? " ready" : "");
+}
+
+async function loadRag() {
+  try {
+    state.rag = await api("/api/rag");
+  } catch {
+    state.rag = null; // 旧服务进程没有该接口 → 静默降级
+  }
+  updateKbBadge();
+}
+
+function openKb() {
+  $("kb-mask").classList.remove("hidden");
+  renderKb();
+}
+
+function closeKb() { $("kb-mask").classList.add("hidden"); }
+
+function renderKb() {
+  const rag = state.rag || {};
+  $("kb-url").value = rag.baseURL || "";
+  $("kb-collection").value = rag.collection || "default";
+  $("kb-topk").value = rag.topK ?? 5;
+  $("kb-key").value = "";
+  $("kb-key-state").textContent = rag.hasKey ? `已保存 ${rag.apiKeyMasked}，留空则不修改` : (rag.configured ? "未保存 Key（服务无鉴权可不填）" : "");
+  $("kb-key-state").className = "key-state" + (rag.hasKey ? " ok" : "");
+  setKbStatus(rag.configured ? "" : "尚未配置外部 RAG 服务", rag.configured ? "" : "err");
+  renderKbRoots();
+  renderKbDocs();
+  $("kb-hits").innerHTML = "";
+}
+
+/** 入库位置下拉：与文件选择器同一批授权根（项目根 + 已添加文件夹，带 💻/☁️ 标记） */
+async function renderKbRoots() {
+  const sel = $("kb-root");
+  let roots = [{ path: "", name: "项目根（当前工作台仓库）", type: "local" }];
+  try {
+    const data = await api("/api/fs/list", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    roots = (data.roots || []).map((r) => ({ ...r, type: r.type || "local" }));
+  } catch { /* 用默认项目根 */ }
+  sel.innerHTML = "";
+  for (const r of roots) {
+    const opt = document.createElement("option");
+    opt.value = r.path;
+    opt.textContent = `${r.type === "cloud" ? "☁️" : "💻"} ${r.name}`;
+    sel.appendChild(opt);
+  }
+}
+
+function renderKbDocs() {
+  const wrap = $("kb-docs");
+  wrap.innerHTML = "";
+  const docs = state.rag?.docs || [];
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="fs-empty">还没有入库记录 —— 选择位置点「⬇ 全量入库」，或「✎ 粘贴文本」</div>`;
+    return;
+  }
+  for (const d of docs) {
+    const row = document.createElement("div");
+    row.className = "fs-row kb-doc";
+    row.innerHTML = `<span class="f-icon">📄</span><span class="f-name"></span><span class="f-size"></span><button class="pm-x kb-doc-del" title="从登记移除（并尝试删除外部对应文档）">✕</button>`;
+    row.querySelector(".f-name").textContent = d.name;
+    row.querySelector(".f-size").textContent = `${(d.bytes / 1000).toFixed(1)}k 字 · ${new Date(d.at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${d.source || ""}`;
+    row.title = d.source || d.name;
+    row.querySelector(".kb-doc-del").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        const res = await api(`/api/rag/docs/${d.id}`, { method: "DELETE" });
+        state.rag = res.rag;
+        renderKbDocs();
+      } catch (err) { uiAlert(`移除失败：${err.message}`, "知识库文档"); }
+    });
+    wrap.appendChild(row);
+  }
+}
+
+async function saveKbConfig() {
+  const baseURL = $("kb-url").value.trim();
+  const apiKeyRaw = $("kb-key").value.trim();
+  if (!baseURL) { setKbStatus("✗ 服务地址不能为空", "err"); return; }
+  const body = {
+    baseURL,
+    collection: $("kb-collection").value.trim() || "default",
+    topK: $("kb-topk").value || undefined,
+  };
+  if (apiKeyRaw) body.apiKey = apiKeyRaw; // 留空 = 不修改已存 Key
+  try {
+    const res = await api("/api/rag/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    state.rag = res.rag;
+    updateKbBadge();
+    renderKbDocs();
+    setKbStatus(`✓ 配置已保存（集合 ${state.rag.collection}）`, "ok");
+  } catch (err) { setKbStatus(`✗ ${err.message}`, "err"); }
+}
+
+async function testKb() {
+  const baseURL = $("kb-url").value.trim();
+  const apiKeyRaw = $("kb-key").value.trim();
+  if (!baseURL) { setKbStatus("✗ 请先填写服务地址", "err"); return; }
+  const body = { baseURL };
+  if (apiKeyRaw) body.apiKey = apiKeyRaw;
+  setKbStatus("正在连接 RAG 服务…", "");
+  try {
+    const res = await api("/api/rag/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    setKbStatus(res.ok ? `✓ 服务可达（HTTP ${res.status}）—— 真实检索效果以入库后测试为准` : `✗ ${res.error}`, res.ok ? "ok" : "err");
+  } catch (err) { setKbStatus(`✗ ${err.message}`, "err"); }
+}
+
+async function ingestKbFolder() {
+  if (!state.rag?.configured) { setKbStatus("✗ 请先保存外部 RAG 服务配置", "err"); return; }
+  const path = $("kb-root").value;
+  const btn = $("kb-ingest");
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ 扫描入库中…（最长 90s）";
+  try {
+    const res = await api("/api/rag/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+    state.rag = res.rag;
+    renderKbDocs();
+    const s = res.summary || {};
+    setKbStatus(`✓ 已入库 ${s.ingested ?? "?"} 个文本文件${s.chunks != null ? `，外部服务返回 ${s.chunks} 个切块` : ""}`, "ok");
+  } catch (err) {
+    setKbStatus(`✗ ${err.message}`, "err");
+    uiAlert(`入库失败：${err.message}\n\n检查：① RAG 服务是否实现 /ingest；② 选择的文件夹是否包含文本文件`, "知识库入库");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
+
+async function pasteKbText() {
+  const text = await uiPrompt("粘贴要入库的文本（切块与 embedding 由外部 RAG 服务完成）：", {
+    title: "知识库 · 文本入库",
+    placeholder: "任意说明文档 / 会议纪要 / 规范片段…",
+  });
+  if (!text || !text.trim()) return;
+  try {
+    const res = await api("/api/rag/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `手动文本 ${new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`, content: text }),
+    });
+    state.rag = res.rag;
+    renderKbDocs();
+    setKbStatus("✓ 文本已入库", "ok");
+  } catch (err) { setKbStatus(`✗ ${err.message}`, "err"); }
+}
+
+async function searchKbTest() {
+  const q = $("kb-query").value.trim();
+  const wrap = $("kb-hits");
+  if (!q) { setKbStatus("✗ 请输入检索词", "err"); return; }
+  wrap.innerHTML = `<div class="fs-empty">检索中…</div>`;
+  try {
+    const res = await api("/api/rag/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q }) });
+    const hits = Array.isArray(res.hits) ? res.hits : [];
+    setKbStatus(`✓ 命中 ${hits.length} 条`, "ok");
+    wrap.innerHTML = "";
+    if (!hits.length) wrap.innerHTML = `<div class="fs-empty">没有命中 —— 确认相关文档已入库</div>`;
+    for (const h of hits) wrap.appendChild(renderRagHit(h, false));
+  } catch (err) {
+    wrap.innerHTML = "";
+    setKbStatus(`✗ ${err.message}`, "err");
+  }
+}
+
+async function clearKb() {
+  if (!(await uiConfirm("清空集合会调用外部 RAG 服务的 /reset，并清空本地登记。\n确定继续？", { title: "清空知识库集合", okText: "清空", danger: true }))) return;
+  try {
+    const res = await api("/api/rag/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    state.rag = res.rag;
+    renderKbDocs();
+    $("kb-hits").innerHTML = "";
+    setKbStatus("✓ 集合已清空", "ok");
+  } catch (err) { setKbStatus(`✗ ${err.message}`, "err"); }
+}
+
+/* ----- RAG 命中片段渲染（面板检索 + 聊天工具卡片共用） ----- */
+function renderRagHit(hit, compact) {
+  const el = document.createElement("div");
+  el.className = "rag-hit";
+  const score = typeof hit.score === "number" ? hit.score.toFixed(3) : String(hit.score ?? "–");
+  el.innerHTML = `
+    <div class="rag-hit-head">
+      <span class="rag-hit-name"></span>
+      <span class="rag-hit-src"></span>
+      <span class="rag-hit-score">score ${escapeHtml(score)}</span>
+    </div>
+    <div class="rag-hit-text"></div>`;
+  el.querySelector(".rag-hit-name").textContent = hit.name || "未命名片段";
+  el.querySelector(".rag-hit-src").textContent = hit.source || "";
+  el.querySelector(".rag-hit-text").textContent = hit.text || "（无文本内容）";
+  if (compact) el.querySelector(".rag-hit-text").style.maxHeight = "84px";
+  return el;
+}
+
+/** retrieve_docs 专属结果渲染：从 JSON 结果里解析出「命中来源」卡片列表 */
+function renderRagHitsInToolCard(part, card) {
+  let wrap = card.querySelector(".rag-hits-wrap");
+  if (!part.result || typeof part.result.content !== "string") return;
+  let data;
+  try { data = JSON.parse(part.result.content); } catch { return; }
+  if (!data || typeof data !== "object") return;
+  if (wrap) wrap.remove();
+  const hits = Array.isArray(data.hits) ? data.hits : [];
+  if (!hits.length && !data.error) return;
+  wrap = document.createElement("div");
+  wrap.className = "rag-hits-wrap";
+  const title = document.createElement("div");
+  title.className = "rag-hits-title";
+  title.textContent = data.error
+    ? "📚 检索失败：" + data.error
+    : `📚 命中 ${hits.length} 条外部知识库片段（按相关度排序）`;
+  wrap.appendChild(title);
+  for (const h of hits.slice(0, 6)) wrap.appendChild(renderRagHit(h, true));
+  card.querySelector(".tool-body").appendChild(wrap);
+}
+
+/* ---------------------------------------------------------------------------
  * 启动
  * ------------------------------------------------------------------------- */
 async function init() {
@@ -1908,9 +2146,10 @@ async function init() {
   }
   applyConfigState(state.config);
   const footNote = $("side-foot-note");
-  if (footNote) footNote.textContent = `点击模型名可修改配置 · ${APP_VERSION.replace(/^web-\d{4}-/, "v")}`;
+  if (footNote)   footNote.textContent = `点击模型名可修改配置 · ${APP_VERSION.replace(/^web-\d{4}-/, "v")}`;
   await loadProjects();
   await loadExternalAgents();
+  await loadRag();
 
   // 能力自检：前端具备但服务端缺失的接口 → 说明服务进程是旧代码启动的，提示重启。
   // （静态文件每次请求都读磁盘，浏览器能拿到新脚本；但路由是进程启动时固化的）
@@ -2036,6 +2275,22 @@ async function init() {
   });
   setupDragDrop();
 
+  // 知识库（外部 RAG）：配置 / 测试 / 入库 / 检索 / 清空
+  on("kb-btn", "click", () => { setSidebarOpen(false); openKb(); });
+  on("kb-close", "click", closeKb);
+  on("kb-mask", "click", (e) => { if (e.target === $("kb-mask")) closeKb(); });
+  on("kb-save", "click", saveKbConfig);
+  on("kb-test", "click", testKb);
+  on("kb-key-toggle", "click", () => {
+    const keyInput = $("kb-key");
+    keyInput.type = keyInput.type === "password" ? "text" : "password";
+  });
+  on("kb-ingest", "click", ingestKbFolder);
+  on("kb-paste", "click", pasteKbText);
+  on("kb-search-btn", "click", searchKbTest);
+  on("kb-query", "keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); searchKbTest(); } });
+  on("kb-clear", "click", clearKb);
+
   on("send-btn", "click", send);
   on("stop-btn", "click", stopStreaming);
   inputEl.addEventListener("input", autoGrow);
@@ -2059,12 +2314,17 @@ async function init() {
       closeModal();
       closeSettings();
       closeFsModal();
+      closeKb();
       showProviderMenu(false);
       setSidebarOpen(false);
     }
     if (e.key === "Enter" && ["pf-name", "pf-base-url", "pf-api-key", "pf-model"].includes(e.target.id)) {
       e.preventDefault();
       saveProvider();
+    }
+    if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(e.target.id)) {
+      e.preventDefault();
+      saveKbConfig();
     }
   });
 

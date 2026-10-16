@@ -45,26 +45,30 @@
 ```
 <项目根目录>\
 ├── .env / .env.example   # 网关配置（baseURL / API_KEY / MODEL），.env 已 gitignore
-├── package.json          # npm scripts：web / demo:1~5 / models / start / typecheck
+├── package.json          # npm scripts：web / desktop / demo:1~5 / models / start / typecheck
 ├── tsconfig.json         # ES2022 / NodeNext / strict
 ├── README.md             # 快速开始
 ├── docs/agent-wiki.md    # 本文件
 ├── scripts/
 │   └── list-models.ts    # npm run models：查询网关支持的模型列表
+├── desktop/
+│   └── main.cjs          # Electron 桌面端：子进程托管 Web 服务 + 窗口加载（§3.14）
 └── src/
     ├── config.ts         # 统一读取 .env 配置
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
+    ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
     ├── agent/            # 通用 Agent + 5 个示例的图定义（学习的重点）
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
-        ├── index.ts      # node:http 服务：静态页面 + SSE 接口（chat / resume / sessions）
+        ├── index.ts      # node:http 服务：静态页面 + SSE 接口（chat / resume / sessions / rag）
         ├── stream.ts     # LangGraph 原始流事件 → 前端友好事件（token/工具卡/审批）的翻译层
         ├── mock.ts       # 未配置 API_KEY 时的模拟模型（事件协议与真实图一致）
         ├── sessions.ts   # 内存会话存储（每会话一张图 + 绑定 thread_id）
         ├── settings.ts   # 多供应商管理（增/删/改/切换 + context_length 缓存）
         ├── projects.ts   # 项目文件夹（本地目录 / 云端 Git 仓库 clone + 会话分组）
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
+        ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
         ├── events.ts     # SSE 事件协议定义
         └── public/       # 前端三件套：index.html / style.css / app.js（零框架零构建）
 ```
@@ -73,6 +77,7 @@
 
 ```bash
 npm run web           # 打开 Web 聊天界面（http://localhost:3000，推荐）
+npm run desktop       # Electron 桌面端（原生窗口，端口 3123）
 npm run demo:1        # 运行 Demo 1（带默认示例问题）
 npx tsx src/cli.ts 1 "你的自定义问题"   # 带自定义问题
 npx tsx src/cli.ts 5 "咖啡, 露营, 极光" # Demo 5 自定义主题列表
@@ -389,6 +394,7 @@ async function routeFromSupervisor(state) {
 | 命令 | 作用 |
 |------|------|
 | `npm run web` | 启动 Web 聊天界面（http://localhost:3000） |
+| `npm run desktop` | Electron 桌面端（原生窗口托管 Web 服务，端口 3123） |
 | `npm run demo:1` ~ `demo:5` | CLI 运行对应示例（1~4 带 token 流式输出） |
 | `npx tsx src/cli.ts N "参数"` | 带自定义问题/主题运行（N=1~5） |
 | `npm start` | 交互菜单 |
@@ -478,6 +484,56 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   ⚠ 接入即运行第三方代码，只加可信仓库。注册表持久化在 `.web-config.json`
   的 `externalAgents` 字段（经 `config-store.ts` 与 providers/projects 合并写入，
   修复了此前保存供应商会抹掉项目列表的隐患）。
+
+### 3.13 `src/server/rag.ts` + `src/tools-rag.ts` — 外部 RAG 知识库
+
+**设计立场**：工作台不内置向量库、不算 embedding —— 检索与入库全部委托一个
+**外部 RAG 服务**（其内部通常是向量库 + OpenAI 兼容 /embeddings）。本侧只有
+一个 HTTP 客户端（`rag.ts`）＋ 一个工具（`tools-rag.ts`）＋ 面板 UI，接入即插即拔。
+
+**通用 HTTP 契约**（外部服务按此实现，字段名宽松解析：hits/results、text/content 都认）：
+
+```txt
+POST {RAG_URL}/ingest  {collection, documents:[{id,name,text,meta}]}  → 切块+embedding+入库
+POST {RAG_URL}/search  {collection, query, topK}                      → {hits:[{text,score,name?}]}
+POST {RAG_URL}/reset   {collection}                                   → 清空集合
+POST {RAG_URL}/delete  {collection, ids}                              → 可选，删单个文档
+Header: Authorization: Bearer <key>（可留空）
+```
+
+**数据流（两层入口、两层出口）**：
+- 入库①：侧栏「📚 知识库」面板选项目/文件夹「全量入库」——`ingestFolder`
+  扫描授权目录的文本文件（白名单扩展名；跳过 dotfiles / `*lock*` / 二进制；
+  ≤300 文件、单文件 300k 字符、每请求 ≤10 文档且 ≤600k 字符分批）；
+- 入库②：`/api/chat` 处理消息时把 📎 **文本附件自动顺手入库**
+  （`ingestChatAttachments`，best-effort：失败只 warn，绝不影响对话）；
+- 出口①：通用 Agent 的 `retrieve_docs` 工具 —— 调 `searchRag`，返回
+  `{query, hits:[{name,text,score,source}], excerpt, note}` JSON（模型读全文，
+  前端按同一 JSON 渲染「命中来源」卡片；未配置 / 服务挂了 → 友好错误 JSON，
+  不抛异常不炸对话轮）；
+- 出口②：面板上的检索测试框。
+
+**关键实现点**：
+- 配置 + 花名册持久化在 `.web-config.json` 的 `rag` 键
+  （`{baseURL, apiKey, collection, topK, docs:{id→{name,bytes,at,source}}}`）——
+  docs 只是「我们送进去过什么」的本地登记，真实索引在外部服务；
+- `loadRag` 支持惰性自动加载（`ensureLoaded`）：任何进程内入口（含一次性脚本）
+  都不必依赖服务启动时的显式加载；
+- *实战坑*：`getRagPublic` 改成 async 后，路由内所有调用点都要 `await`，
+  否则 `JSON.stringify(Promise)` 得到 `{}`（注册表一度「凭空消失/翻倍」）。
+
+### 3.14 `desktop/main.cjs` — Electron 桌面端
+
+**策略**：桌面端 = 原生窗口 + 托管已有 Web 服务，前后端逻辑零改动。
+
+- 启动：以子进程拉起 `npx tsx src/server/index.ts`（独立端口 3123，
+  与 `npm run web` 的 3000 互不打架；Windows 上 `.cmd` 必须 `shell:true`）；
+- 就绪探测：轮询 `GET /api/config` 直到可连接（≤90s）才 `new BrowserWindow()`；
+- 窗口：`ready-to-show` 再显示避免白屏；`backgroundColor` 预置深色；外部链接
+  `setWindowOpenHandler` 交给系统浏览器；
+- 退出：`window-all-closed` → `taskkill /pid <pid> /T /F` 杀干净
+  npx→node→tsx 子进程树（孤儿 tsx 会继续占用端口，这就是必须 /T 的原因）；
+- 单实例锁：二次启动 `requestSingleInstanceLock` 失败即退出并聚焦已有窗口。
 
 ---
 
@@ -869,6 +925,9 @@ console.log(result.messages.at(-1).content);
 | interrupt 不生效 / resume 报错 | 检查 `compile({ checkpointer })` 是否配置、resume 时 `thread_id` 是否一致 |
 | 模型不调用工具                   | 检查 `bindTools` 是否执行、工具 `description` 是否清晰（模型靠描述决定何时调用）        |
 | 图不结束死循环                   | 默认 25 超步递归上限，超限抛 `GraphRecursionError`；在系统提示里明确「何时收手」         |
+| RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
+| 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：主进程退出已 `taskkill /T` 清子进程树；手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
+| 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 
 ***
 

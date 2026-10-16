@@ -1,8 +1,8 @@
 # LangGraph Agent 工作台
 
-一个用 **LangGraph.js**（TypeScript）搭建的**可正常使用的 Agent Web 应用**：
+一个用 **LangGraph.js**（TypeScript）搭建的**可正常使用的 Agent Web 应用 + 桌面端**：
 多轮对话、📎 文件上下文（项目文件 / 远程文件夹 / 本地上传）、多供应商模型切换、
-上下文用量与缓存监控、高风险操作人工审批 —— 与正常 Agent 产品的使用逻辑一致。
+上下文用量与缓存监控、高风险操作人工审批、📚 外部 RAG 知识库 —— 与正常 Agent 产品的使用逻辑一致。
 
 项目同时内置 **5 个学习示例**（基础 ReAct / 对话记忆 / 人工审批 / 多 Agent 协作 / 并行 map-reduce），
 作为「事例选择」保留在新建对话与欢迎页里：默认走通用 Agent，
@@ -18,6 +18,7 @@ npm install
 cp .env.example .env        # 填入你的 BASE_URL / API_KEY / MODEL
 npm run models              # 先确认网关支持哪些模型（防止 400 报错）
 npm run web                 # 启动 Web 界面 → http://localhost:3000
+npm run desktop             # 或启动桌面端（Electron 壳，默认端口 3123）
 ```
 
 > 💡 **没有 API Key？** 也能跑：未配置 `API_KEY` 时自动进入**模拟模式** ——
@@ -132,6 +133,44 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 **历史会话回放**：每轮对话（用户消息 + 全部事件）都会记录在服务端，换浏览器或清空缓存后
 点击历史会话会自动从服务端拉取并按原样重放，不再出现「打开为空」。
 
+## 桌面端（Electron）
+
+```bash
+npm run desktop             # 默认端口 3123（环境变量 DESKTOP_PORT 可换）
+```
+
+- **架构**：Electron 主进程（`desktop/main.cjs`）把现有 HTTP 服务
+  （`npx tsx src/server/index.ts`）作为**子进程**拉起，浏览器内核窗口直接加载
+  `http://127.0.0.1:3123` —— 前端 / 服务端逻辑零改动，`npm run web` 照旧可用；
+- **细节**：窗口就绪才显示（无白屏闪烁）；外部链接交给系统浏览器打开；
+  单实例锁（重复启动自动聚焦已有窗口）；退出时 `taskkill /T` 杀干净
+  npx→node→tsx 子进程树；环境变量 `DESKTOP_DEVTOOLS=1` 可在窗口里打开 DevTools。
+
+## 知识库（外部 RAG）
+
+工作台**不内置向量库 / embedding** —— 检索与入库委托给一个**外部 RAG 服务**，
+通用 Agent 自动获得 `retrieve_docs` 工具。侧栏「📚 知识库（RAG）」打开管理面板：
+
+- **通用 HTTP 契约**（外部服务按此实现即可，无需改造本工作台）：
+
+  | 动作 | 请求 | 说明 |
+  |---|---|---|
+  | 入库 | `POST {RAG_URL}/ingest` | `{collection, documents:[{id, name, text, meta}]}`；切块 / embedding 由服务完成 |
+  | 检索 | `POST {RAG_URL}/search` | `{collection, query, topK}` → `{hits:[{text, score, name?}]}`（字段名宽松解析） |
+  | 清空 | `POST {RAG_URL}/reset` | `{collection}` |
+  | 删除 | `POST {RAG_URL}/delete`（可选） | `{collection, ids}` |
+  | 鉴权 | `Authorization: Bearer <key>` | Key 可留空 |
+
+- **两个入库入口**：① 知识库面板选项目 / 文件夹「全量入库」（自动扫描文本文件，
+  跳过 node_modules / .git / 密钥 / 锁文件，单次 ≤300 个文件）或粘贴文本；
+  ② 发消息时的 📎 文本附件**自动顺手入库**（best-effort，失败不影响对话）；
+- **两个检索出口**：聊天中问知识库相关内容时，通用 Agent 自动调用
+  `retrieve_docs`（命中片段带来源与分数，回答要求标注来源，检索不到会如实说明）；
+  面板内也有检索测试框；
+- **本地登记**：`.web-config.json` 的 `rag` 键只存「送进去过什么」的花名册与
+  服务地址 / 集合名 / topK 配置（真实索引在外部服务侧）；仓库里没有本地向量数据；
+- **安全**：入库只允许授权路径（`files.ts` 授权前缀校验），`.env / *lock*` 等敏感文件不入库。
+
 ## 内置示例（5 个学习 Demo）
 
 新建对话时可选「通用 Agent」（默认）或以下示例 —— 每个示例是一张刻意保持教学形态的图，
@@ -159,8 +198,9 @@ src/
   llm.ts         # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
   tools.ts       # 4 个自定义工具（calculator / 时间 / 天气 / 发邮件），zod 声明参数
   tools-dev.ts   # 编程开发工具（terminal / 读写文件 / 搜索），通用 Agent 使用
+  tools-rag.ts   # 知识检索工具 retrieve_docs：调外部 RAG 服务（通用 HTTP 契约）
   agent/
-    general.ts   # 通用 Agent（默认）：工具循环 + 记忆 + 审批的产品化组合
+    general.ts   # 通用 Agent（默认）：工具循环 + 记忆 + 审批 + RAG 检索的产品化组合
     basic.ts     # 示例 1：亲手搭一张 ReAct 图（不借助 prebuilt 的 createAgent）
     memory.ts    # 示例 2：compile({ checkpointer }) 获得多轮记忆
     hitl.ts      # 示例 3：interrupt()/Command.resume 实现人工审批
@@ -168,6 +208,9 @@ src/
     parallel.ts  # 示例 5：Send API 并行 map-reduce + Annotation.Root 自定义状态
   cli.ts         # CLI 入口：token 流式 + 节点日志 + 审批交互
   server/        # Web 界面（参考 ZCode）：SSE 服务 + 原生前端，见「Web 界面」
+    rag.ts       # 外部 RAG 接入：契约客户端 + 配置 + 文件夹扫描入库 + 📎 自动入库
+desktop/
+  main.cjs       # Electron 桌面端：子进程托管 Web 服务 + BrowserWindow 加载
 scripts/
   list-models.ts # npm run models：查询网关支持的模型列表（排查 400 的利器）
 docs/

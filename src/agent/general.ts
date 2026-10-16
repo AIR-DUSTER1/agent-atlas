@@ -18,6 +18,7 @@ import { toolsCondition } from "@langchain/langgraph/prebuilt";
 import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { terminal, readFileTool, writeFileTool, listDirTool, grepSearch } from "../tools-dev.js";
+import { retrieveDocs } from "../tools-rag.js";
 import { approvalToolsNode } from "./hitl.js";
 
 const tools = [
@@ -25,6 +26,8 @@ const tools = [
   calculator, getCurrentTime, getWeather, sendEmail,
   // 编程/开发工具（terminal 与 write_file 为高风险，走人工审批）
   terminal, readFileTool, writeFileTool, listDirTool, grepSearch,
+  // 知识库检索（外部 RAG 服务，只读低风险，直接执行）
+  retrieveDocs,
 ];
 
 const SYSTEM_PROMPT = [
@@ -32,6 +35,8 @@ const SYSTEM_PROMPT = [
   "- 需要计算、查时间、查天气时调用对应工具，不要凭空编造事实",
   "- 编程任务优先使用开发工具：terminal 执行命令（构建/测试/git），read_file 读代码，" +
     "grep_search 搜索代码，list_dir 看目录结构，write_file 创建或修改文件",
+  "- 用户问及项目文档、需求/设计说明、团队资料等知识库内容时，调用 retrieve_docs 检索" +
+    "（外部 RAG 服务，只读）；片段带来源与分数，回答请标注来源，检索不到就如实说明",
   "- read_file / list_dir / grep_search 直接执行；terminal 和 write_file 是高风险操作，" +
     "系统会在你调用后自动请求用户确认，你无需额外追问",
   "- 用户附加了文件时，基于附件内容回答（在消息中以「--- 附件 N: 名 ---」标注，可能超长截断）",

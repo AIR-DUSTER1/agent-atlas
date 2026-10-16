@@ -33,6 +33,11 @@
           </button>
           <div id="project-menu" class="provider-menu hidden"></div>
         </div>
+        <button id="kb-btn" class="kb-entry" title="知识库（外部 RAG）：配置服务 / 文档入库 / 检索测试">
+          <span class="kb-entry-icon">📚</span>
+          <span class="kb-entry-text">知识库（RAG）</span>
+          <span id="kb-entry-state" class="kb-entry-state">未配置</span>
+        </button>
       </div>
 
       <nav id="session-list" aria-label="会话列表"></nav>
@@ -229,6 +234,66 @@
         <div id="fs-selected" class="fs-selected">未选择文件</div>
         <button id="fs-done" class="btn btn-approve">完成</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ============ 知识库面板：外部 RAG 服务的配置 / 入库 / 检索测试 ============ -->
+  <div id="kb-mask" class="hidden">
+    <div id="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-title">
+      <h2 id="kb-title">📚 知识库（外部 RAG）</h2>
+      <p class="settings-sub">向量存储 / 切块 / embedding 全部由外部 RAG 服务完成，本工作台按通用 HTTP 契约调用 ingest / search</p>
+
+      <div class="field-label">RAG 服务配置</div>
+      <label class="field">
+        <span class="field-label">服务地址（实现 ingest / search 契约）</span>
+        <input id="kb-url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
+      </label>
+      <label class="field">
+        <span class="field-label">API Key <em id="kb-key-state" class="key-state"></em></span>
+        <div class="key-row">
+          <input id="kb-key" type="password" spellcheck="false" placeholder="留空 = 保持不变 / 服务无鉴权" />
+          <button id="kb-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏">👁</button>
+        </div>
+      </label>
+      <div class="kb-row2">
+        <label class="field">
+          <span class="field-label">集合 collection</span>
+          <input id="kb-collection" type="text" spellcheck="false" placeholder="default" />
+        </label>
+        <label class="field">
+          <span class="field-label">检索条数 topK（1-20）</span>
+          <input id="kb-topk" type="number" min="1" max="20" step="1" placeholder="5" />
+        </label>
+      </div>
+      <div class="kb-actions">
+        <button id="kb-save" class="btn btn-approve">保存配置</button>
+        <button id="kb-test" class="ghost-btn">测试连接</button>
+        <span id="kb-status" class="settings-status"></span>
+      </div>
+
+      <div class="field-label ext-head">📥 文档入库 <em class="key-state">扫描授权文件夹内的文本文件（跳过 node_modules / .git / 密钥 / 锁文件）</em></div>
+      <div class="fs-toolbar kb-toolbar">
+        <select id="kb-root" class="fs-root-select" title="选择入库位置"></select>
+        <button id="kb-ingest" class="ghost-btn small">⬇ 全量入库</button>
+        <button id="kb-paste" class="ghost-btn small" style="min-width: 60px;">✎ 粘贴文本</button>
+      </div>
+
+      <div class="field-label">已入库文档（本地登记，真实索引在外部服务）</div>
+      <div id="kb-docs" class="fs-list kb-docs-list"></div>
+
+      <div class="field-label ext-head">🔍 检索测试</div>
+      <div class="kb-search-row">
+        <input id="kb-query" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" />
+        <button id="kb-search-btn" class="btn btn-approve">检索</button>
+      </div>
+      <div id="kb-hits" class="kb-hits"></div>
+
+      <div class="kb-footer-actions">
+        <button id="kb-clear" class="ghost-btn" title="调用外部服务的 /reset 清空集合，并清掉本地登记">🗑 清空集合</button>
+        <span class="spacer"></span>
+        <button id="kb-close" class="ghost-btn">关闭</button>
+      </div>
+      <p class="settings-note">契约：POST <code>{RAG_URL}/ingest</code>（{collection, documents}）、<code>/search</code>（{query, topK} → {hits:[{text, score, name?}]}）、<code>/reset</code>；鉴权头 <code>Authorization: Bearer</code>。聊天中通用 Agent 会自动调用 <code>retrieve_docs</code> 工具检索。</p>
     </div>
   </div>
 
