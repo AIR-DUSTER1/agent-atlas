@@ -27,6 +27,7 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
+import { writeAudit } from "./audit.js";
 
 // ---------------------------------------------------------------------------
 // 常量（限量即上限）
@@ -43,6 +44,24 @@ const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出�
 const BEIKE_INSTALL_TIMEOUT_MS = 600_000; // 整个安装流程（下载 ~32MB + 解压）
 const MANIFEST_TIMEOUT_MS = 30_000;
 const KEY_AUTH_TIMEOUT_MS = 30_000;
+
+/**
+ * 安装链路可信来源 host 白名单（T1-6）：manifest 与二进制都必须是 HTTPS 且
+ * host 命中列表 —— manifest 被 MITM/篡改后给出的任意 host 不再下载执行。
+ */
+const INSTALL_URL_HOST_ALLOW = new Set([
+  "raw.githubusercontent.com", "objects.githubusercontent.com", "github.com", "codeload.github.com",
+]);
+
+/** 下载/解压 URL 的信任校验：HTTPS + host 白名单（导出供注入式测试使用） */
+export function assertTrustedInstallUrl(u: string, what: string): void {
+  let parsed: URL;
+  try { parsed = new URL(u); } catch { throw new Error(`${what} 不是合法 URL`); }
+  if (parsed.protocol !== "https:") throw new Error(`${what} 必须是 HTTPS（当前 ${parsed.protocol}）`);
+  if (!INSTALL_URL_HOST_ALLOW.has(parsed.hostname.toLowerCase())) {
+    throw new Error(`${what} 的来源不在官方白名单（${parsed.hostname}）`);
+  }
+}
 
 const GEOCODE_TIMEOUT_MS = 8_000;         // 单次 Nominatim 请求
 const GEOCODE_MIN_INTERVAL_MS = 1_100;    // 公开服务限约 1 req/s，排队串行
@@ -195,17 +214,31 @@ interface ManifestBinaries {
 }
 
 async function pickLatestBinary(os: string, arch: string): Promise<{ url: string; sha256: string; version: string } | null> {
+  assertTrustedInstallUrl(BEIKE_MANIFEST_URL, "版本清单地址");
   const res = await fetch(BEIKE_MANIFEST_URL, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`获取贝壳 CLI 版本清单失败：HTTP ${res.status}`);
   const manifest = (await res.json()) as ManifestBinaries;
   const bins = manifest.releases.find((r) => r.version === manifest.latest)?.binaries ?? [];
   const hit = bins.find((b) => b.os === os && b.arch === arch);
   if (!hit) throw new Error(`贝壳 CLI 暂无 ${os}/${arch} 的官方二进制`);
+  assertTrustedInstallUrl(hit.url, "二进制下载地址"); // manifest 内容也可能把 host 指到别处，同样过白名单
   return { url: hit.url, sha256: hit.sha256, version: manifest.latest };
 }
 
+/**
+ * 安装互斥（T1-6）：并发点击只保留第一调用，后续调用复用同一个 Promise。
+ * 否则两次 tar 解压/写配置会互相踩（.setting/beike 半拆状态）。
+ */
+let installInFlight: Promise<BeikeStatus> | null = null;
+
 /** 下载安装 beike CLI（仅 win32 自动化；其它平台提示用官方 install.sh）。 */
 export async function installBeike(): Promise<BeikeStatus> {
+  if (installInFlight) return installInFlight;
+  installInFlight = doInstallBeike().finally(() => { installInFlight = null; });
+  return installInFlight;
+}
+
+async function doInstallBeike(): Promise<BeikeStatus> {
   await ensureLoaded();
   const os = process.platform;
   const arch = os === "win32" ? "x64" : process.arch;
@@ -217,9 +250,12 @@ export async function installBeike(): Promise<BeikeStatus> {
     const bin = await pickLatestBinary("win32", "x64");
     if (!bin) throw new Error("未找到可用的官方二进制");
     await fsp.mkdir(BEIKE_DIR, { recursive: true });
-    const archive = join(BEIKE_DIR, "beike-cli.tar.gz");
+    // 先写 .part 临时名再 rename：防响应中断留下「看似可用」的半份压缩包
+    const archive = join(BEIKE_DIR, "beike-cli.tar.gz.part");
     console.log(`[estate] 下载贝壳 CLI v${bin.version}：${bin.url}`);
-    const res = await fetch(bin.url, { signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS) });
+    assertTrustedInstallUrl(bin.url, "二进制下载地址"); // 落到真实 request 前再度校验
+    const res = await fetch(bin.url, { signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS), redirect: "error" });
+    // redirect: "error"：显式拒绝跟到非白名单 host（重定向即视为篡改）
     if (!res.ok) throw new Error(`下载贝壳 CLI 失败：HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     // sha256 校验：manifest 里给的是十六进制摘要，下载必须完全一致才落盘解压
@@ -228,8 +264,9 @@ export async function installBeike(): Promise<BeikeStatus> {
       throw new Error(`下载文件校验失败（sha256 不符），可能被网络劫持：${digest}`);
     }
     await fsp.writeFile(archive, buf);
-    // Windows 10+ 自带 tar.exe（bsdtar），支持 .tar.gz；找不到才报错
-    const tar = await runBeikeRaw("tar.exe", ["-xzf", archive, "-C", BEIKE_DIR], 120_000);
+    // Windows 10+ 自带 tar.exe（bsdtar），支持 .tar.gz；用绝对路径避免 PATH 被换
+    const sysTar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+    const tar = await runBeikeRaw(sysTar, ["-xzf", archive, "-C", BEIKE_DIR], 120_000);
     if (tar.code !== 0) throw new Error(`解压失败：${(tar.stderr || tar.stdout).slice(0, 300)}`);
     await fsp.rm(archive, { force: true });
     // 定位解压出来的 beike 可执行文件：优先 beike.exe，其次任意 beike*.exe
@@ -241,6 +278,8 @@ export async function installBeike(): Promise<BeikeStatus> {
     saved.beikeCliPath = exePath;
     saved.beikeVersion = bin.version;
     await persistEstate();
+    // T1-6 审计：安装动作记录下载 URL / 版本 / 摘要，事后可追责与对账
+    writeAudit("beike.install", { url: bin.url, version: bin.version, sha256: bin.sha256, explicit: true });
   } else {
     throw new Error(
       `本平台请用贝壳官方脚本安装：curl -fsSL ${BEIKE_MANIFEST_URL.replace(
@@ -344,14 +383,18 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
       // 纯文本输出（非 JSON）：对模型来说文本本身就是可读结果
       return { ok: true, action, data: { text: parsed.raw.slice(0, 6_000) } };
     }
-    // CLI 版本过低：贝壳契约是静默重装后重试，这里交给上层（工具函数）处理
+    // CLI 版本过低（-32001）：T1-6 后不再静默自动重装 —— 下载执行代码必须由
+    // 用户显式确认。这里明确告知版本差并指引用户到面板点「安装/升级 CLI」。
     if (/CLI_UPGRADE_REQUIRED|版本过低|-32001/i.test(r.stderr + r.stdout)) {
-      try {
-        await installBeike();
-        const r2 = await runBeikeRaw((await ensureBeike()).path, args, BEIKE_RUN_TIMEOUT_MS);
-        const parsed2 = parseBeikeJson(r2.stdout);
-        if (r2.code === 0 && parsed2.ok) return { ok: true, action, data: parsed2.data };
-      } catch { /* 重装失败 → 走统一报错 */ }
+      writeAudit("beike.upgradeDeclined", { action, current: saved.beikeVersion ?? "" });
+      const cur = saved.beikeVersion || "未知";
+      return {
+        ok: false,
+        action,
+        error: `贝壳 CLI 版本过低（当前 v${cur}，官方要求升级后使用）。` +
+          `请到「找房工具」面板手动点击「安装 CLI」完成升级后再重试；` +
+          `工作台不会在后台自动下载并执行新版本程序。`,
+      };
     }
     const detail = (r.stderr || r.stdout || "无输出").trim().slice(-500);
     return {

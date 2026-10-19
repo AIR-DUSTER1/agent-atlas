@@ -6,7 +6,7 @@
 "use strict";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-19-3";
+const APP_VERSION = "web-2026-10-19-4";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -791,6 +791,29 @@ function renderExternalCards() {
         state.externalAgents = res.agents || [];
         renderExternalCards();
       } catch (err) { uiAlert(`移除失败：${err.message}`, "外部 Agent"); }
+    });
+    // 🔑 凭证注入开关：高风险（网关 Key 会进入第三方仓库的子进程环境），强制二次确认
+    card.addEventListener("contextmenu", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const next = !a.passCredentials;
+      const ok = await uiConfirm(
+        next
+          ? `开启凭证注入？\n当前网关 API Key / 地址将进入「${a.name}」子进程的环境变量。\n只对可信、开源且看过代码的仓库开启！`
+          : `关闭「${a.name}」的凭证注入？其后子进程将拿不到网关 Key。`,
+        { title: "凭证注入", okText: next ? "开启" : "关闭", danger: next }
+      );
+      if (!ok) return;
+      try {
+        const res = await api(`/api/external-agents/${a.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ passCredentials: next, confirmCredentials: true }),
+        });
+        const idx = state.externalAgents.findIndex((x) => x.id === a.id);
+        if (idx >= 0) state.externalAgents[idx] = res.agent;
+        renderExternalCards();
+      } catch (err) { uiAlert(`设置失败：${err.message}`, "凭证注入"); }
     });
     card.addEventListener("click", async () => {
       try {
