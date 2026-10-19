@@ -43,7 +43,9 @@ function startServer() {
     cwd: APP_ROOT,
     shell,
     windowsHide: true,
-    env: { ...process.env, PORT: String(PORT), ELECTRON: "1" },
+    // HOST 强制收缩到 loopback：桌面端窗口永远只连本机服务，
+    // 即使用户外部环境变量设了 HOST=0.0.0.0 也不会把接口暴露到局域网
+    env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", ELECTRON: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const relay = (stream, tag) => {

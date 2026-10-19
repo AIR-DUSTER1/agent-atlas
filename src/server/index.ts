@@ -55,6 +55,15 @@ import type { AgentEvent, ApprovalPayload } from "./events.js";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 const PORT = Number(process.env.PORT ?? 3000);
+/**
+ * Phase 0 安全止血：默认只监听 loopback。
+ * 本服务无内置认证（Phase 1 才引入 AUTH_TOKEN），接口可以改配置、起子进程、
+ * 读服务器文件 —— 绑 0.0.0.0 等于把控制权暴露给局域网。需要显式开放时设置
+ * HOST=0.0.0.0（此时若仍未配置认证，参数校验层会拒绝高危操作并输出醒目警告）。
+ */
+const HOST = process.env.HOST ?? "127.0.0.1";
+/** 认证是否已启用（Phase 1；这里先只用于启动告警判断） */
+const AUTH_ENABLED = Boolean(process.env.AUTH_TOKEN && process.env.AUTH_TOKEN.trim());
 
 // 启动时先叠加 Web 设置页保存的覆盖配置（.web-config.json → 覆盖 .env），
 // 加载项目文件夹列表，并后台拉一次启用中供应商的模型元信息（上下文窗口长度）
@@ -158,16 +167,76 @@ async function streamToClient(
 // ---------------------------------------------------------------------------
 // 业务处理
 // ---------------------------------------------------------------------------
-function readBody(req: import("node:http").IncomingMessage, maxChars = 1_000_000): Promise<string> {
+/** 单次请求体字节数上限：聊天消息 + 附件 base64 正常都在 1MB 内；文件上传另有 12MB 白名单 */
+const BODY_MAX_BYTES = 2_000_000;
+const BODY_TOO_LARGE_MSG = "请求体过大：单次请求上限 2MB，请减少附件或文本内容后重试";
+/** 413 后丢弃式排水的追加字节上限：正常客户端的超限余量是 MB 级，超过视为攻击性流，直接断开 */
+const BODY_DRAIN_EXTRA_MAX_BYTES = 8_000_000;
+
+/** readBody 超限时抛出；respondBadRequest 据此统一回 413（区别于业务错误的 400） */
+class BodyTooLargeError extends Error {
+  constructor() { super(BODY_TOO_LARGE_MSG); this.name = "BodyTooLargeError"; }
+}
+
+/**
+ * 读取请求体（Phase 0 加固版）。
+ * 旧实现的两个内存 DoS 坑：① 按「字符串长度」统计而非字节数（多字节字符会被放大统计，
+ * 但二进制 base64 反而漏判）；② 超限后只是 reject，data 监听仍挂着继续把数据拼进字符串。
+ * 现在：Content-Length 预检可提前拒绝；流式累计字节数，超限立刻 pause + reject，
+ * 由响应层回 413 并断开连接（Connection: close），不再累积任何数据。
+ */
+function readBody(req: import("node:http").IncomingMessage, maxBytes = BODY_MAX_BYTES): Promise<string> {
   return new Promise((resolve, reject) => {
-    let body = "";
+    // Content-Length 预检：声明的长度已超限 → 不读不拼，直接判
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      reject(new BodyTooLargeError());
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let tooLarge = false;
     req.on("data", (c: Buffer) => {
-      body += c;
-      if (body.length > maxChars) reject(new Error("请求体过大"));
+      if (tooLarge) return;
+      total += c.length;
+      if (total > maxBytes) {
+        tooLarge = true;
+        req.pause(); // 停止接收：响应层回完 413 后由全局处理器断开连接
+        reject(new BodyTooLargeError());
+        return;
+      }
+      chunks.push(c);
     });
-    req.on("end", () => resolve(body));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
+}
+
+/** 路由统一的失败响应：BodyTooLargeError → 413，其余一律 400 + 中文错误 */
+function respondBadRequest(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, err: unknown): void {
+  const tooLarge = err instanceof BodyTooLargeError;
+  res.writeHead(tooLarge ? 413 : 400, {
+    "Content-Type": "application/json; charset=utf-8",
+    ...(tooLarge ? { Connection: "close" } : {}),
+  });
+  res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+  if (tooLarge) {
+    // 请求体没被读完 → keep-alive 无法继续。不能直接 destroy：
+    // 客户端可能还有积压 body 未送达，带 unread-data 关闭会触发 RST，
+    // 把已发出的 413 一并冲掉（踩坑：客户端只见 ECONNRESET 拿不到状态码）。
+    // 对策「丢弃式排水」：继续把剩余 body 读进黑洞直到流结束再关；
+    // 攻击性无限流靠排水总量上限兜底（超限直接 destroy，RST 可接受）。
+    res.on("finish", () => {
+      let drained = 0;
+      req.on("data", (c: Buffer) => {
+        drained += c.length;
+        if (drained > BODY_DRAIN_EXTRA_MAX_BYTES) req.socket?.destroy();
+      });
+      req.on("end", () => req.socket?.destroy());
+      req.on("error", () => req.socket?.destroy());
+      req.resume();
+    });
+  }
 }
 
 async function handleChat(
@@ -290,6 +359,13 @@ async function handleResume(
 // ---------------------------------------------------------------------------
 // HTTP 入口
 // ---------------------------------------------------------------------------
+/** 服务是否绑定在 loopback 上（HOST=0.0.0.0 / :: 之外的地址都视为仅本机可用） */
+const LOOPBACK_HOST = HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1";
+/** 未认证 + 对外开放模式下统一的拒绝文案 */
+const EXPOSED_NOAUTH_ERR =
+  "服务当前以非本机地址开放且未配置认证（AUTH_TOKEN），已拒绝该操作。" +
+  "请设置环境变量 AUTH_TOKEN 后携带 Bearer token 访问，或改用 HOST=127.0.0.1 仅本机使用";
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const pathname = url.pathname;
@@ -297,6 +373,15 @@ const server = createServer(async (req, res) => {
   try {
     // API 响应一律禁缓存（GET /api/config 等被浏览器缓存会造成状态不同步）
     if (pathname.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
+
+    // Phase 0 止血：非 loopback 绑定且未启用认证 → 所有写请求全部拒绝。
+    // 用「方法级」而非接口枚举：新增路由默认落在防线内侧，不会因漏单位置绕过。
+    // GET（只读信息）不受限：config/sessions 等只含掩码/元信息，无副作用。
+    if (!LOOPBACK_HOST && !AUTH_ENABLED && req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: EXPOSED_NOAUTH_ERR, authRequired: true }));
+      return;
+    }
 
     // --- 静态 ---
     if (req.method === "GET" && !pathname.startsWith("/api/")) {
@@ -340,8 +425,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, provider, activeChanged, mock: !config.apiKey }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -359,8 +443,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -378,8 +461,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -393,8 +475,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -408,8 +489,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r, reasoning: getReasoningState() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -427,8 +507,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, activeChanged, mock: !config.apiKey, model: config.model, baseURL: config.baseURL }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -444,8 +523,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, activeChanged, mock: !config.apiKey }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -462,8 +540,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r, mock: !config.apiKey, baseURL: config.baseURL, reasoning: getReasoningState() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -523,8 +600,7 @@ const server = createServer(async (req, res) => {
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ id: session.id, kind: session.kind, demo: session.demo, agentId: session.agentId, projectId: session.projectId, title: session.title, createdAt: session.createdAt }));
         } catch (err) {
-          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+          respondBadRequest(res, req, err);
         }
         return;
       }
@@ -568,8 +644,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r, agents: listExternalAgents() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -584,8 +659,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, agent }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -596,8 +670,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, agents: listExternalAgents() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -616,8 +689,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, project, projects: listProjects(), activeProjectId: getActiveProjectId() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -629,8 +701,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, activeProjectId: getActiveProjectId() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -643,8 +714,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, movedSessions: moved, projects: listProjects(), activeProjectId: getActiveProjectId() }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -656,8 +726,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, project: p }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -677,8 +746,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ...data, roots }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -690,8 +758,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(data));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -703,8 +770,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...data }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -722,8 +788,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...data }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -735,11 +800,8 @@ const server = createServer(async (req, res) => {
       try {
         await handleChat(res, req, body.sessionId ?? "", body);
       } catch (err) {
-        // 附件解析等前置错误 → 400（流未开始）
-        if (!res.headersSent) {
-          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
-        }
+        // 附件解析等前置错误 → 400/413（此时流未开始）
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -766,8 +828,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, rag }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -782,8 +843,11 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(r));
       } catch (err) {
-        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        if (err instanceof BodyTooLargeError) respondBadRequest(res, req, err);
+        else {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
       }
       return;
     }
@@ -804,8 +868,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, summary, rag }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -817,8 +880,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...r }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -830,8 +892,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, rag }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -842,8 +903,7 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, rag }));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        respondBadRequest(res, req, err);
       }
       return;
     }
@@ -868,8 +928,11 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...status }));
       } catch (err) {
-        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        if (err instanceof BodyTooLargeError) respondBadRequest(res, req, err);
+        else {
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
       }
       return;
     }
@@ -885,8 +948,11 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(r));
       } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        if (err instanceof BodyTooLargeError) respondBadRequest(res, req, err);
+        else {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
       }
       return;
     }
@@ -894,6 +960,11 @@ const server = createServer(async (req, res) => {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "Not Found" }));
   } catch (err) {
+    // 请求体超限：统一 413 + 断开连接（readBody 已 pause 数据流，不会有残留累积）
+    if (err instanceof BodyTooLargeError) {
+      respondBadRequest(res, req, err);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -902,12 +973,20 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, async () => {
+server.listen(PORT, HOST, async () => {
   const mode = config.apiKey ? "真实模型" : "模拟模式（未配置 API_KEY）";
+  const displayHost = HOST === "0.0.0.0" || HOST === "::" ? "localhost" : HOST;
   console.log(
     `\n  LangGraph Agent Web 已启动\n` +
-    `  ➜  http://localhost:${PORT}\n` +
+    `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
     `  模式: ${mode}   模型: ${config.model}   网关: ${config.baseURL}\n` +
     `  提示: 右上角 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`
   );
+  // 显式对外开放且未配置认证：给出不可忽略的警告（Phase 1 引入 AUTH_TOKEN 后此告警消失）
+  if ((HOST === "0.0.0.0" || HOST === "::") && !AUTH_ENABLED) {
+    console.warn(
+      `  ⚠⚠⚠  HOST=${HOST} 且未配置 AUTH_TOKEN：本服务的接口可以修改配置 / 执行命令 / 消耗网关配额，\n` +
+      `  ⚠⚠⚠  当前对局域网所有设备开放。仅限可信内网临时使用，公网场景必须先设置 AUTH_TOKEN。\n`
+    );
+  }
 });

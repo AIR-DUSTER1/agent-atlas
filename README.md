@@ -301,6 +301,7 @@ scripts/
   list-models.ts # npm run models：查询网关支持的模型列表（排查 400 的利器）
 docs/
   agent-wiki.md  # 完整学习 Wiki（概念/模块/调用链/模板）
+  architecture-improvement-plan.md # 架构治理与生产化改进计划（安全/可靠性/测试/部署）
 ```
 
 ## 踩坑记录（排查 400）
@@ -313,6 +314,16 @@ docs/
 3. 重跑 demo。
 
 `.env` 里的真实配置在本地，已通过 `.gitignore` 排除，不会提交。
+
+## 架构治理与生产化计划
+
+当前项目默认定位是本地学习型工作台；如果要把 Web 服务开放到局域网、云服务器或长期运行，
+请先阅读 [docs/architecture-improvement-plan.md](docs/architecture-improvement-plan.md)。
+
+该计划按「紧急安全止血 → 安全边界 → 状态恢复 → 测试重构 → 部署观测 → 生产试点」推进，
+重点覆盖默认监听地址、认证与 CSRF、密钥保护、子进程限额、原子配置、会话恢复、
+自动化测试、Docker 部署和审计日志。执行任何阶段前，请先阅读计划中的「非目标」与
+「代码约束」，避免破坏零框架、前端零依赖和运行依赖白名单。
 
 ## 学习路线建议
 
