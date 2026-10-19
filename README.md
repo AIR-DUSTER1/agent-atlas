@@ -336,6 +336,26 @@ docs/
 - **请求体限量**：除文件上传（12MB 白名单）外的单次请求体上限 2MB，
   超限返回 413 与中文提示；实现按字节累计并在超限后「丢弃式排水」，不吃内存。
 
+### 访问认证与同源防线（Phase 1）
+
+- **Bearer 认证**：在 `.env` 里设置 `AUTH_TOKEN=任意令牌` 即开启。开启后所有
+  `/api/*`（除 `/healthz` 与静态页）都要求 `Authorization: Bearer <令牌>`；
+  浏览器首次访问会弹框索要令牌并保存在 localStorage，之后不再询问。令牌校验
+  使用 sha256 摘要 + 常量时间比较，无时序侧信道。
+- **跨站防护**：浏览器式的跨站请求（`Origin` 与本站不符、`Sec-Fetch-Site:
+  cross-site`）即使带了令牌也会被 403 拒绝 —— 防恶意页面借浏览器自动带上
+  令牌外打接口。「改世界的动作」（外部 Agent 增删改/运行/凭证注入、贝壳 CLI
+  安装）全部落盘到 `.setting/audit.ndjson`，事后可追溯。
+- **安全响应头**：所有响应带 `X-Content-Type-Options: nosniff`、
+  `Referrer-Policy: no-referrer`、`X-Frame-Options: DENY`、内容安全策略
+  （脚本仅限本站内联，iframe 仅允许贝壳大地图）。
+- **外部 Agent 管控**：启动命令限 `node/npm/npx/pnpm/pnpx/yarn/python*`
+  白名单（裸名）或必须落在该 Agent 自己 clone 目录内的路径；凭证注入
+  （网关 Key 进入子进程环境）默认关闭，开启需二次确认；同并发跑的上限 2 条。
+- **贝壳 CLI 安装加固**：下载仅接受官方 host 白名单（含 HTTPS 强制、拒绝
+  重定向出去）、`System32\tar.exe` 绝对路径解压、临时文件校验后改名、
+  sha256 摘要必须一致；CLI 版本过低不再自动下载新版本，需要你在面板手动点。
+
 ## 学习路线建议
 
 1. 先跑 **示例 1**，把 `src/agent/basic.ts` 的注释和图结构对照着看，
