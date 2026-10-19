@@ -1080,23 +1080,11 @@ console.log(result.messages.at(-1).content);
 
 ***
 
-## 9. 架构治理与生产化计划
+## 9. 架构治理与生产化路线（结论摘要）
 
 学习 Demo 与长期运行服务的安全边界不同：Web 一旦脱离 `127.0.0.1`，认证、CSRF、
-子进程限额、状态恢复、审计和部署探针就变成必选项。完整的分阶段实施计划见
-[architecture-improvement-plan.md](architecture-improvement-plan.md)。
-
-模块视角的改造原则：
-
-| 领域 | 关键模块 | 计划要点 |
-|---|---|---|
-| HTTP 边界 | `request-body.ts` / `auth.ts` / route modules | 统一认证、Origin 校验、请求上限与错误映射 |
-| 配置 | `config-store.ts` | 原子写入、备份恢复、跨进程单写者 |
-| 会话 | `sessions.ts` / `session-store.ts` | journal 回放，重启后恢复历史与审批状态 |
-| 子进程 | `estate.ts` / `external.ts` / `subprocess.ts` | stdout/stderr 上限、进程树清理、并发 semaphore |
-| 观测 | `logging.ts` / `audit.ts` | request id 贯穿、结构化日志、高风险动作审计 |
-| 部署 | health / shutdown / Docker | `/healthz`、`/readyz`、优雅退出、反向代理与数据卷 |
-
-> ⚠ 计划刻意避免第一阶段的“大而全”：先保证默认安全和本地可靠性，再拆模块、补 CI，
-> 最后评估多实例。多实例所需的数据库、队列和持久化 checkpointer 可能引入新依赖，
-> 必须经过计划中的 Phase 5 决策门，不能绕过运行依赖白名单。
+子进程限额、状态恢复、审计和部署探针就变成必选项。治理按阶段推进，节奏是
+「先默认安全与本地可靠 → 拆模块、补 CI → 评估多实例（含数据库/持久化 checkpointer
+是否引入新依赖的决策门）」；公开的文档位（README / 本 wiki）只沉淀**功能层面的
+结论**（见 §3 安全基建小节、§7 踩坑表），逐条弱点清单与阶段计划在内部工作目录
+维护，不入仓库。

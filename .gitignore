@@ -29,3 +29,6 @@ src/server/.dev-server.mjs
 
 # ZCode 本地目录（日志/临时脚本）
 .setting/
+
+# 开发过程内部文档（架构计划/阶段清单/攻面分析）——公开仓库不下发
+.plans/

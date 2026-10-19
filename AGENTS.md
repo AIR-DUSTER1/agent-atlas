@@ -39,7 +39,13 @@ src/
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
   server/public/   # 前端三件套 index.html / style.css / app.js + 版本号常量 APP_VERSION
 desktop/main.cjs   # Electron 主进程（CJS！package.json 是 "type":"module"，桌面端必须 .cjs）
+docs/              # 公开文档（agent-wiki.md 等），只放用户可读内容
+.plans/            # 开发过程内部文档：架构计划 / 阶段清单 / 攻面分析 / 私有交接。
+                   # gitignore 挡住、**永不提交**（本仓库已公开，攻面细节 = 给攻击者的地图）
 ```
+
+- 文档先分流再落笔：给用户/operator 看的 → `README.md` / `docs/`；给自己/AI 的工作过程文档
+  → `.plans/`。`docs/` 与 `.plans/` 是双向禁令：内部文档不得进 `docs/`，用户文档不藏 `.plans/`。
 
 - `src/agent/*` 只依赖 `src/` 顶层与 `@langchain/*`，**禁止 import `server/*`**（图要在 CLI 下可独立运行）。
 - `src/server/*` 可以 import `src/` 顶层；互相之间通过导出函数协作，不做隐式单例外的全局状态。
@@ -144,11 +150,16 @@ node --check desktop/main.cjs           # 桌面端语法门
 
 - 每次交付**必须同步**更新：`README.md`（用户视角：功能怎么用） +
   `docs/agent-wiki.md`（模块视角：§3 加模块小节、§7 加/更新踩坑表）。
+- **开发计划 / 攻面分析 / 阶段交接 → 只写 `.plans/`，永不进 git**（§3 目录职责）。
+  需要向用户公开的结论（如「新增了认证」）提炼到 README / wiki 的功能说明层面，
+  不带弱点清单、攻击路径、内部提交号对照表。
 - 新增外部契约（对外 HTTP/RAG 形状）要在 README 用表格写全请求/响应示例。
 - 提交信息用一行中文短句（「新增 xxx」「修复 xxx：原因」），与现有 git log 风格一致。
 
 ## 10. 提交规范
 
-- 只改 `git status` 里本任务相关文件；`.env`、`.web-config.json` 永不入库。
+- 只改 `git status` 里本任务相关文件；`.env`、`.web-config.json`、`.plans/` 永不入库。
+- **提交前清点**：`git status --short` 里不得出现 `.plans/`、临时测试脚本、
+  含真实 Key/内网地址的文件；`git ls-files | grep -i plan` 应为空。
 - 改动前 `git diff` 自查一遍：没有调试残留（console.log / 临时脚本 / 注释掉的代码块）。
 - 大改动拆逻辑相邻的小提交；提交前必须过 §7 全部质量门。
