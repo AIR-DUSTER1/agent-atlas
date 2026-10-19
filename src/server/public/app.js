@@ -6,7 +6,7 @@
 "use strict";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-19-2";
+const APP_VERSION = "web-2026-10-19-3";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -156,6 +156,8 @@ function uiDialogShowNext() {
   inputRow.classList.toggle("hidden", mode !== "prompt");
   input.value = defaultValue;
   input.placeholder = placeholder;
+  // 令牌类输入需要密文显示（password: true）
+  input.type = next.options.password ? "password" : "text";
   const okBtn = $("ui-dialog-ok");
   okBtn.textContent = okText || (mode === "alert" ? "知道了" : "确定");
   okBtn.className = "btn " + (danger ? "btn-danger" : "btn-approve");
@@ -367,8 +369,43 @@ function transcript(sid) {
 /* ---------------------------------------------------------------------------
  * API 封装
  * ------------------------------------------------------------------------- */
+/** 服务端开启 Bearer 认证（AUTH_TOKEN）时的访问令牌，持久在 localStorage */
+const LS_AUTH_TOKEN = "lg-agent-auth-token";
+
+function getAuthToken() {
+  try { return localStorage.getItem(LS_AUTH_TOKEN) || ""; } catch { return ""; }
+}
+
+/** 401 时收集 token：预填上次的值；取消则抛错阻止继续（不弹第二次） */
+async function ensureAuthToken(hint) {
+  const token = await uiPrompt(hint || "服务已开启访问认证，请输入访问令牌（服务端 .env 的 AUTH_TOKEN）：", {
+    title: "访问认证", okText: "连接",
+    default: getAuthToken(), password: true,
+  });
+  if (token == null) throw new Error("未提供访问令牌，请求已取消");
+  const trimmed = token.trim();
+  try { localStorage.setItem(LS_AUTH_TOKEN, trimmed); } catch { /* 隐私模式 */ }
+  return trimmed;
+}
+
+/**
+ * 401 自愈的 fetch 包装：带 Bearer 头；收到 401 弹框收集 token 后重试一次。
+ * 权限/同源类 403 不重试（弹框也解决不了），错误文案直接透传。
+ */
+async function authFetch(path, options = {}, retried = false) {
+  const token = getAuthToken();
+  const headers = new Headers(options.headers || {});
+  if (token) headers.set("Authorization", "Bearer " + token);
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401 && !retried) {
+    await ensureAuthToken("访问令牌无效（可能与服务端不一致），请重新输入：");
+    return authFetch(path, options, true);
+  }
+  return res;
+}
+
 async function api(path, options) {
-  const res = await fetch(path, options);
+  const res = await authFetch(path, options);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `HTTP ${res.status}`);
@@ -1274,7 +1311,7 @@ async function streamTurn(url, body, ablock) {
   const wasNear = nearBottom();
 
   try {
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -3035,7 +3072,7 @@ async function init() {
   try {
     const probe = await fetch("/api/fs/list", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(getAuthToken() ? { Authorization: "Bearer " + getAuthToken() } : {}) },
       body: "{}",
     });
     if (probe.status === 404) {

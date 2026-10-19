@@ -52,7 +52,8 @@ import type { ChatFileRef } from "./files.js";
 import { loadRag, getRagPublic, saveRagConfig, testRagConnection, searchRag, ingestFolder, ingestText, ingestChatAttachments, deleteRagDoc, clearRag } from "./rag.js";
 import { loadEstate, getEstatePublic, installBeike, saveBeikeKey, analyzeEstateTurn } from "./estate.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
-
+import { isAuthEnabled, verifyBearer } from "./auth.js";
+import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 const PORT = Number(process.env.PORT ?? 3000);
 /**
@@ -62,8 +63,8 @@ const PORT = Number(process.env.PORT ?? 3000);
  * HOST=0.0.0.0（此时若仍未配置认证，参数校验层会拒绝高危操作并输出醒目警告）。
  */
 const HOST = process.env.HOST ?? "127.0.0.1";
-/** 认证是否已启用（Phase 1；这里先只用于启动告警判断） */
-const AUTH_ENABLED = Boolean(process.env.AUTH_TOKEN && process.env.AUTH_TOKEN.trim());
+/** 认证是否已启用（Phase 1：auth.ts 提供判定，本常量用于启动提示与 Phase 0 边界短路） */
+const AUTH_ENABLED = isAuthEnabled();
 
 // 启动时先叠加 Web 设置页保存的覆盖配置（.web-config.json → 覆盖 .env），
 // 加载项目文件夹列表，并后台拉一次启用中供应商的模型元信息（上下文窗口长度）
@@ -373,13 +374,31 @@ const server = createServer(async (req, res) => {
   try {
     // API 响应一律禁缓存（GET /api/config 等被浏览器缓存会造成状态不同步）
     if (pathname.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
+    // Phase 1 安全响应头（nosniff / no-referrer / DENY 嵌入 / CSP），对所有路径生效
+    applySecurityHeaders(res);
+
+    // --- 健康检查（不认证：部署探针需要无凭据可达；只回固定串，无信息泄露）
+    if (pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("ok");
+      return;
+    }
+
+    // Phase 1 认证：AUTH_TOKEN 开启后，除静态页与 /healthz 外的全部 /api/* 都要 Bearer。
+    // 静态页豁免 = 让浏览器能加载出 UI 并弹 token 输入框（401 引导流程）
+    if (pathname.startsWith("/api/")) {
+      if (!verifyBearer(req)) { respondUnauthorized(req, res); return; }
+      // Phase 1 同源/CSRF 防护：mutating 必须同源（跨站表单/text/plain POST 直接拒）
+      const originReject = checkSameOrigin(req);
+      if (originReject) { respondForbidden(req, res, originReject); return; }
+    }
 
     // Phase 0 止血：非 loopback 绑定且未启用认证 → 所有写请求全部拒绝。
     // 用「方法级」而非接口枚举：新增路由默认落在防线内侧，不会因漏单位置绕过。
     // GET（只读信息）不受限：config/sessions 等只含掩码/元信息，无副作用。
     if (!LOOPBACK_HOST && !AUTH_ENABLED && req.method !== "GET" && req.method !== "HEAD") {
-      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: EXPOSED_NOAUTH_ERR, authRequired: true }));
+      // authRequired=true：提示设置 AUTH_TOKEN 后携带 Bearer 即可放开
+      respondForbidden(req, res, EXPOSED_NOAUTH_ERR, true);
       return;
     }
 
