@@ -1556,3 +1556,19 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 /* 一键安装引导卡（CLI 未装时出现在工具卡里） */
 .estate-setup { border: 1px solid rgba(229,96,79,.35); border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--text-dim); display: flex; flex-direction: column; gap: 8px; }
 .estate-setup a { color: var(--accent); }
+
+
+/* ============================================================
+   桌面端（Electron 隐藏标题栏）：顶栏即窗口拖拽区，右上角给
+   原生窗口控制键让位（浏览器环境没有 body.in-desktop，零影响）
+   ============================================================ */
+body.in-desktop #topbar {
+  -webkit-app-region: drag;
+  padding-right: 152px; /* 三枚原生控制键（~46px each）+ 余量 */
+}
+body.in-desktop #topbar button,
+body.in-desktop #topbar input,
+body.in-desktop #topbar a,
+body.in-desktop #topbar .provider-menu {
+  -webkit-app-region: no-drag;
+}

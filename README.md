@@ -185,6 +185,8 @@ npm run desktop             # 默认端口 3123（环境变量 DESKTOP_PORT 可�
   （`npx tsx src/server/index.ts`）作为**子进程**拉起，浏览器内核窗口直接加载
   `http://127.0.0.1:3123` —— 前端 / 服务端逻辑零改动，`npm run web` 照旧可用；
 - **细节**：窗口就绪才显示（无白屏闪烁）；外部链接交给系统浏览器打开；
+  **隐藏系统标题栏**（Windows `titleBarStyle:hidden + titleBarOverlay`）：右上角
+  最小化/最大化/关闭由原生绘制、颜色跟随应用深浅主题，顶栏即拖拽区；
   单实例锁（重复启动自动聚焦已有窗口）；退出时 `taskkill /T` 杀干净
   npx→node→tsx 子进程树；环境变量 `DESKTOP_DEVTOOLS=1` 可在窗口里打开 DevTools。
 

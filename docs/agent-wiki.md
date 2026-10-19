@@ -546,7 +546,13 @@ Header: Authorization: Bearer <key>（可留空）
   `setWindowOpenHandler` 交给系统浏览器；
 - 退出：`window-all-closed` → `taskkill /pid <pid> /T /F` 杀干净
   npx→node→tsx 子进程树（孤儿 tsx 会继续占用端口，这就是必须 /T 的原因）；
-- 单实例锁：二次启动 `requestSingleInstanceLock` 失败即退出并聚焦已有窗口。
+- 单实例锁：二次启动 `requestSingleInstanceLock` 失败即退出并聚焦已有窗口；
+- **无白标题栏**：Windows 以 `titleBarStyle:"hidden" + titleBarOverlay` 隐藏系统标题栏，
+  右上角三枚窗口控制键由原生绘制、颜色跟随应用深浅主题 —— 链路是
+  `preload.cjs` 暴露 `window.desktop.setOverlayTheme(dark)` → ipcMain 调
+  `win.setTitleBarOverlay`；前端 `body.in-desktop` 标记驱动 CSS：
+  `#topbar` 设为 `-webkit-app-region:drag`（窗口拖拽/双击最大化），右上 padding 152px
+  给原生控制键让位，顶栏内按钮一律 `no-drag`。浏览器直接访问 `npm run web` 无标记、零影响。
 
 ---
 

@@ -6,7 +6,7 @@
 "use strict";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-19-1";
+const APP_VERSION = "web-2026-10-19-2";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -72,6 +72,9 @@ function updateThemeBtn() {
   const light = currentTheme() === "light";
   btn.textContent = light ? "🌙" : "☀️";
   btn.title = light ? "切换到深色主题" : "切换到浅色主题";
+  // Electron 桌面端：窗口控制键（右上角原生三按钮）颜色跟随应用主题；
+  // 浏览器环境没有 window.desktop，静默跳过
+  window.desktop?.setOverlayTheme?.(!light);
 }
 
 function toggleTheme() {
@@ -3009,6 +3012,8 @@ function renderEstateInToolCard(part, card) {
  * ------------------------------------------------------------------------- */
 async function init() {
   loadLocal();
+  // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
+  if (window.desktop?.isElectron) document.body.classList.add("in-desktop");
 
   // 配置
   try {

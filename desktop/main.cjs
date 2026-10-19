@@ -13,7 +13,7 @@
  * 运行：npm run desktop  （首次需 npm i 之后 npx electron 会按 devDependency 安装）
  * 参数：环境变量 DESKTOP_PORT 覆盖默认端口；DESKTOP_DEVTOOLS=1 打开 DevTools。
  */
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const http = require("node:http");
@@ -22,6 +22,12 @@ const APP_ROOT = path.join(__dirname, "..");
 const PORT = Number(process.env.DESKTOP_PORT || 3123);
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 const READY_TIMEOUT_MS = 90_000;
+
+// 隐藏系统标题栏后，Windows 原生窗口控制键（最小化/最大化/关闭）由 titleBarOverlay
+// 绘制，颜色必须与应用深浅主题一致 —— 常量与 style.css 的 --topbar-bg / --text-2 对齐
+const OVERLAY_HEIGHT = 52; // 与 #topbar 高度一致，控制键垂直居中
+const OVERLAY_DARK = { color: "#1b1c1f", symbolColor: "#b9b9c0" };
+const OVERLAY_LIGHT = { color: "#f7f8fa", symbolColor: "#575e6c" };
 
 let serverChild = null;
 let win = null;
@@ -105,10 +111,16 @@ function createWindow() {
     backgroundColor: "#101216",
     autoHideMenuBar: true,
     show: false, // ready-to-show 再显示，避免白屏闪烁
+    // Windows：隐藏白底系统标题栏，改用与应用配色一致的 overlay 控制键；
+    // 顶栏（#topbar）在 CSS 里标记为拖拽区。非 Windows 保留系统标题栏（mac 自带的深色红绿灯无需处理）。
+    ...(process.platform === "win32"
+      ? { titleBarStyle: "hidden", titleBarOverlay: { ...OVERLAY_DARK, height: OVERLAY_HEIGHT } }
+      : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
   win.loadURL(URL_BASE);
@@ -163,6 +175,15 @@ if (!gotLock) {
       return;
     }
     createWindow();
+    // 前端换肤时同步 overlay 控制键颜色（preload 暴露 window.desktop.setOverlayTheme）
+    ipcMain.handle("desktop:overlay-theme", (_event, dark) => {
+      if (process.platform !== "win32" || !win || typeof win.setTitleBarOverlay !== "function") return false;
+      try {
+        win.setTitleBarOverlay({ ...(dark ? OVERLAY_DARK : OVERLAY_LIGHT), height: OVERLAY_HEIGHT });
+        return true;
+      } catch { /* 旧版本 Electron / 平台不支持 → 忽略 */ }
+      return false;
+    });
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 
