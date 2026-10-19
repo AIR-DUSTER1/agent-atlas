@@ -32,6 +32,7 @@
  */
 import { promises as fsp } from "node:fs";
 import { spawn } from "node:child_process";
+import { killProcessTree } from "./subprocess.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,8 @@ const run = promisify(execFile);
 const AGENTS_DIR = join(PROJECT_ROOT, ".setting", "agents");
 const RUN_TIMEOUT_MS = 180_000;
 const MAX_AGENTS = 12;
+/** 单轮执行转发的 stdout 累计上限：防外部 Agent 刷屏把浏览器事件流冲爆 */
+const STDOUT_FORWARD_CAP_BYTES = 8_000_000;
 
 export interface ExternalAgent {
   id: string;
@@ -303,8 +306,8 @@ export async function* runExternalAgent(agent: ExternalAgent, message: string, s
     stdio: hasPlaceholder ? ["ignore", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
   });
 
-  const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
-  const onAbort = () => child.kill("SIGKILL");
+  const timer = setTimeout(() => killProcessTree(child.pid ?? 0), RUN_TIMEOUT_MS);
+  const onAbort = () => killProcessTree(child.pid ?? 0);
   signal.addEventListener("abort", onAbort, { once: true });
 
   if (!hasPlaceholder && child.stdin) {
@@ -321,8 +324,16 @@ export async function* runExternalAgent(agent: ExternalAgent, message: string, s
 
   const stdout = child.stdout;
   if (stdout) {
+    let forwarded = 0;
     for await (const chunk of stdout) {
       if (signal.aborted) break;
+      forwarded += chunk.length;
+      if (forwarded > STDOUT_FORWARD_CAP_BYTES) {
+        // 刷屏防护：达到转发上限就终止子进程并明确告知（读取权限的正确用法不存在这个量级）
+        yield { type: "error", message: `外部 Agent 输出超过 ${STDOUT_FORWARD_CAP_BYTES} 字节上限，已终止执行` };
+        killProcessTree(child.pid ?? 0);
+        break;
+      }
       const text = chunk.toString("utf8");
       if (text) yield { type: "token", text };
     }

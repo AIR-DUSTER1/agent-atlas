@@ -20,11 +20,12 @@
  * ⚠ 58 房产开放平台经调研只提供 B 端管理 API（发房 / 房源管理），
  *   无 C 端找房检索接口且授权需企业渠道，本期不接入（用户已确认）。
  */
-import { spawn } from "node:child_process";
+import { runControlled } from "./subprocess.js";
 import { promises as fsp, createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
 
 // ---------------------------------------------------------------------------
@@ -90,44 +91,26 @@ export interface BeikeStatus {
   keyUrl: string;    // 前端引导用户去获取授权 Key
 }
 
-/** spawn 一次 beike：返回退出码 + stdout/stderr（不解析 JSON） */
+/** spawn 一次 beike：返回退出码 + stdout/stderr（不解析 JSON）。
+ * T1-4 迁移到 subprocess.ts 受控运行器：输出上限 + 超时 + Windows整树强杀 */
 function runBeikeRaw(
   bin: string,
   args: string[],
   timeoutMs: number
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolveP) => {
-    let settled = false;
-    const done = (r: { code: number; stdout: string; stderr: string }) => {
-      if (!settled) { settled = true; resolveP(r); }
-    };
-    let child;
-    try {
-      child = spawn(bin, args, {
-        // 贝壳官方技能要求固定来源标识；沿用用户环境变量其余部分
-        env: { ...process.env, BEIKE_SOURCE: "beike_skill" },
-        windowsHide: true,
-      });
-    } catch (err) {
-      done({ code: -1, stdout: "", stderr: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-    const timer = setTimeout(() => {
-      try { child.kill(); } catch { /* 已退出则忽略 */ }
-      done({ code: -2, stdout: "", stderr: `beike 执行超过 ${timeoutMs}ms 被终止` });
-    }, timeoutMs);
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      done({ code: -1, stdout, stderr: err instanceof Error ? err.message : String(err) });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      done({ code: code ?? -3, stdout, stderr });
-    });
+  return runControlled(bin, {
+    args,
+    timeoutMs,
+    // 贝壳官方技能要求固定来源标识；沿用用户环境变量其余部分
+    env: { ...process.env, BEIKE_SOURCE: "beike_skill" },
+  }).then((r) => {
+    // 受控运行器的异常终止统一标 -1；把终止原因补进 stderr，便于调用方转述
+    const stderr = r.killedBy
+      ? (r.stderr + (r.stderr ? "\n" : "") +
+        (r.killedBy === "timeout" ? `beike 执行超过 ${timeoutMs}ms 被终止` : "beike 输出超限被终止")).trim()
+      : r.stderr;
+    // 受控运行器的异常终止统一标 -1；旧约定 -1/-2/-3 的差异对调用方无实际意义
+    return { code: r.code, stdout: r.stdout, stderr };
   });
 }
 
@@ -274,8 +257,21 @@ export async function installBeike(): Promise<BeikeStatus> {
 }
 
 // ---------------------------------------------------------------------------
-// 鉴权：beike auth <KEY> --save（Key 不落盘不回显，由 CLI 存 ~/.beike）
+// 鉴权：Key 不再进 argv（T1-3），直接写官方凭证文件 + doctor 免费校验
 // ---------------------------------------------------------------------------
+/** 贝壳 CLI 的凭证存储文件（`beike auth <KEY> --save` 的本质就是写它，权限 600） */
+const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
+/** 文案回显时的密钥遮蔽：首尾各保留多少明文 */
+const REDACT_KEEP = 4;
+
+/** 把文案里的密钥片段替换为掩码（错误信息可能回显用户输入，统一过这层再返回） */
+function redactSecret(sample: string, secret: string): string {
+  const s = secret.trim();
+  if (!s) return sample;
+  if (s.length <= REDACT_KEEP * 2) return sample.split(s).join("****");
+  return sample.split(s).join(`${s.slice(0, REDACT_KEEP)}****${s.slice(-REDACT_KEEP)}`);
+}
+
 export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
   await ensureLoaded();
   const key = apiKey.trim();
@@ -286,14 +282,24 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   } catch {
     return { ok: false, message: "贝壳 CLI 尚未安装，请先点「安装 CLI」再保存 Key" };
   }
-  const r = await runBeikeRaw(bin, ["auth", key, "--save"], KEY_AUTH_TIMEOUT_MS);
-  if (r.code === 0 && !/无效|过期|失败|invalid|expired/i.test(r.stderr)) {
-    return { ok: true, message: "Key 已保存（beike 本地凭证），可以开始找房了" };
+  // T1-3：官方 CLI 的 auth 只收位置参数 KEY（无 stdin/env 支持），argv 直接进
+  // 进程命令行会被任意本机进程读取（Get-CimInstance Win32_Process 实测可见）。
+  // 但 `auth --save` 的实际动作就是「把 Key 落盘到 ~/.beike/BEIKE_MCP_API_KEY」，
+  // 所以这里由服务端直接写该文件（mode 600），再用 doctor 做校验：
+  // doctor 只探测 /mcp 的工具清单（免费、不耗网关配额），判定 Key 是否被 CLI 认可。
+  await fsp.mkdir(dirname(BEIKE_CRED_FILE), { recursive: true });
+  await fsp.writeFile(BEIKE_CRED_FILE, key, { mode: 0o600 });
+  const doctor = await runBeikeRaw(bin, ["doctor"], KEY_AUTH_TIMEOUT_MS);
+  const out = `${doctor.stdout}\n${doctor.stderr}`;
+  if (/Key 有效/.test(out)) {
+    return { ok: true, message: "Key 已保存并通过 CLI 校验，可以开始找房了" };
   }
-  const tail = (r.stderr || r.stdout || "").trim().slice(-300);
+  const tail = out.trim().slice(-300);
   return {
     ok: false,
-    message: tail ? `凭证校验未通过：${tail}` : "凭证校验未通过，请确认复制的是页面上的完整字符",
+    message: tail
+      ? `凭证校验未通过：${redactSecret(tail, key)}`
+      : "凭证校验未通过，请确认复制的是页面上的完整字符",
   };
 }
 
