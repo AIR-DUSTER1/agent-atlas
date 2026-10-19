@@ -104,8 +104,10 @@ export const sendEmail = tool(
 export const demoTools = [calculator, getCurrentTime, getWeather, sendEmail];
 
 /** name -> 工具 的映射，方便在代码里按名字查找并执行（Demo 3 / 审批节点用到）。
- *  包含基础工具 + 开发工具（tools-dev.ts），覆盖通用 Agent 绑定的全部工具。 */
+ *  覆盖通用 Agent 与房产 Agent 绑定的全部工具：
+ *  基础工具（tools.ts）+ 开发工具（tools-dev.ts）+ 贝壳找房工具（tools-estate.ts）。 */
 import { devTools } from "./tools-dev.js";
+import { estateTools } from "./tools-estate.js";
 export const toolsByName = Object.fromEntries(
-  [...demoTools, ...devTools].map((t) => [t.name, t])
+  [...demoTools, ...devTools, ...estateTools].map((t) => [t.name, t])
 ) as Record<string, (typeof demoTools)[number]>;

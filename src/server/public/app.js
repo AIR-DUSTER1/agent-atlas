@@ -6,7 +6,7 @@
 "use strict";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-16-1";
+const APP_VERSION = "web-2026-10-19-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -38,6 +38,7 @@ const state = {
   projects: [],        // [{id, name, type:"local"|"cloud", path, url?, builtin?}]
   externalAgents: [],  // [{id, name, url, command, args, ...}] 第三方接入的 Agent
   rag: null,           // { configured, baseURL, apiKeyMasked, collection, topK, docs } 外部 RAG 状态
+  estate: null,        // { installed, version?, viaPATH?, keyUrl, ... } 贝壳 CLI 状态
   projectView: "all",  // "all" | projectId（侧栏过滤 + 新建会话归属）
   currentId: null,
   blocks: {},          // sessionId -> [block]
@@ -111,7 +112,13 @@ const PROTOCOL_LABEL = {
   "anthropic": "Anthropic",
   "gemini": "Gemini",
 };
-const TOOL_ICONS = { calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧", delegate: "🧭", retrieve_docs: "📚" };
+const TOOL_ICONS = {
+  calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧",
+  delegate: "🧭", retrieve_docs: "📚",
+  // 房产 Agent（贝壳）
+  house_search: "🏙", house_lookup: "🔍", house_market: "📈", house_map: "🗺️",
+  house_agents: "👤", house_appoint: "📅", house_contact: "🤝",
+};
 const NODE_ICONS = { agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️" };
 
 /* ---------------------------------------------------------------------------
@@ -562,7 +569,7 @@ function renderSessionItem(s) {
   meta.className = "s-meta";
   const tag = document.createElement("span");
   tag.className = "s-demo";
-  tag.textContent = s.kind === "agent" ? "通用" : s.kind === "external" ? "外部" : `示例 ${s.demo}`;
+  tag.textContent = s.kind === "agent" ? "通用" : s.kind === "external" ? "外部" : s.kind === "estate" ? "找房" : `示例 ${s.demo}`;
   meta.appendChild(tag);
   const time = document.createElement("span");
   time.textContent = new Date(s.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -986,6 +993,8 @@ function updateToolCard(part) {
     card.querySelector(".result-pre").className = "result-pre" + (part.result.isError ? " err" : "");
     // 知识检索专属：解析 JSON 结果，渲染「命中来源」卡片
     if (part.name === "retrieve_docs") renderRagHitsInToolCard(part, card);
+    // 房产专属：解析 JSON 结果，渲染房源列表 / 内嵌地图 / 户型图 / 安装引导
+    if (part.name && part.name.startsWith("house_")) renderEstateInToolCard(part, card);
   }
 }
 
@@ -1342,6 +1351,19 @@ function buildDemoCards(container) {
     });
     container.appendChild(card);
   }
+
+  // 房产 Agent（贝壳）：真实找房 / 对比区位地图 / 户型图 / 预约带看
+  const estateCard = document.createElement("button");
+  estateCard.className = "demo-card";
+  estateCard.innerHTML = `
+    <div class="d-head"><span class="d-num">🏠</span><span class="d-name">房产 Agent</span></div>
+    <div class="d-desc">贝壳官方数据 · 找房对比 · 🗺️ 区位地图 · 户型图 · 预约带看审批</div>
+    <div class="d-eg" id="estate-card-hint">示例：帮我在北京租个两居室</div>`;
+  estateCard.addEventListener("click", async () => {
+    try { await createSession("estate"); }
+    catch (err) { uiAlert("创建对话失败：" + err.message, "创建对话"); }
+  });
+  container.appendChild(estateCard);
 }
 
 function buildExampleChips() {
@@ -2698,6 +2720,291 @@ function renderRagHitsInToolCard(part, card) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 房产 Agent（贝壳）：侧栏入口 / 面板 / 工具卡专属渲染
+ * ------------------------------------------------------------------------- */
+async function loadEstate() {
+  try {
+    state.estate = await api("/api/estate");
+  } catch {
+    state.estate = null; // 旧服务进程没有该接口 → 静默降级
+  }
+  updateEstateBadge();
+}
+
+function updateEstateBadge() {
+  const el = $("estate-entry-state");
+  if (!el) return;
+  const st = state.estate || {};
+  el.textContent = st.installed ? `已装 ${st.version || ""}` : "未安装";
+  el.className = "kb-entry-state" + (st.installed ? " ready" : "");
+}
+
+function openEstate() {
+  $("estate-mask").classList.remove("hidden");
+  renderEstatePanel();
+}
+
+function closeEstate() { $("estate-mask").classList.add("hidden"); }
+
+function setEstateStatus(msg, cls) {
+  const el = $("estate-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "estate-status" + (cls ? " " + cls : "");
+}
+
+function renderEstatePanel() {
+  const st = state.estate || { installed: false };
+  if (st.installed) {
+    setEstateStatus(`✓ 已安装贝壳 CLI${st.version ? " " + st.version : ""}${st.viaPATH ? "（来自系统 PATH）" : st.path ? "：" + st.path : ""}`, "ok");
+  } else {
+    setEstateStatus(st.error ? `✗ ${st.error}` : "未检测到贝壳 CLI：点下方按钮自动安装（仅支持 Windows，约 32MB）", "err");
+  }
+  $("estate-key").value = "";
+  const s2 = $("estate-status2");
+  s2.textContent = st.installed ? "CLI 就绪后即可保存 Key 开始找房" : "请先安装 CLI";
+  s2.style.color = st.installed ? "" : "var(--amber)";
+}
+
+async function installBeikeCli() {
+  const btn = $("estate-install");
+  const s2 = $("estate-status2");
+  btn.disabled = true;
+  s2.textContent = "正在下载安装（约 30MB，视网络可能需要 1-2 分钟）…";
+  s2.style.color = "var(--amber)";
+  try {
+    const res = await api("/api/estate/install", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    state.estate = { ...state.estate, ...res };
+    updateEstateBadge();
+    renderEstatePanel();
+  } catch (err) {
+    setEstateStatus(`✗ 安装失败：${err.message}`, "err");
+    s2.textContent = "安装失败，可按官方文档手动安装后重试";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveEstateKey() {
+  const value = $("estate-key").value.trim();
+  const s2 = $("estate-status2");
+  if (!value) { s2.textContent = "✗ 请先粘贴贝壳 Key（building.ke.com 登录后显示）"; s2.style.color = "var(--red)"; return; }
+  if (!state.estate?.installed) {
+    s2.textContent = "✗ 请先安装 CLI 再保存 Key"; s2.style.color = "var(--red)"; return;
+  }
+  s2.textContent = "校验中…";
+  try {
+    const res = await api("/api/estate/key", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: value }),
+    });
+    s2.textContent = res.ok ? "✓ 校验通过，贝壳找房已可用（回到找房对话直接提需求）" : `✗ 校验未通过：${res.error || "未知错误"}`;
+    s2.style.color = res.ok ? "" : "var(--red)";
+    if (res.ok) $("estate-key").value = "";
+  } catch (err) {
+    s2.textContent = `✗ ${err.message}`;
+    s2.style.color = "var(--red)";
+  }
+}
+
+/* ----- 房产 JSON 结果 → 卡片渲染（房源列表 / 地图 / 户型图 / 二维码 / 安装引导） ----- */
+
+/** 只放行 http(s) 图片源（服务端来的 URL 同样不可信，防 javascript: 伪协议） */
+function safeImageSrc(url) {
+  if (typeof url === "string" && (/^https:\/\//i.test(url) || /^data:image\//i.test(url))) return url;
+  return "";
+}
+function safeHref(url) {
+  if (typeof url === "string" && /^https:\/\//i.test(url)) return url;
+  return null;
+}
+function estateExtra(card) {
+  let extra = card.querySelector(".estate-extra");
+  if (extra) extra.remove();
+  extra = document.createElement("div");
+  extra.className = "estate-extra";
+  card.querySelector(".tool-body").appendChild(extra);
+  return extra;
+}
+
+function renderEstateInToolCard(part, card) {
+  let data;
+  try { data = JSON.parse(part.result?.content || ""); } catch { return; }
+  if (!data || typeof data !== "object") return;
+
+  // CLI 未安装 / 未授权 一类引导性错误 → 渲染一键安装卡
+  if (data.error && data.setup === "beike-install") {
+    const extra = estateExtra(card);
+    const box = document.createElement("div");
+    box.className = "estate-setup";
+    box.innerHTML = `<div><b>🏠 贝壳 CLI 未就绪</b><div class="err-line"></div><a class="key-link" target="_blank" rel="noopener"></a></div>`;
+    box.querySelector(".err-line").textContent = data.error;
+    const keyA = box.querySelector(".key-link");
+    keyA.textContent = "获取贝壳 Key（building.ke.com）";
+    keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=beike_skill";
+    const fix = document.createElement("button");
+    fix.className = "btn btn-approve";
+    fix.textContent = "⬇ 一键安装贝壳 CLI";
+    if (!/^win/i.test(data.platform || "win")) fix.disabled = true;
+    fix.addEventListener("click", async () => {
+      fix.disabled = true;
+      fix.textContent = "安装中…（约 1-2 分钟）";
+      try {
+        const res = await api("/api/estate/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        state.estate = { ...state.estate, ...res };
+        updateEstateBadge();
+        fix.textContent = `✓ 安装完成${res.version ? " " + res.version : ""}，请重新发送刚才的问题`;
+      } catch (err) {
+        fix.textContent = "安装失败：" + err.message;
+      }
+    });
+    box.appendChild(fix);
+    extra.appendChild(box);
+    return;
+  }
+
+  // 房源搜索 → 列表卡
+  const listings = Array.isArray(data.listings) ? data.listings : [];
+  if (data.action === "search" || listings.length) {
+    const extra = estateExtra(card);
+    if (listings.length) {
+      const title = document.createElement("div");
+      title.className = "estate-extra-title";
+      title.textContent = `🏙 ${data.city || ""} ${data.mode === "rent" ? "租房" : "买房"}结果 · ${listings.length} 套`;
+      extra.appendChild(title);
+      for (const h of listings.slice(0, 8)) {
+        const row = document.createElement("div");
+        row.className = "estate-house";
+        row.innerHTML = `
+          <img class="estate-house-thumb" alt="">
+          <div class="estate-house-main">
+            <div class="estate-house-title"></div>
+            <div class="estate-house-meta"><span class="estate-house-price"></span><span class="m-area"></span><span class="m-addr"></span></div>
+            <div class="estate-house-links"></div>
+          </div>`;
+        const img = row.querySelector(".estate-house-thumb");
+        const src = safeImageSrc(h.cover || h.coverImage || h.image);
+        if (src) img.src = src; else img.remove();
+        row.querySelector(".estate-house-title").textContent = h.title || h.community || h.name || h.id || "（无标题）";
+        row.querySelector(".estate-house-price").textContent = typeof h.price === "object" ? (h.price.unit || "") : (h.price || "");
+        row.querySelector(".m-area").textContent = h.area || h.areaSize || "";
+        row.querySelector(".m-addr").textContent = h.addressText || h.address || h.region || "";
+        const links = row.querySelector(".estate-house-links");
+        let linkAdded = false;
+        for (const [label, v] of Object.entries(h.links || { detail: h.url || h.detailUrl })) {
+          const href = safeHref(String(v));
+          if (!href) continue;
+          const a = document.createElement("a");
+          a.className = "estate-link";
+          a.textContent = label === "detail" ? "贝壳页面" : label;
+          a.href = href; a.target = "_blank"; a.rel = "noopener";
+          links.appendChild(a); linkAdded = true;
+        }
+        if (!linkAdded) links.remove();
+        extra.appendChild(row);
+      }
+    } else if (data.error) {
+      const miss = document.createElement("div");
+      miss.className = "estate-missed";
+      miss.textContent = "🔍 " + data.error;
+      extra.appendChild(miss);
+    }
+    return;
+  }
+
+  // 区位对比 → 内嵌 OSM 地图 + 各平台跳转链接
+  if (data.action === "map") {
+    const extra = estateExtra(card);
+    const points = Array.isArray(data.points) ? data.points : [];
+    const embed = String(data.embedUrl || "");
+    if (points.length && /^https:\/\/www\.openstreetmap\.org\//i.test(embed)) {
+      const mapBox = document.createElement("div");
+      mapBox.className = "estate-map-embed";
+      const iframe = document.createElement("iframe");
+      iframe.src = embed;
+      iframe.loading = "lazy";
+      iframe.title = "候选房源分布地图";
+      mapBox.appendChild(iframe);
+      extra.appendChild(mapBox);
+    }
+    for (const p of points) {
+      const row = document.createElement("div");
+      row.className = "estate-point";
+      row.innerHTML = `<div class="estate-point-main"><div class="estate-point-name"></div><div class="estate-point-addr"></div></div><div class="estate-point-links"></div>`;
+      row.querySelector(".estate-point-name").textContent = p.name || "未知点位";
+      row.querySelector(".estate-point-addr").textContent = p.address || "";
+      const links = row.querySelector(".estate-point-links");
+      for (const [label, v] of Object.entries(p.links || {})) {
+        const href = safeHref(String(v));
+        if (!href) continue;
+        const a = document.createElement("a");
+        a.className = "estate-link";
+        a.textContent = label;
+        a.href = href; a.target = "_blank"; a.rel = "noopener";
+        links.appendChild(a);
+      }
+      extra.appendChild(row);
+    }
+    if (data.note) {
+      const note = document.createElement("div");
+      note.className = "estate-missed";
+      note.textContent = data.note;
+      extra.appendChild(note);
+    }
+    return;
+  }
+
+  // 户型图 → 图片网格
+  if (data.action === "material") {
+    const images = Array.isArray(data.images) ? data.images : [];
+    const extra = estateExtra(card);
+    if (images.length) {
+      const grid = document.createElement("div");
+      grid.className = "estate-material-grid";
+      for (const src of images) {
+        const s = safeImageSrc(src);
+        if (!s) continue;
+        const img = document.createElement("img");
+        img.src = s; img.alt = "户型图"; img.loading = "lazy";
+        grid.appendChild(img);
+      }
+      extra.appendChild(grid);
+    }
+    const href = safeHref(data.vr || data.detailUrl || data.url);
+    if (href) {
+      const a = document.createElement("a");
+      a.className = "estate-material-link";
+      a.textContent = "▶ 打开贝壳 VR / 详情页";
+      a.href = href; a.target = "_blank"; a.rel = "noopener";
+      extra.appendChild(a);
+    }
+    if (!extra.childElementCount) extra.remove();
+    return;
+  }
+
+  // 经纪人加微 → 二维码
+  if (data.action === "qrcode") {
+    const extra = estateExtra(card);
+    const src = safeImageSrc(data.qrcode || data.image);
+    if (src) {
+      const img = document.createElement("img");
+      img.src = src; img.alt = "经纪人微信二维码";
+      img.style.cssText = "width:180px;border-radius:8px;border:1px solid var(--line)";
+      extra.appendChild(img);
+    }
+    if (data.note) {
+      const note = document.createElement("div");
+      note.className = "estate-material-link";
+      note.textContent = data.note;
+      extra.appendChild(note);
+    }
+    if (!extra.childElementCount) extra.remove();
+    return;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * 启动
  * ------------------------------------------------------------------------- */
 async function init() {
@@ -2716,6 +3023,7 @@ async function init() {
   await loadProjects();
   await loadExternalAgents();
   await loadRag();
+  await loadEstate();
 
   // 能力自检：前端具备但服务端缺失的接口 → 说明服务进程是旧代码启动的，提示重启。
   // （静态文件每次请求都读磁盘，浏览器能拿到新脚本；但路由是进程启动时固化的）
@@ -2885,6 +3193,24 @@ async function init() {
   on("kb-query", "keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); searchKbTest(); } });
   on("kb-clear", "click", clearKb);
 
+  // 房产数据源（贝壳 CLI）：面板开关 / 检测 / 安装 / 保存 Key
+  on("estate-btn", "click", () => { setSidebarOpen(false); openEstate(); });
+  on("estate-close", "click", closeEstate);
+  on("estate-mask", "click", (e) => { if (e.target === $("estate-mask")) closeEstate(); });
+  on("estate-check", "click", async () => {
+    setEstateStatus("探测中…");
+    try { state.estate = await api("/api/estate"); }
+    catch (err) { state.estate = { installed: false, error: err.message }; }
+    updateEstateBadge();
+    renderEstatePanel();
+  });
+  on("estate-install", "click", installBeikeCli);
+  on("estate-key-save", "click", saveEstateKey);
+  on("estate-key-toggle", "click", () => {
+    const keyInput = $("estate-key");
+    keyInput.type = keyInput.type === "password" ? "text" : "password";
+  });
+
   on("send-btn", "click", send);
   on("stop-btn", "click", stopStreaming);
   inputEl.addEventListener("input", autoGrow);
@@ -2909,6 +3235,7 @@ async function init() {
       closeSettings();
       closeFsModal();
       closeKb();
+      closeEstate();
       showProviderMenu(false);
       setSidebarOpen(false);
       closeCmMenus();

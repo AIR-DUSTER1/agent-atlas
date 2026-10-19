@@ -49,6 +49,11 @@ const APPROVAL_TOOLS: Record<string, (args: Record<string, unknown>) => string> 
   send_email: (a) => `向 ${String(a.to)} 发送邮件，主题「${String(a.subject)}」`,
   terminal: (a) => `在项目根目录执行命令：${String(a.command)}`,
   write_file: (a) => `写入文件：${String(a.path)}（${String(a.content ?? "").length} 字符）`,
+  // 房产 Agent：两个「对外动作」必须人工审批（详见 tools-estate.ts）
+  house_appoint: (a) =>
+    `提交贝壳带看预约：房源 ${String(a.houseId)}，${String(a.date)}${a.start ? ` ${String(a.start)}-${String(a.end ?? "18")} 时` : ""}`,
+  house_contact: (a) =>
+    `向贝壳经纪人（ID ${String(a.agentUcid)}，${String(a.biz ?? "")}${String(a.mode) === "rent" ? "租房" : "买房"}）发起加微：${String(a.reason)}`,
 };
 
 // ---------------------------------------------------------------------------

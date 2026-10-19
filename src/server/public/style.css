@@ -1511,3 +1511,48 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   #provider-btn-text { max-width: 96px; }
   #mode-badge, #demo-badge { display: none; }
 }
+
+
+/* ============================================================
+   房产 Agent（estate）：数据源面板 + 工具专属卡（房源/地图/户型图）
+   ============================================================ */
+#estate-modal { width: min(560px, calc(100vw - 32px)); }
+.estate-status {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; line-height: 1.5;
+}
+.estate-status.ok { border-color: rgba(63,185,111,.4); color: var(--green); }
+.estate-status.err { border-color: rgba(229,96,79,.4); color: var(--red); }
+
+/* 工具卡内的房产专属渲染容器 */
+.estate-extra { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.estate-extra-title { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+
+/* 房源行 */
+.estate-house { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.estate-house-thumb { flex: none; width: 74px; height: 56px; object-fit: cover; border-radius: 6px; background: rgba(127,127,127,.15); }
+.estate-house-main { flex: 1; min-width: 0; }
+.estate-house-title { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.estate-house-meta { font-size: 12px; color: var(--text-dim); margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.estate-house-price { color: #e5604f; font-weight: 700; }
+.estate-house-links { margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 地图卡 */
+.estate-map-embed { width: 100%; min-height: 260px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: rgba(127,127,127,.08); }
+.estate-map-embed iframe { width: 100%; height: 260px; border: 0; display: block; }
+.estate-point { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 12.5px; }
+.estate-point-name { font-weight: 600; color: var(--text); }
+.estate-point-addr { color: var(--text-dim); font-size: 11.5px; margin-top: 2px; word-break: break-all; }
+.estate-point-links { margin-left: auto; display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.estate-link { font-size: 11px; text-decoration: none; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-dim); }
+.estate-link:hover { border-color: var(--accent); color: var(--text); }
+.estate-missed { font-size: 12px; color: #d29922; }
+
+/* 户型图图片网格 */
+.estate-material-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.estate-material-grid img { width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+.estate-material-link { font-size: 11.5px; color: var(--text-dim); }
+
+/* 一键安装引导卡（CLI 未装时出现在工具卡里） */
+.estate-setup { border: 1px solid rgba(229,96,79,.35); border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--text-dim); display: flex; flex-direction: column; gap: 8px; }
+.estate-setup a { color: var(--accent); }

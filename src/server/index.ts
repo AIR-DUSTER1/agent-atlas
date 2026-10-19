@@ -50,6 +50,7 @@ import { loadExternalAgents, listExternalAgents, getExternalAgent, addExternalAg
 import { listDir, readFileAuthorized, openRemoteRoot, storeUpload, resolveChatFiles, buildUserContent } from "./files.js";
 import type { ChatFileRef } from "./files.js";
 import { loadRag, getRagPublic, saveRagConfig, testRagConnection, searchRag, ingestFolder, ingestText, ingestChatAttachments, deleteRagDoc, clearRag } from "./rag.js";
+import { loadEstate, getEstatePublic, installBeike, saveBeikeKey, analyzeEstateTurn } from "./estate.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -61,6 +62,7 @@ await loadSettings();
 await loadProjects();
 await loadExternalAgents();
 await loadRag();
+await loadEstate();
 void refreshModelInfo().catch(() => {});
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -223,11 +225,18 @@ async function handleChat(
     return;
   }
 
+  // ── 房产会话：每轮把用户原话上报贝壳 analyze（官方契约，fire-and-forget） ──
+  if (session.kind === "estate") {
+    // 意图摘要 = 最近几轮用户消息的拼接（best-effort，无模型调用）
+    const recent = session.turnHistory.slice(-3).map((r) => r.user).join(" ; ");
+    void analyzeEstateTurn(message, recent ? `${recent} ; 本轮：${message}` : message);
+  }
+
   // 未配置 API_KEY → 模拟模式；否则跑真实图
   if (!config.apiKey) {
     session.turns += 1; // 轮次递增，供模拟用量（上下文增长 / 缓存命中率）使用
     await streamToClient(res, req, session, (signal) =>
-      mockRun({ message: typeof fullMessage === "string" ? fullMessage : message, rawMessage: message, turnIndex: session.turns - 1, signal })
+      mockRun({ message: typeof fullMessage === "string" ? fullMessage : message, rawMessage: message, kind: session.kind, turnIndex: session.turns - 1, signal })
     , (events) => completeTurnRecord(session, events));
     return;
   }
@@ -497,9 +506,10 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST") {
         const body = JSON.parse((await readBody(req)) || "{}") as { kind?: unknown; demo?: unknown; projectId?: unknown; title?: string; agentId?: unknown };
         // 新逻辑：{ kind: "agent" }（默认）/ { kind: "demo", demo: 1-4 } / { kind: "external", agentId }
+        //         / { kind: "estate" }（房产 Agent，贝壳工具集）
         // 兼容旧调用：只传 { demo: N } 视为示例会话
-        const kind = body.kind === "demo" || body.kind === "external" || (!body.kind && isDemo(body.demo))
-          ? (body.kind as "demo" | "external")
+        const kind = body.kind === "demo" || body.kind === "external" || body.kind === "estate" || (!body.kind && isDemo(body.demo))
+          ? (body.kind as "demo" | "external" | "estate")
           : "agent";
         const demo = isDemo(body.demo) ? body.demo : null;
         if (kind === "demo" && !demo) {
@@ -834,6 +844,49 @@ const server = createServer(async (req, res) => {
       } catch (err) {
         res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    // ── 房产 Agent（贝壳 CLI）：状态 / 一键安装 / 保存授权 Key ──
+    // 注意 getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await
+    if (pathname === "/api/estate" && req.method === "GET") {
+      try {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(await getEstatePublic()));
+      } catch (err) {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ installed: false, error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/estate/install" && req.method === "POST") {
+      await readBody(req); // 消费掉可能为空的请求体，参数无关紧要
+      try {
+        const status = await installBeike(); // 下载 ~32MB + 解压，可能要几十秒
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...status }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (pathname === "/api/estate/key" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}") as { apiKey?: unknown };
+      try {
+        if (typeof body.apiKey !== "string" || !body.apiKey.trim()) {
+          throw new Error("apiKey 不能为空：登录贝壳获取页面显示的完整凭证后粘贴");
+        }
+        // beike auth --save：Key 只进 CLI 本地凭证，工作台不落盘不回显
+        const r = await saveBeikeKey(body.apiKey);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(r));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
       }
       return;
     }

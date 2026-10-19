@@ -213,6 +213,44 @@ npm run desktop             # 默认端口 3123（环境变量 DESKTOP_PORT 可�
   服务地址 / 集合名 / topK 配置（真实索引在外部服务侧）；仓库里没有本地向量数据；
 - **安全**：入库只允许授权路径（`files.ts` 授权前缀校验），`.env / *lock*` 等敏感文件不入库。
 
+## 房产找房（贝壳官方 AI）
+
+侧栏「🏠 找房数据源（贝壳）」管理数据源；新建对话时选「房产 Agent」即得到一个
+贝壳顾问式 Agent（`src/agent/estate.ts`），对话特征与通用 Agent 一致（流式 / 工具卡 / 审批）。
+
+**首次使用两步（面板里自动完成）**：
+
+1. **安装 CLI**：服务端从贝壳官方 GitHub 下载 win32-x64 二进制（默认白名单内零 npm 依赖），
+   sha256 校验后解压到 `.setting/beike/`；已装过（PATH 里有 `beike`）则自动识别；
+2. **保存授权 Key**：浏览器打开 <https://building.ke.com/?action=get-key&source=beike_skill>
+   登录后复制页面显示的完整凭证 → 面板粘贴保存（走 `beike auth KEY --save`，
+   Key 只落贝壳本地凭证 `~/.beike`，工作台不落盘不回显）。
+
+**Agent 的工具集**（`src/tools-estate.ts`，全部包装贝壳官方 `beike` CLI 子进程）：
+
+| 工具 | 对应命令 | 说明 |
+|---|---|---|
+| `house_search` | `beike buy/rent search` | 二手房 / 新房 / 整租 / 合租搜索 |
+| `house_lookup` | `detail / resolve / material / resblock / plate` | 房源详情 / 口语描述转 ID / 户型图 / 小区 / 板块 |
+| `house_market` | `market / sold / rank / policy / district / school` | 行情 / 成交 / 排行 / 政策 / 学区 |
+| `house_map` | 本地 geocode | 把一组候选地址解析成坐标，返回内嵌 OSM 地图 + 高德/腾讯/百度直链（免 key，≤6 个点位） |
+| `house_agents` | `agent / agent-detail` | 经纪人搜索 / 详情 |
+| `house_appoint` | `rent/buy appoint` | 预约带看（**高风险**，必须人工审批） |
+| `house_contact` | `rent/buy contact` | 经纪人加微（**高风险**，必须人工审批） |
+
+**对比区位地图**：`house_map` 用 <https://nominatim.openstreetmap.org>（串行 ≥1.1s + 内存缓存，
+遵守 1 req/s 限流）把候选地址解析为经纬度，前端渲染 OSM iframe 地图；每个点位附带
+高德 / 腾讯 / 百度地图 marker 直链按钮（三个平台原生免 key）。解析失败的候选不放弃，
+仍会以「未定位」行列出。**城市名/区域名尽量用「小区名」而不是方言简称，命中率高很多。**
+
+**说明与坑**：
+
+- 每轮对话后台会 fire-and-forget 上报 `beike analyze`（官方协议要求，静默执行）；
+- 贝壳渲染出来的房价 / 行情 / 排名**不是实时行情**，Agent 回答时会声明统计口径；
+- CLI 甩 `-32001 / CLI_UPGRADE_REQUIRED` 时会自动重装再重试一次；
+- 真·找房消耗贝壳侧配额：模拟模式（未配模型 Key）用内置演示数据渲染同样的事件流，
+  不会调用贝壳 CLI。
+
 ## 内置示例（5 个学习 Demo）
 
 新建对话时可选「通用 Agent」（默认）或以下示例 —— 每个示例是一张刻意保持教学形态的图，
@@ -241,8 +279,10 @@ src/
   tools.ts       # 4 个自定义工具（calculator / 时间 / 天气 / 发邮件），zod 声明参数
   tools-dev.ts   # 编程开发工具（terminal / 读写文件 / 搜索），通用 Agent 使用
   tools-rag.ts   # 知识检索工具 retrieve_docs：调外部 RAG 服务（通用 HTTP 契约）
+  tools-estate.ts# 房产工具集（贝壳 CLI 包装：找房/行情/地图/经纪人/预约/加微）
   agent/
     general.ts   # 通用 Agent（默认）：工具循环 + 记忆 + 审批 + RAG 检索的产品化组合
+    estate.ts    # 房产 Agent：贝壳顾问式流程（search→map→detail→appoint，复用审批节点）
     basic.ts     # 示例 1：亲手搭一张 ReAct 图（不借助 prebuilt 的 createAgent）
     memory.ts    # 示例 2：compile({ checkpointer }) 获得多轮记忆
     hitl.ts      # 示例 3：interrupt()/Command.resume 实现人工审批
@@ -251,6 +291,7 @@ src/
   cli.ts         # CLI 入口：token 流式 + 节点日志 + 审批交互
   server/        # Web 界面（参考 ZCode）：SSE 服务 + 原生前端，见「Web 界面」
     rag.ts       # 外部 RAG 接入：契约客户端 + 配置 + 文件夹扫描入库 + 📎 自动入库
+    estate.ts    # 贝壳 CLI 客户端：安装/鉴权/命令映射 + Nominatim geocode + 地图数据
     settings.ts  # 多供应商 × 多模型管理（.web-config.json 读写、迁移、思考等级）
 desktop/
   main.cjs       # Electron 桌面端：子进程托管 Web 服务 + BrowserWindow 加载

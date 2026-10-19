@@ -550,6 +550,31 @@ Header: Authorization: Bearer <key>（可留空）
 
 ---
 
+### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI）
+
+**设计立场**：贝壳能力由官方 `beike` CLI（LianjiaTech/beike-ai-platform）提供，
+工作台只做「子进程包装 + JSON 解析 + 错误兜底 + 工具 schema」；(indexPath) 不引入贝壳私有
+协议 / npm SDK —— CLI 是官方唯一承诺稳定的接口。
+
+**三段结构**：
+
+| 文件 | 职责 | 关键设计 |
+|---|---|---|
+| `server/estate.ts` | CLI 客户端 | `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?}`；`CLI_UPGRADE_REQUIRED/-32001` 自动重装重试一次；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
+| `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；工具永不 throw 穿透图，失败返回 `{error}` 中文说明 |
+| `agent/estate.ts` | 图 | 与 `general.ts` 同形态（ReAct + MemorySaver + approvalToolsNode），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图对比 / 材料前置 / 禁编造 ID / 高风险复述 / 口径声明） |
+
+**关键常量**（city 名尽量存表）：`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存走 `beike auth KEY --save`，凭证只落 `~/.beike`（官方位置），工作台 `.web-config.json` 不存 Key —— 与 RAG / 模型 Key 的策略不同，因为贝壳 CLI 自己管理凭证。
+
+**高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
+`APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
+
+**契约外发现**：贝壳返回字段名不固定（`priceTitle/price/bodyPrice…`），所以工具侧一律
+松散解析再归一；CLI 输出虽是单行 JSON，中文在某些版本带 BOM/转义差异，解析失败时会把
+原始 stdout 尾部 500 字符放进 `error` 便于排查。
+
+---
+
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）
 
 > 这一节是「学会了」的关键：把每一轮对话在图里怎么流动看明白。
@@ -982,6 +1007,10 @@ console.log(result.messages.at(-1).content);
 | RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：主进程退出已 `taskkill /T` 清子进程树；手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
+| 贝壳工具结果里全是 `{error:"…"}`    | 三排查：① `where beike` 确认 CLI 在 PATH 或 `.setting/beike/` 已解压；② Key 过期（面板重新保存）；③ 用 `beike doctor` 看官方诊断输出 |
+| 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：服务端已自动重装重试一次；连报说明 GitHub 拉取失败，看 `error` 里的网络文案 |
+| 房产会话地图空白 / 点位缺              | Nominatim 限流 1 req/s：候选 ≤6 且串行；地址太口语（如「望京那种小区」）解析失败属预期，列为「未定位」；换官方小区名重试 |
+| e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 
 ***
 

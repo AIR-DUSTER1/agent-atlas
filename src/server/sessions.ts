@@ -21,6 +21,7 @@ import { createMemoryGraph } from "../agent/memory.js";
 import { createHitlGraph } from "../agent/hitl.js";
 import { createMultiAgentGraph } from "../agent/multi.js";
 import { createAgentGraph } from "../agent/general.js";
+import { createEstateGraph } from "../agent/estate.js";
 import { getExternalAgent } from "./external.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
 
@@ -43,7 +44,7 @@ export function isDemo(v: unknown): v is 1 | 2 | 3 | 4 {
   return v === 1 || v === 2 || v === 3 || v === 4;
 }
 
-export type SessionKind = "agent" | "demo" | "external";
+export type SessionKind = "agent" | "estate" | "demo" | "external";
 
 /** 一轮对话的服务端记录：用户消息 + 该轮全部 AgentEvent（供任意浏览器回放历史） */
 export interface TurnRecord {
@@ -95,6 +96,8 @@ export function currentConfigVersion(): number {
 
 export function buildGraph(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null): unknown {
   if (kind === "agent") return createAgentGraph();
+  // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
+  if (kind === "estate") return createEstateGraph();
   switch (demo) {
     case 1: return createBasicGraph();
     case 2: return createMemoryGraph();
@@ -122,13 +125,17 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
   // 外部 Agent 会话不建 LangGraph：每条消息直接启动第三方工具的子进程（external.ts）
   const external = kind === "external" ? getExternalAgent(agentId ?? "") : undefined;
   if (kind === "external" && !external) throw new Error("外部 Agent 不存在或已被移除");
+  const defaultTitle = external ? external.name
+    : kind === "demo" ? `${DEMOS.find((d) => d.id === demo)?.name ?? "示例"} 示例`
+    : kind === "estate" ? "房产找房"
+    : "新对话";
   const session: Session = {
     id: randomUUID(),
     kind,
     demo: kind === "demo" ? demo : null,
     agentId: external?.id ?? null,
     projectId: projectId || "default",
-    title: title?.trim() || (external ? external.name : kind === "demo" ? `${DEMOS.find((d) => d.id === demo)?.name ?? "示例"} 示例` : "新对话"),
+    title: title?.trim() || defaultTitle,
     createdAt: Date.now(),
     graph: kind === "external" ? null : buildGraph(kind, demo),
     threadId: `web-${randomUUID()}`,

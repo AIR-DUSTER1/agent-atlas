@@ -9,7 +9,8 @@
  *
  *   唯一被模拟的是「模型的决策」，工具结果是**真实的**：
  *   calculator 真的会算、get_weather 真的会查（本地模拟表）、
- *   send_email 批准后真的走一遍发送函数。
+ *   send_email 批准后真的走一遍发送函数、房产场景用内置演示数据
+ *   （不调贝壳 CLI，保证零配置零网络也能看到地图/房源卡/户型图卡）。
  *
  * 触发方式：未配置 API_KEY 时服务端自动切换；配置后自动恢复真实模型。
  */
@@ -24,6 +25,7 @@ interface MockInput {
   decision?: "approve" | "reject"; // resume：人工审批结果
   approval?: ApprovalPayload;    // resume：被审批的载荷
   turnIndex?: number;            // 本会话第几轮（用于模拟缓存命中率递增）
+  kind?: string;                 // 会话类型（estate → 房产演示场景）
   signal?: AbortSignal;
 }
 
@@ -117,12 +119,14 @@ async function* interruptFlow(req: ApprovalPayload, signal?: AbortSignal): Async
 // ---------------------------------------------------------------------------
 // 场景识别
 // ---------------------------------------------------------------------------
-type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "chat";
+type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "chat";
 
 function detectScenario(message: string): Scenario {
   if (/邮件|email/i.test(message)) return "email";
   // 创作类（写诗/作文/写文章）优先于天气：一句话里同时出现「查天气+写诗」时走多 Agent 协作
   if (/诗|词|文章|作文|写一[首篇封个]|润色/.test(message)) return "poem";
+  // 房产关键词覆盖：找房/对比区位/户型图/贝壳
+  if (/买房|租房|找房|房源|二手房|新房|户型|贝壳|楼盘|小区|中介|带看/.test(message)) return "estate";
   if (/天气|气温|温度/.test(message)) return "weather";
   if (/几点|时间|日期|今天.*号/.test(message)) return "time";
   if (/计算|算一下|等于多少|\d+\s*[+\-*/]\s*\d+/.test(message)) return "math";
@@ -179,9 +183,11 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
     return;
   }
 
-  // 场景识别用「用户原始输入」，避免附件内容里的关键词误触发场景
+  // 场景识别用「用户原始输入」，避免附件内容里的关键词误触发场景；
+  // 房产会话（kind=estate）在消息没有命中其它场景时固定走房产演示
   const message = input.rawMessage ?? input.message ?? "";
-  const scenario = detectScenario(message);
+  const detected = detectScenario(message);
+  const scenario = input.kind === "estate" && detected === "chat" ? "estate" : detected;
 
   switch (scenario) {
     // ---- 发邮件：先审批，再由 resume 继续（复刻 Demo 3 完整交互）----
@@ -284,6 +290,106 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       yield { type: "node", name: "agent" };
       yield* streamText(
         "好的，我记住了！在**真实模式**下，这条信息会通过 `checkpointer` 写入当前 `thread_id` 的检查点 —— 同一会话里再问「我叫什么」，我依然答得上来。\n\n> 模拟模式下没有真实记忆，重启会话即清空；接入 API Key 后可完整体验。",
+        signal
+      );
+      return;
+    }
+
+    // ---- 房产演示：贝壳搜索 + 区位对比地图 + 户型图（前端专属卡片渲染路径）----
+    // 时间线与真实图一致；数据为内置演示值（明确标注 mock，不调贝壳 CLI 不联网）
+    case "estate": {
+      const rent = /租/.test(message);
+      const city = /上海/.test(message) ? "上海" : /广州/.test(message) ? "广州" : /深圳/.test(message) ? "深圳" : "北京";
+      const cond = /两居|两房/.test(message) ? "两居" : rent ? "一居" : "两居";
+      // 内联 SVG 户型图：data URL，零外链依赖，前端 <img> 直接可渲染
+      const floorplanSvg = (label: string) =>
+        "data:image/svg+xml;utf8," + encodeURIComponent(
+          `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='260'>` +
+          `<rect width='360' height='260' fill='#f5f2ea'/>` +
+          `<rect x='16' y='16' width='200' height='150' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
+          `<text x='28' y='42' font-size='14' fill='#4a5568'>客厅 26㎡</text>` +
+          `<rect x='224' y='16' width='120' height='96' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
+          `<text x='236' y='42' font-size='13' fill='#4a5568'>卧室A 14㎡</text>` +
+          `<rect x='224' y='120' width='120' height='96' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
+          `<text x='236' y='146' font-size='13' fill='#4a5568'>卧室B 12㎡</text>` +
+          `<rect x='16' y='174' width='200' height='70' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
+          `<text x='28' y='198' font-size='13' fill='#4a5568'>厨房/卫生间</text>` +
+          `<text x='16' y='252' font-size='12' fill='#8a8f98'>${label}</text>` +
+          `</svg>`
+        );
+
+      yield { type: "node", name: "agent" };
+      yield* streamText(
+        `好的，先用内置演示数据把流程跑给你看（模拟模式下**不调贝壳 CLI**，配置 API_KEY 后才走真实贝壳数据）：`,
+        signal
+      );
+
+      // ① 搜索房源
+      yield { type: "node", name: "tools" };
+      const sId = MOCK_ID();
+      const listings = [
+        { id: "mock-listing-1", title: `${city} 望京花园南里 ${cond}·南向有电梯`, price: rent ? "9,800 元/月" : "618 万", area: "89.4㎡", addressText: "望京核心区，地铁 14 号线沿线" },
+        { id: "mock-listing-2", title: `${city} 慧谷阳光 ${cond}·带落地窗`, price: rent ? "8,600 元/月" : "586 万", area: "82.0㎡", addressText: "近望京商圈，配套成熟" },
+        { id: "mock-listing-3", title: `${city} 银枫家园 ${cond}·满五唯一`, price: rent ? "7,200 元/月" : "520 万", area: "76.5㎡", addressText: "酒仙桥北路，近 798" },
+        { id: "mock-listing-4", title: `${city} 北苑家园首城 ${cond}·精装修近地铁（演示）`, price: rent ? "6,900 元/月" : "488 万", area: "78.2㎡", addressText: "5 号线北苑路北站旁" },
+      ];
+      yield* streamToolCall(sId, "house_search", { mode: rent ? "rent" : "buy", city, query: `${cond} 好楼层 近地铁` }, signal);
+      yield { type: "tool_result", id: sId, content: JSON.stringify({ action: "search", mode: rent ? "rent" : "buy", city, query: "演示条件", count: listings.length, listings }) };
+
+      // ② 对比区位 → 前端渲染内嵌地图卡
+      yield { type: "node", name: "agent" };
+      yield* streamText("四个候选的分布差异不小，我把它们标到地图上对比一下…", signal);
+      yield { type: "node", name: "tools" };
+      const mId = MOCK_ID();
+      const mk = (name: string, lat: number, lng: number) => ({
+        name, lat, lng, address: `${city}演示坐标`,
+        source: "mock",
+        links: {
+          amap: `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}&callnative=0`,
+          qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${encodeURIComponent(name)}&referer=langgraph-agent`,
+          baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${encodeURIComponent(name)}&output=html&src=langgraph-agent`,
+          osm: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`,
+        },
+      });
+      const points = [
+        mk("望京花园南里", 39.9892, 116.4633),
+        mk("慧谷阳光", 39.9957, 116.4817),
+        mk("银枫家园", 39.9772, 116.4925),
+        mk("北苑家园", 40.0058, 116.4235),
+      ];
+      yield* streamToolCall(mId, "house_map", { city, items: points.map((p) => ({ name: p.name })) }, signal);
+      yield {
+        type: "tool_result", id: mId,
+        content: JSON.stringify({
+          action: "map", city, count: 4, points, missing: undefined,
+          embedUrl: `https://www.openstreetmap.org/export/embed.html?bbox=116.4035,39.9572,116.5125,40.0258&layer=mapnik`,
+          note: "演示模式：坐标为演示值，配置贝壳 CLI 与 Key 后会用真实地址 geocode。",
+        }),
+      };
+
+      // ③ 户型图卡
+      yield { type: "node", name: "agent" };
+      yield* streamText("顺手看一下候选一的户型图：", signal);
+      yield { type: "node", name: "tools" };
+      const tId = MOCK_ID();
+      yield* streamToolCall(tId, "house_lookup", { action: "material", mode: rent ? "rent" : "buy", city, houseId: "mock-listing-1" }, signal);
+      yield {
+        type: "tool_result", id: tId,
+        content: JSON.stringify({
+          action: "material", houseId: "mock-listing-1",
+          images: [floorplanSvg("候选一 · 89.4㎡ 两居（演示户型图）"), floorplanSvg("候选一 · 户型示意副本")],
+          vr: "https://ke.com/ke/mock-vr",
+          note: "演示模式：户型图为内联 SVG 示意图。",
+        }),
+      };
+
+      // ④ 收尾总结
+      yield { type: "node", name: "agent" };
+      yield* streamText(
+        `### 演示小结\n\n` +
+        `| 候选 | 价格 | 面积 | 位置 |\n|------|------|------|------|\n` +
+        listings.map((l) => `| ${l.title} | ${l.price} | ${l.area} | ${l.addressText} |`).join("\n") +
+        `\n\n以上数据/坐标/户型图**全是内置演示值**。真实模式（配置 API_KEY + 安装贝壳 CLI）下，这里会调 Beike CLI：\n\`\`\`bash\nbeike ${rent ? "rent" : "buy"} search -c ${city} -q "..."   # 真实房源\n\`\`\``,
         signal
       );
       return;
