@@ -51,6 +51,7 @@ import { listDir, readFileAuthorized, openRemoteRoot, storeUpload, resolveChatFi
 import type { ChatFileRef } from "./files.js";
 import { loadRag, getRagPublic, saveRagConfig, testRagConnection, searchRag, ingestFolder, ingestText, ingestChatAttachments, deleteRagDoc, clearRag } from "./rag.js";
 import { loadEstate, getEstatePublic, installBeike, saveBeikeKey, analyzeEstateTurn } from "./estate.js";
+import { assertChatInterval, acquireSessionSlot } from "./limits.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
 import { isAuthEnabled, verifyBearer } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
@@ -261,6 +262,23 @@ async function handleChat(
   // 配置在会话创建后被改过 → 先用当前配置重建图（Demo 2/3 的记忆会重置）
   rebuildIfStale(session);
 
+  // T2-5 并发闸：连点节流 + 同会话唯一流（在登记对话记录之前，拒绝即零痕迹）
+  assertChatInterval(sessionId);
+  const releaseSlot = acquireSessionSlot(sessionId);
+  try {
+    await handleChatInner(res, req, session, message, body);
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function handleChatInner(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  session: Session,
+  message: string,
+  body: { message?: unknown; files?: unknown }
+): Promise<void> {
   // 附件：前端只传引用（项目/远程文件路径 或 上传 id），内容由服务端读取并校验。
   // 图片附件仅在启用中的模型为「多模态」时可用（否则 400 提示）。
   const fileRefs: ChatFileRef[] = Array.isArray(body.files) ? (body.files as ChatFileRef[]).slice(0, 5) : [];
@@ -333,6 +351,22 @@ async function handleResume(
     return;
   }
   const decision = body.decision === "approve" ? "approve" : "reject";
+  // T2-5：审批恢复也是流，同样走同会话唯一流闸
+  const releaseSlot = acquireSessionSlot(sessionId);
+  try {
+    await handleResumeInner(res, req, session, decision, body);
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function handleResumeInner(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  session: Session,
+  decision: "approve" | "reject",
+  body: { decision?: unknown }
+): Promise<void> {
   const approval = session.pendingApproval;
   // 配置变更后不重建审批中的图：旧图的 interrupt 状态无法跨 checkpointer 恢复，
   // 让本次 resume 在原图上完成（配置从下一条消息起生效）

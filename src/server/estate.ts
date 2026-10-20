@@ -28,6 +28,11 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { writeAudit } from "./audit.js";
+import { runWithLimit } from "./limits.js";
+
+/** 贝壳 CLI 资源桶（T2-5）：查询 + 后台 analyze 共用，2 并发上限 */
+const BEIKE_CLI_BUCKET = "beike-cli";
+const BEIKE_CLI_CONCURRENCY = 2;
 
 // ---------------------------------------------------------------------------
 // 常量（限量即上限）
@@ -376,7 +381,9 @@ export interface BeikeOutcome {
 async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcome> {
   try {
     const { path: bin } = await ensureBeike();
-    const r = await runBeikeRaw(bin, args, BEIKE_RUN_TIMEOUT_MS);
+    // T2-5：贝壳 CLI 全局并发上限 2（用户查询 + analyze 后台上报不会互相挤爆）
+    const r = await runWithLimit(BEIKE_CLI_BUCKET, BEIKE_CLI_CONCURRENCY, () =>
+      runBeikeRaw(bin, args, BEIKE_RUN_TIMEOUT_MS));
     if (r.code === 0) {
       const parsed = parseBeikeJson(r.stdout);
       if (parsed.ok) return { ok: true, action, data: parsed.data };
