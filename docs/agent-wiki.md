@@ -604,6 +604,28 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 ---
 
+### 3.17 `src/server/{config-store,session-store,limits}.ts` — Phase 2 本地可靠性基建
+
+| 文件 | 职责 | 关键设计 |
+|---|---|---|
+| `config-store.ts` | `.web-config.json` 原子存储 | 写入「`.tmp` + fsync + rename」（Windows rename 抖动重试一次）；`.bak` 滚动备份 + 启动自动抢救（双坏降级 `{}` 不崩服务）；跨进程文件锁 `.web-config.lock`（O_EXCL 创建，**存活判断只能靠时间戳** —— `process.kill(pid,0)` 在 Windows 对在在/否/无权限一律 EPERM，纯 pid 探测不可靠）；`schemaVersion=2` 注入向后兼容 |
+| `session-store.ts` | 会话 journal | append-only NDJSON `.setting/sessions.ndjson`（gitignore）；事件：`session`（upsert，**白名单挑字段**——Session 含编译图/内存结构严禁整只序列化）、`approval`（pending 全量 payload）、`decided`（一次性转移）、`delete`、`turn`（user + events）；坏行跳过告警；`JOURNAL_MAX_BYTES=2MB` 超限快照重写 + 轮转 `.1`；启动 `replaySessions()` 回放进内存 |
+| `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `runWithLimit("beike-cli", 2)` |
+
+**sessions.ts 启动回放配套**（Phase 2）：`restoreSessions()` 把 journal 回放成内存会话
+（图按 kind 重建为空态 checkpointer）；`pendingApproval === "pending"` 的会话标
+`resumeUnavailable` —— resume 一律 400 中文引导「重新发起」（绝不静默重复执行还能改
+世界的操作）；带历史轮次的会话标 `resumeUninjected` —— 首条真图消息前自动注入「最近
+12 轮的上文摘录」一次性续命（`buildPrehistoryNote`，纯工具轮跳过，demo1/4 无记忆图不注入）。
+
+**坑（踩过的）**：
+- `done` 事件是 streamToClient finally 兜底写的、**不是** produce 产出的 —— 主循环里
+  `event.type === "done"` 的分支是死代码，内存 `pendingApproval` 清理要靠 `recordDecision`；
+- resume 的 `recordDecision` 不能判内存 `pendingApproval`（done 兜底已把内存清空，
+  onDone 在其后才执行）—— journal 侧幂等（已 decided 的 pending 回放时忽略）。
+
+---
+
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）
 
 > 这一节是「学会了」的关键：把每一轮对话在图里怎么流动看明白。
@@ -1045,6 +1067,10 @@ console.log(result.messages.at(-1).content);
 | spec 请求返回 401 但浏览器已在用        | 服务端开了 `AUTH_TOKEN`：浏览器首次访问会弹框收令牌存 localStorage；命令行/脚本调试要自己带 `Authorization: Bearer <token>` 头 |
 | file:// 仓库 clone「成功」但 agent 不带命令 | `git init` 后没 commit 的空仓库，对 `git clone file://...` 会**静默成功**（exit 0 + warning），clone 出来是空目录 → 发现不到 agent.json。测试仓库要先 commit 再让服务接入 |
 | 外部 Agent 子进程一启动就 exit 1      | agent.json 同时声明了 `{{prompt}}` 占位与读 stdin：占位模式下服务端 stdio[0] 是 `ignore`（不开 stdin 管道），读 stdin 直接收 end 抛错 —— 两种模式**二选一** |
+| journal 里会话行突然巨大 / 回放拿到怪对象 | `journalSession` 直接传了整个 Session 对象 —— 里面带编译图（`CompiledStateGraph`）等内部结构。**必须白名单挑字段**序列化（§3.17） |
+| 重启后审批卡片能点但拒绝「重复执行」         | 设计如此（Phase 2）：图的 interrupt 状态不跨进程恢复，resume 闸一律 400 引导重新发起，而不是静默把高危操作再跑一遍 |
+| 测试里「新 server 行为像旧代码」       | `killServer` 后**立即**重启：taskkill 异步生效 + 孤儿进程占端口 → 新进程 EADDRINUSE 崩，请求静默打到旧进程。测试必须「等端口真空再重启」（fetch 探测 /api/sessions 直到不通），孤儿先按端口查 PID 补杀 |
+| `process.kill(pid, 0)` 判断进程是否存活总是 throw EPERM | Windows 不可靠（存在/不存在/无权限都可能是 EPERM）。存活判断改用**时间戳**（如 config-store 文件锁：超过 `LOCK_STALE_MS` 视为死进程遗留可接管） |
 
 ***
 
@@ -1088,3 +1114,8 @@ console.log(result.messages.at(-1).content);
 是否引入新依赖的决策门）」；公开的文档位（README / 本 wiki）只沉淀**功能层面的
 结论**（见 §3 安全基建小节、§7 踩坑表），逐条弱点清单与阶段计划在内部工作目录
 维护，不入仓库。
+
+**已落地**：Phase 0（只监听本机 / 请求体限量）、Phase 1（Bearer 认证 / 跨站防线 /
+安全头 / 外部命令白名单 / 子进程限额 / 审计 / 贝壳安装加固）、Phase 2（配置原子
+落盘 + 备份抢救、会话 journal 重启恢复、审批状态机与 resume 引导、历史上文注入、
+并发节流闸 —— §3.17）。遗留：服务端/前端拆分、node:test 体系、CI（下一阶段）。
