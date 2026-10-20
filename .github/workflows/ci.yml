@@ -1,0 +1,50 @@
+# CI — 质量门（typecheck / 语法门 / 测试）
+# 约束：不读真实 .env、不调真实模型、不访问用户 .web-config.json。
+# 测试侧由 tests/helpers/server.ts 强制 mock 模式 + 临时端口 + 临时 journal/配置。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Syntax gate (frontend / desktop)
+        run: |
+          node --check src/server/public/app.js
+          node --check src/server/public/modules/format.js
+          node --check src/server/public/modules/ui-dialog.js
+          node --check desktop/main.cjs
+
+      - name: Tests (unit / integration / security)
+        run: npm test
+        env:
+          # 双保险：即使 runner 上存在同名变量，也不允许测试触达真实网关
+          API_KEY: ""
+          AUTH_TOKEN: ""
+
+      - name: Dependency audit (advisory)
+        run: npm audit --omit=dev --registry=https://registry.npmjs.org
+        continue-on-error: true

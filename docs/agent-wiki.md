@@ -636,6 +636,33 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 ---
 
+### 3.18 `tests/` + `.github/workflows/ci.yml` — Phase 3 测试与 CI
+
+**设计立场**：只用 Node 内置 `node:test`（零新增测试依赖），`tsx --test` 直跑 TS；
+文件分层对应风险面：
+
+| 目录 | 覆盖 |
+|---|---|
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义 |
+| `tests/integration/` | 起临时服务端（mock 模式）：healthz、config 形状、会话创建、chat SSE、transcript 回放、404/400、静态页面与 ESM 模块 MIME |
+| `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、静态目录穿越 |
+| `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（**不碰真实 journal 与供应商 Key**）、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
+
+```bash
+npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多服务抢资源）
+```
+
+**CI（`.github/workflows/ci.yml`）**：push/PR 到 main 时跑 `npm ci` → `npm run typecheck`
+→ 前端/桌面 `node --check` → `npm test`；`npm audit` 作为 advisory（continue-on-error，
+不阻塞合并）。CI 不读真实 `.env`（测试侧强制 mock + 临时配置）。
+
+**测试钩子（生产默认行为不变）**：
+- `SESSIONS_FILE`：覆盖 journal 路径（`session-store.ts` 模块加载时读取）；
+- `WEB_CONFIG_FILE`：覆盖 `.web-config.json` 路径（`config-store.ts`）；
+- 两者都是「设了才生效」的环境变量，供 e2e 隔离数据；正常启动不设置即走仓库默认路径。
+
+---
+
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）
 
 > 这一节是「学会了」的关键：把每一轮对话在图里怎么流动看明白。
@@ -1081,6 +1108,8 @@ console.log(result.messages.at(-1).content);
 | 重启后审批卡片能点但拒绝「重复执行」         | 设计如此（Phase 2）：图的 interrupt 状态不跨进程恢复，resume 闸一律 400 引导重新发起，而不是静默把高危操作再跑一遍 |
 | 测试里「新 server 行为像旧代码」       | `killServer` 后**立即**重启：taskkill 异步生效 + 孤儿进程占端口 → 新进程 EADDRINUSE 崩，请求静默打到旧进程。测试必须「等端口真空再重启」（fetch 探测 /api/sessions 直到不通），孤儿先按端口查 PID 补杀 |
 | `process.kill(pid, 0)` 判断进程是否存活总是 throw EPERM | Windows 不可靠（存在/不存在/无权限都可能是 EPERM）。存活判断改用**时间戳**（如 config-store 文件锁：超过 `LOCK_STALE_MS` 视为死进程遗留可接管） |
+| 坏 JSON 请求返回 500（而不是 400） | 路由里 `JSON.parse(await readBody(req))` 的 `SyntaxError` 直接冒到入口顶层 catch，被归为服务端故障。入口集中处理：`SyntaxError → 400「请求体不是合法的 JSON」`（5.6 测试发现并修复） |
+| 跑完自动化测试后侧栏多出陌生会话 | 测试进程用了真实 `.setting/sessions.ndjson` / `.web-config.json`。测试钩子 `SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（§3.18），生产默认路径不变 |
 | 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
 | 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |
 
@@ -1130,4 +1159,5 @@ console.log(result.messages.at(-1).content);
 **已落地**：Phase 0（只监听本机 / 请求体限量）、Phase 1（Bearer 认证 / 跨站防线 /
 安全头 / 外部命令白名单 / 子进程限额 / 审计 / 贝壳安装加固）、Phase 2（配置原子
 落盘 + 备份抢救、会话 journal 重启恢复、审批状态机与 resume 引导、历史上文注入、
-并发节流闸 —— §3.17）。遗留：服务端/前端拆分、node:test 体系、CI（下一阶段）。
+并发节流闸 —— §3.17）、Phase 3（服务端 index.ts → `routes/*.ts` 拆分、前端通用件
+`public/modules/` 原生 ESM、`tests/` 三档测试 + `npm test`、GitHub Actions CI —— §3.18）。

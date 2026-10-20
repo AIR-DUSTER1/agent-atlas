@@ -19,6 +19,7 @@ cp .env.example .env        # 填入你的 BASE_URL / API_KEY / MODEL
 npm run models              # 先确认网关支持哪些模型（防止 400 报错）
 npm run web                 # 启动 Web 界面 → http://localhost:3000
 npm run desktop             # 或启动桌面端（Electron 壳，默认端口 3123）
+npm test                    # 单元 / 集成 / 安全测试（node:test，全程 mock，不耗真实配额）
 ```
 
 > 💡 **没有 API Key？** 也能跑：未配置 `API_KEY` 时自动进入**模拟模式** ——
@@ -303,9 +304,14 @@ desktop/
   main.cjs       # Electron 桌面端：子进程托管 Web 服务 + BrowserWindow 加载
 scripts/
   list-models.ts # npm run models：查询网关支持的模型列表（排查 400 的利器）
+tests/
+  unit/          # 纯函数/内存状态单测（Markdown、limits、files、prehistory）
+  integration/   # 临时服务端冒烟（mock 模式，SSE/回放/静态分发）
+  security/      # 跨站/认证/坏 JSON/413/目录穿越边界
+  helpers/       # 临时服务端托管（随机端口 + 隔离 journal/配置）
+.github/workflows/ci.yml  # CI：typecheck + 语法门 + npm test
 docs/
   agent-wiki.md  # 完整学习 Wiki（概念/模块/调用链/模板）
-  architecture-improvement-plan.md # 架构治理与生产化改进计划（安全/可靠性/测试/部署）
 ```
 
 ## 踩坑记录（排查 400）
@@ -322,12 +328,23 @@ docs/
 ## 架构治理与生产化计划
 
 当前项目默认定位是本地学习型工作台；如果要把 Web 服务开放到局域网、云服务器或长期运行，
-请先阅读 [docs/architecture-improvement-plan.md](docs/architecture-improvement-plan.md)。
-
-该计划按「紧急安全止血 → 安全边界 → 状态恢复 → 测试重构 → 部署观测 → 生产试点」推进，
+治理顺序与结论见 Wiki [§9 架构治理与生产化路线](docs/agent-wiki.md#9-架构治理与生产化路线结论摘要)。
 重点覆盖默认监听地址、认证与 CSRF、密钥保护、子进程限额、原子配置、会话恢复、
-自动化测试、Docker 部署和审计日志。执行任何阶段前，请先阅读计划中的「非目标」与
-「代码约束」，避免破坏零框架、前端零依赖和运行依赖白名单。
+自动化测试、Docker 部署和审计日志。改动时请守住「零框架、前端零依赖和运行依赖白名单」的约束。
+
+### 代码结构与质量门（Phase 3）
+
+- **后端分层**：`src/server/index.ts` 只做 server 创建、认证/同源/安全头、静态分发与
+  **集中路由 dispatch**；业务按域拆在 `src/server/routes/*.ts`（chat / config / sessions /
+  external / projects / files / rag / estate），请求体读取与 413 排水在 `http-body.ts`。
+- **前端零构建 ESM**：`public/app.js` 通过原生 `<script type="module">` 引入
+  `public/modules/format.js`（Markdown / 格式化 / URL 白名单）与
+  `public/modules/ui-dialog.js`（错误横幅 + 页面内对话框），仍无打包步骤。
+- **测试**：`tests/unit` / `tests/integration` / `tests/security` 三档（Node 内置
+  `node:test`，共 34 例），`npm test` 一键运行；测试强制 mock 模式并隔离临时
+  journal / 配置，不读取真实 Key、不消耗网关配额。
+- **CI**：`.github/workflows/ci.yml` 在 push / PR 到 `main` 时执行
+  `npm ci` → `npm run typecheck` → 前端与桌面端 `node --check` → `npm test`。
 
 ### 当前已落地的安全默认值（Phase 0）
 
