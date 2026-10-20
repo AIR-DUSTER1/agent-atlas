@@ -28,7 +28,10 @@ import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises"
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const JOURNAL_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".setting", "sessions.ndjson");
+// 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
+// 避免跑测试把假会话写进开发者真实的 .setting/sessions.ndjson。
+const JOURNAL_FILE = process.env.SESSIONS_FILE
+  || join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".setting", "sessions.ndjson");
 /** journal 大小上限：超过触发 compact（按当前在内存的会话快照重写） */
 const JOURNAL_MAX_BYTES = 2_000_000;
 /** 回放/快照 时保留的会话数上限（超出按 createdAt 丢最旧） */

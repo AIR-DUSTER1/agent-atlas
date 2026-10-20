@@ -54,9 +54,11 @@ export function readBody(req: IncomingMessage, maxBytes = BODY_MAX_BYTES): Promi
 /** 路由统一的失败响应：BodyTooLargeError → 413，其余一律 400 + 中文错误 */
 export function respondBadRequest(res: ServerResponse, req: IncomingMessage, err: unknown): void {
   const tooLarge = err instanceof BodyTooLargeError;
+  // 注意：这里**不要**带 `Connection: close`。node:http 在「响应结束 + 请求体没读完」
+  // 时会自行 destroy socket（发 RST），可能把已写出的 413 冲掉（客户端只见 ECONNRESET）。
+  // 正确姿势是保持 keep-alive，由下面的「丢弃式排水」读完剩余 body 后自己 end() 优雅关闭。
   res.writeHead(tooLarge ? 413 : 400, {
     "Content-Type": "application/json; charset=utf-8",
-    ...(tooLarge ? { Connection: "close" } : {}),
   });
   res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
   if (tooLarge) {
@@ -71,8 +73,11 @@ export function respondBadRequest(res: ServerResponse, req: IncomingMessage, err
         drained += c.length;
         if (drained > BODY_DRAIN_EXTRA_MAX_BYTES) req.socket?.destroy();
       });
-      req.on("end", () => req.socket?.destroy());
-      req.on("error", () => req.socket?.destroy());
+      // 已读完剩余 body → 用 end() 发 FIN，不用 destroy()：destroy 在 Windows 上
+      // 带未读数据/未清发送缓冲时会发 RST，可能把刚写出的 413 一起冲掉（ECONNRESET）。
+      // 攻击性无限流才 destroy（此时 RST 可接受）。
+      req.on("end", () => req.socket?.end());
+      req.on("error", () => req.socket?.end());
       req.resume();
     });
   }

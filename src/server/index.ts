@@ -218,6 +218,13 @@ const server = createServer(async (req, res) => {
       respondBadRequest(res, req, err);
       return;
     }
+    // 请求体不是合法 JSON（各路由直接 JSON.parse(readBody)）：客户端问题 → 400，
+    // 不应落到 500（500 会误导「服务端故障」，也让压测把坏请求算成服务错误）
+    if (err instanceof SyntaxError) {
+      if (!res.headersSent) respondBadRequest(res, req, new Error("请求体不是合法的 JSON"));
+      else res.end();
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });

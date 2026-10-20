@@ -24,7 +24,10 @@ import { open, readFile, rename, writeFile, unlink, stat, copyFile, appendFile }
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SETTINGS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".web-config.json");
+// 测试钩子：e2e 用临时配置文件（tests/helpers 注入 WEB_CONFIG_FILE），
+// 避免测试读写开发者真实的 .web-config.json（含真实供应商 Key）。
+export const SETTINGS_FILE = process.env.WEB_CONFIG_FILE
+  || join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".web-config.json");
 
 const BAK_FILE = SETTINGS_FILE + ".bak";
 const TMP_FILE = SETTINGS_FILE + ".tmp";
