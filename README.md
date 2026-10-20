@@ -123,6 +123,8 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 
 架构：`node:http` + SSE（无 Express）｜前端原生 HTML/CSS/JS（无框架、无构建）。
 事件协议与翻译层见 `src/server/events.ts` / `stream.ts`，细节见 Wiki §3.12。
+后端按「入口 + 路由 + 域模块」分层（`index.ts` 只做 dispatch，业务在 `server/routes/*.ts`）；
+前端通用件拆在 `public/modules/`（原生 ESM：Markdown 渲染、弹窗组件），仍无构建步骤。
 
 ### 接入第三方 Agent（只需要一个 Git 地址）
 
@@ -292,6 +294,8 @@ src/
     parallel.ts  # 示例 5：Send API 并行 map-reduce + Annotation.Root 自定义状态
   cli.ts         # CLI 入口：token 流式 + 节点日志 + 审批交互
   server/        # Web 界面（参考 ZCode）：SSE 服务 + 原生前端，见「Web 界面」
+    index.ts     # HTTP 入口：安全头/认证/静态/集中 dispatch（业务不写这里）
+    routes/      # 各域 handler：chat / config / sessions / external / projects / files / rag / estate
     rag.ts       # 外部 RAG 接入：契约客户端 + 配置 + 文件夹扫描入库 + 📎 自动入库
     estate.ts    # 贝壳 CLI 客户端：安装/鉴权/命令映射 + Nominatim geocode + 地图数据
     settings.ts  # 多供应商 × 多模型管理（.web-config.json 读写、迁移、思考等级）

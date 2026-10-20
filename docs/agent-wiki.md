@@ -71,7 +71,7 @@
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
         ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
         ├── events.ts     # SSE 事件协议定义
-        └── public/       # 前端三件套：index.html / style.css / app.js（零框架零构建）
+        └── public/       # 前端：index.html / style.css / app.js + modules/（原生 ESM，零构建）
 ```
 
 ### 1.3 运行方式（3 秒上手）
@@ -435,6 +435,16 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
 
 关键设计（详见各文件头注释）：
 
+- **服务端结构（Phase 3 拆分）**：`index.ts` 只负责 server 创建、认证/同源/安全头、
+  静态分发兜底、**集中路径 dispatch**、404/500 与启动加载；请求体读取与 413 排水收在
+  `http-body.ts`，静态文件收在 `static.ts`，各业务域 handler 收在 `routes/*.ts`
+  （chat / config / sessions / external / projects / files / rag / estate）。
+  新增接口照 §6 检查单插一条 `if` 分支，不要往 index.ts 里堆业务；
+- **前端结构（Phase 3 拆分）**：`app.js` 以原生 ESM 引入 `modules/format.js`
+  （Markdown 渲染 / token 与字节格式化 / 图标映射 / 图片与链接白名单，纯函数）
+  与 `modules/ui-dialog.js`（全局错误横幅 + 页面内 alert/confirm/prompt 队列），
+  `index.html` 用 `<script type="module">`。`static.ts` 白名单只额外放开
+  `modules/` 一层子目录，其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
   （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 7 种 `AgentEvent`
   （node / token / tool_call / tool_result / interrupt / ai_message / error）。
@@ -1071,6 +1081,8 @@ console.log(result.messages.at(-1).content);
 | 重启后审批卡片能点但拒绝「重复执行」         | 设计如此（Phase 2）：图的 interrupt 状态不跨进程恢复，resume 闸一律 400 引导重新发起，而不是静默把高危操作再跑一遍 |
 | 测试里「新 server 行为像旧代码」       | `killServer` 后**立即**重启：taskkill 异步生效 + 孤儿进程占端口 → 新进程 EADDRINUSE 崩，请求静默打到旧进程。测试必须「等端口真空再重启」（fetch 探测 /api/sessions 直到不通），孤儿先按端口查 PID 补杀 |
 | `process.kill(pid, 0)` 判断进程是否存活总是 throw EPERM | Windows 不可靠（存在/不存在/无权限都可能是 EPERM）。存活判断改用**时间戳**（如 config-store 文件锁：超过 `LOCK_STALE_MS` 视为死进程遗留可接管） |
+| 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
+| 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |
 
 ***
 

@@ -1,33 +1,24 @@
 /* ============================================================
    app.js — LangGraph Agent 学习 Demo 前端
    参考 ZCode 聊天界面：流式回答 / 工具调用卡片 / 人工审批 / 会话侧栏
-   无框架、无构建：原生 JS + SSE
+   无框架、无构建：原生 JS + SSE。通用件拆在 modules/（原生 ESM）：
+     modules/format.js    Markdown 渲染 / token 与字节格式化 / 图标与 URL 白名单
+     modules/ui-dialog.js 全局错误横幅 / 页面内 alert/confirm/prompt 组件
    ============================================================ */
 "use strict";
 
+import {
+  escapeHtml, renderInline, renderMarkdown, fmtArgs, fmtTokens, fmtSize,
+  reasoningTag, safeImageSrc, safeHref, nodeIcon, NODE_ICONS, TOOL_ICONS,
+} from "./modules/format.js";
+import { showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
+
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-19-4";
+const APP_VERSION = "web-2026-10-20-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
 );
-
-/** 全局错误可见化：任何未捕获异常都在页面上挂红色横幅（不再只进控制台） */
-function showFatalBanner(message) {
-  let banner = document.getElementById("fatal-banner");
-  if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "fatal-banner";
-    banner.style.cssText =
-      "position:fixed;top:0;left:0;right:0;z-index:9999;background:#e5604f;color:#fff;" +
-      "padding:8px 14px;font-size:12.5px;font-family:monospace;white-space:pre-wrap;" +
-      "word-break:break-all;max-height:40vh;overflow:auto;";
-    document.body.appendChild(banner);
-  }
-  banner.textContent = "⚠ 页面脚本错误（把这段文字发给助手排查）： " + message;
-}
-window.addEventListener("error", (e) => showFatalBanner(e.message));
-window.addEventListener("unhandledrejection", (e) => showFatalBanner(String(e.reason)));
 
 /* ---------------------------------------------------------------------------
  * 全局状态
@@ -115,104 +106,6 @@ const PROTOCOL_LABEL = {
   "anthropic": "Anthropic",
   "gemini": "Gemini",
 };
-const TOOL_ICONS = {
-  calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧",
-  delegate: "🧭", retrieve_docs: "📚",
-  // 房产 Agent（贝壳）
-  house_search: "🏙", house_lookup: "🔍", house_market: "📈", house_map: "🗺️",
-  house_agents: "👤", house_appoint: "📅", house_contact: "🤝",
-};
-const NODE_ICONS = { agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️" };
-
-/* ---------------------------------------------------------------------------
- * 通用弹窗组件 —— 替代原生 alert / prompt / confirm。
- * 原生对话框被部分浏览器环境（自动化参数、企业策略）拦截或样式突兀，
- * 这里用页面内组件实现同样语义：Promise 化，await 后拿结果。
- *   uiAlert(msg)            → 关闭后 resolve
- *   uiConfirm(msg, opts)    → 确定 true / 取消 false
- *   uiPrompt(msg, opts)     → 确定 返回输入串（可能为空串）/ 取消 null
- * 多个弹窗请求会串行排队展示，不会相互覆盖。
- * ------------------------------------------------------------------------- */
-const uiDialogState = { open: false, queue: [], mode: null, resolve: null };
-
-function uiDialog(options) {
-  return new Promise((resolve) => {
-    uiDialogState.queue.push({ options, resolve });
-    if (!uiDialogState.open) uiDialogShowNext();
-  });
-}
-
-function uiDialogShowNext() {
-  const next = uiDialogState.queue.shift();
-  const mask = $("ui-dialog-mask");
-  if (!next || !mask) { uiDialogState.open = false; return; }
-  uiDialogState.open = true;
-  const { title, message, mode, defaultValue = "", placeholder = "", okText, cancelText, danger } = next.options;
-  $("ui-dialog-title").textContent = title || (mode === "confirm" ? "请确认" : "提示");
-  const msgEl = $("ui-dialog-msg");
-  msgEl.textContent = message; // textContent 防注入；CSS pre-wrap 保留换行
-  const inputRow = $("ui-dialog-input-row");
-  const input = $("ui-dialog-input");
-  inputRow.classList.toggle("hidden", mode !== "prompt");
-  input.value = defaultValue;
-  input.placeholder = placeholder;
-  // 令牌类输入需要密文显示（password: true）
-  input.type = next.options.password ? "password" : "text";
-  const okBtn = $("ui-dialog-ok");
-  okBtn.textContent = okText || (mode === "alert" ? "知道了" : "确定");
-  okBtn.className = "btn " + (danger ? "btn-danger" : "btn-approve");
-  const cancelBtn = $("ui-dialog-cancel");
-  cancelBtn.textContent = cancelText || "取消";
-  cancelBtn.classList.toggle("hidden", mode === "alert");
-  uiDialogState.mode = mode;
-  uiDialogState.resolve = next.resolve;
-  mask.classList.remove("hidden");
-  if (mode === "prompt") { input.focus(); input.select(); }
-  else okBtn.focus();
-}
-
-/** 关闭当前弹窗并回传结果；队列里还有就继续展示下一个 */
-function uiDialogFinish(value) {
-  if (!uiDialogState.open) return;
-  const resolve = uiDialogState.resolve;
-  $("ui-dialog-mask").classList.add("hidden");
-  uiDialogState.resolve = null;
-  uiDialogState.mode = null;
-  uiDialogState.open = false;
-  resolve(value);
-  uiDialogShowNext();
-}
-
-function uiAlert(message, title) {
-  return uiDialog({ message, title, mode: "alert" });
-}
-function uiConfirm(message, opts = {}) {
-  return uiDialog({ message, mode: "confirm", ...opts });
-}
-function uiPrompt(message, opts = {}) {
-  return uiDialog({ message, mode: "prompt", ...opts });
-}
-
-// 组件事件绑定（脚本在 body 末尾加载，元素此时已存在）
-(() => {
-  const mask = $("ui-dialog-mask");
-  if (!mask) { console.warn("[ui-dialog] 未找到弹窗骨架，原生对话框将被兜底使用"); return; }
-  const finishCancel = () => uiDialogFinish(uiDialogState.mode === "prompt" ? null : false);
-  $("ui-dialog-ok").addEventListener("click", () => {
-    uiDialogFinish(uiDialogState.mode === "prompt" ? $("ui-dialog-input").value : true);
-  });
-  $("ui-dialog-cancel").addEventListener("click", finishCancel);
-  mask.addEventListener("click", (e) => { if (e.target === mask) finishCancel(); });
-  mask.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      uiDialogFinish(uiDialogState.mode === "prompt" ? $("ui-dialog-input").value : true);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      finishCancel();
-    }
-  });
-})();
 
 /** 通用 Agent 的常规示例（点击 → 新建通用 Agent 会话并预填） */
 const GENERAL_EXAMPLES = [
@@ -221,119 +114,6 @@ const GENERAL_EXAMPLES = [
   "给 boss@example.com 发一封邮件，主题是周报",
   "附加一个文件，帮我总结它的要点（用 📎 选择）",
 ];
-
-function nodeIcon(name) { return NODE_ICONS[name.split("/")[0]] || "⚙️"; }
-
-/* ---------------------------------------------------------------------------
- * Markdown 渲染（零依赖迷你实现：先转义再解析，天然防注入）
- * 支持：围栏代码块 / 行内代码 / 加粗斜体 / 链接 / 标题 / 列表 / 引用 / 表格 / 分割线
- * 对「流式中途未闭合的围栏」也能正确渲染成代码块。
- * ------------------------------------------------------------------------- */
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function renderInline(text) {
-  let h = escapeHtml(text);
-  h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
-  h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  return h;
-}
-
-function renderMarkdown(src) {
-  const fences = [];
-  // 1. 提取围栏代码块（含未闭合的流式半截）
-  src = src.replace(/```(\w*)[ \t]*\n?([\s\S]*?)(?:```|$)/g, (_m, lang, code) => {
-    fences.push({ lang, code: code.replace(/\n$/, "") });
-    return `\u0000F${fences.length - 1}\u0000`;
-  });
-
-  // 2. 逐行做块级解析
-  const lines = src.split("\n");
-  const out = [];
-  let i = 0;
-  const isFence = (l) => /^\u0000F\d+\u0000\s*$/.test(l);
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (isFence(line)) { out.push(line); i++; continue; }
-    if (!line.trim()) { i++; continue; }
-
-    const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (heading) { out.push(`<h${heading[1].length}>${renderInline(heading[2])}</h${heading[1].length}>`); i++; continue; }
-
-    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
-
-    if (/^\s*>/.test(line)) {
-      const buf = [];
-      while (i < lines.length && /^\s*>/.test(lines[i])) {
-        buf.push(lines[i].replace(/^\s*>\s?/, ""));
-        i++;
-      }
-      // buf 至少含当前行（入口已匹配 >），循环内每轮 i++，必然终止
-      out.push(`<blockquote>${buf.map(renderInline).join("<br>")}</blockquote>`);
-      continue;
-    }
-
-    // 表格：| a | b | 换行 |---|---|
-    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
-      const parseRow = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-      const head = parseRow(line);
-      i += 2;
-      const rows = [];
-      while (i < lines.length && /^\s*\|.*\|?\s*$/.test(lines[i]) && lines[i].includes("|")) { rows.push(parseRow(lines[i])); i++; }
-      out.push(
-        `<table><thead><tr>${head.map((c) => `<th>${renderInline(c)}</th>`).join("")}</tr></thead>` +
-        `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${renderInline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
-      );
-      continue;
-    }
-
-    // 列表
-    const ul = line.match(/^\s*[-*]\s+(.*)$/);
-    const ol = line.match(/^\s*\d+[.、]\s+(.*)$/);
-    if (ul || ol) {
-      const tag = ul ? "ul" : "ol";
-      const items = [];
-      while (i < lines.length) {
-        const m = lines[i].match(ul ? /^\s*[-*]\s+(.*)$/ : /^\s*\d+[.、]\s+(.*)$/);
-        if (!m) break;
-        items.push(`<li>${renderInline(m[1])}</li>`);
-        i++;
-      }
-      out.push(`<${tag}>${items.join("")}</${tag}>`);
-      continue;
-    }
-
-    // 普通段落（连续非空行，行间以 <br> 连接）
-    const buf = [];
-    while (i < lines.length && lines[i].trim() && !isFence(lines[i]) &&
-      !/^(#{1,4})\s/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+[.、]\s+/.test(lines[i]) && !/^\s*\|.*\|\s*$/.test(lines[i]) &&
-      !/^\s*>/.test(lines[i])) {
-      buf.push(lines[i]);
-      i++;
-    }
-    if (buf.length) {
-      out.push(`<p>${buf.map(renderInline).join("<br>")}</p>`);
-    } else {
-      // 兜底：当前行不属于任何块（如流式中的半截表格行），直接按段落输出，保证 i 前进
-      out.push(`<p>${renderInline(lines[i])}</p>`);
-      i++;
-    }
-  }
-
-  let html = out.join("\n");
-  // 3. 还原代码块
-  html = html.replace(/\u0000F(\d+)\u0000/g, (_m, n) => {
-    const f = fences[Number(n)];
-    return `<pre><code>${escapeHtml(f.code)}</code></pre>`;
-  });
-  return html;
-}
 
 /* ---------------------------------------------------------------------------
  * 会话持久化（localStorage）—— 服务端会话是内存态，重启即失；
@@ -1033,9 +813,6 @@ function renderTextPart(part) {
   refs.el.innerHTML = renderMarkdown(part.text) + (part.streaming ? '<span class="cursor"></span>' : "");
 }
 
-function fmtArgs(part) {
-  try { return JSON.stringify(JSON.parse(part.argsText), null, 2); } catch { return part.argsText || "…"; }
-}
 
 function updateToolCard(part) {
   const refs = partEls.get(part);
@@ -1637,13 +1414,6 @@ function renderThinkingMenu(menu) {
  * input_token_details.cache_read ≈ 提示词缓存命中）；分母来自网关 /models
  * 返回的 context_length（未知时不显示占比，只显示 token 数）。
  * ------------------------------------------------------------------------- */
-function fmtTokens(n) {
-  if (n == null || isNaN(n)) return "–";
-  if (n >= 100000) return Math.round(n / 1000) + "k";
-  if (n >= 10000) return (n / 1000).toFixed(1) + "k";
-  return n.toLocaleString("zh-CN");
-}
-
 function updateContextBar() {
   const bar = $("context-bar");
   const u = state.usage[state.currentId];
@@ -1692,11 +1462,6 @@ function updateTurnCaption(ablock) {
 /* ----- 顶栏快捷切换菜单：模型菜单（按供应商分组）+ 思考等级档位 ----- */
 function showProviderMenu(show) {
   $("provider-menu").classList.toggle("hidden", !show);
-}
-
-/** 思考等级角标：供应商默认时不显示，避免噪音 */
-function reasoningTag(model) {
-  return model?.reasoningLevel && model.reasoningLevel !== "default" ? model.reasoningLabel : "";
 }
 
 /**
@@ -2441,11 +2206,6 @@ function renderFsRows(entries) {
   }
 }
 
-function fmtSize(n) {
-  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
-  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
-  return n + " B";
-}
 
 async function openRemoteFolder() {
   const p = await uiPrompt(
@@ -2873,15 +2633,6 @@ async function saveEstateKey() {
 
 /* ----- 房产 JSON 结果 → 卡片渲染（房源列表 / 地图 / 户型图 / 二维码 / 安装引导） ----- */
 
-/** 只放行 http(s) 图片源（服务端来的 URL 同样不可信，防 javascript: 伪协议） */
-function safeImageSrc(url) {
-  if (typeof url === "string" && (/^https:\/\//i.test(url) || /^data:image\//i.test(url))) return url;
-  return "";
-}
-function safeHref(url) {
-  if (typeof url === "string" && /^https:\/\//i.test(url)) return url;
-  return null;
-}
 function estateExtra(card) {
   let extra = card.querySelector(".estate-extra");
   if (extra) extra.remove();
