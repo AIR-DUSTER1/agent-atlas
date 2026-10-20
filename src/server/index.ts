@@ -38,8 +38,8 @@ import { mockRun } from "./mock.js";
 import {
   createSession, deleteSession, getSession, isDemo, listSessions, DEMOS,
   rebuildIfStale, bumpConfigVersion, beginTurnRecord, completeTurnRecord, getTurnHistory,
+  recordApproval, recordDecision, restoreSessions, buildPrehistoryNote, type Session,
 } from "./sessions.js";
-import type { Session } from "./sessions.js";
 import {
   loadSettings, listProviders, getActiveId, getActiveModelId, addProvider, updateProvider, deleteProvider,
   activate, addModel, updateModel, deleteModel, setReasoning, listDialects, getReasoningState,
@@ -74,6 +74,11 @@ await loadProjects();
 await loadExternalAgents();
 await loadRag();
 await loadEstate();
+// T2-2：journal 回放 —— 重启后恢复会话壳 / 轮次历史 / pending 审批标记
+const restoredSessions = await restoreSessions();
+if (restoredSessions > 0) {
+  console.log(`  ↪ 已从 journal 恢复 ${restoredSessions} 个会话（对话历史可回放；带审批挂起的会话将提示重新发起）`);
+}
 void refreshModelInfo().catch(() => {});
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -145,7 +150,7 @@ async function streamToClient(
       if (controller.signal.aborted) break;
       collected.push(event);
       writeEvent(res, event);
-      if (event.type === "interrupt") session.pendingApproval = event.payload;
+      if (event.type === "interrupt") recordApproval(session, event.payload);
       if (event.type === "done") session.pendingApproval = null;
     }
   } catch (err) {
@@ -214,8 +219,7 @@ function readBody(req: import("node:http").IncomingMessage, maxBytes = BODY_MAX_
   });
 }
 
-/** 路由统一的失败响应：BodyTooLargeError → 413，其余一律 400 + 中文错误 */
-function respondBadRequest(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, err: unknown): void {
+/** 路由统一的失败响应：BodyTooLargeError → 413，其余一律 400 + 中文错误 */function respondBadRequest(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, err: unknown): void {
   const tooLarge = err instanceof BodyTooLargeError;
   res.writeHead(tooLarge ? 413 : 400, {
     "Content-Type": "application/json; charset=utf-8",
@@ -330,8 +334,13 @@ async function handleChatInner(
   }
 
   const { HumanMessage } = await import("@langchain/core/messages");
+  // T2-4：journal 回放来的会话首条真图消息 —— 前置注入历史上文摘录（一次性）
+  const preNote = buildPrehistoryNote(session);
+  const graphInput: unknown[] = preNote
+    ? [new HumanMessage(preNote), new HumanMessage(fullMessage)]
+    : [new HumanMessage(fullMessage)];
   await streamToClient(res, req, session, (signal) =>
-    runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: [new HumanMessage(fullMessage)] }, {
+    runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: graphInput }, {
       threadId: session.threadId,
       signal,
     })
@@ -368,6 +377,16 @@ async function handleResumeInner(
   body: { decision?: unknown }
 ): Promise<void> {
   const approval = session.pendingApproval;
+  // T2-3：重启后带 pendingApproval 的会话 —— 图的 interrupt 状态已不可恢复，
+  // 重复 resume 是明确错误，必须让用户重新发起（不允许静默重复执行）
+  if (approval && session.resumeUnavailable) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({
+      error: `服务重启后该审批的执行上下文已失效，无法继续（不重复执行、也不静默重做）。` +
+        `请重新发起这个请求，例如：「${approval.toolName}」的那条指令再发一次。`,
+    }));
+    return;
+  }
   // 配置变更后不重建审批中的图：旧图的 interrupt 状态无法跨 checkpointer 恢复，
   // 让本次 resume 在原图上完成（配置从下一条消息起生效）
   if (!approval) rebuildIfStale(session);
@@ -377,7 +396,11 @@ async function handleResumeInner(
   if (!config.apiKey) {
     await streamToClient(res, req, session, (signal) =>
       mockRun({ decision, approval: approval ?? undefined, turnIndex: session.turns, signal })
-    , (events) => completeTurnRecord(session, events));
+    , (events) => {
+      // T2-3：决定已做出 → journal 落 decided（一次性转移），再把本轮入档
+      recordDecision(session, decision === "approve" ? "approved" : "rejected");
+      completeTurnRecord(session, events);
+    });
     return;
   }
 
@@ -388,7 +411,10 @@ async function handleResumeInner(
       threadId: session.threadId,
       signal,
     })
-  , (events) => completeTurnRecord(session, events));
+  , (events) => {
+    recordDecision(session, decision === "approve" ? "approved" : "rejected");
+    completeTurnRecord(session, events);
+  });
 }
 
 // ---------------------------------------------------------------------------
