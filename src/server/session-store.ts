@@ -27,6 +27,7 @@
 import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { log } from "./logging.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
 // 避免跑测试把假会话写进开发者真实的 .setting/sessions.ndjson。
@@ -71,11 +72,28 @@ async function appendJournal(line: unknown): Promise<void> {
   await appendFile(JOURNAL_FILE, JSON.stringify(line) + "\n", "utf8");
 }
 
+/** 在途写入集合：优雅退出前用 flushJournal() 等它们落盘 */
+const pendingWrites = new Set<Promise<void>>();
+
 /** 所有写入都是后台任务：失败只告警，绝不向上抛（聊天流不能因此中断） */
 function journalWrite(ev: Record<string, unknown>): void {
-  void appendJournal(ev).catch((err) => {
-    console.error("[session-store] journal 写入失败（服务重启后该轮可能丢失）：", err instanceof Error ? err.message : String(err));
-  });
+  let task: Promise<void>;
+  task = appendJournal(ev)
+    .catch((err) => {
+      log("error", "journal_write_failed", { message: err instanceof Error ? err.message : String(err) });
+    })
+    .finally(() => pendingWrites.delete(task));
+  pendingWrites.add(task);
+}
+
+/**
+ * 等待 journal 待写队列清空（Phase 4 优雅退出用）。
+ * 循环等待：flush 期间还可能产生新写入（例如 close 事件里的 turn 落盘）。
+ */
+export async function flushJournal(): Promise<void> {
+  while (pendingWrites.size > 0) {
+    await Promise.allSettled([...pendingWrites]);
+  }
 }
 
 export function journalSession(rec: {
@@ -131,7 +149,7 @@ export async function replaySessions(): Promise<void> {
       ev = JSON.parse(trimmed) as Record<string, unknown>;
     } catch {
       // 单行损坏：跳过并告警（NDJSON 语义允许）
-      console.error("[session-store] journal 有一行损坏，已跳过（不影响其它行）");
+      log("warn", "journal_bad_line", { action: "skipped" });
       continue;
     }
     applyEvent(ev);
@@ -228,7 +246,7 @@ async function compactJournal(): Promise<void> {
     await rename(JOURNAL_FILE, JOURNAL_FILE + ".1").catch(() => {});
     await writeFile(JOURNAL_FILE, body, "utf8");
   } catch (err) {
-    console.error("[session-store] journal compact 失败（继续用追加模式）:", err instanceof Error ? err.message : String(err));
+    log("error", "journal_compact_failed", { message: err instanceof Error ? err.message : String(err) });
   }
 }
 

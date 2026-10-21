@@ -92,6 +92,15 @@ test("请求体超限 → 413（排水后客户端能拿到状态码）", async 
   assert.match(raw, /请求体过大/);
 });
 
+test("探针免认证：开启 AUTH_TOKEN 后 /healthz 与 /readyz 仍可直接访问", async () => {
+  for (const path of ["/healthz", "/readyz"]) {
+    const res = await fetch(authSrv.base + path);
+    assert.equal(res.status, 200, path);
+    const body = await res.json() as { ok?: boolean };
+    assert.equal(body.ok, true, path);
+  }
+});
+
 test("认证开启：无 Bearer 401，正确 Bearer 放行", async () => {
   const noAuth = await fetch(authSrv.base + "/api/sessions");
   assert.equal(noAuth.status, 401);

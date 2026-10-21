@@ -23,6 +23,7 @@
 import { open, readFile, rename, writeFile, unlink, stat, copyFile, appendFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { log } from "./logging.js";
 
 // 测试钩子：e2e 用临时配置文件（tests/helpers 注入 WEB_CONFIG_FILE），
 // 避免测试读写开发者真实的 .web-config.json（含真实供应商 Key）。
@@ -46,7 +47,7 @@ export async function readConfig(): Promise<Record<string, unknown>> {
     try {
       return normalize(JSON.parse(raw));
     } catch {
-      console.error(`[config] .web-config.json 损坏（JSON 解析失败），尝试从 .bak 恢复`);
+      log("warn", "config_corrupt", { action: "restore_from_bak" });
     }
   }
   // 主文件缺失或损坏：尝试 .bak
@@ -56,12 +57,12 @@ export async function readConfig(): Promise<Record<string, unknown>> {
     if (parsed && typeof parsed === "object") {
       // 把抢救出来的内容原子回写为主文件（下次读直接命中）
       await atomicWrite(SETTINGS_FILE, JSON.stringify(parsed, null, 2));
-      console.error(`[config] 已从 .web-config.json.bak 恢复配置；请核对管理页数据后重新登记缺失项`);
+      log("warn", "config_restored", { source: "bak" });
       return normalize(parsed);
     }
   } catch {
     // .bak 也没有 / 也坏：返回空配置，让各模块按缺省播种（与「删除文件回退 .env」一致）
-    if (raw !== null) console.error(`[config] 主文件与 .bak 均不可解析，回退空配置（.env 播种仍生效）`);
+    if (raw !== null) log("error", "config_restore_failed", { action: "fallback_empty" });
   }
   return {};
 }

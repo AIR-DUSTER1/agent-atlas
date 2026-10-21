@@ -14,7 +14,7 @@ import {
 import { showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-20-1";
+const APP_VERSION = "web-2026-10-21-3";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -1044,6 +1044,19 @@ function handleEvent(ev, ablock) {
       saveLocal();
       break;
     }
+    case "shutdown": {
+      // 服务端优雅退出的最后一帧：常驻顶部提示；刷新时若服务已恢复则自然消失
+      let banner = document.getElementById("shutdown-banner");
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "shutdown-banner";
+        banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;padding:8px 16px;" +
+          "background:#8a5a00;color:#fff;text-align:center;font-size:13px";
+        document.body.appendChild(banner);
+      }
+      banner.textContent = ev.message || "服务正在关闭，请稍后刷新页面重连";
+      break;
+    }
     case "error": addErrorBlock(ablock, ev.message); break;
     case "done": break;
   }
@@ -1964,8 +1977,10 @@ async function saveProvider() {
       setSettingsStatus(`✓ 已添加供应商（${res.provider.models.length} 个模型）${res.activeChanged ? "并启用" : ""}`, "ok");
     }
     await applyConfigState(await api("/api/config"));
-    openProviderForm(editingProviderId);
-    setSettingsStatus($("settings-status").textContent, "ok");
+    // 保存成功后关闭设置弹窗；模型上下文等参数下次点模型「编辑」仍可继续配置。
+    // 不调用 openProviderForm：它会重置表单并关闭模型编辑面板，造成“保存后还停在编辑态”。
+    $("settings-mask").classList.add("hidden");
+    closeProviderForm();
   } catch (err) {
     setSettingsStatus(`✗ ${err.message}`, "err");
   }

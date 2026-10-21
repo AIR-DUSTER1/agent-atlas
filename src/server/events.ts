@@ -18,6 +18,7 @@
  *   interrupt   → Human-in-the-loop 审批卡片（Demo 3 的核心交互）
  *   usage       → 本轮模型调用的 token 用量（驱动上下文容量条 + 缓存占比）
  *   ai_message  → 整段助手消息兜底（极少数网关不支持 token 流时使用）
+ *   shutdown    → 服务端优雅退出通知（前端提示「稍后刷新重连」）
  *   error/done  → 错误提示 / 本轮流结束
  */
 
@@ -57,5 +58,7 @@ export type AgentEvent =
     }
   /** HITL：图已暂停，等待人工审批 */
   | { type: "interrupt"; payload: ApprovalPayload }
+  /** 优雅退出：由 lifecycle.shutdown 直接写入 SSE，不经过图/翻译层 */
+  | { type: "shutdown"; message: string }
   | { type: "error"; message: string }
   | { type: "done" };

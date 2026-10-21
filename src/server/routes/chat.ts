@@ -17,6 +17,8 @@ import {
   recordApproval, recordDecision, buildPrehistoryNote, type Session,
 } from "../sessions.js";
 import { getActiveModality } from "../settings.js";
+import { lifecycle } from "../lifecycle.js";
+import { writeAudit } from "../audit.js";
 import type { AgentEvent } from "../events.js";
 
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
@@ -41,6 +43,9 @@ async function streamToClient(
 
   const controller = new AbortController();
   let clientGone = false;
+  // 登记 SSE 连接：优雅退出时 lifecycle 先写 shutdown 帧再 abort，客户端能区分
+  // 「服务在重启」与「网络断了」；卸载放在 finally，避免已结束连接被反复通知。
+  const unregisterSse = lifecycle.registerSse(res, () => controller.abort());
   // 客户端断开检测：ServerResponse 的 close 在「响应未写完就断连」时才是真正的中止信号
   // （req 的 close 在请求体读完时就会触发，不能用来判断断连）
   res.on("close", () => {
@@ -66,6 +71,7 @@ async function streamToClient(
       writeEvent(res, { type: "error", message });
     }
   } finally {
+    unregisterSse();
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过
     onDone?.(collected);
     if (!clientGone) {
@@ -222,6 +228,15 @@ async function handleResumeInner(
   // 配置变更后不重建审批中的图：旧图的 interrupt 状态无法跨 checkpointer 恢复，
   // 让本次 resume 在原图上完成（配置从下一条消息起生效）
   if (!approval) rebuildIfStale(session);
+
+  // 审批决定是安全边界动作：审计只记会话/工具/决定，不落工具参数
+  if (approval) {
+    writeAudit("hitl.decided", {
+      sessionId: session.id,
+      toolName: approval.toolName,
+      decision,
+    });
+  }
 
   beginTurnRecord(session, `(人工审批：${decision === "approve" ? "批准" : "拒绝"} ${approval?.toolName ?? "操作"}）`);
 

@@ -1,0 +1,28 @@
+# 依赖与构建缓存（镜像内由 npm ci 重新安装）
+node_modules
+dist
+*.tsbuildinfo
+
+# 版本库与开发过程文档
+.git
+.gitignore
+.github
+.plans
+AGENTS.md
+docs
+tests
+desktop
+
+# 本机数据与密钥：绝不进镜像
+.env
+.env.*
+.web-config.json*
+.setting
+data
+*.log
+
+# 容器编排文件本身不需要进镜像
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

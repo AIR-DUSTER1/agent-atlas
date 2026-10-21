@@ -20,6 +20,9 @@ npm run models              # 先确认网关支持哪些模型（防止 400 报
 npm run web                 # 启动 Web 界面 → http://localhost:3000
 npm run desktop             # 或启动桌面端（Electron 壳，默认端口 3123）
 npm test                    # 单元 / 集成 / 安全测试（node:test，全程 mock，不耗真实配额）
+
+# 或容器部署（需要 Docker；先设置 AUTH_TOKEN，详见 docs/deployment.md）
+docker compose up -d --build
 ```
 
 > 💡 **没有 API Key？** 也能跑：未配置 `API_KEY` 时自动进入**模拟模式** ——
@@ -84,6 +87,8 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 - 切换后**新建会话立即生效**；已有会话在下一条消息时自动切换模型
   （示例 2/3 的多轮记忆会重置，等同重启服务）；
 - 至少保留一个供应商；删除启用中的供应商会自动切到列表第一个；
+- 保存供应商成功后自动关闭设置弹窗；模型上下文窗口等参数仍在模型行的「编辑」里配置，
+  点「保存模型」后持久化，下次打开继续可改；
 - 配置持久化在本地 `.web-config.json`（已 gitignore，含 Key），优先级高于 `.env`，
   删除该文件即回退到 `.env`；旧版单供应商 / 单模型格式会自动迁移成多模型结构。
 
@@ -190,8 +195,8 @@ npm run desktop             # 默认端口 3123（环境变量 DESKTOP_PORT 可�
 - **细节**：窗口就绪才显示（无白屏闪烁）；外部链接交给系统浏览器打开；
   **隐藏系统标题栏**（Windows `titleBarStyle:hidden + titleBarOverlay`）：右上角
   最小化/最大化/关闭由原生绘制、颜色跟随应用深浅主题，顶栏即拖拽区；
-  单实例锁（重复启动自动聚焦已有窗口）；退出时 `taskkill /T` 杀干净
-  npx→node→tsx 子进程树；环境变量 `DESKTOP_DEVTOOLS=1` 可在窗口里打开 DevTools。
+  单实例锁（重复启动自动聚焦已有窗口）；退出时同步等待 `taskkill /T` 完成，
+  确保 npx→node→tsx 子进程树不会残留；环境变量 `DESKTOP_DEVTOOLS=1` 可在窗口里打开 DevTools。
 
 ## 知识库（外部 RAG）
 
@@ -295,7 +300,12 @@ src/
     parallel.ts  # 示例 5：Send API 并行 map-reduce + Annotation.Root 自定义状态
   cli.ts         # CLI 入口：token 流式 + 节点日志 + 审批交互
   server/        # Web 界面（参考 ZCode）：SSE 服务 + 原生前端，见「Web 界面」
-    index.ts     # HTTP 入口：安全头/认证/静态/集中 dispatch（业务不写这里）
+    index.ts     # HTTP 入口：安全头/认证/静态/集中 dispatch/信号处理（业务不写这里）
+    health.ts    # /healthz 存活探针 + /readyz 就绪探针（目录可写/关闭中检查）
+    lifecycle.ts # 在途请求统计 + 优雅退出（SSE 通知/超时强断/flush/退出码）
+    logging.ts   # 结构化日志（stdout JSON、密钥打码、LOG_LEVEL）
+    audit.ts     # 安全动作审计（append-only NDJSON，认证失败/外部 Agent/安装）
+    session-store.ts # 会话 journal（NDJSON 回放 + compact + flushJournal）
     routes/      # 各域 handler：chat / config / sessions / external / projects / files / rag / estate
     rag.ts       # 外部 RAG 接入：契约客户端 + 配置 + 文件夹扫描入库 + 📎 自动入库
     estate.ts    # 贝壳 CLI 客户端：安装/鉴权/命令映射 + Nominatim geocode + 地图数据
@@ -310,8 +320,10 @@ tests/
   security/      # 跨站/认证/坏 JSON/413/目录穿越边界
   helpers/       # 临时服务端托管（随机端口 + 隔离 journal/配置）
 .github/workflows/ci.yml  # CI：typecheck + 语法门 + npm test
+├── Dockerfile / docker-compose.yml  # 单实例容器部署（/data 数据卷，见 docs/deployment.md）
 docs/
   agent-wiki.md  # 完整学习 Wiki（概念/模块/调用链/模板）
+  deployment.md  # 部署运维：Docker / 探针 / 优雅退出 / 日志 / 反向代理
 ```
 
 ## 踩坑记录（排查 400）
@@ -341,7 +353,7 @@ docs/
   `public/modules/format.js`（Markdown / 格式化 / URL 白名单）与
   `public/modules/ui-dialog.js`（错误横幅 + 页面内对话框），仍无打包步骤。
 - **测试**：`tests/unit` / `tests/integration` / `tests/security` 三档（Node 内置
-  `node:test`，共 34 例），`npm test` 一键运行；测试强制 mock 模式并隔离临时
+  `node:test`，共 45 例），`npm test` 一键运行；测试强制 mock 模式并隔离临时
   journal / 配置，不读取真实 Key、不消耗网关配额。
 - **CI**：`.github/workflows/ci.yml` 在 push / PR 到 `main` 时执行
   `npm ci` → `npm run typecheck` → 前端与桌面端 `node --check` → `npm test`。
@@ -360,7 +372,7 @@ docs/
 ### 访问认证与同源防线（Phase 1）
 
 - **Bearer 认证**：在 `.env` 里设置 `AUTH_TOKEN=任意令牌` 即开启。开启后所有
-  `/api/*`（除 `/healthz` 与静态页）都要求 `Authorization: Bearer <令牌>`；
+  `/api/*`（除 `/healthz`、`/readyz` 与静态页）都要求 `Authorization: Bearer <令牌>`；
   浏览器首次访问会弹框索要令牌并保存在 localStorage，之后不再询问。令牌校验
   使用 sha256 摘要 + 常量时间比较，无时序侧信道。
 - **跨站防护**：浏览器式的跨站请求（`Origin` 与本站不符、`Sec-Fetch-Site:
@@ -394,6 +406,23 @@ docs/
 - **防误触与并发上限**：同一会话同时只允许一条回答在生成（重复发送提示稍候）；
   同一会话两次发送至少间隔 1.5 秒；贝壳 CLI 的并发查询上限 2。
   超限都是中文提示，不会出现「跑两次」或幽灵审批。
+
+### 部署与可观测性（Phase 4）
+
+- **Docker 单实例部署**：`Dockerfile` 基于 `node:22-slim`，多阶段安装依赖后以非 root
+  运行；`docker-compose.yml` 只映射到宿主机 `127.0.0.1`，强制 `AUTH_TOKEN`，配置 /
+  会话 / 审计统一挂载到 `./data`（gitignore）。完整步骤见
+  [`docs/deployment.md`](docs/deployment.md)。已在 Docker 28.5.1 实测镜像构建、
+  healthcheck、`docker stop`（约 0.8s 内，退出码 0）与纯 NDJSON 日志。
+- **健康探针**：`GET /healthz` 只证明进程存活（liveness，永不 503）；
+  `GET /readyz` 检查配置目录与 journal 目录可写、且未在关闭中（readiness，异常回 503）。
+  两者免认证、只回版本/耗时/布尔值，Docker healthcheck 已内置。
+- **优雅退出**：收到 `SIGINT` / `SIGTERM`（Windows 另有 `SIGBREAK`）后停止接新请求、
+  给进行中的 SSE 补一帧 `shutdown` 再断开、最多等 10 秒让在途请求收尾、flush
+  journal/audit 后退出；超时强断并以退出码 1 结束。重复信号会立即退出。
+- **结构化日志**：每个请求一行 stdout JSON（`X-Request-Id` / method / path / status /
+  durationMs），密钥字段打码、不记录用户消息；`LOG_LEVEL` 可调。认证失败等安全动作
+  仍单独写入 append-only 审计文件，不随日志级别关闭。
 
 ## 学习路线建议
 

@@ -32,6 +32,7 @@ import { randomUUID } from "node:crypto";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { assertAuthorized, PROJECT_ROOT, SKIPPED_DIRS } from "./files.js";
 import { maskKey } from "./settings.js";
+import { log } from "./logging.js";
 
 // ---------------------------------------------------------------------------
 // 配置
@@ -274,7 +275,7 @@ export async function clearRag(): Promise<Record<string, unknown>> {
     if (!res.ok) throw ragError(res, "reset");
   }).catch(async (e) => {
     // 服务不支持 /reset：不打断本地清理，但提示用户
-    console.warn("[rag] reset 失败：", e instanceof Error ? e.message : e);
+    log("warn", "rag_reset_failed", { message: e instanceof Error ? e.message : String(e) });
   });
   rag.docs = {};
   await persistRag();
@@ -404,7 +405,7 @@ export async function ingestChatAttachments(
       source: "聊天附件",
     })), "聊天附件");
   } catch (e) {
-    console.warn("[rag] 附件自动入库失败（不影响对话）：", e instanceof Error ? e.message : e);
+    log("warn", "rag_auto_ingest_failed", { message: e instanceof Error ? e.message : String(e) });
   }
 }
 

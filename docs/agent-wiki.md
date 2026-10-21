@@ -52,6 +52,7 @@
 ├── docs/agent-wiki.md    # 本文件
 ├── scripts/
 │   └── list-models.ts    # npm run models：查询网关支持的模型列表
+├── Dockerfile / docker-compose.yml  # 单实例容器部署（/data 数据卷，§3.19）
 ├── desktop/
 │   └── main.cjs          # Electron 桌面端：子进程托管 Web 服务 + 窗口加载（§3.14）
 └── src/
@@ -62,7 +63,10 @@
     ├── agent/            # 通用 Agent + 5 个示例的图定义（学习的重点）
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
-        ├── index.ts      # node:http 服务：静态页面 + SSE 接口（chat / resume / sessions / rag）
+        ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
+        ├── health.ts     # /healthz 存活 + /readyz 就绪探针（§3.19）
+        ├── lifecycle.ts  # 在途请求统计 + 优雅退出（§3.19）
+        ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
         ├── stream.ts     # LangGraph 原始流事件 → 前端友好事件（token/工具卡/审批）的翻译层
         ├── mock.ts       # 未配置 API_KEY 时的模拟模型（事件协议与真实图一致）
         ├── sessions.ts   # 内存会话存储（每会话一张图 + 绑定 thread_id）
@@ -78,6 +82,7 @@
 
 ```bash
 npm run web           # 打开 Web 聊天界面（http://localhost:3000，推荐）
+docker compose up -d --build   # 或容器部署（先设 AUTH_TOKEN，见 docs/deployment.md）
 npm run desktop       # Electron 桌面端（原生窗口，端口 3123）
 npm run demo:1        # 运行 Demo 1（带默认示例问题）
 npx tsx src/cli.ts 1 "你的自定义问题"   # 带自定义问题
@@ -555,8 +560,9 @@ Header: Authorization: Bearer <key>（可留空）
 - 就绪探测：轮询 `GET /api/config` 直到可连接（≤90s）才 `new BrowserWindow()`；
 - 窗口：`ready-to-show` 再显示避免白屏；`backgroundColor` 预置深色；外部链接
   `setWindowOpenHandler` 交给系统浏览器；
-- 退出：`window-all-closed` → `taskkill /pid <pid> /T /F` 杀干净
-  npx→node→tsx 子进程树（孤儿 tsx 会继续占用端口，这就是必须 /T 的原因）；
+- 退出：`window-all-closed` → **同步等待** `taskkill /pid <pid> /T /F` 完成，
+  杀干净 npx→node→tsx 子进程树（孤儿 tsx 会继续占用端口，这就是必须 /T 的原因）；
+  若用异步 `spawn` 发完 taskkill 就退出 Electron，子进程树会残留（桌面实测踩坑）；
 - 单实例锁：二次启动 `requestSingleInstanceLock` 失败即退出并聚焦已有窗口；
 - **无白标题栏**：Windows 以 `titleBarStyle:"hidden" + titleBarOverlay` 隐藏系统标题栏，
   右上角三枚窗口控制键由原生绘制、颜色跟随应用深浅主题 —— 链路是
@@ -643,10 +649,10 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义 |
-| `tests/integration/` | 起临时服务端（mock 模式）：healthz、config 形状、会话创建、chat SSE、transcript 回放、404/400、静态页面与 ESM 模块 MIME |
-| `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、静态目录穿越 |
-| `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（**不碰真实 journal 与供应商 Key**）、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、404/400、静态页面与 ESM 模块 MIME |
+| `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
+| `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
 
 ```bash
 npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多服务抢资源）
@@ -659,7 +665,38 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 **测试钩子（生产默认行为不变）**：
 - `SESSIONS_FILE`：覆盖 journal 路径（`session-store.ts` 模块加载时读取）；
 - `WEB_CONFIG_FILE`：覆盖 `.web-config.json` 路径（`config-store.ts`）；
-- 两者都是「设了才生效」的环境变量，供 e2e 隔离数据；正常启动不设置即走仓库默认路径。
+- `AUDIT_FILE`：覆盖审计文件路径（`audit.ts`，Phase 4 补）；
+- 三者都是「设了才生效」的环境变量，供 e2e 隔离数据；正常启动不设置即走仓库默认路径。
+
+---
+
+### 3.19 `health.ts` + `lifecycle.ts` + `logging.ts` + Docker — Phase 4 部署与可观测性
+
+**设计立场**：不引入日志/部署框架；探针、退出、日志都保持「一个文件一个职责」，
+且核心状态机（lifecycle）做成工厂以便离线单测。
+
+| 文件 | 职责 | 关键设计（坑见 §7.3） |
+|---|---|---|
+| `server/health.ts` | 探针 | `/healthz` 只证明事件循环活着，永远 200；`/readyz` 检查配置目录 + journal 目录可写（`mkdir` + `W_OK`，带 1.5s 超时）且未在关闭中，否则 503；两者免认证，只回 `{ok, version, uptimeSeconds, ...}`，不含路径/供应商/Key |
+| `server/lifecycle.ts` | 优雅退出 | `createLifecycle()` 工厂：`beginRequest/endRequest` 在途计数、`registerSse` 连接表、`shutdown(deps)` 注入 `closeServer/closeIdle/closeAll/flush/exit`；先给 SSE 写 `shutdown` 帧再 abort；等在途归零（默认 10s）→ flush → 退出码 0/1；重复 shutdown 幂等 |
+| `server/logging.ts` | 结构化日志 | stdout 一行 JSON；固定字段 `time/level/event` 放在业务字段**之后**（防覆盖）；`redact` 按字段名打码 + 长文本/数组/深度截断；`LOG_LEVEL` 运行时读取，非法值回退 `info` |
+| `server/audit.ts` | 审计增强 | 新增 `AUDIT_FILE` 测试钩子与 `flushAudit()`；认证失败记 `auth_rejected`（只记 requestId/method/path，不带 token）；配置变更（`config.*`）、HITL 决定（`hitl.decided`）、项目授权（`project.authorized`）也落审计，均不带 Key/URL/工具参数 |
+| `server/session-store.ts` | journal 增强 | 写入任务进 `pendingWrites`，`flushJournal()` 循环等到清空（flush 期间新产生的写入也能等到） |
+| `server/index.ts` | 入口接线 | 每请求 `X-Request-Id`；handler `finally` 统一记 `http_request`（静态 debug、API info，避免 SSE abort 时 `res.close` 抢跑）；关闭中非探针请求回 503；`SIGINT/SIGTERM/SIGBREAK` → lifecycle；`EADDRINUSE` 中文提示 + 退出码 1 |
+| `Dockerfile` / `docker-compose.yml` | 单实例部署 | `node:22-slim` 多阶段；`npm ci --ignore-scripts`（跳过 electron 下载）；非 root `node`；`/data` 卷统一放配置/journal/审计；`CMD node --import tsx ...` 让 node 作 PID 1 收信号；compose 强制 `AUTH_TOKEN`、`init: true`、`stop_grace_period: 15s`、内置 healthcheck |
+| `docs/deployment.md` | 运维文档 | Docker 启动、环境变量表、探针语义、退出流程、日志/审计、Nginx/Caddy SSE 配置、桌面端打包评估、单实例边界 |
+
+**SSE 退出帧**：`AgentEvent` 新增 `{type:"shutdown", message}`；`routes/chat.ts` 把
+连接登记进 lifecycle。退出时 lifecycle 直接往 `res` 写一帧再 abort，前端
+`app.js` 的 `handleEvent` 显示顶部常驻提示 —— 客户端能区分「服务重启」与「网络故障」。
+
+**为什么 node 直接作 PID 1**：`npm run web` / npx 包装层不会把 SIGTERM 转发给
+node 子进程，容器停止时只能等宽限期结束吃 SIGKILL，journal/audit 可能丢尾部。
+Dockerfile 用 `CMD ["node", "--import", "tsx", ...]`，信号直达应用。
+
+**当前边界**：会话、限流闸、SSE 表都在进程内，`data/` 只能给一个实例用；
+多副本/共享存储属于 Phase 5。桌面端仍是开发壳（Windows 退出用 `taskkill /F`，
+不触发优雅退出），打包评估结论见 `docs/deployment.md` §7。
 
 ---
 
@@ -953,6 +990,8 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 
 - **一个供应商 = 一套网关凭据**，下面可以挂任意多个模型；每个模型有自己的
   显示名 / 多模态开关 / 上下文窗口 / 思考等级；
+- 保存供应商成功后设置弹窗自动关闭；模型上下文窗口等参数在模型行「编辑」里配置，
+  点「保存模型」后持久化，重新打开设置仍可继续修改；
 - **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
 - 切换后**新建会话立即生效**，已有会话在下一条消息时自动切换
@@ -1093,7 +1132,7 @@ console.log(result.messages.at(-1).content);
 | 模型不调用工具                   | 检查 `bindTools` 是否执行、工具 `description` 是否清晰（模型靠描述决定何时调用）        |
 | 图不结束死循环                   | 默认 25 超步递归上限，超限抛 `GraphRecursionError`；在系统提示里明确「何时收手」         |
 | RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
-| 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：主进程退出已 `taskkill /T` 清子进程树；手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
+| 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 | 贝壳工具结果里全是 `{error:"…"}`    | 三排查：① `where beike` 确认 CLI 在 PATH 或 `.setting/beike/` 已解压；② Key 过期（面板重新保存）；③ 用 `beike doctor` 看官方诊断输出 |
 | 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：工作台不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
@@ -1112,6 +1151,16 @@ console.log(result.messages.at(-1).content);
 | 跑完自动化测试后侧栏多出陌生会话 | 测试进程用了真实 `.setting/sessions.ndjson` / `.web-config.json`。测试钩子 `SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（§3.18），生产默认路径不变 |
 | 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
 | 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |
+| 点 📎 附件按钮「没反应」/ 文件选择器不出现 | `#fs-mask` 只有 `hidden` 切换，没有 `position:fixed; inset:0; display:grid; z-index`，弹窗被排到文档流末尾，事件其实已触发。给 `#fs-mask` / `#estate-mask` 补遮罩样式（与 `#kb-mask` 同层），别只查 JS 事件 |
+| `docker stop` 很慢、最后被 SIGKILL，journal 可能丢尾部 | `npm run web` / npx 包装层收不到或不会转发 SIGTERM 给 node 子进程。Dockerfile 必须 `CMD ["node","--import","tsx",...]` 让 node 作 PID 1；compose 的 `stop_grace_period` 要大于应用内 10s 排空超时 |
+| 容器首次启动 `/data/web-config.json` 变成空目录 | 把**不存在的宿主机文件** bind mount 到容器路径时，Docker 会创建目录而不是文件。正确做法：挂载 `./data:/data`，用 `WEB_CONFIG_FILE=/data/web-config.json` 指向卷内文件（本项目镜像默认即如此） |
+| 镜像构建卡在 electron 下载 | `npm ci` 会跑 devDependencies 的 postinstall（electron 要下几百 MB 二进制）。Web 镜像用 `npm ci --ignore-scripts`；tsx/esbuild 靠平台可选包仍可运行 |
+| `/readyz` 在只读 rootfs 下一直 503 | 探针会 `mkdir -p` + `W_OK` 检查配置/journal 目录。K8s `readOnlyRootFilesystem` 时必须把 `/data` 挂成可写卷，否则不是误报而是真实不可用 |
+| 测试跑完后 `.setting/audit.ndjson` 多出 `auth_rejected` | Phase 4 给认证失败加了审计；测试若只隔离 journal/配置，事件会写进开发者真实审计文件。`tests/helpers/server.ts` 必须同时注入 `AUDIT_FILE` 指向临时目录 |
+| Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
+| 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
+| Docker 日志里混入人类横幅 / 非 JSON | 启动横幅、无认证警告、配置抢救提示原来无条件 `console.*`，采集器逐行 `JSON.parse` 会报错。人类提示只在 `stdout/stderr.isTTY` 时输出；配置恢复/启动失败等改走 `log("info"/"warn"/"error", event)`，容器 `docker logs` 才能保持纯 NDJSON |
+| 子进程超时返回 `code=1` 而非文档写的 `-1`，单测还莫名多等 5 秒 | `taskkill` 后 `close` 事件带回真实退出码，覆盖了终止时写的 `-1`；同时强杀兜底 `setTimeout(5s)` 没在 close 时清掉，Node 事件循环被拖住。对策：异常终止统一 `code:-1`（调用方看 `killedBy`），`done()` 里同时 `clearTimeout` 正常超时 timer 与强杀兜底 timer |
 
 ***
 
@@ -1160,4 +1209,12 @@ console.log(result.messages.at(-1).content);
 安全头 / 外部命令白名单 / 子进程限额 / 审计 / 贝壳安装加固）、Phase 2（配置原子
 落盘 + 备份抢救、会话 journal 重启恢复、审批状态机与 resume 引导、历史上文注入、
 并发节流闸 —— §3.17）、Phase 3（服务端 index.ts → `routes/*.ts` 拆分、前端通用件
-`public/modules/` 原生 ESM、`tests/` 三档测试 + `npm test`、GitHub Actions CI —— §3.18）。
+`public/modules/` 原生 ESM、`tests/` 三档测试 + `npm test`、GitHub Actions CI —— §3.18）、
+Phase 4（`/healthz` + `/readyz` 探针、SIGINT/SIGTERM 优雅退出与 SSE `shutdown` 帧、
+结构化日志 + journal/audit flush、Docker/compose 与部署文档 —— §3.19），并已在
+Docker 28.5.1 实测镜像构建、healthcheck、`docker stop` 优雅退出与纯 NDJSON 日志。
+
+**部分执行**：Phase 5 的自动化试点子集（硬杀重启后的会话恢复、配置损坏 `.bak`
+恢复、日志检索、60 请求资源冒烟）。**未执行**：3 天连续运行、真实反向代理/公网
+链路、子进程超时注入，以及多实例/共享存储（需要产品决策、依赖评审与连续运行
+观测；当前会话、限流、SSE 连接表都在单进程内，`data/` 只能给一个实例用）。

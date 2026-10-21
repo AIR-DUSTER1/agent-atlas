@@ -1292,6 +1292,14 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 .btn-danger:hover { filter: brightness(1.12); }
 
 /* ============================== 文件选择器 ============================== */
+/* 遮罩必须自己定位：只切 .hidden 时 #fs-mask 会留在文档流末尾，看起来像“点击没反应” */
+#fs-mask, #estate-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  z-index: 120;
+}
 #fs-modal {
   width: min(620px, 94vw);
   max-height: 86vh;

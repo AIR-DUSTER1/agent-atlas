@@ -25,8 +25,14 @@
  *   POST /api/config/activate                     启用「供应商 × 模型」{ providerId, modelId }
  *   POST /api/config/reasoning                    只改思考等级 { providerId?, modelId?, dialect?, level?, custom? }
  *
+ * 运维探针（免认证）：
+ *   GET /healthz            存活探针（进程/事件循环活着，永不 503）
+ *   GET /readyz             就绪探针（配置目录/journal 目录可写且未在关闭中）
+ *
  * SSE 数据帧：每行 `data: {"type":"token","text":"..."}` + 空行，与 AgentEvent 一一对应。
  * 客户端断开：通过 AbortSignal 取消图流（模型请求随之中止），保证「停止」按钮可用。
+ * Phase 4：每个请求带 X-Request-Id 并记一行 JSON 日志；SIGINT/SIGTERM 走
+ * lifecycle 优雅退出（通知 SSE → 等请求 → flush journal/audit → 退出码）。
  */
 import { createServer } from "node:http";
 import { config } from "../config.js";
@@ -40,6 +46,11 @@ import { isAuthEnabled, verifyBearer } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
+import { handleHealthz, handleReadyz } from "./health.js";
+import { lifecycle } from "./lifecycle.js";
+import { flushAudit, writeAudit } from "./audit.js";
+import { flushJournal } from "./session-store.js";
+import { log, newRequestId } from "./logging.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
@@ -72,7 +83,11 @@ await loadEstate();
 // T2-2：journal 回放 —— 重启后恢复会话壳 / 轮次历史 / pending 审批标记
 const restoredSessions = await restoreSessions();
 if (restoredSessions > 0) {
-  console.log(`  ↪ 已从 journal 恢复 ${restoredSessions} 个会话（对话历史可回放；带审批挂起的会话将提示重新发起）`);
+  log("info", "sessions_restored", { count: restoredSessions });
+  // 人类可读提示只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
+  if (process.stdout.isTTY) {
+    console.log(`  ↪ 已从 journal 恢复 ${restoredSessions} 个会话（对话历史可回放；带审批挂起的会话将提示重新发起）`);
+  }
 }
 void refreshModelInfo().catch(() => {});
 
@@ -87,8 +102,13 @@ const EXPOSED_NOAUTH_ERR =
   "请设置环境变量 AUTH_TOKEN 后携带 Bearer token 访问，或改用 HOST=127.0.0.1 仅本机使用";
 
 const server = createServer(async (req, res) => {
+  const requestId = newRequestId();
+  res.setHeader("X-Request-Id", requestId);
+  const startedAt = Date.now();
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const pathname = url.pathname;
+  let tracked = false;
+  let sessionIdForLog: string | undefined;
 
   try {
     // API 响应一律禁缓存（GET /api/config 等被浏览器缓存会造成状态不同步）
@@ -96,17 +116,28 @@ const server = createServer(async (req, res) => {
     // Phase 1 安全响应头（nosniff / no-referrer / DENY 嵌入 / CSP），对所有路径生效
     applySecurityHeaders(res);
 
-    // --- 健康检查（不认证：部署探针需要无凭据可达；只回固定串，无信息泄露）
-    if (pathname === "/healthz") {
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("ok");
+    // --- 健康检查（免认证：部署探针无凭据可达；只回版本/布尔值，无路径与 Key）
+    if (pathname === "/healthz") { await handleHealthz(res); return; }
+    if (pathname === "/readyz") { await handleReadyz(res); return; }
+
+    // 优雅退出期间不再接新业务（探针除外）：明确 503，避免客户端只看到连接重置
+    if (!lifecycle.beginRequest()) {
+      res.writeHead(503, { "Content-Type": "application/json; charset=utf-8", Connection: "close" });
+      res.end(JSON.stringify({ error: "服务正在关闭，请稍后重试" }));
+      log("warn", "request_rejected", { requestId, method: req.method, path: pathname });
       return;
     }
+    tracked = true;
 
-    // Phase 1 认证：AUTH_TOKEN 开启后，除静态页与 /healthz 外的全部 /api/* 都要 Bearer。
+    // Phase 1 认证：AUTH_TOKEN 开启后，除静态页与探针外的全部 /api/* 都要 Bearer。
     // 静态页豁免 = 让浏览器能加载出 UI 并弹 token 输入框（401 引导流程）
     if (pathname.startsWith("/api/")) {
-      if (!verifyBearer(req)) { respondUnauthorized(req, res); return; }
+      if (!verifyBearer(req)) {
+        // 认证失败留审计痕迹（只记方法/路径，不带 token 内容）
+        writeAudit("auth_rejected", { requestId, method: req.method, path: pathname });
+        respondUnauthorized(req, res);
+        return;
+      }
       // Phase 1 同源/CSRF 防护：mutating 必须同源（跨站表单/text/plain POST 直接拒）
       const originReject = checkSameOrigin(req);
       if (originReject) { respondForbidden(req, res, originReject); return; }
@@ -182,6 +213,7 @@ const server = createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)) || "{}") as {
         sessionId?: string; message?: unknown; files?: unknown;
       };
+      sessionIdForLog = typeof body.sessionId === "string" ? body.sessionId : undefined;
       try {
         await handleChat(res, req, body.sessionId ?? "", body);
       } catch (err) {
@@ -192,6 +224,7 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === "/api/resume" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)) || "{}") as { sessionId?: string; decision?: unknown };
+      sessionIdForLog = typeof body.sessionId === "string" ? body.sessionId : undefined;
       await handleResume(res, req, body.sessionId ?? "", body);
       return;
     }
@@ -226,27 +259,104 @@ const server = createServer(async (req, res) => {
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
+    log("error", "request_failed", { requestId, method: req.method, path: pathname, message });
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
     }
     res.end(JSON.stringify({ error: message }));
+  } finally {
+    // 在 handler 完全退出后记账（而不是 res 的 close）：SSE 被 shutdown abort 时，
+    // close 可能早于 streamToClient 的 finally 落 journal，会让优雅退出提前 flush。
+    if (tracked) {
+      lifecycle.endRequest();
+      log(pathname.startsWith("/api/") ? "info" : "debug", "http_request", {
+        requestId,
+        method: req.method,
+        path: pathname,
+        status: res.statusCode,
+        durationMs: Date.now() - startedAt,
+        sessionId: sessionIdForLog,
+      });
+    }
   }
+});
+
+// ---------------------------------------------------------------------------
+// 优雅退出（Phase 4）：停新请求 → 通知 SSE → 等在途 → flush → 退出
+// ---------------------------------------------------------------------------
+let signalHandled = false;
+function handleSignal(signal: string): void {
+  // 第二次 Ctrl+C / kill：编排器已等不及，立即退出，不再拖住 drain
+  if (signalHandled) {
+    log("warn", "shutdown_forced_by_signal", { signal });
+    process.exit(1);
+  }
+  signalHandled = true;
+  log("info", "shutdown_signal", { signal });
+  void lifecycle.shutdown({
+    // 等 close 回调：确保最后几帧（含 SSE shutdown/done）已交给 socket 再退出
+    closeServer: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    closeIdleConnections: () => server.closeIdleConnections(),
+    closeAllConnections: () => server.closeAllConnections(),
+    flush: async () => {
+      await flushJournal();
+      await flushAudit();
+    },
+    // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，
+    // 并留一个 1s 的兜底定时器（不 hold 事件循环）
+    exit: (code) => {
+      process.exitCode = code;
+      const fallback = setTimeout(() => process.exit(code), 1_000);
+      fallback.unref();
+      process.stdout.write("", () => process.exit(code));
+    },
+  });
+}
+
+process.on("SIGINT", () => handleSignal("SIGINT"));
+process.on("SIGTERM", () => handleSignal("SIGTERM"));
+// Windows 控制台 Ctrl+Break 对应 SIGBREAK（POSIX 无此信号）
+if (process.platform === "win32") process.on("SIGBREAK", () => handleSignal("SIGBREAK"));
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  log("error", "server_listen_failed", { code: err.code, message: err.message, host: HOST, port: PORT });
+  if (process.stderr.isTTY) {
+    console.error(
+      err.code === "EADDRINUSE"
+        ? `\n  端口 ${PORT} 已被占用：请设置 PORT=其它端口，或先停掉占用进程。\n`
+        : `\n  服务启动失败：${err.message}\n`
+    );
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, async () => {
   const mode = config.apiKey ? "真实模型" : "模拟模式（未配置 API_KEY）";
   const displayHost = HOST === "0.0.0.0" || HOST === "::" ? "localhost" : HOST;
-  console.log(
-    `\n  LangGraph Agent Web 已启动\n` +
-    `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
-    `  模式: ${mode}   模型: ${config.model}   网关: ${config.baseURL}\n` +
-    `  提示: 右上角 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`
-  );
-  // 显式对外开放且未配置认证：给出不可忽略的警告（Phase 1 引入 AUTH_TOKEN 后此告警消失）
-  if ((HOST === "0.0.0.0" || HOST === "::") && !AUTH_ENABLED) {
-    console.warn(
-      `  ⚠⚠⚠  HOST=${HOST} 且未配置 AUTH_TOKEN：本服务的接口可以修改配置 / 执行命令 / 消耗网关配额，\n` +
-      `  ⚠⚠⚠  当前对局域网所有设备开放。仅限可信内网临时使用，公网场景必须先设置 AUTH_TOKEN。\n`
+  log("info", "server_start", {
+    host: HOST,
+    port: PORT,
+    authEnabled: AUTH_ENABLED,
+    mockMode: !config.apiKey,
+    model: config.model,
+  });
+  // 人类可读横幅只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
+  if (process.stdout.isTTY) {
+    console.log(
+      `\n  LangGraph Agent Web 已启动\n` +
+      `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
+      `  模式: ${mode}   模型: ${config.model}   网关: ${config.baseURL}\n` +
+      `  提示: 右上角 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`
     );
+  }
+  // 显式对外开放且未配置认证：日志里必须留痕，终端再给一次醒目提示
+  if ((HOST === "0.0.0.0" || HOST === "::") && !AUTH_ENABLED) {
+    log("warn", "insecure_bind", { host: HOST });
+    if (process.stderr.isTTY) {
+      console.warn(
+        `  ⚠⚠⚠  HOST=${HOST} 且未配置 AUTH_TOKEN：本服务的接口可以修改配置 / 执行命令 / 消耗网关配额，\n` +
+        `  ⚠⚠⚠  当前对局域网所有设备开放。仅限可信内网临时使用，公网场景必须先设置 AUTH_TOKEN。\n`
+      );
+    }
   }
 });

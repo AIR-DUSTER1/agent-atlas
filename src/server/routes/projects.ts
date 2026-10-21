@@ -6,6 +6,7 @@
 import { readBody, respondBadRequest } from "../http-body.js";
 import { listProjects, getActiveProjectId, setActiveProject, addProject, deleteProject, refreshCloudProject } from "../projects.js";
 import { moveSessions } from "../sessions.js";
+import { writeAudit } from "../audit.js";
 
 export async function handleListProjects(res: import("node:http").ServerResponse): Promise<void> {
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -16,6 +17,8 @@ export async function handleAddProject(res: import("node:http").ServerResponse, 
   const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; type?: string; path?: string; url?: string };
   try {
     const project = await addProject(body);
+    // 授权本地目录 / 云端仓库属于安全边界动作：只记 id 与类型，URL 可能含凭据
+    writeAudit("project.authorized", { projectId: project.id, type: project.type });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, project, projects: listProjects(), activeProjectId: getActiveProjectId() }));
   } catch (err) {

@@ -26,9 +26,15 @@ src/server/.dev-server.mjs
 
 # Web 设置页保存的供应商/模型覆盖配置（含 API Key，绝不提交）
 .web-config.json
+.web-config.json.bak
+.web-config.json.tmp
+.web-config.json.lock
 
 # ZCode 本地目录（日志/临时脚本）
 .setting/
+
+# Docker Compose 挂载的数据卷（配置/journal/审计，含密钥，绝不提交）
+data/
 
 # 开发过程内部文档（架构计划/阶段清单/攻面分析）——公开仓库不下发
 .plans/

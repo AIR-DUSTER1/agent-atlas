@@ -14,7 +14,7 @@
  * 参数：环境变量 DESKTOP_PORT 覆盖默认端口；DESKTOP_DEVTOOLS=1 打开 DevTools。
  */
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, execFileSync } = require("node:child_process");
 const path = require("node:path");
 const http = require("node:http");
 
@@ -144,7 +144,15 @@ function stopServer() {
   const pid = serverChild.pid;
   serverChild = null;
   if (process.platform === "win32" && pid) {
-    try { spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }); } catch { /* 尽力而为 */ }
+    // 必须同步等 taskkill 完成：spawn 是异步的，Electron 先退出会留下
+    // npx→tsx→node 孤儿继续占着 3123（真实测试时踩到过）。
+    try {
+      execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+        timeout: 5_000,
+      });
+    } catch { /* 已退出 / 权限不足：尽力而为 */ }
   } else if (pid) {
     try { process.kill(pid, "SIGTERM"); } catch { /* 已退出 */ }
   }

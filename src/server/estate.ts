@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { writeAudit } from "./audit.js";
 import { runWithLimit } from "./limits.js";
+import { log } from "./logging.js";
 
 /** 贝壳 CLI 资源桶（T2-5）：查询 + 后台 analyze 共用，2 并发上限 */
 const BEIKE_CLI_BUCKET = "beike-cli";
@@ -257,7 +258,7 @@ async function doInstallBeike(): Promise<BeikeStatus> {
     await fsp.mkdir(BEIKE_DIR, { recursive: true });
     // 先写 .part 临时名再 rename：防响应中断留下「看似可用」的半份压缩包
     const archive = join(BEIKE_DIR, "beike-cli.tar.gz.part");
-    console.log(`[estate] 下载贝壳 CLI v${bin.version}：${bin.url}`);
+    log("info", "estate_cli_download", { version: bin.version, url: bin.url });
     assertTrustedInstallUrl(bin.url, "二进制下载地址"); // 落到真实 request 前再度校验
     const res = await fetch(bin.url, { signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS), redirect: "error" });
     // redirect: "error"：显式拒绝跟到非白名单 host（重定向即视为篡改）

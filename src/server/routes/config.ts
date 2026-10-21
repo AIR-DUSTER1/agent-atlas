@@ -13,6 +13,12 @@ import {
 } from "../settings.js";
 import { bumpConfigVersion } from "../sessions.js";
 import { DEMOS } from "../sessions.js";
+import { writeAudit } from "../audit.js";
+
+/** 配置变更审计：只记 id/动作，不落 Key、baseURL 或模型清单全文 */
+function auditConfig(action: string, detail: Record<string, unknown> = {}): void {
+  writeAudit(`config.${action}`, detail);
+}
 
 /** GET /api/config —— 模型/模式元信息（前端顶栏与设置页的状态源） */
 export async function handleGetApiConfig(res: import("node:http").ServerResponse): Promise<void> {
@@ -44,6 +50,7 @@ export async function handleAddProvider(res: import("node:http").ServerResponse,
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("provider.added", { providerId: provider.id, activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, provider, activeChanged, mock: !config.apiKey }));
   } catch (err) {
@@ -60,6 +67,7 @@ export async function handleAddModel(res: import("node:http").ServerResponse, re
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("model.added", { providerId, modelId: r.model.id, created: r.created, activeChanged: r.activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, ...r }));
   } catch (err) {
@@ -76,6 +84,7 @@ export async function handleUpdateModel(res: import("node:http").ServerResponse,
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("model.updated", { providerId, modelId, activeChanged: r.activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, ...r }));
   } catch (err) {
@@ -91,6 +100,7 @@ export async function handleDeleteModel(res: import("node:http").ServerResponse,
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("model.deleted", { providerId, modelId, activeChanged: r.activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, ...r }));
   } catch (err) {
@@ -104,6 +114,7 @@ export async function handleSetReasoning(res: import("node:http").ServerResponse
   try {
     const r = await setReasoning(body);
     if (r.activeChanged) bumpConfigVersion();
+    auditConfig("reasoning.updated", { providerId: r.providerId, modelId: r.modelId, label: r.reasoningLabel });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, ...r, reasoning: getReasoningState() }));
   } catch (err) {
@@ -120,6 +131,7 @@ export async function handleUpdateProvider(res: import("node:http").ServerRespon
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("provider.updated", { providerId, activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, activeChanged, mock: !config.apiKey, model: config.model, baseURL: config.baseURL }));
   } catch (err) {
@@ -135,6 +147,7 @@ export async function handleDeleteProvider(res: import("node:http").ServerRespon
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("provider.deleted", { providerId, activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, activeChanged, mock: !config.apiKey }));
   } catch (err) {
@@ -151,6 +164,7 @@ export async function handleActivate(res: import("node:http").ServerResponse, re
       bumpConfigVersion();
       void refreshModelInfo().catch(() => {});
     }
+    auditConfig("provider.activated", { providerId: body.providerId ?? body.id ?? "", modelId: body.modelId ?? null, activeChanged: r.activeChanged });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, ...r, mock: !config.apiKey, baseURL: config.baseURL, reasoning: getReasoningState() }));
   } catch (err) {

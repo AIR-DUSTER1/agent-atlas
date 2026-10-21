@@ -78,46 +78,47 @@ export function runControlled(command: string, opts: ControlledSpawnOptions): Pr
     });
 
     let settled = false;
-    let code = 0;
     let killedBy: RunResult["killedBy"];
+    let killFallback: ReturnType<typeof setTimeout> | undefined;
     let stdoutBytes = 0;
     let stdout = "";
     const stderrChunks: string[] = []; // 先攒后取尾部，避免逐片段字符串拼接 O(n²)
     let stderrBytes = 0;
-    const done = (finalCode: number, by: RunResult["killedBy"]) => {
+    const done = (finalCode: number | null, by: RunResult["killedBy"]) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killFallback) clearTimeout(killFallback);
       child.removeAllListeners();
       // 终止原因统一写进 stderr 尾部：调用方（工具层）的 stderr 文案要能自解释
       const hint = by === "timeout" ? `\n[运行器] 超过 ${opts.timeoutMs}ms 被终止`
         : by === "output-limit" ? `\n[运行器] 输出超出上限被终止`
         : by === "abort" ? `\n[运行器] 被中止` : "";
       resolve({
-        code: by ? finalCode : (finalCode ?? 0),
+        // 异常终止统一 -1：taskkill 的真实退出码不稳定，调用方应看 killedBy
+        code: by ? -1 : (finalCode ?? -1),
         stdout,
         stderr: (stderrChunks.join("") + hint).slice(-stderrCap),
         killedBy: by,
       });
     };
 
-    /** 树杀 + 按「强杀路径」收结果（code 保留真实值，killedBy 标明原因） */
-    const terminate = (by: NonNullable<RunResult["killedBy"]>, exitCode: number) => {
+    /** 树杀 + 按「强杀路径」收结果（killedBy 标明原因，code 归一为 -1） */
+    const terminate = (by: NonNullable<RunResult["killedBy"]>) => {
       if (settled) return;
       killedBy = by;
-      code = exitCode;
-      if (!child.pid) { done(code, killedBy); return; } // spawn 都没成功（ENOENT）：无进程可杀
+      if (!child.pid) { done(-1, killedBy); return; } // spawn 都没成功（ENOENT）：无进程可杀
       try { killProcessTree(child.pid); } catch { /* 已退出 */ }
       // taskkill 是异步的，close 事件会随后到达走 done；
-      // 若 /T 失败进程还活着，用兜底时限强制 resolve
-      setTimeout(() => done(code, killedBy), KILL_SETTLE_GRACE_MS);
+      // 若 /T 失败进程还活着，用兜底时限强制 resolve（close 到了要清掉）
+      killFallback = setTimeout(() => done(-1, killedBy), KILL_SETTLE_GRACE_MS);
     };
 
-    const timer = setTimeout(() => terminate("timeout", -1), opts.timeoutMs);
+    const timer = setTimeout(() => terminate("timeout"), opts.timeoutMs);
 
     if (opts.signal) {
-      if (opts.signal.aborted) { terminate("abort", -1); return; }
-      opts.signal.addEventListener("abort", () => terminate("abort", -1), { once: true });
+      if (opts.signal.aborted) { terminate("abort"); return; }
+      opts.signal.addEventListener("abort", () => terminate("abort"), { once: true });
     }
 
     if (opts.stdinData !== null && child.stdin) {
@@ -129,7 +130,7 @@ export function runControlled(command: string, opts: ControlledSpawnOptions): Pr
       stdoutBytes += c.length;
       if (stdoutBytes > stdoutCap) {
         // 结果通道超限：保留已有头部，按输出上限终止
-        terminate("output-limit", -1);
+        terminate("output-limit");
         return;
       }
       stdout += c.toString("utf8");
@@ -145,9 +146,9 @@ export function runControlled(command: string, opts: ControlledSpawnOptions): Pr
         stderrBytes = Buffer.byteLength(joined);
       }
     });
-    child.on("error", (err) => done(-1, undefined));
+    child.on("error", () => done(-1, undefined));
     // spawn 自身失败（ENOENT 等）时 close 事件缺失 → error 事件后 resolve
-    child.on("close", (c) => done(c ?? (killedBy ? code : -1), killedBy));
+    child.on("close", (c) => done(c, killedBy));
   });
 }
 

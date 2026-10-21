@@ -1,0 +1,33 @@
+# ============================================================
+# docker-compose.yml — 单实例自托管（Phase 4，仅 loopback 暴露）
+# ============================================================
+# 容器内 HOST=0.0.0.0，宿主机只映射到 127.0.0.1，公网访问必须经
+# 反向代理（见 docs/deployment.md）。AUTH_TOKEN 用 :? 强制必填：
+# 未设置时 compose 直接报错，避免「对外开放且无认证」的默认事故。
+
+services:
+  agent:
+    build: .
+    image: langgraph-agent-demo:dev
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      AUTH_TOKEN: ${AUTH_TOKEN:?请先设置 AUTH_TOKEN（容器监听 0.0.0.0，不能无认证对外开放）}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data:/data
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g

@@ -52,10 +52,23 @@ async function readSse(path: string, payload: unknown): Promise<{ status: number
   return { status: 200, events };
 }
 
-test("healthz 与 config 形状（mock 模式）", async () => {
+test("healthz / readyz 与 config 形状（mock 模式）", async () => {
+  const raw = await fetch(srv.base + "/healthz");
+  assert.equal(raw.status, 200);
+  assert.match(raw.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/, "每个响应都应带 X-Request-Id");
+
   const health = await json("/healthz");
   assert.equal(health.status, 200);
-  assert.equal(health.body, "ok");
+  assert.equal(health.body.ok, true);
+  assert.match(health.body.version, /^\d+\.\d+\.\d+/);
+  assert.ok(health.body.uptimeSeconds >= 0);
+
+  const ready = await json("/readyz");
+  assert.equal(ready.status, 200);
+  assert.equal(ready.body.ok, true);
+  assert.equal(ready.body.shuttingDown, false);
+  assert.deepEqual(ready.body.checks, { configStore: true, sessionStore: true });
+
   const cfg = await json("/api/config");
   assert.equal(cfg.status, 200);
   assert.equal(cfg.body.mock, true, "测试必须跑在 mock 模式");
