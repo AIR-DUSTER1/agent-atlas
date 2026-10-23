@@ -51,6 +51,18 @@ export const generalProfile: AgentProfile = {
   systemPrompt: SYSTEM_PROMPT,
   tools,
   approvalDescriptions: generalApprovals,
+  analystGuidance: [
+    "通用编程任务补充规则：",
+    "- 能通过搜索、列目录或读文件定位目标时先执行工具，不要先问用户。",
+    "- 用户明确要求「只分析 / 不要修改」时，禁止把 write_file 或会改文件的 terminal 动作视为可执行默认值。",
+    "- 缺少目标对象、修改范围冲突或验证方式会实质改变结果时，才请求澄清。",
+  ].join("\n"),
+  reviewerGuidance: [
+    "通用编程任务补充检查：",
+    "- 是否直接回答了用户目标，并覆盖所有明确要求。",
+    "- 是否把未执行的工具、未运行的测试或未验证的结论说成已完成。",
+    "- 涉及代码修改时，是否说明改了什么、如何验证、还有哪些风险。",
+  ].join("\n"),
 };
 
 export function createAgentGraph() {

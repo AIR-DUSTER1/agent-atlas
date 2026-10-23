@@ -11,6 +11,8 @@ import {
   type WorkflowChatModel,
 } from "../../src/agent/workflow.js";
 import type { AgentProfile } from "../../src/agent/profile.js";
+import { generalProfile } from "../../src/agent/general.js";
+import { estateProfile } from "../../src/agent/estate.js";
 
 const testProfile: AgentProfile = {
   id: "general",
@@ -79,6 +81,15 @@ test("结果反思：明确失败才回炉，坏输出默认通过", () => {
 
   assert.equal(parseReviewResult("not json").passes, true);
   assert.equal(parseReviewResult(JSON.stringify({ passes: true })).passes, true);
+});
+
+test("通用与房产 profile 注入不同的分析 / 反思领域规则", () => {
+  assert.match(generalProfile.analystGuidance ?? "", /只分析/);
+  assert.match(generalProfile.reviewerGuidance ?? "", /未验证/);
+  assert.match(estateProfile.analystGuidance ?? "", /租房/);
+  assert.match(estateProfile.analystGuidance ?? "", /houseId/);
+  assert.match(estateProfile.reviewerGuidance ?? "", /宏观均价/);
+  assert.match(estateProfile.reviewerGuidance ?? "", /预约或加微/);
 });
 
 test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反思", async () => {

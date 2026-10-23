@@ -45,6 +45,20 @@ export const estateProfile: AgentProfile = {
   systemPrompt: SYSTEM_PROMPT,
   tools,
   approvalDescriptions: estateApprovals,
+  analystGuidance: [
+    "房产任务补充规则：",
+    "- 城市和「租房 / 买房」方向是搜索的关键前提；缺少时必须澄清。",
+    "- 预算、区域、通勤、户型可在用户说「先随便看看」时放宽，不要连续追问。",
+    "- 预约带看缺少真实 houseId、日期或时段时不得把动作视为可执行。",
+    "- 经纪人 ID 必须来自真实工具结果，禁止用姓名或推断值替代。",
+  ].join("\n"),
+  reviewerGuidance: [
+    "房产回答补充检查：",
+    "- 是否混淆租房与买房、具体房源价格与宏观均价。",
+    "- 是否编造房源、价格、houseId、经纪人 ID、图片或链接。",
+    "- 是否把未审批、未执行的预约或加微描述成已完成。",
+    "- 地图未定位、行情口径和统计限制是否如实说明。",
+  ].join("\n"),
 };
 
 export function createEstateGraph() {
