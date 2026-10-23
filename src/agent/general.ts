@@ -63,6 +63,10 @@ export const generalProfile: AgentProfile = {
     "- 是否把未执行的工具、未运行的测试或未验证的结论说成已完成。",
     "- 涉及代码修改时，是否说明改了什么、如何验证、还有哪些风险。",
   ].join("\n"),
+  contextPolicy: {
+    maxRecentMessages: 32,
+    maxToolResultChars: 8_000,
+  },
 };
 
 export function createAgentGraph() {

@@ -13,6 +13,13 @@ export type AgentProfileId = "general" | "estate";
 
 export type ApprovalDescriptions = Record<string, (args: Record<string, unknown>) => string>;
 
+export interface AgentContextPolicy {
+  /** 送给模型的最近消息上限；工具结果按字符预算再裁剪。 */
+  maxRecentMessages: number;
+  /** 单条 ToolMessage 进入模型上下文前的字符上限。 */
+  maxToolResultChars: number;
+}
+
 export interface AgentProfile {
   id: AgentProfileId;
   displayName: string;
@@ -24,6 +31,8 @@ export interface AgentProfile {
   /** 可选：追加到需求分析 / 结果反思提示词的领域规则。 */
   analystGuidance?: string;
   reviewerGuidance?: string;
+  /** 可选：消息与工具结果预算；未配置时使用 workflow 的安全默认值。 */
+  contextPolicy?: Partial<AgentContextPolicy>;
 }
 
 /** 会话 kind 到 profile 的派生规则；demo / external 没有可执行 profile。 */

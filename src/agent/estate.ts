@@ -59,6 +59,10 @@ export const estateProfile: AgentProfile = {
     "- 是否把未审批、未执行的预约或加微描述成已完成。",
     "- 地图未定位、行情口径和统计限制是否如实说明。",
   ].join("\n"),
+  contextPolicy: {
+    maxRecentMessages: 24,
+    maxToolResultChars: 5_000,
+  },
 };
 
 export function createEstateGraph() {
