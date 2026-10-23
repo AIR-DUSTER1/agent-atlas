@@ -92,6 +92,11 @@ export function uiPrompt(message, opts = {}) {
   return uiDialog({ message, mode: "prompt", ...opts });
 }
 
+/** 全局 Esc 兜底：关闭当前页内对话框；队列中的下一个由 uiDialogFinish 自动继续。 */
+export function cancelActiveDialog() {
+  uiDialogFinish(uiDialogState.mode === "prompt" ? null : false);
+}
+
 // 组件事件绑定（module 脚本在 DOM 解析完成后执行，元素此时已存在）
 (() => {
   const mask = $("ui-dialog-mask");

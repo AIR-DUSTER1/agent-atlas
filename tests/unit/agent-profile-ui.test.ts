@@ -4,6 +4,7 @@
  * UI 只依赖 agentProfileId 的展示契约；legacy kind 仍可回退，未知值不能伪装成通用 Agent。
  */
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   AGENT_PROFILES,
@@ -25,4 +26,14 @@ test("agentProfileId 优先，旧 kind 可兼容，未知身份不默认成通�
   assert.equal(profileMetaForSession({ agentProfileId: "evil", kind: "agent" })?.id, "general");
   assert.equal(agentProfileMeta("evil"), null);
   assert.equal(profileMetaForSession({ kind: "unknown" }), null);
+});
+
+
+test("全局 Esc 使用 ui-dialog 导出函数，不引用模块私有实现", async () => {
+  const app = await readFile(new URL("../../src/server/public/app.js", import.meta.url), "utf8");
+  const dialog = await readFile(new URL("../../src/server/public/modules/ui-dialog.js", import.meta.url), "utf8");
+  assert.match(app, /import \{[^}]*cancelActiveDialog[^}]*\} from "\.\/modules\/ui-dialog\.js"/);
+  assert.match(app, /cancelActiveDialog\(\);/);
+  assert.doesNotMatch(app, /uiDialogFinish\(/);
+  assert.match(dialog, /export function cancelActiveDialog\(/);
 });

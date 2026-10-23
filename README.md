@@ -139,7 +139,8 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 架构：`node:http` + SSE（无 Express）｜前端原生 HTML/CSS/JS（无框架、无构建）。
 事件协议与翻译层见 `src/server/events.ts` / `stream.ts`，细节见 Wiki §3.12。
 后端按「入口 + 路由 + 域模块」分层（`index.ts` 只做 dispatch，业务在 `server/routes/*.ts`）；
-前端通用件拆在 `public/modules/`（原生 ESM：Markdown 渲染、弹窗组件），仍无构建步骤。
+前端通用件拆在 `public/modules/`（原生 ESM：Markdown 渲染、Agent profile、弹窗组件），
+仍无构建步骤；页内弹窗支持 Esc 与点击遮罩关闭。
 
 ### 接入第三方 Agent（只需要一个 Git 地址）
 

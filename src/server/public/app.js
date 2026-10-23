@@ -11,11 +11,11 @@ import {
   escapeHtml, renderInline, renderMarkdown, fmtArgs, fmtTokens, fmtSize,
   reasoningTag, safeImageSrc, safeHref, nodeIcon, nodeLabel, NODE_ICONS, TOOL_ICONS,
 } from "./modules/format.js";
-import { showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
+import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-23-1";
+const APP_VERSION = "web-2026-10-23-2";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -3549,7 +3549,7 @@ async function init() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      uiDialogFinish(null); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）
+      cancelActiveDialog(); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）
       closeComposerMenu();
       closeModal();
       closeSettings();
