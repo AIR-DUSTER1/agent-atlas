@@ -9,8 +9,8 @@
  *   session   会话创建 / 元数据全量（upsert 形）
  *   rename    标题变更
  *   project   项目归属变更
- *   approval  人工审批进入 pending（payload 全量）
- *   decided   审批已由用户做出（approve / reject）—— 之后不再改写
+ *   approval  人工审批 / 需求澄清进入 pending（payload 全量）
+ *   decided   用户已做出决定（approve / reject / answered）—— 之后不再改写
  *   delete    会话删除（回放时丢弃，同样也允许 compact 时省空间）
  *   turn      一轮对话的完整事件流（user 消息 + events 数组）
  *
@@ -21,7 +21,7 @@
  * - 回放时坏行跳过并告警（NDJSON 单行损坏不影响其它行）；
  * - 会话数上限 SESSIONS_MAX，compact 时按 createdAt 保留最新的。
  *
- * 坑（T2-3）：审批状态机的一次性 —— approval→decided 只允许一次转移，
+ * 坑（T2-3）：审批/澄清状态机的一次性 —— approval→decided 只允许一次转移，
  * 回放时 resolved 状态以 joined decided行 为准，之后重复 approve 不再执行。
  */
 import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises";
@@ -41,7 +41,7 @@ const SESSIONS_MAX = 300;
 export interface ApprovalSnapshot {
   toolName: string;
   payload: unknown;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "answered";
 }
 
 export interface SessionRecord {
@@ -119,7 +119,7 @@ export function journalApproval(id: string, toolName: string, payload: unknown):
   journalWrite({ ts: Date.now(), ev: "approval", id, toolName, payload });
 }
 
-export function journalDecided(id: string, status: "approved" | "rejected"): void {
+export function journalDecided(id: string, status: "approved" | "rejected" | "answered"): void {
   journalWrite({ ts: Date.now(), ev: "decided", id, status });
 }
 
@@ -188,7 +188,8 @@ function applyEvent(ev: Record<string, unknown>): void {
   } else if (evName === "decided") {
     const base = state.get(String(ev.id ?? ""));
     if (base?.pendingApproval) {
-      base.pendingApproval.status = ev.status === "approved" ? "approved" : "rejected";
+      base.pendingApproval.status =
+        ev.status === "approved" ? "approved" : ev.status === "rejected" ? "rejected" : "answered";
     }
   } else if (evName === "delete") {
     state.delete(String(ev.id ?? ""));

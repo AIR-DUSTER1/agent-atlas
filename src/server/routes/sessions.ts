@@ -7,6 +7,7 @@
 import { readBody, respondBadRequest } from "../http-body.js";
 import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory } from "../sessions.js";
 import { getActiveProjectId } from "../projects.js";
+import { compactSession } from "../compaction.js";
 
 export async function handleSessions(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
   if (req.method === "GET") {
@@ -48,6 +49,23 @@ export async function handleDeleteSession(res: import("node:http").ServerRespons
   res.end(JSON.stringify({ ok: deleteSession(id) }));
 }
 
+/** POST /api/sessions/:id/compact —— 压缩当前会话上下文（模型摘要 + 重建线程） */
+export async function handleCompactSession(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, id: string): Promise<void> {
+  const session = getSession(id);
+  if (!session) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    return;
+  }
+  try {
+    const data = await compactSession(session);
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true, ...data }));
+  } catch (err) {
+    respondBadRequest(res, req, err);
+  }
+}
+
 /** GET /api/sessions/:id/transcript —— 历史轮次回放（本地浏览器无该会话缓存时前端拉取重放） */
 export async function handleTranscript(res: import("node:http").ServerResponse, id: string): Promise<void> {
   const session = getSession(id);
@@ -57,5 +75,5 @@ export async function handleTranscript(res: import("node:http").ServerResponse, 
     return;
   }
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ records: getTurnHistory(session), pendingApproval: session.pendingApproval }));
+  res.end(JSON.stringify({ records: getTurnHistory(session), pendingApproval: Boolean(session.pendingApproval) }));
 }

@@ -56,10 +56,10 @@ import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
   handleSetReasoning, handleUpdateProvider, handleDeleteProvider, handleActivate, handleModels,
 } from "./routes/config.js";
-import { handleSessions, handleDeleteSession, handleTranscript } from "./routes/sessions.js";
+import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
-import { handleFsList, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
+import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 const PORT = Number(process.env.PORT ?? 3000);
@@ -167,6 +167,7 @@ const server = createServer(async (req, res) => {
     const providerMatch = pathname.match(/^\/api\/config\/providers\/([\w-]+)$/);
     const sessionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
     const transcriptMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/transcript$/);
+    const compactMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/compact$/);
     const extMatch = pathname.match(/^\/api\/external-agents\/([\w-]+)$/);
     const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
@@ -187,6 +188,7 @@ const server = createServer(async (req, res) => {
     // 会话
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }
     if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, sessionMatch[1]); return; }
+    if (compactMatch && req.method === "POST") { await handleCompactSession(res, req, compactMatch[1]); return; }
     if (transcriptMatch && req.method === "GET") { await handleTranscript(res, transcriptMatch[1]); return; }
 
     // 外部 Agent
@@ -204,6 +206,7 @@ const server = createServer(async (req, res) => {
 
     // 文件上下文
     if (pathname === "/api/fs/list" && req.method === "POST") { await handleFsList(res, req); return; }
+    if (pathname === "/api/fs/search" && req.method === "POST") { await handleFsSearch(res, req); return; }
     if (pathname === "/api/fs/read" && req.method === "POST") { await handleFsRead(res, req); return; }
     if (pathname === "/api/fs/open-remote" && req.method === "POST") { await handleFsOpenRemote(res, req); return; }
     if (pathname === "/api/files/upload" && req.method === "POST") { await handleUpload(res, req); return; }
@@ -223,7 +226,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (pathname === "/api/resume" && req.method === "POST") {
-      const body = JSON.parse((await readBody(req)) || "{}") as { sessionId?: string; decision?: unknown };
+      const body = JSON.parse((await readBody(req)) || "{}") as { sessionId?: string; decision?: unknown; choice?: unknown };
       sessionIdForLog = typeof body.sessionId === "string" ? body.sessionId : undefined;
       await handleResume(res, req, body.sessionId ?? "", body);
       return;

@@ -22,7 +22,17 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentEvent, ApprovalPayload } from "./events.js";
+import type { AgentEvent, InterruptPayload } from "./events.js";
+
+/** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
+const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review"]);
+
+function asInterruptPayload(value: unknown): InterruptPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const type = (value as { type?: unknown }).type;
+  return type === "approval" || type === "clarification" ? (value as InterruptPayload) : null;
+}
+
 
 /** 任意 graph.stream() 可用对象（4 个 demo 的图节点名互不相同，泛型互斥，鸭子类型即可） */
 type AnyGraph = {
@@ -198,6 +208,7 @@ export async function* runGraphEvents(
     if (mode === "messages" && Array.isArray(payload)) {
       const [msg, meta] = payload as [unknown, Record<string, unknown>];
       const node = nodeLabel(meta);
+      if (node && INTERNAL_LLM_NODES.has(node)) continue;
 
       if (msg instanceof AIMessageChunk) {
         // -- token 用量（分片累积合并；Anthropic 系 input/output 分散在多个 chunk）--
@@ -253,8 +264,8 @@ export async function* runGraphEvents(
         if (nodeKey === "__interrupt__") {
           const list = (update as Array<{ value?: unknown }>) ?? [];
           for (const item of list) {
-            const value = item?.value as ApprovalPayload | undefined;
-            if (value && value.type === "approval") {
+            const value = asInterruptPayload(item?.value);
+            if (value) {
               yield { type: "interrupt", payload: value };
             }
           }
@@ -263,6 +274,7 @@ export async function* runGraphEvents(
         if (!nodeKey.startsWith("__")) {
           yield { type: "node", name: nodeKey };
         }
+        if (INTERNAL_LLM_NODES.has(nodeKey)) continue;
         // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息
         for (const [, msg] of walkUpdateMessages(nodeKey, update)) {
           if (msg instanceof HumanMessage) continue;

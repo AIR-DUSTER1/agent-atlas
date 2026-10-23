@@ -5,7 +5,7 @@
  * 上传单独放宽请求体到 12MB（图片走 dataURL，体积比文本大）。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { listDir, readFileAuthorized, openRemoteRoot, storeUpload } from "../files.js";
+import { listDir, searchFiles, readFileAuthorized, openRemoteRoot, storeUpload } from "../files.js";
 import { listProjects } from "../projects.js";
 
 export async function handleFsList(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
@@ -20,6 +20,17 @@ export async function handleFsList(res: import("node:http").ServerResponse, req:
     });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ...data, roots }));
+  } catch (err) {
+    respondBadRequest(res, req, err);
+  }
+}
+
+export async function handleFsSearch(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
+  const body = JSON.parse((await readBody(req)) || "{}") as { query?: unknown };
+  try {
+    const data = await searchFiles(typeof body.query === "string" ? body.query : "");
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(data));
   } catch (err) {
     respondBadRequest(res, req, err);
   }

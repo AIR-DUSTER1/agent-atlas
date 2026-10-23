@@ -4,6 +4,9 @@
 > 并能从零搭出自己的 Agent。
 >
 > 配套阅读：代码里每个文件都有详细中文注释，建议「文档 + 源码 + 运行观察」三者对照学习。
+>
+> 端到端运行时编排（请求 → 选图 → 工具 / 审批 → SSE → 压缩）见
+> [`agent-orchestration.md`](agent-orchestration.md)。
 
 ***
 
@@ -27,12 +30,14 @@
 
 一个用 **LangGraph.js（v1.4.9）+ TypeScript** 搭建的 **Agent Web 应用**（可正常使用），
 同时内置 **5 个学习示例**作为「事例选择」：
-新建对话默认使用**通用 Agent**（`src/agent/general.ts`：工具循环 + 多轮记忆 + 高风险审批 +
-📎 文件上下文，按产品逻辑组装）；示例则刻意保持教学形态，用于观察特定图结构的运行方式。
+新建对话默认使用**通用 Agent**（`src/agent/general.ts`：需求理解 → 澄清 →
+ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件上下文，按产品逻辑组装）；
+示例则刻意保持教学形态，用于观察特定图结构的运行方式。
 
 | 类型 | 文件 | 概念 | 一句话说明 |
 |------|------|------|-----------|
-| 通用 Agent | `src/agent/general.ts` | 产品化组合（默认） | ReAct + 记忆 + 审批 + 文件上下文 |
+| 通用 Agent | `src/agent/general.ts` | 产品化组合（默认） | 需求理解 / 澄清 + ReAct + 记忆 + 审批 + 反思 |
+| 共享编排 | `src/agent/workflow.ts` | 图内前置/后置节点 | `analyze → clarify? → agent ⇄ tools → review` |
 | 1 | `src/agent/basic.ts` | State / Node / Edge / 条件边 / 工具循环 | 亲手搭一张最基础的 ReAct 图 |
 | 2 | `src/agent/memory.ts` | Checkpointer / thread_id | 给同一张图加上多轮记忆 |
 | 3 | `src/agent/hitl.ts` | interrupt / Command.resume | 高风险操作（发邮件）执行前人工审批 |
@@ -60,7 +65,7 @@
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
-    ├── agent/            # 通用 Agent + 5 个示例的图定义（学习的重点）
+    ├── agent/            # 共享工作流 + 通用/房产 Agent + 5 个示例的图定义（学习的重点）
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
@@ -204,6 +209,17 @@ const decision = interrupt<"approve" | "reject">({
 
 // 外部恢复（src/cli.ts）
 await graph.invoke(new Command({ resume: decision }), { configurable: { thread_id } });
+```
+
+需求澄清复用同一机制，只是载荷与恢复值不同（`src/agent/workflow.ts`）：
+
+```ts
+const choice = interrupt<ClarificationRequest, string>({
+  type: "clarification",
+  question: "先看哪个城市？",
+  options: [{ id: "A", label: "北京" }, { id: "B", label: "上海" }],
+  allowCustom: true,
+});
 ```
 
 > ⚠️ interrupt 依赖 checkpointer 保存「暂停时的状态」，所以 HITL 必须配 checkpointer。
@@ -454,6 +470,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 7 种 `AgentEvent`
   （node / token / tool_call / tool_result / interrupt / ai_message / error）。
   内容只认 messages 模式，updates 只取「节点名 + interrupt + 兜底消息」，按消息 id 去重；
+  默认工作流的 `analyze / clarify / review` 是内部节点，token 与整段消息会被过滤，
+  只保留节点徽章和 interrupt（见 §3.20）；
 - **会话绑定 `sessions.ts`**：每个会话一张图实例，Demo 2/3 的 `thread_id` 绑定会话 id，
   多轮记忆与 interrupt 状态因此得以延续；
 - **在线配置 `settings.ts`（多供应商）**：设置页（⚙）可添加任意多个供应商档案
@@ -462,10 +480,11 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   切换/修改启用中的供应商 → 配置版本号 +1，**已有会话在下次发消息时自动重建图**
   （Demo 2/3 的记忆随之重置）；Key 只回传掩码，编辑时留空 = 保持不变；
   旧版单供应商配置文件会自动迁移；首次启动无文件时从 `.env` 播种一个默认档案；
-- **模型在建图时创建**：4 个 agent 文件的 `createChatModel()` 都在 `createXxxGraph()` 工厂内
+- **模型在建图时创建**：各 agent 图文件的 `createChatModel()` 都在 `createXxxGraph()` 工厂内
   调用（而非模块加载时），这是「改配置能对新会话生效」的前提；
 - **模拟模式 `mock.ts`**：未配置 `API_KEY` 时自动接管「模型决策」（脚本编排，工具结果仍真实执行），
-  事件协议与真实图完全一致 —— 没有Key 也能完整体验 UI 的全部交互；
+  事件协议与真实图完全一致 —— 没有Key 也能完整体验 UI 的大部分交互；
+  但 mock 不经过 `workflow.ts`，不会产生需求澄清，也不能恢复澄清；
 - **用量与容量条 `stream.ts` / `settings.ts`**：网关返回的 `usage`
   （`usage_metadata`，兼容旧 `tokenUsage` 形状）被翻译成 `usage` 事件 ——
   `input_tokens` ≈ 当时整段对话的上下文大小，`input_token_details.cache_read`
@@ -486,6 +505,13 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   前端只传「引用」（路径 / uploadId），内容由服务端在发送时读取并校验
   （授权前缀校验防穿越、二进制拒绝、单文件超长截断），再以
   `--- 附件 N: 名 ---` 边界拼进用户消息，因此 4 个 Demo 的图与 mock 无需任何改动；
+- **输入辅助 `app.js`**：输入框以「行首或空白后的 `/` / `@`」识别触发器，避免正文邮箱误触。
+  `@` 走 `POST /api/fs/search`（`files.ts:searchFiles`，最多 20 条、跳过依赖/密钥文件），
+  选中后复用附件 chips，不把路径文本塞进消息；`/` 菜单当前只有「压缩上下文」。
+- **上下文压缩 `compaction.ts`**：`POST /api/sessions/:id/compact` 取最近最多 40 轮、
+  80k 字符送模型摘要（无 Key / 失败时退回本地摘录），成功后重建图并换新 `threadId`，
+  下一轮由 `takeContextSummary()` 一次性注入摘要。外部 Agent、待审批会话拒绝压缩；
+  旧 transcript 仍保留用于回放，所以 UI 会额外显示一张“压缩摘要”提示卡。
 - **项目文件夹 `projects.ts`**：参考 ZCode 的「项目 ▾」—— 侧栏可选项目，
   会话按项目分组、新建对话归属当前项目。项目分两类并用样式区分：
   **💻 本地**（服务器磁盘目录）与 **☁️ 云端**（Git 仓库地址，添加时
@@ -493,7 +519,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   菜单里 ⟳ = `git pull`，删除 = 撤销授权并清缓存，其会话迁移到默认项目）。
   列表持久化在 `.web-config.json` 的 `projects/activeProjectId` 字段，
   启动时校验目录仍在才恢复；
-- **审批交互**：`interrupt` 事件 → 前端渲染批准/拒绝按钮 → `POST /api/resume` →
+- **审批 / 澄清交互**：`interrupt` 事件（`approval` 或 `clarification` 载荷）→
+  前端渲染批准/拒绝或选项/自定义输入 → `POST /api/resume`（`{decision}` 或 `{choice}`）→
   服务端 `Command({ resume })` 继续被暂停的图（与 CLI 的 Demo 3 同一条路径）；
 - **多协议模型工厂 `llm.ts`**：供应商档案带 `protocol` 字段（openai / openai-responses /
   anthropic / gemini），`createChatModel` 据此返回 `ChatOpenAI(useResponsesApi)` /
@@ -585,7 +612,7 @@ Header: Authorization: Bearer <key>（可留空）
 |---|---|---|
 | `server/estate.ts` | CLI 客户端 | `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?}`；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（Phase 1：人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；工具永不 throw 穿透图，失败返回 `{error}` 中文说明 |
-| `agent/estate.ts` | 图 | 与 `general.ts` 同形态（ReAct + MemorySaver + approvalToolsNode），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图对比 / 材料前置 / 禁编造 ID / 高风险复述 / 口径声明） |
+| `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图对比 / 材料前置 / 禁编造 ID / 高风险复述 / 口径声明） |
 
 **关键常量**（city 名尽量存表）：`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：工作台直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。
 
@@ -625,20 +652,21 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
 | `config-store.ts` | `.web-config.json` 原子存储 | 写入「`.tmp` + fsync + rename」（Windows rename 抖动重试一次）；`.bak` 滚动备份 + 启动自动抢救（双坏降级 `{}` 不崩服务）；跨进程文件锁 `.web-config.lock`（O_EXCL 创建，**存活判断只能靠时间戳** —— `process.kill(pid,0)` 在 Windows 对在在/否/无权限一律 EPERM，纯 pid 探测不可靠）；`schemaVersion=2` 注入向后兼容 |
-| `session-store.ts` | 会话 journal | append-only NDJSON `.setting/sessions.ndjson`（gitignore）；事件：`session`（upsert，**白名单挑字段**——Session 含编译图/内存结构严禁整只序列化）、`approval`（pending 全量 payload）、`decided`（一次性转移）、`delete`、`turn`（user + events）；坏行跳过告警；`JOURNAL_MAX_BYTES=2MB` 超限快照重写 + 轮转 `.1`；启动 `replaySessions()` 回放进内存 |
+| `session-store.ts` | 会话 journal | append-only NDJSON `.setting/sessions.ndjson`（gitignore）；事件：`session`（upsert，**白名单挑字段**——Session 含编译图/内存结构严禁整只序列化）、`approval`（pending 全量 payload）、`decided`（approve / reject / answered，一次性转移）、`delete`、`turn`（user + events）；坏行跳过告警；`JOURNAL_MAX_BYTES=2MB` 超限快照重写 + 轮转 `.1`；启动 `replaySessions()` 回放进内存 |
 | `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `runWithLimit("beike-cli", 2)` |
 
 **sessions.ts 启动回放配套**（Phase 2）：`restoreSessions()` 把 journal 回放成内存会话
-（图按 kind 重建为空态 checkpointer）；`pendingApproval === "pending"` 的会话标
+（图按 kind 重建为空态 checkpointer）；`pendingApproval` 仍为 `status=pending` 的会话标
 `resumeUnavailable` —— resume 一律 400 中文引导「重新发起」（绝不静默重复执行还能改
-世界的操作）；带历史轮次的会话标 `resumeUninjected` —— 首条真图消息前自动注入「最近
+世界的操作，也不重放已失效的澄清）；带历史轮次的会话标 `resumeUninjected` —— 首条真图消息前自动注入「最近
 12 轮的上文摘录」一次性续命（`buildPrehistoryNote`，纯工具轮跳过，demo1/4 无记忆图不注入）。
 
 **坑（踩过的）**：
-- `done` 事件是 streamToClient finally 兜底写的、**不是** produce 产出的 —— 主循环里
-  `event.type === "done"` 的分支是死代码，内存 `pendingApproval` 清理要靠 `recordDecision`；
-- resume 的 `recordDecision` 不能判内存 `pendingApproval`（done 兜底已把内存清空，
-  onDone 在其后才执行）—— journal 侧幂等（已 decided 的 pending 回放时忽略）。
+- `done` 由 `runGraphEvents` 产出、`streamToClient` finally 再兜底补发；主循环收到
+  `done` 时只在**没有新 interrupt** 的情况下清空内存 `pendingApproval`，否则会把
+  等待用户恢复的审批/澄清误清掉；
+- resume 的 `recordDecision` 只在恢复流没有产生新 interrupt 时调用；正常完成的 done
+  会先清内存，onDone 在其后执行，所以不能靠内存状态判断（journal 侧 decided 幂等）。
 
 ---
 
@@ -649,8 +677,8 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
-| `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、404/400、静态页面与 ESM 模块 MIME |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
 
@@ -697,6 +725,42 @@ Dockerfile 用 `CMD ["node", "--import", "tsx", ...]`，信号直达应用。
 **当前边界**：会话、限流闸、SSE 表都在进程内，`data/` 只能给一个实例用；
 多副本/共享存储属于 Phase 5。桌面端仍是开发壳（Windows 退出用 `taskkill /F`，
 不触发优雅退出），打包评估结论见 `docs/deployment.md` §7。
+
+### 3.20 `src/agent/workflow.ts` — 产品默认编排（需求理解 / 澄清 / 反思）
+
+**设计立场**：把「执行前理解、执行后检查」做成图内节点，而不是散落在路由或
+prompt 里；`general.ts` / `estate.ts` 只提供工具集和系统提示词，避免两套编排漂移。
+
+```text
+START → analyze → clarify? → agent ⇄ tools → review → END
+                         ↑                    │
+                         └── 不通过且未修订 ──┘
+```
+
+| 节点 | 职责 | 关键约束 |
+|---|---|---|
+| `analyze` | 判断最新请求是否明确，生成 `requirementBrief` | 坏 JSON / 模型异常默认“明确继续”；只问会实质改变结果的信息 |
+| `clarify` | `interrupt({ type:"clarification", question, options, allowCustom })` | 2–4 个互斥选项；服务端 `/api/resume {choice}`；选项 id 映射成可读标签；答案同时写入 `clarificationHistory` |
+| `agent` | 绑定工具的 ReAct 节点 | 系统提示词后追加 `【需求理解】` / `【上一轮反思反馈】` 内部注记 |
+| `tools` | 复用 `approvalToolsNode` | 高风险工具仍走审批，不另造一套 |
+| `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多一次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
+
+**关键坑**：
+
+- `analyze` / `clarify` / `review` 的模型输出是内部 JSON，不能进入对话正文；
+  `server/stream.ts` 按节点名 `INTERNAL_LLM_NODES` 过滤 token 与完整消息，
+  改节点名必须同步改过滤集合；
+- 澄清答案不写入图的 `messages`，而是并入 `requirementBrief` 并保存到
+  `clarificationHistory`，供后续轮次的 `analyze` / `agent` 参考；`turnHistory`
+  只记一条带括号的审计轮次（回放时可见），不会作为新的用户指令重复喂给模型；
+- `reviewFeedback` 只作为下一轮 `agent` 的 system 注记，不写进 `messages`，
+  防止内部批评被当成用户可见历史；
+- 图状态字段的 reducer 必须兼容 `undefined`，否则中断恢复时旧 checkpoint 缺字段会报错；
+- `createWorkflowGraph()` 支持注入 `WorkflowModels`，单测用 `FakeListChatModel`
+  跑通「澄清 → resume → 反思回炉」整图，不消耗真实 API。
+
+**当前边界**：只有默认 `agent` 与 `estate` 使用；Demo 1–5、外部 Agent、mock
+模式都不经过这张图。mock 不会产生澄清，也不能恢复澄清。
 
 ---
 
@@ -1152,6 +1216,7 @@ console.log(result.messages.at(-1).content);
 | 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
 | 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |
 | 点 📎 附件按钮「没反应」/ 文件选择器不出现 | `#fs-mask` 只有 `hidden` 切换，没有 `position:fixed; inset:0; display:grid; z-index`，弹窗被排到文档流末尾，事件其实已触发。给 `#fs-mask` / `#estate-mask` 补遮罩样式（与 `#kb-mask` 同层），别只查 JS 事件 |
+| 房产数据源面板只有文字、没有窗体 | 遮罩修好后 `#estate-modal` 仍只有 `width`，没有背景/边框/圆角/内边距，内容直接浮在暗色遮罩上。补齐 `background/border/border-radius/padding/max-height/overflow`，与 `#kb-modal` 保持同一套窗体语义 |
 | `docker stop` 很慢、最后被 SIGKILL，journal 可能丢尾部 | `npm run web` / npx 包装层收不到或不会转发 SIGTERM 给 node 子进程。Dockerfile 必须 `CMD ["node","--import","tsx",...]` 让 node 作 PID 1；compose 的 `stop_grace_period` 要大于应用内 10s 排空超时 |
 | 容器首次启动 `/data/web-config.json` 变成空目录 | 把**不存在的宿主机文件** bind mount 到容器路径时，Docker 会创建目录而不是文件。正确做法：挂载 `./data:/data`，用 `WEB_CONFIG_FILE=/data/web-config.json` 指向卷内文件（本项目镜像默认即如此） |
 | 镜像构建卡在 electron 下载 | `npm ci` 会跑 devDependencies 的 postinstall（electron 要下几百 MB 二进制）。Web 镜像用 `npm ci --ignore-scripts`；tsx/esbuild 靠平台可选包仍可运行 |

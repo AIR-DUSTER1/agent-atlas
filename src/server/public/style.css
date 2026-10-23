@@ -644,6 +644,35 @@ body {
 .btn-reject:hover { background: rgba(229,96,79,.12); }
 .approval-verdict { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 
+/* --- 需求澄清卡片：选项 + 自由输入 --- */
+.clarification-card {
+  border-color: rgba(91,140,255,.42);
+  background: rgba(91,140,255,.07);
+}
+.clarify-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 12px; }
+.clarify-option {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  width: 100%; padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg-elev); color: var(--text);
+  text-align: left; cursor: pointer;
+  transition: border-color .15s, background .15s;
+  font-family: var(--sans);
+}
+.clarify-option:hover { border-color: var(--accent); background: var(--bg-hover); }
+.clarify-option-label { font-size: 13px; font-weight: 600; color: var(--accent-soft-2); }
+.clarify-option-desc { font-size: 12px; line-height: 1.5; color: var(--text-3); }
+.clarify-custom { display: flex; gap: 8px; margin-bottom: 10px; }
+.clarify-custom.hidden { display: none; }
+.clarify-input {
+  flex: 1; min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); color: var(--text);
+  font-size: 13px; font-family: var(--sans);
+}
+.clarify-input:focus { outline: none; border-color: var(--accent); }
+
 /* --- 错误块 --- */
 .error-block {
   margin: 10px 0;
@@ -654,6 +683,26 @@ body {
   border-radius: 10px;
   font-size: 13px;
   line-height: 1.6;
+}
+.notice-block {
+  margin: 10px 0;
+  border: 1px solid rgba(91,140,255,.3);
+  background: rgba(91,140,255,.07);
+  color: var(--text-2);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.notice-block.loading { border-style: dashed; opacity: .85; }
+.notice-title { color: var(--text); font-weight: 600; margin-bottom: 3px; }
+.notice-details { margin-top: 6px; }
+.notice-details summary { cursor: pointer; color: var(--accent-soft); }
+.notice-details pre {
+  margin: 6px 0 0;
+  max-height: 220px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: var(--mono); font-size: 11px; color: var(--text-2);
 }
 
 /* 打字中指示（还没收到任何 token 时） */
@@ -817,6 +866,7 @@ body {
 .bubble .f-chip .fsrc { font-size: 9.5px; color: var(--accent-soft-2); }
 
 #input-box {
+  position: relative;
   max-width: var(--content-w); margin: 0 auto;
   display: flex; align-items: flex-end; gap: 6px;
   background: linear-gradient(180deg, var(--composer-a), var(--composer-b));
@@ -888,6 +938,56 @@ body {
 }
 #stop-btn:active { transform: scale(.9); }
 #input-box .attach-btn { margin-bottom: 3px; }
+
+/* 输入框上方的 / 命令与 @ 文件菜单：锚定 #input-box，避免被输入区裁切 */
+.composer-menu {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px);
+  max-height: min(340px, 50vh); overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0,0,0,.4);
+  padding: 6px;
+  z-index: 90;
+  animation: slideIn .15s ease;
+}
+.composer-menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px 4px;
+  font-size: 10.5px; color: var(--text-3);
+}
+.composer-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 8px 10px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-2);
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.composer-item:hover,
+.composer-item.active { background: rgba(91,140,255,.12); color: var(--text); }
+.composer-item .ci-icon { width: 22px; flex: none; text-align: center; font-size: 15px; }
+.composer-item .ci-main { flex: 1; min-width: 0; }
+.composer-item .ci-title {
+  display: block;
+  font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-item .ci-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-item .ci-meta {
+  flex: none;
+  font-size: 10px; color: var(--text-3); font-family: var(--mono);
+}
+.composer-menu-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px; color: var(--text-3);
+}
 
 /* 附件里的图片缩略 chip */
 .attach-chip.has-thumb { padding: 4px 8px 4px 4px; }
@@ -1524,7 +1624,17 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 /* ============================================================
    房产 Agent（estate）：数据源面板 + 工具专属卡（房源/地图/户型图）
    ============================================================ */
-#estate-modal { width: min(560px, calc(100vw - 32px)); }
+#estate-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  animation: slideIn .2s ease;
+}
+#estate-modal h2 { margin: 0 0 4px; font-size: 16px; }
 .estate-status {
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; line-height: 1.5;

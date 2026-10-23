@@ -9,12 +9,12 @@
 
 import {
   escapeHtml, renderInline, renderMarkdown, fmtArgs, fmtTokens, fmtSize,
-  reasoningTag, safeImageSrc, safeHref, nodeIcon, NODE_ICONS, TOOL_ICONS,
+  reasoningTag, safeImageSrc, safeHref, nodeIcon, nodeLabel, NODE_ICONS, TOOL_ICONS,
 } from "./modules/format.js";
 import { showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-21-3";
+const APP_VERSION = "web-2026-10-21-6";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -35,6 +35,7 @@ const state = {
   blocks: {},          // sessionId -> [block]
   usage: {},           // sessionId -> { contextTokens, lastInput, lastOutput, lastCache }
   streaming: null,     // { ctrl, sid, ablock }
+  compacting: false,   // /压缩上下文 请求进行中（与 SSE streaming 互斥）
 };
 
 /** 流式期间每个 part 对应的 DOM 引用（内存 Map，不参与持久化） */
@@ -42,6 +43,28 @@ const partEls = new Map();      // part -> 渲染所需 DOM 引用
 const blockBodies = new Map();  // assistant block -> 正文容器
 const textTimers = new Map();   // part -> 节流定时器
 const usageEls = new Map();     // assistant block -> 用量小字元素
+
+const FILE_MENTION_LIMIT = 20;
+const SLASH_COMMANDS = [
+  {
+    id: "compact",
+    icon: "🗜️",
+    label: "压缩上下文",
+    desc: "把当前会话整理成摘要，释放上下文空间",
+    keywords: "compact 压缩 上下文 摘要",
+  },
+];
+const composerMenu = {
+  kind: null,       // "slash" | "file"
+  items: [],
+  active: 0,
+  trigger: null,    // { char, query, start, end }
+  loading: false,
+  error: "",
+  searchSeq: 0,
+  searchTimer: 0,
+  ctrl: null,
+};
 
 const LS_TRANSCRIPTS = "lg-agent-transcripts";
 const LS_SESSIONS = "lg-agent-sessions-meta";
@@ -430,6 +453,7 @@ function renderSessionItem(s) {
  * 会话选择 / 新建 / 欢迎页
  * ------------------------------------------------------------------------- */
 function showWelcomeState() {
+  closeComposerMenu();
   $("session-title").textContent = "未选择会话";
   $("demo-badge").classList.add("hidden");
   welcomeEl.classList.remove("hidden");
@@ -461,6 +485,7 @@ function showChatState(session) {
 
 function selectSession(sid) {
   if (state.streaming) { uiAlert("当前正在生成回复，请先停止或等待完成", "请稍候"); return; }
+  closeComposerMenu();
   state.currentId = sid;
   setSidebarOpen(false); // 窄屏抽屉：选中即收起
   const s = state.sessions.find((x) => x.id === sid);
@@ -470,6 +495,30 @@ function selectSession(sid) {
   updateContextBar();
   chatScroll.scrollTop = chatScroll.scrollHeight;
   hydrateFromServer(s); // 本地没有该会话的记录 → 从服务端拉取回放（修复历史会话打开为空）
+}
+
+/** 历史回放中的 interrupt 只代表「当时暂停过」，服务端无 pending 时不再可操作 */
+function markInterruptsResolved(sid) {
+  for (const block of transcript(sid)) {
+    if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
+    for (const part of block.parts) {
+      if (part.status !== "pending") continue;
+      if (part.p === "approval") part.status = "resolved";
+      if (part.p === "clarification") part.status = "answered";
+    }
+  }
+}
+
+/** 服务端仍有 pending 时，只有历史里最后一张 interrupt 卡可操作；更早的必须收起。 */
+function markLatestInterruptPending(sid) {
+  let latest = null;
+  for (const block of transcript(sid)) {
+    if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
+    for (const part of block.parts) {
+      if (part.p === "approval" || part.p === "clarification") latest = part;
+    }
+  }
+  if (latest) latest.status = "pending";
 }
 
 /** 历史会话回放：localStorage 里没有这个会话的对话记录时（换浏览器 / 清过缓存），
@@ -487,6 +536,12 @@ async function hydrateFromServer(s) {
       arr.push(userBlock, ablock);
       for (const ev of rec.events || []) handleEvent(ev, ablock);
       finalize(ablock);
+    }
+    // 回放中的 interrupt 是历史事件；先统一标成「已处理」，服务端仍有 pending
+    // 时只把最后一张卡恢复为可操作，避免旧卡片在刷新后误点（尤其是多轮审批/澄清）。
+    if (typeof data.pendingApproval === "boolean") {
+      markInterruptsResolved(s.id);
+      if (data.pendingApproval) markLatestInterruptPending(s.id);
     }
     saveLocal();
     if (state.currentId === s.id) {
@@ -707,6 +762,14 @@ function mountBlock(block) {
     block._el = wrap;
     return;
   }
+  if (block.t === "notice") {
+    const el = document.createElement("div");
+    el.className = "notice-block" + (block.loading ? " loading" : "");
+    messagesEl.appendChild(el);
+    block._el = el;
+    renderNoticeBlock(block);
+    return;
+  }
   if (block.t === "error") {
     const el = document.createElement("div");
     el.className = "error-block";
@@ -732,6 +795,25 @@ function mountBlock(block) {
   for (const part of block.parts) mountPart(block, part);
   if (!block.parts.length) mountTyping(block);
   if (block._usage) updateTurnCaption(block);
+}
+
+function renderNoticeBlock(block) {
+  const el = block._el;
+  if (!el) return;
+  el.classList.toggle("loading", Boolean(block.loading));
+  el.innerHTML = `<div class="notice-title"></div><div class="notice-text"></div>`;
+  el.querySelector(".notice-title").textContent = block.title || "提示";
+  el.querySelector(".notice-text").textContent = block.text || "";
+  if (block.summary) {
+    const details = document.createElement("details");
+    details.className = "notice-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看压缩摘要";
+    const pre = document.createElement("pre");
+    pre.textContent = block.summary;
+    details.append(summary, pre);
+    el.appendChild(details);
+  }
 }
 
 function mountTyping(block) {
@@ -765,7 +847,7 @@ function mountPart(block, part) {
   if (part.p === "node") {
     const chip = document.createElement("span");
     chip.className = "node-chip";
-    chip.textContent = `${nodeIcon(part.name)} ${part.name}`;
+    chip.textContent = `${nodeIcon(part.name)} ${nodeLabel(part.name)}`;
     const row = document.createElement("div");
     row.appendChild(chip);
     body.appendChild(row);
@@ -804,6 +886,82 @@ function mountPart(block, part) {
     body.appendChild(el);
     partEls.set(part, { el });
     return;
+  }
+
+  if (part.p === "clarification") {
+    const el = document.createElement("div");
+    el.className = "approval-card clarification-card";
+    renderClarificationCard(part, el);
+    body.appendChild(el);
+    partEls.set(part, { el });
+    return;
+  }
+}
+
+function renderClarificationCard(part, el) {
+  const req = part.req;
+  el.innerHTML = `
+    <div class="approval-title">🧭 需求澄清（请选择一个方向）</div>
+    <div class="approval-desc"></div>
+    <div class="clarify-options"></div>
+    <div class="clarify-custom hidden"></div>
+    <div class="approval-actions"></div>`;
+  el.querySelector(".approval-desc").textContent = req.question || "请补充关键信息后继续";
+  const options = el.querySelector(".clarify-options");
+  const actions = el.querySelector(".approval-actions");
+
+  if (part.status === "pending") {
+    for (const opt of Array.isArray(req.options) ? req.options : []) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "clarify-option";
+      const label = document.createElement("span");
+      label.className = "clarify-option-label";
+      label.textContent = `${opt.id}. ${opt.label}`;
+      button.appendChild(label);
+      if (opt.description) {
+        const desc = document.createElement("span");
+        desc.className = "clarify-option-desc";
+        desc.textContent = opt.description;
+        button.appendChild(desc);
+      }
+      button.addEventListener("click", () =>
+        decideClarification(part, opt.id, `${opt.label}${opt.description ? `（${opt.description}）` : ""}`)
+      );
+      options.appendChild(button);
+    }
+
+    if (req.allowCustom !== false) {
+      const custom = el.querySelector(".clarify-custom");
+      custom.classList.remove("hidden");
+      const input = document.createElement("input");
+      input.className = "clarify-input";
+      input.type = "text";
+      input.maxLength = 2000;
+      input.placeholder = "也可以直接输入补充说明…";
+      const submit = document.createElement("button");
+      submit.type = "button";
+      submit.className = "btn btn-approve";
+      submit.textContent = "提交";
+      const send = () => {
+        const value = input.value.trim();
+        if (value) decideClarification(part, value, value);
+      };
+      submit.addEventListener("click", send);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          send();
+        }
+      });
+      custom.append(input, submit);
+    }
+  } else {
+    el.classList.add("done-approve");
+    const verdict = document.createElement("div");
+    verdict.className = "approval-verdict";
+    verdict.textContent = part.answer ? `已选择：${part.answer}` : "此前已处理";
+    actions.appendChild(verdict);
   }
 }
 
@@ -860,10 +1018,13 @@ function renderApprovalCard(part, el) {
     no.addEventListener("click", () => decideApproval(part, "rejected"));
     actions.append(ok, no);
   } else {
-    el.classList.add(part.status === "approved" ? "done-approve" : "done-reject");
+    const resolved = part.status === "resolved";
+    el.classList.add(part.status === "approved" || resolved ? "done-approve" : "done-reject");
     const v = document.createElement("div");
     v.className = "approval-verdict";
-    v.textContent = part.status === "approved" ? "✅ 你批准了本次操作" : "🚫 你拒绝了本次操作";
+    v.textContent = resolved
+      ? "此前已处理"
+      : part.status === "approved" ? "✅ 你批准了本次操作" : "🚫 你拒绝了本次操作";
     actions.appendChild(v);
   }
 }
@@ -931,10 +1092,16 @@ function addNodeChip(ablock, name) {
   scrollBottom();
 }
 
-function addApproval(ablock, payload) {
-  const part = { p: "approval", req: payload, status: "pending" };
-  ablock.parts.push(part);
-  mountPart(ablock, part);
+function addInterrupt(ablock, payload) {
+  if (payload?.type === "clarification") {
+    const part = { p: "clarification", req: payload, status: "pending" };
+    ablock.parts.push(part);
+    mountPart(ablock, part);
+  } else {
+    const part = { p: "approval", req: payload, status: "pending" };
+    ablock.parts.push(part);
+    mountPart(ablock, part);
+  }
   const s = state.sessions.find((x) => x.id === state.currentId);
   if (s) s.pendingApproval = true;
   renderSessions();
@@ -950,7 +1117,25 @@ async function decideApproval(part, status) {
   if (s) s.pendingApproval = false;
   renderSessions();
   saveLocal();
-  await runResume(status === "approved" ? "approve" : "reject");
+  await runResume({ decision: status === "approved" ? "approve" : "reject" });
+}
+
+async function decideClarification(part, choice, label) {
+  if (state.streaming) return;
+  const value = String(choice || "").trim();
+  if (!value) return;
+  part.status = "answered";
+  part.answer = label || value;
+  const refs = partEls.get(part);
+  if (refs) {
+    refs.el.className = "approval-card clarification-card done-approve";
+    renderClarificationCard(part, refs.el);
+  }
+  const s = state.sessions.find((x) => x.id === state.currentId);
+  if (s) s.pendingApproval = false;
+  renderSessions();
+  saveLocal();
+  await runResume({ choice: value });
 }
 
 function addErrorBlock(ablock, message) {
@@ -1030,7 +1215,7 @@ function handleEvent(ev, ablock) {
       }
       break;
     }
-    case "interrupt": addApproval(ablock, ev.payload); break;
+    case "interrupt": addInterrupt(ablock, ev.payload); break;
     case "usage": {
       // 上下文容量 ≈ 最近一次模型调用的 输入 + 输出；缓存占比 = cache_read / 输入
       const u = state.usage[state.currentId] || (state.usage[state.currentId] = {});
@@ -1067,9 +1252,10 @@ function handleEvent(ev, ablock) {
  * ------------------------------------------------------------------------- */
 async function send() {
   const text = inputEl.value.trim();
-  if (!text || !state.currentId || state.streaming) return;
+  if (!text || !state.currentId || state.streaming || state.compacting) return;
   const cur = state.sessions.find((x) => x.id === state.currentId);
   if (cur?.stale) return; // 历史会话不可发送
+  closeComposerMenu();
   // 附件引用：项目/远程文件传路径（服务端读取校验），上传传 uploadId
   const fileRefs = state.pendingFiles.map((f) => f.kind === "upload"
     ? { kind: "upload", uploadId: f.uploadId, name: f.name }
@@ -1107,12 +1293,12 @@ async function send() {
   }, ablock);
 }
 
-async function runResume(decision) {
+async function runResume(payload) {
   if (!state.currentId || state.streaming) return;
   const ablock = { t: "assistant", parts: [] };
   transcript(state.currentId).push(ablock);
   mountBlock(ablock);
-  await streamTurn(`/api/resume`, { sessionId: state.currentId, decision }, ablock);
+  await streamTurn(`/api/resume`, { sessionId: state.currentId, ...payload }, ablock);
 }
 
 async function streamTurn(url, body, ablock) {
@@ -1165,6 +1351,284 @@ function autoGrow() {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
   // 发送按钮随内容点亮：空输入保持灰态，有内容才变成主色渐变
   sendBtn.classList.toggle("is-ready", inputEl.value.trim().length > 0);
+}
+
+/* ---------------------------------------------------------------------------
+ * 输入辅助：/ 命令（压缩上下文）与 @ 文件搜索
+ * 规则：/ 或 @ 必须是当前 token 的开头（行首或空白后），避免正文里的邮箱被误触发。
+ * @ 选中后不插入 @路径 文本，而是加入既有附件 chips —— 文件内容仍由服务端授权读取。
+ * ------------------------------------------------------------------------- */
+function closeComposerMenu() {
+  composerMenu.kind = null;
+  composerMenu.items = [];
+  composerMenu.active = 0;
+  composerMenu.trigger = null;
+  composerMenu.loading = false;
+  composerMenu.error = "";
+  composerMenu.searchSeq += 1;
+  clearTimeout(composerMenu.searchTimer);
+  composerMenu.ctrl?.abort();
+  composerMenu.ctrl = null;
+  const menu = $("composer-menu");
+  if (menu) {
+    menu.classList.add("hidden");
+    menu.innerHTML = "";
+  }
+}
+
+function currentComposerTrigger() {
+  if (!state.currentId || state.streaming || state.compacting || inputEl.disabled) return null;
+  const cur = state.sessions.find((s) => s.id === state.currentId);
+  if (cur?.stale) return null;
+  const end = inputEl.selectionStart ?? 0;
+  if (end !== inputEl.selectionEnd) return null;
+  const match = inputEl.value.slice(0, end).match(/(^|\s)([/@])([^\s]*)$/);
+  if (!match) return null;
+  return {
+    char: match[2],
+    query: match[3],
+    start: end - match[2].length - match[3].length,
+    end,
+  };
+}
+
+function slashCommandItems(query) {
+  const q = query.trim().toLowerCase();
+  return SLASH_COMMANDS
+    .filter((cmd) => !q || cmd.label.toLowerCase().includes(q) || cmd.keywords.toLowerCase().includes(q) || cmd.id.includes(q))
+    .map((cmd) => ({ type: "command", ...cmd }));
+}
+
+function refreshComposerMenu() {
+  const trigger = currentComposerTrigger();
+  if (!trigger) {
+    closeComposerMenu();
+    return;
+  }
+
+  composerMenu.trigger = trigger;
+  composerMenu.active = 0;
+
+  if (trigger.char === "/") {
+    clearTimeout(composerMenu.searchTimer);
+    composerMenu.ctrl?.abort();
+    composerMenu.ctrl = null;
+    composerMenu.kind = "slash";
+    composerMenu.loading = false;
+    composerMenu.error = "";
+    composerMenu.items = slashCommandItems(trigger.query);
+    renderComposerMenu();
+    return;
+  }
+
+  // @：先显示加载态，再防抖请求服务端搜索（最多 20 条）
+  composerMenu.kind = "file";
+  composerMenu.items = [];
+  composerMenu.loading = true;
+  composerMenu.error = "";
+  renderComposerMenu();
+  clearTimeout(composerMenu.searchTimer);
+  const query = trigger.query;
+  composerMenu.searchTimer = setTimeout(() => {
+    if (composerMenu.kind === "file" && composerMenu.trigger?.query === query) {
+      void searchComposerFiles(query);
+    }
+  }, 140);
+}
+
+function renderComposerMenu() {
+  const menu = $("composer-menu");
+  if (!menu) return;
+  if (!composerMenu.kind) {
+    closeComposerMenu();
+    return;
+  }
+
+  menu.classList.remove("hidden");
+  menu.innerHTML = `<div class="composer-menu-head"><span></span><span></span></div>`;
+  const head = menu.querySelector(".composer-menu-head");
+  head.firstElementChild.textContent = composerMenu.kind === "slash"
+    ? "命令"
+    : `文件（最多 ${FILE_MENTION_LIMIT} 个）`;
+  if (!composerMenu.loading && !composerMenu.error) {
+    head.lastElementChild.textContent = composerMenu.items.length ? `${composerMenu.items.length} 个结果` : "";
+  }
+
+  if (composerMenu.loading) {
+    const empty = document.createElement("div");
+    empty.className = "composer-menu-empty";
+    empty.textContent = "搜索文件中…";
+    menu.appendChild(empty);
+    return;
+  }
+  if (composerMenu.error) {
+    const empty = document.createElement("div");
+    empty.className = "composer-menu-empty";
+    empty.textContent = `搜索失败：${composerMenu.error}`;
+    menu.appendChild(empty);
+    return;
+  }
+  if (!composerMenu.items.length) {
+    const empty = document.createElement("div");
+    empty.className = "composer-menu-empty";
+    empty.textContent = composerMenu.kind === "slash" ? "没有匹配的命令" : "没有找到文件";
+    menu.appendChild(empty);
+    return;
+  }
+
+  composerMenu.items.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "composer-item" + (index === composerMenu.active ? " active" : "");
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", index === composerMenu.active ? "true" : "false");
+    button.innerHTML = `<span class="ci-icon"></span><span class="ci-main"><span class="ci-title"></span><span class="ci-desc"></span></span><span class="ci-meta"></span>`;
+    button.querySelector(".ci-icon").textContent = item.type === "command" ? item.icon : "📄";
+    button.querySelector(".ci-title").textContent = item.type === "command" ? item.label : item.file.name;
+    button.querySelector(".ci-desc").textContent = item.type === "command"
+      ? item.desc
+      : `${item.file.rootName} / ${item.file.rel}`;
+    button.querySelector(".ci-meta").textContent = item.type === "command" ? "Enter" : fmtSize(item.file.size);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      selectComposerItem(index);
+    });
+    menu.appendChild(button);
+  });
+  menu.querySelector(".composer-item.active")?.scrollIntoView({ block: "nearest" });
+}
+
+async function searchComposerFiles(query) {
+  const seq = ++composerMenu.searchSeq;
+  composerMenu.ctrl?.abort();
+  const ctrl = new AbortController();
+  composerMenu.ctrl = ctrl;
+  try {
+    const data = await api("/api/fs/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+      signal: ctrl.signal,
+    });
+    if (seq !== composerMenu.searchSeq || composerMenu.kind !== "file") return;
+    composerMenu.items = (data.files || []).slice(0, FILE_MENTION_LIMIT).map((file) => ({ type: "file", file }));
+    composerMenu.active = 0;
+    composerMenu.loading = false;
+    renderComposerMenu();
+  } catch (err) {
+    if (seq !== composerMenu.searchSeq || err.name === "AbortError") return;
+    composerMenu.items = [];
+    composerMenu.loading = false;
+    composerMenu.error = err.message;
+    renderComposerMenu();
+  }
+}
+
+function selectComposerItem(index) {
+  const item = composerMenu.items[index];
+  const trigger = composerMenu.trigger;
+  if (!item || !trigger) return;
+  const value = inputEl.value;
+  const next = value.slice(0, trigger.start) + value.slice(trigger.end);
+
+  if (item.type === "command") {
+    inputEl.value = next.replace(/\s+$/, "");
+    closeComposerMenu();
+    autoGrow();
+    inputEl.focus();
+    if (item.id === "compact") void compactContext();
+    return;
+  }
+
+  if (!addPendingFile({
+    kind: "fs",
+    path: item.file.path,
+    name: item.file.name,
+    source: item.file.rootName || "项目文件",
+  })) return;
+  inputEl.value = next;
+  closeComposerMenu();
+  autoGrow();
+  inputEl.focus();
+}
+
+function moveComposerActive(delta) {
+  if (!composerMenu.kind || !composerMenu.items.length) return;
+  const length = composerMenu.items.length;
+  composerMenu.active = (composerMenu.active + delta + length) % length;
+  renderComposerMenu();
+}
+
+/** 返回 true 表示事件已被输入菜单消费，调用方不要再走发送逻辑 */
+function handleComposerKeydown(event) {
+  if (!composerMenu.kind) return false;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeComposerMenu();
+    return true;
+  }
+  if (!composerMenu.items.length) return false;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveComposerActive(1);
+    return true;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveComposerActive(-1);
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    selectComposerItem(composerMenu.active);
+    return true;
+  }
+  return false;
+}
+
+async function compactContext() {
+  if (!state.currentId || state.streaming || state.compacting) return;
+  const sid = state.currentId;
+  const cur = state.sessions.find((s) => s.id === sid);
+  if (cur?.stale) { uiAlert("历史会话不可压缩，请新建会话", "提示"); return; }
+
+  const block = {
+    t: "notice",
+    title: "正在压缩上下文",
+    text: "正在把当前会话整理成摘要，请稍候…",
+    loading: true,
+  };
+  state.compacting = true;
+  transcript(sid).push(block);
+  mountBlock(block);
+  scrollBottom(true);
+  sendBtn.disabled = true;
+  setStatus("busy");
+
+  try {
+    const res = await api(`/api/sessions/${sid}/compact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    block.loading = false;
+    block.title = "上下文已压缩";
+    block.text = `原对话约 ${Number(res.beforeChars || 0).toLocaleString("zh-CN")} 字符 → 摘要 ${Number(res.afterChars || 0).toLocaleString("zh-CN")} 字符。后续对话会自动使用这份摘要。`;
+    block.summary = res.summary || "";
+    renderNoticeBlock(block);
+    delete state.usage[sid];
+    updateContextBar();
+  } catch (err) {
+    block.loading = false;
+    block.title = "压缩失败";
+    block.text = err.message;
+    renderNoticeBlock(block);
+  } finally {
+    state.compacting = false;
+    sendBtn.disabled = !state.currentId;
+    setStatus(state.streaming ? "busy" : "idle");
+    saveLocal();
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2938,6 +3402,7 @@ async function init() {
     if (!pw || !pw.contains(e.target)) showProjectMenu(false);
     // composer 弹出菜单：点击组外关闭（组内交给各自的 item 处理器）
     if (!e.target.closest(".cm-group")) closeCmMenus();
+    if (!e.target.closest("#composer-menu") && e.target !== inputEl) closeComposerMenu();
   });
 
   // 项目文件夹：切换 / 添加（本地 / 云端）
@@ -3044,12 +3509,20 @@ async function init() {
 
   on("send-btn", "click", send);
   on("stop-btn", "click", stopStreaming);
-  inputEl.addEventListener("input", autoGrow);
+  inputEl.addEventListener("input", () => {
+    autoGrow();
+    refreshComposerMenu();
+  });
   inputEl.addEventListener("keydown", (e) => {
+    if (handleComposerKeydown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
     }
+  });
+  inputEl.addEventListener("click", refreshComposerMenu);
+  inputEl.addEventListener("keyup", (e) => {
+    if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) refreshComposerMenu();
   });
   // 粘贴上传：剪贴板里是文件（如截图、复制的文件）时直接作为附件，纯文本走默认输入
   inputEl.addEventListener("paste", (e) => {
@@ -3062,6 +3535,7 @@ async function init() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       uiDialogFinish(null); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）
+      closeComposerMenu();
       closeModal();
       closeSettings();
       closeFsModal();

@@ -8,7 +8,11 @@
    ============================================================ */
 "use strict";
 
-export const NODE_ICONS = { agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️" };
+export const NODE_ICONS = {
+  analyze: "🧭", clarify: "❓", review: "🔎",
+  agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️",
+};
+export const NODE_LABELS = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思" };
 export const TOOL_ICONS = {
   calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧",
   delegate: "🧭", retrieve_docs: "📚",
@@ -18,6 +22,7 @@ export const TOOL_ICONS = {
 };
 
 export function nodeIcon(name) { return NODE_ICONS[name.split("/")[0]] || "⚙️"; }
+export function nodeLabel(name) { return NODE_LABELS[name.split("/")[0]] || name; }
 
 export function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

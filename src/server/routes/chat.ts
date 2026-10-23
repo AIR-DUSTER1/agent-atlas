@@ -14,7 +14,7 @@ import { resolveChatFiles, buildUserContent, type ChatFileRef } from "../files.j
 import { ingestChatAttachments } from "../rag.js";
 import {
   getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord,
-  recordApproval, recordDecision, buildPrehistoryNote, type Session,
+  recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
 import { getActiveModality } from "../settings.js";
 import { lifecycle } from "../lifecycle.js";
@@ -56,13 +56,19 @@ async function streamToClient(
   });
 
   const collected: AgentEvent[] = [];
+  let sawInterrupt = false;
   try {
     for await (const event of produce(controller.signal)) {
       if (controller.signal.aborted) break;
       collected.push(event);
       writeEvent(res, event);
-      if (event.type === "interrupt") recordApproval(session, event.payload);
-      if (event.type === "done") session.pendingApproval = null;
+      if (event.type === "interrupt") {
+        recordApproval(session, event.payload);
+        sawInterrupt = true;
+      }
+      // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
+      // 只有正常走完、没有新 interrupt 的流才清空（resume 的 onDone 在无新 interrupt 时也会再清一次）。
+      if (event.type === "done" && !sawInterrupt) session.pendingApproval = null;
     }
   } catch (err) {
     if (!controller.signal.aborted) {
@@ -174,9 +180,13 @@ async function handleChatInner(
   const { HumanMessage } = await import("@langchain/core/messages");
   // T2-4：journal 回放来的会话首条真图消息 —— 前置注入历史上文摘录（一次性）
   const preNote = buildPrehistoryNote(session);
-  const graphInput: unknown[] = preNote
-    ? [new HumanMessage(preNote), new HumanMessage(fullMessage)]
-    : [new HumanMessage(fullMessage)];
+  // /compact 后的新线程：旧消息已清空，只注入压缩摘要（一次性）
+  const compactNote = takeContextSummary(session);
+  const graphInput: unknown[] = [
+    ...(preNote ? [new HumanMessage(preNote)] : []),
+    ...(compactNote ? [new HumanMessage(compactNote)] : []),
+    new HumanMessage(fullMessage),
+  ];
   await streamToClient(res, req, session, (signal) =>
     runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: graphInput }, {
       threadId: session.threadId,
@@ -189,7 +199,7 @@ export async function handleResume(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   sessionId: string,
-  body: { decision?: unknown }
+  body: { decision?: unknown; choice?: unknown }
 ): Promise<void> {
   const session = getSession(sessionId);
   if (!session) {
@@ -197,11 +207,31 @@ export async function handleResume(
     res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
     return;
   }
-  const decision = body.decision === "approve" ? "approve" : "reject";
-  // T2-5：审批恢复也是流，同样走同会话唯一流闸
+
+  const pending = session.pendingApproval;
+  let resumeValue: string;
+  if (pending?.type === "clarification") {
+    const choice = typeof body.choice === "string" ? body.choice.trim() : "";
+    if (!choice) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "请选择一个选项或输入补充说明" }));
+      return;
+    }
+    resumeValue = choice.slice(0, 2_000);
+  } else {
+    // 没有待处理事项却发送 choice：说明前端状态已过期，明确拒绝而不是静默当审批拒绝
+    if (!pending && typeof body.choice === "string" && body.choice.trim()) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "当前没有待确认的选项，请重新发起请求" }));
+      return;
+    }
+    resumeValue = body.decision === "approve" ? "approve" : "reject";
+  }
+
+  // T2-5：审批/澄清恢复也是流，同样走同会话唯一流闸
   const releaseSlot = acquireSessionSlot(sessionId);
   try {
-    await handleResumeInner(res, req, session, decision, body);
+    await handleResumeInner(res, req, session, resumeValue);
   } finally {
     releaseSlot();
   }
@@ -211,55 +241,84 @@ async function handleResumeInner(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   session: Session,
-  decision: "approve" | "reject",
-  body: { decision?: unknown }
+  resumeValue: string
 ): Promise<void> {
   const approval = session.pendingApproval;
+  const clarification = approval?.type === "clarification" ? approval : null;
   // T2-3：重启后带 pendingApproval 的会话 —— 图的 interrupt 状态已不可恢复，
   // 重复 resume 是明确错误，必须让用户重新发起（不允许静默重复执行）
   if (approval && session.resumeUnavailable) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({
-      error: `服务重启后该审批的执行上下文已失效，无法继续（不重复执行、也不静默重做）。` +
-        `请重新发起这个请求，例如：「${approval.toolName}」的那条指令再发一次。`,
-    }));
+    const error = clarification
+      ? "服务重启后该澄清的上下文已失效，无法继续。请重新发起原来的请求。"
+      : `服务重启后该审批的执行上下文已失效，无法继续（不重复执行、也不静默重做）。` +
+        `请重新发起这个请求，例如：「${approval.type === "approval" ? approval.toolName : "操作"}」的那条指令再发一次。`;
+    res.end(JSON.stringify({ error }));
     return;
   }
   // 配置变更后不重建审批中的图：旧图的 interrupt 状态无法跨 checkpointer 恢复，
   // 让本次 resume 在原图上完成（配置从下一条消息起生效）
   if (!approval) rebuildIfStale(session);
 
-  // 审批决定是安全边界动作：审计只记会话/工具/决定，不落工具参数
-  if (approval) {
-    writeAudit("hitl.decided", {
-      sessionId: session.id,
-      toolName: approval.toolName,
-      decision,
-    });
-  }
-
-  beginTurnRecord(session, `(人工审批：${decision === "approve" ? "批准" : "拒绝"} ${approval?.toolName ?? "操作"}）`);
-
-  if (!config.apiKey) {
-    await streamToClient(res, req, session, (signal) =>
-      mockRun({ decision, approval: approval ?? undefined, turnIndex: session.turns, signal })
-    , (events) => {
-      // T2-3：决定已做出 → journal 落 decided（一次性转移），再把本轮入档
-      recordDecision(session, decision === "approve" ? "approved" : "rejected");
-      completeTurnRecord(session, events);
-    });
+  if (!config.apiKey && clarification) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "模拟模式不支持澄清恢复，请配置模型后重新发起请求" }));
     return;
   }
 
-  // 真实图：用 Command({ resume }) 把决定送回被暂停的图（见 agent/hitl.ts）
+  // 审批/澄清决定是安全边界动作：审计只记会话/工具/决定，不落具体参数或用户补充内容
+  if (approval) {
+    writeAudit("hitl.decided", {
+      sessionId: session.id,
+      toolName: approval.type === "approval" ? approval.toolName : "clarification",
+      decision: clarification ? "answered" : resumeValue,
+    });
+  }
+
+  const recordUser = clarification
+    ? `（需求澄清：${resumeValue.slice(0, 60)}）`
+    : `（人工审批：${resumeValue === "approve" ? "批准" : "拒绝"} ${approval?.type === "approval" ? approval.toolName : "操作"}）`;
+  beginTurnRecord(session, recordUser);
+
+  if (!config.apiKey) {
+    const approved = approval?.type === "approval" ? approval : undefined;
+    await streamToClient(
+      res,
+      req,
+      session,
+      (signal) => mockRun({ decision: resumeValue as "approve" | "reject", approval: approved, turnIndex: session.turns, signal }),
+      (events) => {
+        // T2-3：决定已做出 → journal 记 decided（一次性转移），再把本轮入档。
+        // 若恢复过程中又产生新 interrupt（例如连续两个高风险工具），保留新 pending。
+        if (!events.some((event) => event.type === "interrupt")) {
+          recordDecision(session, resumeValue === "approve" ? "approved" : "rejected");
+        }
+        completeTurnRecord(session, events);
+      }
+    );
+
+    return;
+  }
+
+  // 真实图：用 Command({ resume }) 把决定送回被暂停的图（见 agent/hitl.ts / workflow.ts）
   const { buildResumeCommand } = await import("../../agent/hitl.js");
-  await streamToClient(res, req, session, (signal) =>
-    runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], buildResumeCommand(decision as "approve" | "reject"), {
-      threadId: session.threadId,
-      signal,
-    })
-  , (events) => {
-    recordDecision(session, decision === "approve" ? "approved" : "rejected");
-    completeTurnRecord(session, events);
-  });
+  await streamToClient(
+    res,
+    req,
+    session,
+    (signal) => runGraphEvents(
+      session.graph as Parameters<typeof runGraphEvents>[0],
+      buildResumeCommand(resumeValue),
+      { threadId: session.threadId, signal }
+    ),
+    (events) => {
+      if (!events.some((event) => event.type === "interrupt")) {
+        recordDecision(
+          session,
+          clarification ? "answered" : resumeValue === "approve" ? "approved" : "rejected"
+        );
+      }
+      completeTurnRecord(session, events);
+    }
+  );
 }

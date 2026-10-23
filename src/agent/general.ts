@@ -9,17 +9,15 @@
  *   - Checkpointer 记忆（示例 2）：同一会话多轮共享上下文
  *   - 人工审批（示例 3）：send_email 等高风险工具执行前 interrupt，等用户批准
  *   - 文件上下文（files.ts）：用户 📎 附加的文件内容随消息进入上下文
+ *   - 需求理解 / 澄清 / 反思（workflow.ts）：先确认需求，再执行 ReAct，最后检查结果
  *
  * 与示例的差异：示例是「拆解版」（有的故意不带 checkpointer 展示无记忆的
  * 行为差异），这里全部按真实使用的方式组装。
  */
-import { StateGraph, START, END, MessagesAnnotation, MemorySaver } from "@langchain/langgraph";
-import { toolsCondition } from "@langchain/langgraph/prebuilt";
-import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { terminal, readFileTool, writeFileTool, listDirTool, grepSearch } from "../tools-dev.js";
 import { retrieveDocs } from "../tools-rag.js";
-import { approvalToolsNode } from "./hitl.js";
+import { createWorkflowGraph } from "./workflow.js";
 
 const tools = [
   // 基础工具
@@ -45,26 +43,6 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 export function createAgentGraph() {
-  // 模型在建图时创建（Web 端改供应商/模型配置后，新建会话即用新配置）
-  const model = createChatModel().bindTools(tools);
-
-  async function agentNode(state: typeof MessagesAnnotation.State) {
-    const response = await model.invoke([
-      { role: "system", content: SYSTEM_PROMPT },
-      ...state.messages,
-    ]);
-    return { messages: [response] };
-  }
-
-  // 多轮记忆 + interrupt 审批都依赖 checkpointer
-  const checkpointer = new MemorySaver();
-
-  return new StateGraph(MessagesAnnotation)
-    .addNode("agent", agentNode)
-    // approvalToolsNode：send_email 先 interrupt 审批，其余工具直接执行
-    .addNode("tools", approvalToolsNode)
-    .addEdge(START, "agent")
-    .addConditionalEdges("agent", toolsCondition)
-    .addEdge("tools", "agent")
-    .compile({ checkpointer });
+  // 模型与 checkpointer 都在建图时创建；换配置后由 sessions.rebuildIfStale 重建
+  return createWorkflowGraph(tools, SYSTEM_PROMPT);
 }

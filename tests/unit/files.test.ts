@@ -15,6 +15,7 @@ import {
   authorizeRoot,
   listDir,
   readFileAuthorized,
+  searchFiles,
   unauthorizeRoot,
 } from "../../src/server/files.js";
 
@@ -29,6 +30,14 @@ before(() => {
   writeFileSync(join(outside, "secret.txt"), "不该被读到", "utf8");
   mkdirSync(join(root, "node_modules"));
   writeFileSync(join(root, "node_modules", "x.js"), "x", "utf8");
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src", "zz-search-target.ts"), "export const target = 1;", "utf8");
+  writeFileSync(join(root, "src", "secret.key"), "secret", "utf8");
+  writeFileSync(join(root, ".env"), "API_KEY=secret", "utf8");
+  writeFileSync(join(root, "package-lock.json"), "{}", "utf8");
+  for (let i = 0; i < 25; i += 1) {
+    writeFileSync(join(root, `doc-${String(i).padStart(2, "0")}.md`), `# ${i}`, "utf8");
+  }
   authorizeRoot(root, "测试根");
 });
 
@@ -73,4 +82,22 @@ test("readFileAuthorized：二进制（含 \\0）标记 binary 且不返回内�
 
 test("readFileAuthorized：未授权路径拒绝", async () => {
   await assert.rejects(readFileAuthorized(join(outside, "secret.txt")), /路径未授权/);
+});
+
+test("searchFiles：按文件名 / 相对路径命中，且跳过密钥与依赖目录", async () => {
+  const result = await searchFiles("zz-search-target");
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].name, "zz-search-target.ts");
+  assert.ok(result.files[0].rel.endsWith("src/zz-search-target.ts"));
+
+  const secret = await searchFiles("secret");
+  assert.equal(secret.files.length, 0, "密钥文件不得出现在 @ 搜索里");
+});
+
+test("searchFiles：空查询最多返回 20 个文本文件", async () => {
+  const result = await searchFiles("");
+  assert.equal(result.files.length, 20);
+  assert.ok(result.files.every((f) => !f.name.startsWith(".")));
+  assert.ok(result.files.every((f) => f.name !== "package-lock.json"));
+  assert.ok(result.files.every((f) => !f.rel.includes("node_modules")));
 });

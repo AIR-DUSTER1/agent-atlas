@@ -2,18 +2,15 @@
  * ============================================================
  * estate.ts — 房产 Agent（租房/买房找房的专用会话图）
  * ============================================================
- * 结构与 general.ts 完全同一形态（ReAct + 记忆 + 审批），差异只在：
+ * 结构与 general.ts 完全同一形态（需求理解 + ReAct + 记忆 + 审批 + 反思），差异只在：
  *   1. 工具集换成 tools-estate.ts 的贝壳找房工具 + 基础计算/时间工具；
  *   2. 系统提示词是「贝壳官方找房顾问」的浓缩版（来自贝壳 AI 技能的
  *      顾问式工作流：先城市与动机 → 收敛条件 → 搜索门槛 → 对比报告）。
  * 高风险工具（预约带看 / 经纪人加微）复用 hitl.ts 的 approvalToolsNode。
  */
-import { StateGraph, START, MessagesAnnotation, MemorySaver } from "@langchain/langgraph";
-import { toolsCondition } from "@langchain/langgraph/prebuilt";
-import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime } from "../tools.js";
 import { estateTools } from "../tools-estate.js";
-import { approvalToolsNode } from "./hitl.js";
+import { createWorkflowGraph } from "./workflow.js";
 
 const tools = [
   // 贝壳找房工具（检索/详情/户型图/对比地图/行情/经纪人）；约看与加微走人工审批
@@ -40,26 +37,6 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 export function createEstateGraph() {
-  // 模型在建图时创建（Web 端改供应商/模型配置后，新建会话即用新配置）
-  const model = createChatModel().bindTools(tools);
-
-  async function agentNode(state: typeof MessagesAnnotation.State) {
-    const response = await model.invoke([
-      { role: "system", content: SYSTEM_PROMPT },
-      ...state.messages,
-    ]);
-    return { messages: [response] };
-  }
-
-  // 多轮记忆（预算/区域等画像跨轮延续）+ interrupt 审批都依赖 checkpointer
-  const checkpointer = new MemorySaver();
-
-  return new StateGraph(MessagesAnnotation)
-    .addNode("agent", agentNode)
-    // approvalToolsNode：house_appoint / house_contact 先 interrupt 审批，其余直接执行
-    .addNode("tools", approvalToolsNode)
-    .addEdge(START, "agent")
-    .addConditionalEdges("agent", toolsCondition)
-    .addEdge("tools", "agent")
-    .compile({ checkpointer });
+  // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
+  return createWorkflowGraph(tools, SYSTEM_PROMPT);
 }

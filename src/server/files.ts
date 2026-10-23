@@ -18,7 +18,7 @@
  *     前端只传「引用」，不传内容 —— 保证附件内容始终经过授权校验。
  */
 import { promises as fsp } from "node:fs";
-import { join, resolve, basename, dirname, sep } from "node:path";
+import { join, resolve, basename, dirname, sep, relative, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +31,32 @@ const MAX_UPLOAD_CHARS = 400_000;  // 上传单文件上限（字符）
 const MAX_UPLOAD_FILES = 40;       // 暂存区文件数（LRU）
 const MAX_ATTACH_FILES = 5;        // 单条消息最多附加文件数
 const MAX_ATTACH_CHARS = 100_000;  // 发送时单文件截断阈值
+const MAX_SEARCH_RESULTS = 20;     // @ 文件搜索最多展示条数
+const MAX_SEARCH_CANDIDATES = 200; // 先收集候选再按相关度排序
+const MAX_SEARCH_SCAN = 5000;      // 扫描条目上限，避免大仓库阻塞事件循环
+const MAX_SEARCH_DEPTH = 12;       // 递归深度上限，防异常目录结构
+
+/** @ 文件搜索只列可直接作为文本附件读取的常见扩展名 */
+const SEARCH_TEXT_EXTS = new Set([
+  ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".css", ".html",
+  ".yml", ".yaml", ".toml", ".ini", ".conf", ".properties", ".sql", ".xml",
+  ".py", ".go", ".rs", ".java", ".kt", ".c", ".h", ".cpp", ".cs", ".php", ".rb",
+  ".sh", ".bat", ".ps1", ".vue", ".svelte", ".graphql", ".gql",
+]);
+
+const SEARCH_SKIPPED_FILES = new Set([
+  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "cargo.lock", "poetry.lock",
+]);
+
+/** 点文件 / 密钥 / 证书不进 @ 搜索；与 RAG 入库的跳过规则保持一致 */
+function isSearchableFile(name: string): boolean {
+  if (name.startsWith(".")) return false;
+  if (SEARCH_SKIPPED_FILES.has(name.toLowerCase())) return false;
+  if (/(?:^|[._-])(key|pem|p12|pfx|crt|cer)$/i.test(name)) return false;
+  const ext = extname(name).toLowerCase();
+  if (ext) return SEARCH_TEXT_EXTS.has(ext);
+  return /^(dockerfile|makefile|license|readme)$/i.test(name);
+}
 
 /** 已授权的可浏览根：绝对路径 → 显示名 */
 const authorizedRoots = new Map<string, string>([[PROJECT_ROOT, "项目根"]]);
@@ -123,6 +149,94 @@ export async function listDir(rawPath?: string): Promise<{
     parent,
     roots: listRoots(),
     entries,
+  };
+}
+
+export interface FileSearchHit {
+  path: string;
+  name: string;
+  rel: string;
+  rootName: string;
+  size: number;
+}
+
+/**
+ * 在已授权根内搜索文本文件（@ 提及用）。
+ * 只返回 20 条；空查询返回根目录下最先扫到的 20 个文件，供刚输入 @ 时直接选择。
+ * 安全边界与 listDir 一致：不越过 authorizedRoots，跳过 SKIPPED_DIRS / 点目录 / 密钥文件。
+ */
+export async function searchFiles(queryRaw: string): Promise<{
+  files: FileSearchHit[];
+  scanned: number;
+  truncated: boolean;
+}> {
+  const query = queryRaw.trim().toLowerCase();
+  const candidates: Array<FileSearchHit & { score: number }> = [];
+  const seen = new Set<string>();
+  let scanned = 0;
+  let truncated = false;
+
+  const normPath = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+
+  async function walk(root: string, rootName: string, dir: string, depth: number): Promise<void> {
+    if (truncated || depth > MAX_SEARCH_DEPTH) {
+      if (depth > MAX_SEARCH_DEPTH) truncated = true;
+      return;
+    }
+    let dirents;
+    try {
+      dirents = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const d of dirents) {
+      if (scanned >= MAX_SEARCH_SCAN || candidates.length >= MAX_SEARCH_CANDIDATES) {
+        truncated = true;
+        return;
+      }
+      scanned += 1;
+      if (d.isDirectory()) {
+        if (SKIPPED_DIRS.has(d.name) || d.name.startsWith(".")) continue;
+        await walk(root, rootName, join(dir, d.name), depth + 1);
+        continue;
+      }
+      if (!d.isFile() || !isSearchableFile(d.name)) continue;
+
+      const full = join(dir, d.name);
+      const key = normPath(full);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const rel = relative(root, full).split(sep).join("/");
+      if (query && !`${d.name}\n${rel}`.toLowerCase().includes(query)) continue;
+
+      const nameLower = d.name.toLowerCase();
+      const score = !query ? 0
+        : nameLower === query ? 0
+        : nameLower.startsWith(query) ? 1
+        : nameLower.includes(query) ? 2
+        : 3;
+      const size = await fsp.stat(full).then((s) => s.size).catch(() => 0);
+      candidates.push({ path: full, name: d.name, rel, rootName, size, score });
+
+      if (!query && candidates.length >= MAX_SEARCH_RESULTS) return;
+    }
+  }
+
+  for (const [root, rootName] of authorizedRoots) {
+    await walk(root, rootName, root, 0);
+    if (truncated || (!query && candidates.length >= MAX_SEARCH_RESULTS)) break;
+  }
+
+  candidates.sort((a, b) =>
+    a.score - b.score ||
+    a.rel.length - b.rel.length ||
+    a.rel.localeCompare(b.rel)
+  );
+  return {
+    files: candidates.slice(0, MAX_SEARCH_RESULTS).map(({ score: _score, ...file }) => file),
+    scanned,
+    truncated,
   };
 }
 

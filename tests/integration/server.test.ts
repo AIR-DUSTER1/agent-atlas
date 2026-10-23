@@ -115,6 +115,82 @@ test("错误路径：未知 API 404、缺 message 400、未知会话 chat 404", 
   })).status, 404);
 });
 
+test("resume：没有待确认事项时 choice 返回 400，不误当审批处理", async () => {
+  const mk = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const res = await json("/api/resume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: mk.body.id, choice: "A" }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /没有待确认/);
+});
+
+test("审批：interrupt 后保留 pending，批准能恢复并执行工具", async () => {
+  const mk = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const sessionId = mk.body.id;
+  const first = await readSse("/api/chat", { sessionId, message: "帮我发邮件给 test@example.com，主题是测试" });
+  const interrupt = first.events.find((event) => event.type === "interrupt");
+  assert.equal(interrupt?.payload?.type, "approval");
+
+  const sessions = await json("/api/sessions");
+  const pending = sessions.body.find((item: { id: string }) => item.id === sessionId);
+  assert.equal(pending?.pendingApproval, true, "interrupt 后 done 不能清掉待审批状态");
+
+  const resumed = await readSse("/api/resume", { sessionId, decision: "approve" });
+  const result = resumed.events.find((event) => event.type === "tool_result");
+  assert.match(String(result?.content ?? ""), /邮件已发送/);
+
+  const afterResume = await json("/api/sessions");
+  const cleared = afterResume.body.find((item: { id: string }) => item.id === sessionId);
+  assert.equal(cleared?.pendingApproval, false);
+});
+
+test("文件搜索接口：最多 20 条，跳过依赖目录", async () => {
+  const res = await json("/api/fs/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "app.js" }),
+  });
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body.files));
+  assert.ok(res.body.files.length > 0);
+  assert.ok(res.body.files.length <= 20);
+  assert.ok(res.body.files.every((f: any) => !f.rel.includes("node_modules")));
+});
+
+test("压缩上下文：mock 模式走本地摘录并保留轮次回放", async () => {
+  const mk = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const id = mk.body.id;
+  const stream = await readSse("/api/chat", { sessionId: id, message: "记住暗号：蓝鲸" });
+  assert.equal(stream.status, 200);
+
+  const compact = await json(`/api/sessions/${id}/compact`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(compact.status, 200);
+  assert.equal(compact.body.usedModel, false);
+  assert.match(compact.body.summary, /较早对话摘录/);
+  assert.ok(compact.body.beforeChars > 0);
+
+  const tr = await json(`/api/sessions/${id}/transcript`);
+  assert.equal(tr.body.records.at(-1).user, "记住暗号：蓝鲸");
+});
+
 test("静态分发：index 引用 module 脚本，modules/*.js 可达且 MIME 正确", async () => {
   const index = await fetch(srv.base + "/");
   assert.equal(index.status, 200);

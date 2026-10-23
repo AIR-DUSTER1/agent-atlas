@@ -1,15 +1,19 @@
 # LangGraph Agent 工作台
 
 一个用 **LangGraph.js**（TypeScript）搭建的**可正常使用的 Agent Web 应用 + 桌面端**：
-多轮对话、📎 文件上下文（项目文件 / 远程文件夹 / 本地上传）、多供应商模型切换、
+多轮对话、需求理解与澄清、📎 文件上下文（项目文件 / 远程文件夹 / 本地上传）、多供应商模型切换、
 上下文用量与缓存监控、高风险操作人工审批、📚 外部 RAG 知识库 —— 与正常 Agent 产品的使用逻辑一致。
 
 项目同时内置 **5 个学习示例**（基础 ReAct / 对话记忆 / 人工审批 / 多 Agent 协作 / 并行 map-reduce），
-作为「事例选择」保留在新建对话与欢迎页里：默认走通用 Agent，
+其中前 4 个可在新建对话与欢迎页选择，Demo 5 通过 CLI 运行：默认走通用 Agent，
 想观察某个特定图结构的运行方式时再选对应示例。每个示例文件都带详细中文注释。
 
 > 📖 **完整学习文档见 [`docs/agent-wiki.md`](docs/agent-wiki.md)** —— 核心概念讲解、
 > 模块功能详解、示例的调用链分析（含实测日志）、从零自建 Agent 模板。
+>
+> 🧭 **端到端编排见 [`docs/agent-orchestration.md`](docs/agent-orchestration.md)** ——
+> 从 HTTP 请求、选图、需求理解 / 澄清、ReAct 工具循环、结果反思、人工审批到 SSE、
+> 持久化与上下文压缩。
 
 ## 快速开始
 
@@ -40,8 +44,8 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
   菜单顶部是当前模型的「思考等级」档位（档位随供应商划分方式变化，见下文）；
 - **流式回答**：token 级打字机输出 + Markdown 渲染（表格 / 代码块 / 引用）；
 - **工具调用卡片**：参数随模型生成逐字流出，完成后展示结果，可展开查看（同 ZCode 的工具块）；
-- **节点徽章**：`🧠 agent` / `🔧 tools` / `👔 supervisor` / `🔍 researcher/agent`，
-  图的执行轨迹一目了然；
+- **节点徽章**：`🧭 analyze` / `❓ clarify` / `🧠 agent` / `🔧 tools` / `🔎 review` /
+  `👔 supervisor` / `🔍 researcher/agent`，图的执行轨迹一目了然；
 - **项目文件夹（本地 / 云端）**：侧栏「项目 ▾」可选项目，会话按项目分组显示；
   项目分两类并用样式区分 —— **💻 本地**（服务器上的目录）与
   **☁️ 云端**（Git 仓库地址，添加时自动 `git clone --depth 1` 到本地缓存，
@@ -51,7 +55,9 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
   **远程文件夹**（授权服务器上的任意目录）、
   **本地上传 / 拖拽 / 粘贴**（支持文本文件与**图片**，服务部署在云端时从本机选择）；
   发送时服务端读取内容（授权校验 + 防路径穿越 + 超长截断）拼进消息，
-  模型直接基于文件内容回答；
+  模型直接基于文件内容回答；输入框还支持 **`/` 命令**（当前为「压缩上下文」：
+  把旧对话压成摘要后继续，节省上下文）与 **`@` 文件搜索**（直接搜项目/已授权目录，
+  最多展示 20 个结果，选中即加入附件）；
 - **图片与多模态**：粘贴 / 拖拽 / 上传的图片以缩略 chip 展示，发送时转为
   `image_url` 内容块进入消息 —— 仅当启用中的模型勾选了「多模态」；
   纯文本模型附加图片会得到明确提示；
@@ -60,6 +66,9 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
   数据来自模型响应的 `usage`（含提示词缓存命中），分母来自模型上下文窗口：
   可在设置里**手动输入**，留空则自动读取网关 `/models` 的 `context_length`；
 - **人工审批（示例 3）**：发送邮件前弹出审批卡，批准/拒绝按钮对应 `Command({ resume })`；
+- **需求理解与澄清（默认 / 房产 Agent）**：先判断请求是否明确；缺少关键信息时弹出
+  2–4 个选项 + 自定义输入，选择后继续执行；最终回答会做一次反思，明显遗漏时
+  带反馈重答一次（最多一次）。Mock 模式不经过该流程，需配置真实模型观察；
 - **停止按钮**：随时中断生成（AbortSignal 直通模型请求）。
 
 ### 在界面里管理供应商与模型（多供应商 × 多模型 + 思考等级）
@@ -291,8 +300,9 @@ src/
   tools-rag.ts   # 知识检索工具 retrieve_docs：调外部 RAG 服务（通用 HTTP 契约）
   tools-estate.ts# 房产工具集（贝壳 CLI 包装：找房/行情/地图/经纪人/预约/加微）
   agent/
-    general.ts   # 通用 Agent（默认）：工具循环 + 记忆 + 审批 + RAG 检索的产品化组合
-    estate.ts    # 房产 Agent：贝壳顾问式流程（search→map→detail→appoint，复用审批节点）
+    workflow.ts  # 默认编排：需求理解 → 澄清 → ReAct/审批 → 结果反思（general/estate 共用）
+    general.ts   # 通用 Agent（默认）：工具集 + 系统提示词 → 共享工作流
+    estate.ts    # 房产 Agent：贝壳顾问式流程 → 共享工作流
     basic.ts     # 示例 1：亲手搭一张 ReAct 图（不借助 prebuilt 的 createAgent）
     memory.ts    # 示例 2：compile({ checkpointer }) 获得多轮记忆
     hitl.ts      # 示例 3：interrupt()/Command.resume 实现人工审批
@@ -322,8 +332,10 @@ tests/
 .github/workflows/ci.yml  # CI：typecheck + 语法门 + npm test
 ├── Dockerfile / docker-compose.yml  # 单实例容器部署（/data 数据卷，见 docs/deployment.md）
 docs/
-  agent-wiki.md  # 完整学习 Wiki（概念/模块/调用链/模板）
-  deployment.md  # 部署运维：Docker / 探针 / 优雅退出 / 日志 / 反向代理
+  agent-wiki.md          # 完整学习 Wiki（概念/模块/调用链/模板）
+  agent-orchestration.md # 端到端编排：请求/选图/工具/审批/SSE/压缩
+  agent-orchestration-vs-zcode.md # 与 ZCode / DSH 的流程编排对比
+  deployment.md          # 部署运维：Docker / 探针 / 优雅退出 / 日志 / 反向代理
 ```
 
 ## 踩坑记录（排查 400）

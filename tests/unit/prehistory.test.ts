@@ -26,6 +26,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     turnHistory: [],
     resumeUninjected: true,
     resumeUnavailable: false,
+    contextSummary: null,
+    contextSummaryInjected: false,
     ...overrides,
   };
 }

@@ -128,9 +128,9 @@ export function createHitlGraph() {
   return graph;
 }
 
-/** 供 CLI / Web 使用：把用户的审批结果「喂」回被暂停的图 */
-export function buildResumeCommand(decision: "approve" | "reject") {
+/** 供 CLI / Web 使用：把用户的审批结果或澄清选择「喂」回被暂停的图 */
+export function buildResumeCommand(value: string) {
   // Command 的泛型参数：Resume 值类型 / Update / 目标节点。
   // 纯 resume 命令不涉及 goto 路由，这里显式给三个 any 省略类型推断。
-  return new Command<any, any, any>({ resume: decision });
+  return new Command<any, any, any>({ resume: value });
 }

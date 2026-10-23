@@ -15,14 +15,14 @@
  *   token       → 助手正文流式文本（打字机效果）
  *   tool_call   → 工具调用卡片（参数随流式增量到达，边收边渲染）
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
- *   interrupt   → Human-in-the-loop 审批卡片（Demo 3 的核心交互）
+ *   interrupt   → Human-in-the-loop 审批卡片 / 需求澄清选项
  *   usage       → 本轮模型调用的 token 用量（驱动上下文容量条 + 缓存占比）
  *   ai_message  → 整段助手消息兜底（极少数网关不支持 token 流时使用）
  *   shutdown    → 服务端优雅退出通知（前端提示「稍后刷新重连」）
  *   error/done  → 错误提示 / 本轮流结束
  */
 
-/** 从 hitl.ts 复用审批载荷形状（避免循环依赖，这里独立声明同构类型） */
+/** 与 hitl.ts 复用审批载荷形状（避免循环依赖，这里独立声明同构类型）。 */
 export interface ApprovalPayload {
   type: "approval";
   toolName: string;
@@ -30,8 +30,25 @@ export interface ApprovalPayload {
   args: Record<string, unknown>;
 }
 
+/** 与 agent/workflow.ts 的 ClarificationRequest 同构；用户选择通过 /api/resume 回传。 */
+export interface ClarificationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface ClarificationPayload {
+  type: "clarification";
+  question: string;
+  options: ClarificationOption[];
+  allowCustom: boolean;
+}
+
+export type InterruptPayload = ApprovalPayload | ClarificationPayload;
+
 export type AgentEvent =
   /** 进入某个图节点（name 可能是 "agent" 或子图路径 "researcher/agent"） */
+
   | { type: "node"; name: string }
   /** 助手文本的流式增量片段 */
   | { type: "token"; text: string; node?: string }
@@ -56,8 +73,8 @@ export type AgentEvent =
       totalTokens: number;
       cacheReadTokens: number;
     }
-  /** HITL：图已暂停，等待人工审批 */
-  | { type: "interrupt"; payload: ApprovalPayload }
+  /** HITL：图已暂停，等待人工审批或需求澄清 */
+  | { type: "interrupt"; payload: InterruptPayload }
   /** 优雅退出：由 lifecycle.shutdown 直接写入 SSE，不经过图/翻译层 */
   | { type: "shutdown"; message: string }
   | { type: "error"; message: string }
