@@ -307,7 +307,8 @@ src/
   tools-estate.ts# 房产工具集（贝壳 CLI 包装：找房/行情/地图/经纪人/预约/加微）
   agent/
     workflow.ts  # 默认编排：需求理解 → 澄清 → ReAct/审批 → 结果反思（消费 profile）
-    profile.ts   # Agent profile 类型 / 工具 allowlist / kind → profile 派生
+    profile.ts   # Agent profile 类型 / 工具 allowlist / 上下文预算 / kind → profile 派生
+    context-builder.ts # prompt 分层、最近消息窗口与工具结果预算投影
     approvals.ts # 按 profile 拆分的审批登记（general / estate / demo）
     general.ts   # 通用 Agent profile：工具集 + 系统提示词
     estate.ts    # 房产 Agent profile：贝壳顾问式流程
@@ -333,7 +334,7 @@ desktop/
 scripts/
   list-models.ts # npm run models：查询网关支持的模型列表（排查 400 的利器）
 tests/
-  unit/          # 纯函数/内存状态单测（Markdown、limits、files、prehistory）
+  unit/          # 纯函数/内存状态单测（Markdown、files、workflow、context、profile、prehistory）
   integration/   # 临时服务端冒烟（mock 模式，SSE/回放/静态分发）
   security/      # 跨站/认证/坏 JSON/413/目录穿越边界
   helpers/       # 临时服务端托管（随机端口 + 隔离 journal/配置）

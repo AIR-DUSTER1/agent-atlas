@@ -751,7 +751,7 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 |---|---|---|
 | `analyze` | 判断最新请求是否明确，生成 `requirementBrief` | 坏 JSON / 模型异常默认“明确继续”；只问会实质改变结果的信息 |
 | `clarify` | `interrupt({ type:"clarification", question, options, allowCustom })` | 2–4 个互斥选项；服务端 `/api/resume {choice}`；选项 id 映射成可读标签；答案同时写入 `clarificationHistory` |
-| `agent` | 绑定工具的 ReAct 节点 | 系统提示词后追加 `【需求理解】` / `【上一轮反思反馈】` 内部注记 |
+| `agent` | 绑定工具的 ReAct 节点 | 通过 `context-builder.ts` 组装稳定 system、内部注记与投影后的消息窗口；工具结果按 profile 预算裁剪 |
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
 | `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多一次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
 
@@ -785,6 +785,7 @@ profile，不判断具体业务名。
 | `tools` | 唯一执行 allowlist；建图时转成 local `Map`，同名工具直接报错 |
 | `approvalDescriptions` | 高风险工具名 → 审批文案；未登记工具直接执行 |
 | `analystGuidance` / `reviewerGuidance` | 可选领域规则，追加到 analyze / review prompt |
+| `contextPolicy` | 最近消息数与单条工具结果字符预算；general / estate 可不同 |
 
 隔离规则：
 
@@ -795,6 +796,20 @@ profile，不判断具体业务名。
 - 会话 `agentProfileId`、每轮 `TurnRecord.agentProfileId`、journal 与
   `hitl.decided` 审计都携带执行域；旧 journal 按 `kind` 派生；
 - 未来租房需要 RAG 时，必须显式加入 estate profile，不能从通用注册表隐式获得。
+
+### 3.22 `src/agent/context-builder.ts` — 上下文投影与观测
+
+**设计立场**：prompt 分区、最近消息窗口和工具结果裁剪都做成纯函数，既能单测，
+也不会修改 checkpoint / journal 中的原始历史。UI 仍能展示完整工具结果，模型只读预算内投影。
+
+| 能力 | 行为 |
+|---|---|
+| Prompt 分层 | profile system prompt + 需求 brief / 澄清历史 / 反思反馈的内部 system 注记 |
+| 最近窗口 | 每个 profile 配置 `maxRecentMessages`；不会从 ToolMessage 中间切断 tool call/result |
+| 工具预算 | `maxToolResultChars`；terminal 优先保留尾部错误，其它工具保留头部 |
+| 原文保留 | 只 clone 投影后的 `ToolMessage`，原 checkpoint、transcript 与前端卡片不变 |
+| 轮次观测 | `TurnRecord.turnId` 贯穿 journal / transcript；`agent_turn_started/finished` 记录 profile、状态、耗时，debug 级记录 step/tool 开始与结束 |
+| 日志隐私 | 结构化日志不记录用户消息、工具参数或完整工具输出，只记 id、名称、状态和计数 |
 
 ---
 

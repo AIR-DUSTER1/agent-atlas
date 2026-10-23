@@ -66,7 +66,7 @@ flowchart TD
 - `threadId`：同一会话多轮记忆的键；
 - `configVersion`：建图时的模型配置版本；
 - `pendingApproval`：当前是否在等待人工审批或需求澄清；
-- `turnHistory`：服务端保存的逐轮用户消息与事件，用于回放和重启后的摘要注入；
+- `turnHistory`：服务端保存的逐轮用户消息、事件、稳定 `turnId` 与耗时，用于回放和重启后的摘要注入；
 - `contextSummary` / `contextSummaryInjected`：压缩上下文后的摘要及其注入状态。
 
 ## 3. 一次 `/api/chat` 请求的固定编排
@@ -168,8 +168,9 @@ flowchart LR
 - `clarify`：需求确实缺少关键信息时调用 `interrupt()`，载荷是
   `{ type:"clarification", question, options, allowCustom:true }`；选项 2–4 个，
   兼容用户自定义输入；
-- `agent`：绑定工具的模型节点；系统提示词之后追加内部注记
-  （`【需求理解】` / `【上一轮反思反馈】`），再传完整消息历史；
+- `agent`：绑定工具的模型节点；`context-builder.ts` 组装 profile system prompt、
+  内部注记（`【需求理解】` / `【上一轮反思反馈】`）与投影后的最近消息窗口；
+  超长工具结果只在该投影中裁剪，checkpoint / journal 原文不变；
 - `tools`：使用 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建的
   profile-local 执行节点；工具表在装配期封闭，跨域 tool call 会 fail-closed；
 - `review`：只检查最终非工具回答，并对照需求理解与最近 3 条工具结果；明确不通过时把反馈写回 `reviewFeedback`，
