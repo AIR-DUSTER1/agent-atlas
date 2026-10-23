@@ -10,7 +10,7 @@
  *
  * 安全设计：
  *   - 读写/列目录/搜索全部走 files.ts 的授权前缀校验（只能碰已授权根）；
- *   - terminal / write_file 在 approvalToolsNode 里注册为「需审批」工具，
+ *   - terminal / write_file 在 general profile 的审批策略里登记为「需审批」工具，
  *     模型调用后会先 interrupt 等用户点头，批准才真正执行；
  *   - 终端在 PROJECT_ROOT 下执行，输出限量截断，120s 超时强杀。
  */

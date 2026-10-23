@@ -17,6 +17,8 @@
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { terminal, readFileTool, writeFileTool, listDirTool, grepSearch } from "../tools-dev.js";
 import { retrieveDocs } from "../tools-rag.js";
+import { generalApprovals } from "./approvals.js";
+import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 
 const tools = [
@@ -42,7 +44,16 @@ const SYSTEM_PROMPT = [
   "- 回答简洁准确，代码放在 Markdown 代码块里",
 ].join("\n");
 
+/** 通用 profile 的能力边界：只含开发 / 知识库 / 基础工具，绝不包含 house_*。 */
+export const generalProfile: AgentProfile = {
+  id: "general",
+  displayName: "通用 Agent",
+  systemPrompt: SYSTEM_PROMPT,
+  tools,
+  approvalDescriptions: generalApprovals,
+};
+
 export function createAgentGraph() {
   // 模型与 checkpointer 都在建图时创建；换配置后由 sessions.rebuildIfStale 重建
-  return createWorkflowGraph(tools, SYSTEM_PROMPT);
+  return createWorkflowGraph(generalProfile);
 }

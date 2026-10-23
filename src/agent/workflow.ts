@@ -24,9 +24,9 @@ import {
 } from "@langchain/langgraph";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
-import type { StructuredToolInterface } from "@langchain/core/tools";
 import { createChatModel } from "../llm.js";
-import { approvalToolsNode } from "./hitl.js";
+import { createApprovalToolsNode } from "./hitl.js";
+import type { AgentProfile } from "./profile.js";
 
 const MAX_USER_TEXT = 8_000;
 const MAX_BRIEF_TEXT = 1_200;
@@ -266,19 +266,30 @@ function recentToolResults(messages: BaseMessage[]): string {
 
 /**
  * 构建带需求理解与反思的 ReAct 图。
- * general / estate 只提供工具集与系统提示词，避免两套编排逻辑各自漂移。
+ * general / estate 只提供 profile（提示词 + 工具 allowlist + 审批策略），
+ * 避免两套编排逻辑各自漂移；工具执行节点在建图时绑定 profile-local map。
  */
 export function createWorkflowGraph(
-  tools: StructuredToolInterface[],
-  systemPrompt: string,
+  profile: AgentProfile,
   models?: WorkflowModels
 ) {
+  const tools = profile.tools;
   const agentModel = models?.agent
     ?? (createChatModel().bindTools(tools) as unknown as WorkflowChatModel);
   const analystModel = models?.analyst
     ?? (createChatModel() as unknown as WorkflowChatModel);
   const reviewerModel = models?.reviewer
     ?? (createChatModel() as unknown as WorkflowChatModel);
+  const toolsNode = createApprovalToolsNode({
+    tools,
+    approvalDescriptions: profile.approvalDescriptions,
+  });
+  const analyzePrompt = profile.analystGuidance
+    ? `${ANALYZE_PROMPT}\n${profile.analystGuidance}`
+    : ANALYZE_PROMPT;
+  const reviewPrompt = profile.reviewerGuidance
+    ? `${REVIEW_PROMPT}\n${profile.reviewerGuidance}`
+    : REVIEW_PROMPT;
 
   async function analyzeNode(state: WorkflowStateType) {
     const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
@@ -295,7 +306,7 @@ export function createWorkflowGraph(
 
     try {
       const response = await analystModel.invoke([
-        { role: "system", content: ANALYZE_PROMPT },
+        { role: "system", content: analyzePrompt },
         {
           role: "user",
           content:
@@ -353,7 +364,7 @@ export function createWorkflowGraph(
     ].filter(Boolean);
 
     const response = await agentModel.invoke([
-      { role: "system", content: systemPrompt },
+      { role: "system", content: profile.systemPrompt },
       ...(notes.length ? [{ role: "system" as const, content: notes.join("\n\n") }] : []),
       ...state.messages,
     ]);
@@ -367,7 +378,7 @@ export function createWorkflowGraph(
     const attempts = state.reviewAttempts;
     try {
       const response = await reviewerModel.invoke([
-        { role: "system", content: REVIEW_PROMPT },
+        { role: "system", content: reviewPrompt },
         {
           role: "user",
           content:
@@ -406,7 +417,7 @@ export function createWorkflowGraph(
     .addNode("analyze", analyzeNode)
     .addNode("clarify", clarifyNode)
     .addNode("agent", agentNode)
-    .addNode("tools", approvalToolsNode)
+    .addNode("tools", toolsNode)
     .addNode("review", reviewNode)
     .addEdge(START, "analyze")
     .addConditionalEdges("analyze", afterAnalyze)

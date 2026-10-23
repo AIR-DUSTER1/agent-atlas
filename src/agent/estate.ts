@@ -6,10 +6,12 @@
  *   1. 工具集换成 tools-estate.ts 的贝壳找房工具 + 基础计算/时间工具；
  *   2. 系统提示词是「贝壳官方找房顾问」的浓缩版（来自贝壳 AI 技能的
  *      顾问式工作流：先城市与动机 → 收敛条件 → 搜索门槛 → 对比报告）。
- * 高风险工具（预约带看 / 经纪人加微）复用 hitl.ts 的 approvalToolsNode。
+ * 高风险工具（预约带看 / 经纪人加微）复用 hitl.ts 的 profile 审批工厂。
  */
 import { calculator, getCurrentTime } from "../tools.js";
 import { estateTools } from "../tools-estate.js";
+import { estateApprovals } from "./approvals.js";
+import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 
 const tools = [
@@ -36,7 +38,16 @@ const SYSTEM_PROMPT = [
   "回答简洁专业（120—260 字），先结论后解释，价格统一格式（¥X,XXX/月 或 X,XXX 万），绝不输出工具原始 JSON。",
 ].join("\n");
 
+/** 房产 profile 的能力边界：只含贝壳工具与计算/时间，不含开发、RAG、邮件工具。 */
+export const estateProfile: AgentProfile = {
+  id: "estate",
+  displayName: "租房 / 房产 Agent",
+  systemPrompt: SYSTEM_PROMPT,
+  tools,
+  approvalDescriptions: estateApprovals,
+};
+
 export function createEstateGraph() {
   // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(tools, SYSTEM_PROMPT);
+  return createWorkflowGraph(estateProfile);
 }

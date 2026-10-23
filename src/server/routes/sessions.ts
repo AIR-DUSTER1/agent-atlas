@@ -13,7 +13,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
   if (req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(listSessions().map((s) => ({
-      id: s.id, kind: s.kind, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
+      id: s.id, kind: s.kind, agentProfileId: s.agentProfileId, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
       pendingApproval: Boolean(s.pendingApproval),
     }))));
     return;
@@ -36,7 +36,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
     try {
       const session = createSession(kind, demo, projectId, body.title, typeof body.agentId === "string" ? body.agentId : null);
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ id: session.id, kind: session.kind, demo: session.demo, agentId: session.agentId, projectId: session.projectId, title: session.title, createdAt: session.createdAt }));
+      res.end(JSON.stringify({ id: session.id, kind: session.kind, agentProfileId: session.agentProfileId, demo: session.demo, agentId: session.agentId, projectId: session.projectId, title: session.title, createdAt: session.createdAt }));
     } catch (err) {
       respondBadRequest(res, req, err);
     }

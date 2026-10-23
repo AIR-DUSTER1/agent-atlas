@@ -37,6 +37,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 | 类型 | 文件 | 概念 | 一句话说明 |
 |------|------|------|-----------|
 | 通用 Agent | `src/agent/general.ts` | 产品化组合（默认） | 需求理解 / 澄清 + ReAct + 记忆 + 审批 + 反思 |
+| Agent profile | `src/agent/profile.ts` | 能力边界 | 工具 allowlist、审批策略、会话 kind → profile 派生 |
 | 共享编排 | `src/agent/workflow.ts` | 图内前置/后置节点 | `analyze → clarify? → agent ⇄ tools → review` |
 | 1 | `src/agent/basic.ts` | State / Node / Edge / 条件边 / 工具循环 | 亲手搭一张最基础的 ReAct 图 |
 | 2 | `src/agent/memory.ts` | Checkpointer / thread_id | 给同一张图加上多轮记忆 |
@@ -65,7 +66,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
-    ├── agent/            # 共享工作流 + 通用/房产 Agent + 5 个示例的图定义（学习的重点）
+    ├── agent/            # profile + 共享工作流 + 通用/房产 Agent + 5 个示例的图定义
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
@@ -362,20 +363,29 @@ export function createBasicGraph() {
 
 **职责**：与 basic.ts 图结构**完全相同**，唯一区别是 `compile({ checkpointer })`。一个词：`compile` 时多传一个参数。用来对比「有/无记忆」的行为差异。
 
-### 3.6 `src/agent/hitl.ts` — Demo 3：人工审批
+### 3.6 `src/agent/hitl.ts` — 审批工具节点工厂 + Demo 3
 
-**职责**：在 tools 节点里手动实现工具执行循环（顺带演示 ToolNode 的内部原理），遇到 `send_email` 就 `interrupt()` 暂停。
+**职责**：`createApprovalToolsNode({ tools, approvalDescriptions })` 在 tools 节点里手动实现
+工具执行循环，遇到当前 profile 登记的高风险工具就 `interrupt()` 暂停；Demo 3 用
+`demoApprovals` 只审批 `send_email`。
 
 ```ts
-async function approvalToolsNode(state) {
-  for (const call of lastMessage.tool_calls ?? []) {
-    if (call.name === "send_email") {
-      const decision = interrupt({ type: "approval", toolName, description, args }); // ★ 暂停
-      // decision 来自人类：approve → 执行；reject → 生成拒绝结果
-    } else {
-      // 普通工具直接执行
-    }
+const toolsNode = createApprovalToolsNode({
+  tools,                       // 当前图允许的全部工具（fail-closed allowlist）
+  approvalDescriptions,        // 当前 profile 的高风险工具 → 审批文案
+});
+
+// tools 节点内部：
+for (const call of lastMessage.tool_calls ?? []) {
+  const toolFn = toolMap.get(call.name);
+  if (!toolFn) {
+    // 跨域 / 伪造调用：返回 ToolMessage，不执行、不中断
+    continue;
   }
+  if (approvalDescriptions[call.name]) {
+    const decision = interrupt({ type: "approval", toolName, description, args });
+  }
+  // approve → 执行；reject → 生成拒绝结果
 }
 ```
 
@@ -729,7 +739,7 @@ Dockerfile 用 `CMD ["node", "--import", "tsx", ...]`，信号直达应用。
 ### 3.20 `src/agent/workflow.ts` — 产品默认编排（需求理解 / 澄清 / 反思）
 
 **设计立场**：把「执行前理解、执行后检查」做成图内节点，而不是散落在路由或
-prompt 里；`general.ts` / `estate.ts` 只提供工具集和系统提示词，避免两套编排漂移。
+prompt 里；`general.ts` / `estate.ts` 各自导出 profile，避免两套编排漂移。
 
 ```text
 START → analyze → clarify? → agent ⇄ tools → review → END
@@ -742,7 +752,7 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 | `analyze` | 判断最新请求是否明确，生成 `requirementBrief` | 坏 JSON / 模型异常默认“明确继续”；只问会实质改变结果的信息 |
 | `clarify` | `interrupt({ type:"clarification", question, options, allowCustom })` | 2–4 个互斥选项；服务端 `/api/resume {choice}`；选项 id 映射成可读标签；答案同时写入 `clarificationHistory` |
 | `agent` | 绑定工具的 ReAct 节点 | 系统提示词后追加 `【需求理解】` / `【上一轮反思反馈】` 内部注记 |
-| `tools` | 复用 `approvalToolsNode` | 高风险工具仍走审批，不另造一套 |
+| `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
 | `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多一次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
 
 **关键坑**：
@@ -756,11 +766,35 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 - `reviewFeedback` 只作为下一轮 `agent` 的 system 注记，不写进 `messages`，
   防止内部批评被当成用户可见历史；
 - 图状态字段的 reducer 必须兼容 `undefined`，否则中断恢复时旧 checkpoint 缺字段会报错；
-- `createWorkflowGraph()` 支持注入 `WorkflowModels`，单测用 `FakeListChatModel`
-  跑通「澄清 → resume → 反思回炉」整图，不消耗真实 API。
+- `createWorkflowGraph(profile, models?)` 支持注入 `WorkflowModels`，单测用
+  `FakeListChatModel` / 脚本化模型跑通「澄清 → resume → 反思回炉」整图，
+  不消耗真实 API。
 
 **当前边界**：只有默认 `agent` 与 `estate` 使用；Demo 1–5、外部 Agent、mock
 模式都不经过这张图。mock 不会产生澄清，也不能恢复澄清。
+
+### 3.21 `src/agent/profile.ts` + `approvals.ts` — Agent 能力隔离
+
+**职责**：profile 只描述「这个 Agent 允许什么」，不执行 IO；`workflow.ts` 只消费
+profile，不判断具体业务名。
+
+| 字段 | 作用 |
+|---|---|
+| `id` / `displayName` | `general` / `estate`，用于会话身份与 UI |
+| `systemPrompt` | 当前 Agent 的角色与业务规则 |
+| `tools` | 唯一执行 allowlist；建图时转成 local `Map`，同名工具直接报错 |
+| `approvalDescriptions` | 高风险工具名 → 审批文案；未登记工具直接执行 |
+| `analystGuidance` / `reviewerGuidance` | 可选领域规则，追加到 analyze / review prompt |
+
+隔离规则：
+
+- `general`：基础工具 + 开发工具 + `retrieve_docs`；禁止任何 `house_*`；
+- `estate`：贝壳工具 + `calculator` / `get_current_time`；禁止开发、RAG、邮件工具；
+- 模型伪造跨域 tool call 时，执行节点返回
+  `当前 Agent 不支持工具「X」，未执行。`，不执行、不进入审批；
+- 会话 `agentProfileId`、每轮 `TurnRecord.agentProfileId`、journal 与
+  `hitl.decided` 审计都携带执行域；旧 journal 按 `kind` 派生；
+- 未来租房需要 RAG 时，必须显式加入 estate profile，不能从通用注册表隐式获得。
 
 ---
 

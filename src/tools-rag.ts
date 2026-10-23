@@ -3,7 +3,7 @@
  *
  * retrieve_docs：对外部 RAG 服务发起语义检索，返回命中文本片段与来源。
  *   - 向量存储 / 切块 / embedding 全部由外部 RAG 服务完成（见 server/rag.ts 契约）；
- *   - 本工具是只读低风险操作，不走人工审批（approvalToolsNode 只拦 send_email 等）；
+ *   - 本工具是只读低风险操作，不走人工审批（general 审批策略只拦 send_email / terminal / write_file）；
  *   - 结果同时面向两类读者：模型直接阅读文本；前端按 JSON 渲染命中来源卡片。
  *
  * 输出形态（JSON 字符串）：

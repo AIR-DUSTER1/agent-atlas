@@ -27,6 +27,7 @@
 import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { log } from "./logging.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
@@ -46,7 +47,9 @@ export interface ApprovalSnapshot {
 
 export interface SessionRecord {
   id: string;
-  kind: "agent" | "estate" | "demo" | "external";
+  kind: SessionKind;
+  /** 旧 journal 可能没有该字段；回放时按 kind 派生 */
+  agentProfileId: AgentProfileId | null;
   demo: 1 | 2 | 3 | 4 | null;
   agentId: string | null;
   projectId: string;
@@ -57,7 +60,13 @@ export interface SessionRecord {
   /** 累计轮数（由回放统计而来，新创建为 0） */
   turns: number;
   /** 回放出的对话轮（user + events），与 sessions.ts 的 TurnRecord 同形 */
-  turnHistory: Array<{ user: string; files?: Array<{ name: string; source: string; image: boolean }>; events: unknown[] }>;
+  turnHistory: Array<{ agentProfileId?: AgentProfileId | null; user: string; files?: Array<{ name: string; source: string; image: boolean }>; events: unknown[] }>;
+}
+
+export type SessionKind = "agent" | "estate" | "demo" | "external";
+
+function isSessionKind(value: unknown): value is SessionKind {
+  return value === "agent" || value === "estate" || value === "demo" || value === "external";
 }
 
 /** journal 内存视角（回放后的状态），也是 compact 的快照来源 */
@@ -97,10 +106,16 @@ export async function flushJournal(): Promise<void> {
 }
 
 export function journalSession(rec: {
-  id: string; kind: "agent" | "estate" | "demo" | "external"; demo: 1 | 2 | 3 | 4 | null;
+  id: string; kind: SessionKind;
+  demo: 1 | 2 | 3 | 4 | null;
   agentId: string | null; projectId: string; title: string; createdAt: number; threadId: string;
 }): void {
-  journalWrite({ ts: Date.now(), ev: "session", session: rec });
+  // profile identity 只由服务端从 kind 派生，不接受调用方注入。
+  journalWrite({
+    ts: Date.now(),
+    ev: "session",
+    session: { ...rec, agentProfileId: profileIdForKind(rec.kind) },
+  });
 }
 
 export function journalRename(id: string, title: string): void {
@@ -123,8 +138,23 @@ export function journalDecided(id: string, status: "approved" | "rejected" | "an
   journalWrite({ ts: Date.now(), ev: "decided", id, status });
 }
 
-export function journalTurn(id: string, user: string, files: Array<{ name: string; source: string; image: boolean }> | undefined, events: unknown[]): void {
-  journalWrite({ ts: Date.now(), ev: "turn", id, user, files, events });
+export function journalTurn(
+  id: string,
+  kind: SessionKind,
+  user: string,
+  files: Array<{ name: string; source: string; image: boolean }> | undefined,
+  events: unknown[]
+): void {
+  // 轮次身份同样由 kind 派生，避免 journal 中的伪造字段把执行域改到另一个 Agent。
+  journalWrite({
+    ts: Date.now(),
+    ev: "turn",
+    id,
+    user,
+    files,
+    events,
+    agentProfileId: profileIdForKind(kind),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -162,9 +192,16 @@ function applyEvent(ev: Record<string, unknown>): void {
   if (evName === "session") {
     const s = ev.session as Partial<SessionRecord> | undefined;
     if (!s || typeof s.id !== "string") return;
+    if (s.kind !== undefined && !isSessionKind(s.kind)) {
+      log("warn", "journal_bad_session_kind", { action: "skipped" });
+      return;
+    }
     const base = findOrMake(s.id);
+    const kind = isSessionKind(s.kind) ? s.kind : base.kind;
     Object.assign(base, {
-      kind: s.kind ?? base.kind,
+      kind,
+      // 不接受 journal 自报 profile；kind 是唯一权威，避免跨域身份伪造。
+      agentProfileId: profileIdForKind(kind),
       demo: s.demo ?? null,
       agentId: s.agentId ?? null,
       projectId: s.projectId ?? "default",
@@ -200,6 +237,7 @@ function applyEvent(ev: Record<string, unknown>): void {
     const base = findOrMake(id);
     base.turns += 1;
     base.turnHistory.push({
+      agentProfileId: profileIdForKind(base.kind),
       user: typeof ev.user === "string" ? ev.user : "",
       files: Array.isArray(ev.files) ? (ev.files as SessionRecord["turnHistory"][0]["files"]) : undefined,
       events: Array.isArray(ev.events) ? ev.events : [],
@@ -211,7 +249,7 @@ function findOrMake(id: string): SessionRecord {
   let rec = state.get(id);
   if (!rec) {
     rec = {
-      id, kind: "agent", demo: null, agentId: null, projectId: "default",
+      id, kind: "agent", agentProfileId: null, demo: null, agentId: null, projectId: "default",
       title: "", createdAt: Date.now(), threadId: "", pendingApproval: null, turns: 0, turnHistory: [],
     };
     state.set(id, rec);
@@ -234,12 +272,12 @@ async function compactJournal(): Promise<void> {
   const snapshot = journalSnapshot();
   const lines: string[] = [];
   for (const rec of snapshot) {
-    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId } }));
+    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId } }));
     if (rec.pendingApproval && rec.pendingApproval.status === "pending") {
       lines.push(JSON.stringify({ ts: rec.createdAt, ev: "approval", id: rec.id, toolName: rec.pendingApproval.toolName, payload: rec.pendingApproval.payload }));
     }
     for (const t of rec.turnHistory) {
-      lines.push(JSON.stringify({ ts: Date.now(), ev: "turn", id: rec.id, user: t.user, files: t.files, events: t.events }));
+      lines.push(JSON.stringify({ ts: Date.now(), ev: "turn", id: rec.id, user: t.user, files: t.files, events: t.events, agentProfileId: t.agentProfileId ?? rec.agentProfileId }));
     }
   }
   const body = lines.join("\n") + "\n";

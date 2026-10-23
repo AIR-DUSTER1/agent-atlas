@@ -8,7 +8,7 @@
  *   - zod schema + describe 全中文；description 写清「何时用/何时不用」
  *   - 失败不 throw 穿透图：返回中文错误 JSON，让模型转述
  *   - house_appoint（预约带看）/ house_contact（加微经纪人）是「对外动作」，
- *     在 agent/hitl.ts 的 APPROVAL_TOOLS 登记，执行前必须人工审批
+ *     在 agent/approvals.ts 的 estate profile 策略登记，执行前必须人工审批
  *   - 运行结果统一 JSON 字符串：模型读全文，前端按工具名渲染专属卡片
  *     （房源列表卡 / 地图卡 / 户型图卡 —— 见 public/app.js updateToolCard）
  */

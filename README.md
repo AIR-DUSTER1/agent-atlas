@@ -189,6 +189,12 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 安全边界：读写/搜索走 files.ts 的授权前缀校验（只能碰项目根与已添加的远程文件夹）；
 `terminal` / `write_file` 与发邮件一样，模型调用后会先 interrupt 弹出人工审批卡，批准才执行。
 
+**能力隔离**：通用 / 房产是两个 Agent profile（`src/agent/profile.ts`）。每个 profile 自带
+工具 allowlist 与审批策略，工具执行节点只按当前 profile 的 local map 查工具；模型即使伪造
+跨域调用（例如通用会话调 `house_search`），也只会得到「当前 Agent 不支持工具」的失败结果，
+不会执行其他域工具，也不会进入审批。会话与每轮记录都保存 `agentProfileId`，供列表、回放与
+审计区分执行域。
+
 **历史会话回放**：每轮对话（用户消息 + 全部事件）都会记录在服务端，换浏览器或清空缓存后
 点击历史会话会自动从服务端拉取并按原样重放，不再出现「打开为空」。
 
@@ -300,12 +306,14 @@ src/
   tools-rag.ts   # 知识检索工具 retrieve_docs：调外部 RAG 服务（通用 HTTP 契约）
   tools-estate.ts# 房产工具集（贝壳 CLI 包装：找房/行情/地图/经纪人/预约/加微）
   agent/
-    workflow.ts  # 默认编排：需求理解 → 澄清 → ReAct/审批 → 结果反思（general/estate 共用）
-    general.ts   # 通用 Agent（默认）：工具集 + 系统提示词 → 共享工作流
-    estate.ts    # 房产 Agent：贝壳顾问式流程 → 共享工作流
+    workflow.ts  # 默认编排：需求理解 → 澄清 → ReAct/审批 → 结果反思（消费 profile）
+    profile.ts   # Agent profile 类型 / 工具 allowlist / kind → profile 派生
+    approvals.ts # 按 profile 拆分的审批登记（general / estate / demo）
+    general.ts   # 通用 Agent profile：工具集 + 系统提示词
+    estate.ts    # 房产 Agent profile：贝壳顾问式流程
     basic.ts     # 示例 1：亲手搭一张 ReAct 图（不借助 prebuilt 的 createAgent）
     memory.ts    # 示例 2：compile({ checkpointer }) 获得多轮记忆
-    hitl.ts      # 示例 3：interrupt()/Command.resume 实现人工审批
+    hitl.ts      # 审批工具节点工厂 + 示例 3：interrupt()/Command.resume
     multi.ts     # 示例 4：子图当节点，主管用虚拟工具 delegate 路由
     parallel.ts  # 示例 5：Send API 并行 map-reduce + Annotation.Root 自定义状态
   cli.ts         # CLI 入口：token 流式 + 节点日志 + 审批交互

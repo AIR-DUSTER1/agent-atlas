@@ -100,14 +100,7 @@ export const sendEmail = tool(
 
 // ---------------------------------------------------------------------------
 // 工具清单：Demo 1 / 2 / 3 共用；Demo 3 还单独演示了手动执行工具
+// 注意：这里只导出工具数组，不建跨域 name -> tool 全局注册表。
+// 通用 / 房产 Agent 的工具表由各自 profile 在建图时局部构建。
 // ---------------------------------------------------------------------------
 export const demoTools = [calculator, getCurrentTime, getWeather, sendEmail];
-
-/** name -> 工具 的映射，方便在代码里按名字查找并执行（Demo 3 / 审批节点用到）。
- *  覆盖通用 Agent 与房产 Agent 绑定的全部工具：
- *  基础工具（tools.ts）+ 开发工具（tools-dev.ts）+ 贝壳找房工具（tools-estate.ts）。 */
-import { devTools } from "./tools-dev.js";
-import { estateTools } from "./tools-estate.js";
-export const toolsByName = Object.fromEntries(
-  [...demoTools, ...devTools, ...estateTools].map((t) => [t.name, t])
-) as Record<string, (typeof demoTools)[number]>;

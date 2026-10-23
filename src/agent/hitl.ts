@@ -18,7 +18,6 @@
 import {
   StateGraph,
   START,
-  END,
   MessagesAnnotation,
   MemorySaver,
   interrupt,
@@ -27,9 +26,11 @@ import {
 import { toolsCondition } from "@langchain/langgraph/prebuilt";
 import type { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ToolMessage as ToolMessageCls } from "@langchain/core/messages";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import { createChatModel } from "../llm.js";
-import { calculator, getCurrentTime, getWeather, sendEmail, toolsByName } from "../tools.js";
-import type { Tool } from "@langchain/core/tools";
+import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
+import { demoApprovals } from "./approvals.js";
+import { createToolMap, type ApprovalDescriptions } from "./profile.js";
 
 // ---------------------------------------------------------------------------
 // 工具集：多了一个「高风险」的 send_email
@@ -44,69 +45,113 @@ export interface ApprovalRequest {
   args: Record<string, unknown>;
 }
 
-/** 需要「人工审批」的高风险工具 → 审批卡片上的描述文案（新增高风险工具在这里登记） */
-const APPROVAL_TOOLS: Record<string, (args: Record<string, unknown>) => string> = {
-  send_email: (a) => `向 ${String(a.to)} 发送邮件，主题「${String(a.subject)}」`,
-  terminal: (a) => `在项目根目录执行命令：${String(a.command)}`,
-  write_file: (a) => `写入文件：${String(a.path)}（${String(a.content ?? "").length} 字符）`,
-  // 房产 Agent：两个「对外动作」必须人工审批（详见 tools-estate.ts）
-  house_appoint: (a) =>
-    `提交贝壳带看预约：房源 ${String(a.houseId)}，${String(a.date)}${a.start ? ` ${String(a.start)}-${String(a.end ?? "18")} 时` : ""}`,
-  house_contact: (a) =>
-    `向贝壳经纪人（ID ${String(a.agentUcid)}，${String(a.biz ?? "")}${String(a.mode) === "rent" ? "租房" : "买房"}）发起加微：${String(a.reason)}`,
-};
+export interface ApprovalToolsNodeOptions {
+  /** 当前图允许执行的完整工具集；执行节点只认这一份。 */
+  tools: StructuredToolInterface[];
+  /** 需要人工审批的工具名 → 审批文案；未登记的工具直接执行。 */
+  approvalDescriptions: ApprovalDescriptions;
+}
+
+function toolResultText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+interface ToolInvocationResult {
+  content: string;
+  status: "success" | "error";
+}
+
+async function invokeTool(
+  toolFn: StructuredToolInterface,
+  args: Record<string, unknown>
+): Promise<ToolInvocationResult> {
+  try {
+    return { content: toolResultText(await toolFn.invoke(args)), status: "success" };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: `工具「${toolFn.name}」执行失败：${message}。请把原因转述给用户，不要重复执行。`,
+      status: "error",
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
-// 节点「tools」：手动实现工具执行循环（演示 ToolNode 的内部原理）
-//   ★ 关键：高风险工具（见 APPROVAL_TOOLS）执行之前先 interrupt() 暂停，等人类点头
-//   （本节点不依赖模型，放在模块级；模型在建图时才创建）
-//   导出复用：通用 Agent（general.ts）也用这个节点做高风险操作审批
+// 节点「tools」工厂：手动实现工具执行循环（演示 ToolNode 的内部原理）
+//   ★ 高风险工具执行前先 interrupt() 暂停；工具不在 profile allowlist 时
+//     fail-closed 返回 ToolMessage，绝不按全局名字去别的 Agent 找工具。
 // ---------------------------------------------------------------------------
-export async function approvalToolsNode(state: typeof MessagesAnnotation.State) {
-  const lastMessage = state.messages.at(-1) as AIMessage;
-  const toolResults: ToolMessage[] = [];
-
-  for (const call of lastMessage.tool_calls ?? []) {
-    const describe = APPROVAL_TOOLS[call.name];
-    if (describe) {
-      // ---- 高风险操作：暂停图，向人类请求审批 ----
-      // interrupt() 的参数会原样出现在流输出里（__interrupt__），
-      // 返回值则是 CLI 通过 Command({ resume }) 传回来的内容
-      const decision = interrupt<ApprovalRequest, "approve" | "reject">({
-        type: "approval",
-        toolName: call.name,
-        description: describe(call.args as Record<string, unknown>),
-        args: call.args as Record<string, unknown>,
-      });
-
-      // ---- 根据人类的决定继续执行 ----
-      const toolFn = toolsByName[call.name] as unknown as Tool;
-      const content =
-        decision === "approve"
-          ? await toolFn.invoke(call.args) // 批准 → 真正执行
-          : `用户拒绝了本次 ${call.name} 操作，不要执行。`; // 拒绝 → 生成结果消息
-
-      toolResults.push(
-        new ToolMessageCls({ content, tool_call_id: call.id ?? "" })
-      );
-    } else {
-      // 普通工具：直接执行，无需审批
-      // toolsByName 的值是多个工具组成的联合类型，invoke 参数签名互不兼容，
-      // 基类 Tool 的 schema 类型与 DynamicStructuredTool 也不重叠，只能经 unknown 收窄。
-      // （运行时 call.args 就是模型为该工具填的参数，与工具 schema 一致）
-      const toolFn = toolsByName[call.name] as unknown as Tool;
-      const content = await toolFn.invoke(call.args);
-      toolResults.push(new ToolMessageCls({ content, tool_call_id: call.id ?? "" }));
-    }
+export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
+  const toolMap = createToolMap(options.tools);
+  for (const name of Object.keys(options.approvalDescriptions)) {
+    if (!toolMap.has(name)) throw new Error(`Agent 审批项未绑定工具：${name}`);
   }
 
-  // 把工具结果追加进消息历史，agent 下一轮才能「看到结果并总结」
-  return { messages: toolResults };
+  return async function approvalToolsNode(state: typeof MessagesAnnotation.State) {
+    const lastMessage = state.messages.at(-1) as AIMessage;
+    const toolResults: ToolMessage[] = [];
+
+    for (const call of lastMessage.tool_calls ?? []) {
+      const toolFn = toolMap.get(call.name);
+      if (!toolFn) {
+        // 模型可能伪造或残留旧工具调用：只返回模型可读的拒绝结果，不 throw 穿透图。
+        toolResults.push(new ToolMessageCls({
+          content: `当前 Agent 不支持工具「${call.name}」，未执行。请改用当前可用工具或直接回答。`,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: "error",
+        }));
+        continue;
+      }
+
+      const describe = options.approvalDescriptions[call.name];
+      let content: string;
+      let status: "success" | "error" = "success";
+      if (describe) {
+        // interrupt() 的参数会原样出现在流输出里（__interrupt__），
+        // 返回值则是 CLI / Web 通过 Command({ resume }) 传回来的内容。
+        const decision = interrupt<ApprovalRequest, "approve" | "reject">({
+          type: "approval",
+          toolName: call.name,
+          description: describe(call.args as Record<string, unknown>),
+          args: call.args as Record<string, unknown>,
+        });
+        if (decision === "approve") {
+          const result = await invokeTool(toolFn, call.args);
+          content = result.content;
+          status = result.status;
+        } else {
+          content = `用户拒绝了本次 ${call.name} 操作，不要执行。`;
+        }
+      } else {
+        const result = await invokeTool(toolFn, call.args);
+        content = result.content;
+        status = result.status;
+      }
+
+      toolResults.push(new ToolMessageCls({
+        content,
+        tool_call_id: call.id ?? "",
+        name: call.name,
+        status,
+      }));
+    }
+
+    // 把工具结果追加进消息历史，agent 下一轮才能「看到结果并总结」
+    return { messages: toolResults };
+  };
 }
 
 export function createHitlGraph() {
   // ★ 模型在建图时创建：Web 端修改供应商/模型后，新建会话即用新配置
   const model = createChatModel().bindTools(tools);
+  const toolsNode = createApprovalToolsNode({ tools, approvalDescriptions: demoApprovals });
 
   // 节点「agent」：与 Demo 1 相同，让模型决定回答还是调工具
   async function agentNode(state: typeof MessagesAnnotation.State) {
@@ -119,7 +164,7 @@ export function createHitlGraph() {
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", agentNode)
-    .addNode("tools", approvalToolsNode)
+    .addNode("tools", toolsNode)
     .addEdge(START, "agent")
     .addConditionalEdges("agent", toolsCondition)
     .addEdge("tools", "agent")

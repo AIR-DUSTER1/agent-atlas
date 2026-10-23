@@ -270,6 +270,7 @@ async function handleResumeInner(
   if (approval) {
     writeAudit("hitl.decided", {
       sessionId: session.id,
+      agentProfileId: session.agentProfileId,
       toolName: approval.type === "approval" ? approval.toolName : "clarification",
       decision: clarification ? "answered" : resumeValue,
     });

@@ -22,6 +22,7 @@ import { createHitlGraph } from "../agent/hitl.js";
 import { createMultiAgentGraph } from "../agent/multi.js";
 import { createAgentGraph } from "../agent/general.js";
 import { createEstateGraph } from "../agent/estate.js";
+import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { getExternalAgent } from "./external.js";
 import {
   journalSession, journalDelete, journalApproval, journalDecided, journalTurn,
@@ -52,6 +53,8 @@ export type SessionKind = "agent" | "estate" | "demo" | "external";
 
 /** 一轮对话的服务端记录：用户消息 + 该轮全部 AgentEvent（供任意浏览器回放历史） */
 export interface TurnRecord {
+  /** 该轮执行的 Agent profile；demo / external 为 null（不参与 Agent 能力隔离） */
+  agentProfileId: AgentProfileId | null;
   /** 用户消息文本（审批/澄清恢复轮为「（批准/拒绝 xx）」「（需求澄清：…）」标记） */
   user: string;
   /** 随消息附加的文件元信息（与前端 user block 的 files 对应） */
@@ -66,6 +69,8 @@ const MAX_RECORD_EVENTS = 3000; // 单轮事件数上限（异常防护）
 export interface Session {
   id: string;
   kind: SessionKind;
+  /** 会话创建时确定的 Agent 能力 profile；demo / external 没有可执行 profile */
+  agentProfileId: AgentProfileId | null;
   demo: 1 | 2 | 3 | 4 | null;
   /** kind === "external"：接入的第三方 Agent id（external.ts 注册表） */
   agentId: string | null;
@@ -145,6 +150,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
   const session: Session = {
     id: randomUUID(),
     kind,
+    agentProfileId: profileIdForKind(kind),
     demo: kind === "demo" ? demo : null,
     agentId: external?.id ?? null,
     projectId: projectId || "default",
@@ -164,7 +170,8 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
   sessions.set(session.id, session);
   // T2-2：创建即落 journal —— 白名单挑字段（Session 内含编译图/内存结构，严禁整只序列化）
   journalSession({
-    id: session.id, kind: session.kind, demo: session.demo, agentId: session.agentId,
+    id: session.id, kind: session.kind,
+    demo: session.demo, agentId: session.agentId,
     projectId: session.projectId, title: session.title, createdAt: session.createdAt, threadId: session.threadId,
   });
   return session;
@@ -180,7 +187,12 @@ export function beginTurnRecord(
   user: string,
   files?: Array<{ name: string; source: string; image: boolean }>
 ): void {
-  session.turnHistory.push({ user, files, events: [] });
+  session.turnHistory.push({
+    agentProfileId: session.agentProfileId,
+    user,
+    files,
+    events: [],
+  });
   if (session.turnHistory.length > MAX_TURN_RECORDS) {
     session.turnHistory.splice(0, session.turnHistory.length - MAX_TURN_RECORDS);
   }
@@ -192,7 +204,7 @@ export function completeTurnRecord(session: Session, events: AgentEvent[]): void
   if (!record) return;
   record.events = events.length > MAX_RECORD_EVENTS ? events.slice(-MAX_RECORD_EVENTS) : events;
   // T2-2：完整轮次落 journal（含被中止的部分轮；失败自吞，不影响回答流）
-  journalTurn(session.id, record.user, record.files, record.events);
+  journalTurn(session.id, session.kind, record.user, record.files, record.events);
   void maybeCompactJournal(); // 后台探 journal 大小，超阈值自动 compact
 }
 
@@ -291,13 +303,15 @@ export async function restoreSessions(): Promise<number> {
   let restored = 0;
   for (const rec of records) {
     const kind = rec.kind;
-    // 已失效的外部 Agent / 未知 kind 仍保留会话壳（chat 时给出明确提示）
+    // 外部 Agent 没有可执行图；journal 在回放阶段已拒绝未知 kind。
     const hasGraph = kind !== "external";
     const graph = hasGraph ? buildGraph(kind, rec.demo) : null;
     const pend = rec.pendingApproval;
     const session: Session = {
       id: rec.id,
       kind,
+      // kind 是唯一权威；旧 journal 的 profile 字段只做兼容展示，不参与身份判定。
+      agentProfileId: profileIdForKind(kind),
       demo: rec.demo,
       agentId: rec.agentId,
       projectId: rec.projectId,
@@ -309,6 +323,7 @@ export async function restoreSessions(): Promise<number> {
       configVersion: currentConfigVersion(),
       turns: rec.turns,
       turnHistory: rec.turnHistory.map((t) => ({
+        agentProfileId: profileIdForKind(kind),
         user: t.user,
         files: t.files,
         events: t.events as AgentEvent[],

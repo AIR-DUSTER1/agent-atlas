@@ -13,6 +13,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "s-test",
     kind: "agent",
+    agentProfileId: "general",
     demo: null,
     agentId: null,
     projectId: "default",
@@ -34,6 +35,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 
 function turn(user: string, aiText: string): TurnRecord {
   return {
+    agentProfileId: "general",
     user,
     events: aiText ? [{ type: "token", text: aiText } as TurnRecord["events"][number]] : [],
   };

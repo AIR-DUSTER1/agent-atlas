@@ -48,8 +48,8 @@ flowchart TD
 
 | 会话类型 | 选择方式 | 使用的图 | Checkpointer | 备注 |
 |---|---|---|---|---|
-| `agent` | 默认「通用 Agent」 | `agent/workflow.ts`（general 配置） | 有 | 默认产品形态 |
-| `estate` | 「房产 Agent」 | `agent/workflow.ts`（estate 配置） | 有 | 贝壳工具集，审批规则复用 |
+| `agent` | 默认「通用 Agent」 | `agent/workflow.ts`（general profile） | 有 | 默认产品形态 |
+| `estate` | 「房产 Agent」 | `agent/workflow.ts`（estate profile） | 有 | 贝壳工具集，独立审批策略 |
 | `demo` 1 | 新建对话选「基础 ReAct」 | `agent/basic.ts` | 无 | 教学用，无多轮记忆 |
 | `demo` 2 | 「对话记忆」 | `agent/memory.ts` | 有 | 演示 `thread_id` 记忆 |
 | `demo` 3 | 「人工审批」 | `agent/hitl.ts` | 有 | 演示 `interrupt()` |
@@ -61,6 +61,7 @@ flowchart TD
 
 每个 `Session` 还保存：
 
+- `agentProfileId`：`general` / `estate`；demo 与 external 为 `null`，用于隔离工具、审批与观测；
 - `graph`：编译后的图实例；
 - `threadId`：同一会话多轮记忆的键；
 - `configVersion`：建图时的模型配置版本；
@@ -141,8 +142,9 @@ const graphInput = [
 
 ## 4. 默认通用 Agent 的编排
 
-`src/agent/general.ts` 与 `src/agent/estate.ts` 只提供工具集和系统提示词，实际图由
-`src/agent/workflow.ts` 的 `createWorkflowGraph()` 构建。产品默认路径不是裸 ReAct，而是：
+`src/agent/general.ts` 与 `src/agent/estate.ts` 各自导出 `AgentProfile`（系统提示词、工具
+allowlist、审批策略与可选领域 guidance），实际图由 `src/agent/workflow.ts` 的
+`createWorkflowGraph(profile)` 构建。产品默认路径不是裸 ReAct，而是：
 
 ```mermaid
 flowchart LR
@@ -168,7 +170,8 @@ flowchart LR
   兼容用户自定义输入；
 - `agent`：绑定工具的模型节点；系统提示词之后追加内部注记
   （`【需求理解】` / `【上一轮反思反馈】`），再传完整消息历史；
-- `tools`：复用 `approvalToolsNode`，工具循环与审批规则与旧图完全一致；
+- `tools`：使用 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建的
+  profile-local 执行节点；工具表在装配期封闭，跨域 tool call 会 fail-closed；
 - `review`：只检查最终非工具回答，并对照需求理解与最近 3 条工具结果；明确不通过时把反馈写回 `reviewFeedback`，
   让 `agent` 再答一次；最多修订一次（`MAX_REVIEW_REVISIONS = 1`），坏 JSON 默认通过；
 - 边：`START → analyze`，`analyze → clarify | agent`，`clarify → agent`，
@@ -229,7 +232,7 @@ flowchart LR
 
 ## 5. 房产 Agent 的编排
 
-`src/agent/estate.ts` 与通用 Agent 使用同一张 `workflow.ts` 图：
+`src/agent/estate.ts` 与通用 Agent 使用同一张 `workflow.ts` 图，但消费独立的 estate profile：
 
 ```text
 START → analyze → (clarify?) → agent → (toolsCondition) → tools → agent → review → END
@@ -237,7 +240,9 @@ START → analyze → (clarify?) → agent → (toolsCondition) → tools → ag
 
 差异只在：
 
-- 工具集换成贝壳找房工具 `tools-estate.ts` + `calculator` / `get_current_time`；
+- profile 的工具集是贝壳找房工具 `tools-estate.ts` + `calculator` / `get_current_time`，
+  审批策略只登记 `house_appoint` / `house_contact`；
+- 明确不绑定 terminal、读写文件、grep、RAG 与邮件工具；
 - system prompt 是「贝壳找房顾问」的顾问式流程；
 - 每轮进入图之前，`chat.ts` 额外把用户原话上报给贝壳 `analyzeEstateTurn`，该调用
   不阻塞主流程，失败不影响回答。
@@ -291,18 +296,24 @@ flowchart TD
 
 ## 7. 工具执行与 Human-in-the-loop
 
-所有需要审批的图都复用 `approvalToolsNode`（`src/agent/hitl.ts`）。
+通用 / 房产的 `tools` 节点都由 `createApprovalToolsNode({ tools, approvalDescriptions })`
+（`src/agent/hitl.ts`）创建：每个图实例持有自己的 local tool map，不再共用全局
+`toolsByName` 或跨域 `APPROVAL_TOOLS`。
 
 ### 7.1 普通工具
 
 模型返回 `tool_calls` 后，`tools` 节点遍历调用：
 
 ```text
-call.name 不在 APPROVAL_TOOLS
+call.name 不在当前 profile 的 tools
+  → 返回 fail-closed ToolMessage（当前 Agent 不支持工具…）
+call.name 不在当前 profile 的 approvalDescriptions
   → 直接 toolFn.invoke(call.args)
   → 生成 ToolMessage
   → 回到 agent
 ```
+
+工具执行异常会被转换成中文错误 `ToolMessage`，不 throw 穿透图。
 
 ### 7.2 高风险工具
 
@@ -321,7 +332,7 @@ sequenceDiagram
   G->>M: agent 节点
   M-->>G: AIMessage + tool_calls
   G->>T: 进入 tools
-  T->>T: 命中 APPROVAL_TOOLS
+  T->>T: 命中当前 profile 的 approvalDescriptions
   T-->>G: interrupt({ type:"approval", ... })
   G-->>A: interrupt 事件
   A-->>UI: SSE interrupt
@@ -337,13 +348,11 @@ sequenceDiagram
   A-->>UI: SSE token / done
 ```
 
-登记在 `APPROVAL_TOOLS` 中的工具：
+审批策略按 profile 拆分（`src/agent/approvals.ts`）：
 
-- `send_email`
-- `terminal`
-- `write_file`
-- `house_appoint`
-- `house_contact`
+- general：`send_email`、`terminal`、`write_file`；
+- estate：`house_appoint`、`house_contact`；
+- Demo 3：仅 `send_email`。
 
 ### 7.3 审批恢复的边界
 
@@ -518,12 +527,14 @@ clone 仓库
 | `src/server/external.ts` | 外部 Agent 子进程通道 |
 | `src/server/compaction.ts` | `/compact` 摘要与图重建 |
 | `src/server/limits.ts` | 同会话流闸、发送节流、资源桶 |
-| `src/agent/workflow.ts` | 需求理解 / 澄清 / ReAct / 反思的共享图 |
-| `src/agent/general.ts` | 默认通用 Agent：工具集 + 系统提示词 → 共享工作流 |
-| `src/agent/estate.ts` | 房产 Agent：工具集 + 系统提示词 → 共享工作流 |
+| `src/agent/workflow.ts` | 需求理解 / 澄清 / ReAct / 反思的共享图，消费 profile |
+| `src/agent/profile.ts` | Agent profile 类型、工具 allowlist、kind → profile 派生 |
+| `src/agent/approvals.ts` | 按 profile 拆分的审批策略 |
+| `src/agent/general.ts` | 默认通用 Agent profile：工具集 + 系统提示词 |
+| `src/agent/estate.ts` | 房产 Agent profile：工具集 + 系统提示词 |
 | `src/agent/basic.ts` | Demo 1 基础 ReAct |
 | `src/agent/memory.ts` | Demo 2 记忆 |
-| `src/agent/hitl.ts` | Demo 3 人工审批 |
+| `src/agent/hitl.ts` | 审批工具节点工厂 + Demo 3 人工审批 |
 | `src/agent/multi.ts` | Demo 4 Supervisor 多 Agent |
 | `src/agent/parallel.ts` | Demo 5 并行 map-reduce（CLI） |
 | `src/llm.ts` | 多协议模型工厂 |

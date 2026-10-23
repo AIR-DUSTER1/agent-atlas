@@ -10,6 +10,15 @@ import {
   parseReviewResult,
   type WorkflowChatModel,
 } from "../../src/agent/workflow.js";
+import type { AgentProfile } from "../../src/agent/profile.js";
+
+const testProfile: AgentProfile = {
+  id: "general",
+  displayName: "测试 Agent",
+  systemPrompt: "测试系统提示",
+  tools: [],
+  approvalDescriptions: {},
+};
 
 test("需求分析：fenced JSON + 两个选项 → 进入澄清", () => {
   const result = parseRequirementAnalysis([
@@ -93,7 +102,7 @@ test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反
     analyst: fake as unknown as WorkflowChatModel,
     reviewer: fake as unknown as WorkflowChatModel,
   };
-  const graph = createWorkflowGraph([], "测试系统提示", models);
+  const graph = createWorkflowGraph(testProfile, models);
   const threadId = `workflow-${randomUUID()}`;
   const config = { configurable: { thread_id: threadId } };
 
@@ -125,7 +134,7 @@ test("工作流：反思不通过时带反馈回炉一次，然后结束", async
       JSON.stringify({ passes: true, reason: "已补齐", feedback: "" }),
     ],
   });
-  const graph = createWorkflowGraph([], "测试系统提示", {
+  const graph = createWorkflowGraph(testProfile, {
     agent: fake as unknown as WorkflowChatModel,
     analyst: fake as unknown as WorkflowChatModel,
     reviewer: fake as unknown as WorkflowChatModel,
