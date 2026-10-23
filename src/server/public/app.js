@@ -12,9 +12,10 @@ import {
   reasoningTag, safeImageSrc, safeHref, nodeIcon, nodeLabel, NODE_ICONS, TOOL_ICONS,
 } from "./modules/format.js";
 import { showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
+import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-21-6";
+const APP_VERSION = "web-2026-10-23-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -25,7 +26,7 @@ console.log(
  * ------------------------------------------------------------------------- */
 const state = {
   config: null,        // { mock, model, baseURL, contextWindow, providers, demos }
-  sessions: [],        // { id, kind, demo, agentId, projectId, title, createdAt, stale?, pendingApproval? }
+  sessions: [],        // { id, kind, agentProfileId, demo, agentId, projectId, title, createdAt, stale?, pendingApproval? }
   projects: [],        // [{id, name, type:"local"|"cloud", path, url?, builtin?}]
   externalAgents: [],  // [{id, name, url, command, args, ...}] 第三方接入的 Agent
   rag: null,           // { configured, baseURL, apiKeyMasked, collection, topK, docs } 外部 RAG 状态
@@ -123,6 +124,13 @@ const sendBtn = $("send-btn");
 const stopBtn = $("stop-btn");
 
 const DEMO_BADGE_TEXT = { 1: "示例 1 · 基础 ReAct", 2: "示例 2 · 对话记忆", 3: "示例 3 · 人工审批", 4: "示例 4 · 多 Agent" };
+
+/** 会话列表短标签：Agent profile 走元数据，demo / external 保留各自语义。 */
+function sessionTagText(session) {
+  if (session.kind === "external") return "外部";
+  if (session.kind === "demo") return `示例 ${session.demo}`;
+  return profileMetaForSession(session)?.shortLabel ?? "未知";
+}
 /** 请求协议 → 徽标短文案（openai 是默认，不显示徽标） */
 const PROTOCOL_LABEL = {
   "openai-responses": "Responses",
@@ -159,7 +167,10 @@ function saveLocal() {
       localStorage.setItem(LS_USAGE, JSON.stringify(state.usage));
       localStorage.setItem(LS_PROJECT_VIEW, state.projectView);
       localStorage.setItem(LS_SESSIONS, JSON.stringify(
-        state.sessions.map((s) => ({ id: s.id, kind: s.kind, title: s.title, demo: s.demo, projectId: s.projectId, createdAt: s.createdAt }))
+        state.sessions.map((s) => ({
+          id: s.id, kind: s.kind, agentProfileId: s.agentProfileId,
+          title: s.title, demo: s.demo, projectId: s.projectId, createdAt: s.createdAt,
+        }))
       ));
     } catch { /* 存储已满等场景忽略 */ }
   }, 300);
@@ -412,7 +423,7 @@ function renderSessionItem(s) {
   meta.className = "s-meta";
   const tag = document.createElement("span");
   tag.className = "s-demo";
-  tag.textContent = s.kind === "agent" ? "通用" : s.kind === "external" ? "外部" : s.kind === "estate" ? "找房" : `示例 ${s.demo}`;
+  tag.textContent = sessionTagText(s);
   meta.appendChild(tag);
   const time = document.createElement("span");
   time.textContent = new Date(s.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -468,11 +479,12 @@ function showChatState(session) {
   welcomeEl.classList.add("hidden");
   $("session-title").textContent = session.title;
   const badge = $("demo-badge");
+  const profile = profileMetaForSession(session);
   badge.textContent = session.kind === "demo"
     ? (DEMO_BADGE_TEXT[session.demo] || `示例 ${session.demo}`)
     : session.kind === "external"
       ? `🔌 外部 · ${state.externalAgents.find((a) => a.id === session.agentId)?.name ?? "Agent"}`
-      : "通用 Agent";
+      : profile ? `${profile.icon} ${profile.label}` : "未知 Agent";
   badge.classList.remove("hidden");
   // 历史会话（服务重启后仅存于本地）只读：发送必然 404，直接禁用输入
   const stale = Boolean(session.stale);
@@ -986,7 +998,8 @@ function updateToolCard(part) {
     card.classList.remove("running");
     card.classList.add(part.result.isError ? "err" : "ok");
     status.className = "tool-status " + (part.result.isError ? "err" : "ok");
-    status.innerHTML = part.result.isError ? "✕ 失败" : "✓ 完成";
+    const unsupported = part.result.isError && /当前 Agent 不支持工具/.test(String(part.result.content));
+    status.textContent = unsupported ? "✕ 不支持" : part.result.isError ? "✕ 失败" : "✓ 完成";
     card.querySelector(".result-pre").textContent = part.result.content;
     card.querySelector(".result-pre").className = "result-pre" + (part.result.isError ? " err" : "");
     // 知识检索专属：解析 JSON 结果，渲染「命中来源」卡片
@@ -1638,12 +1651,13 @@ function buildDemoCards(container) {
   container.innerHTML = "";
 
   // 通用 Agent（默认）：正常产品逻辑 —— 工具 + 文件上下文 + 多轮记忆 + 审批
+  const general = AGENT_PROFILES.general;
   const agentCard = document.createElement("button");
   agentCard.className = "demo-card";
   agentCard.innerHTML = `
-    <div class="d-head"><span class="d-num">⚡</span><span class="d-name">通用 Agent <span class="d-default">默认</span></span></div>
-    <div class="d-desc">工具调用 · 📎 文件上下文 · 多轮记忆 · 高风险操作审批</div>
-    <div class="d-eg">直接输入任何问题即可开始</div>`;
+    <div class="d-head"><span class="d-num">${general.icon}</span><span class="d-name">${general.label} <span class="d-default">默认</span></span></div>
+    <div class="d-desc">${general.description}</div>
+    <div class="d-eg">${general.example}</div>`;
   agentCard.addEventListener("click", async () => {
     try { await createSession("agent", null, null); }
     catch (err) { uiAlert("创建对话失败：" + err.message, "创建对话"); }
@@ -1670,12 +1684,13 @@ function buildDemoCards(container) {
   }
 
   // 房产 Agent（贝壳）：真实找房 / 对比区位地图 / 户型图 / 预约带看
+  const estate = AGENT_PROFILES.estate;
   const estateCard = document.createElement("button");
   estateCard.className = "demo-card";
   estateCard.innerHTML = `
-    <div class="d-head"><span class="d-num">🏠</span><span class="d-name">房产 Agent</span></div>
-    <div class="d-desc">贝壳官方数据 · 找房对比 · 🗺️ 区位地图 · 户型图 · 预约带看审批</div>
-    <div class="d-eg" id="estate-card-hint">示例：帮我在北京租个两居室</div>`;
+    <div class="d-head"><span class="d-num">${estate.icon}</span><span class="d-name">${estate.label}</span></div>
+    <div class="d-desc">${estate.description}</div>
+    <div class="d-eg" id="estate-card-hint">示例：${estate.example}</div>`;
   estateCard.addEventListener("click", async () => {
     try { await createSession("estate"); }
     catch (err) { uiAlert("创建对话失败：" + err.message, "创建对话"); }
