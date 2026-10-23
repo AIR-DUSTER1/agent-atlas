@@ -35,9 +35,11 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 
 function turn(user: string, aiText: string): TurnRecord {
   return {
+    turnId: `turn-${user}`,
     agentProfileId: "general",
     user,
     events: aiText ? [{ type: "token", text: aiText } as TurnRecord["events"][number]] : [],
+    startedAt: Date.now(),
   };
 }
 

@@ -53,6 +53,8 @@ export type SessionKind = "agent" | "estate" | "demo" | "external";
 
 /** 一轮对话的服务端记录：用户消息 + 该轮全部 AgentEvent（供任意浏览器回放历史） */
 export interface TurnRecord {
+  /** 稳定轮次 id：结构化日志、journal 与回放共用，不进入模型上下文。 */
+  turnId: string;
   /** 该轮执行的 Agent profile；demo / external 为 null（不参与 Agent 能力隔离） */
   agentProfileId: AgentProfileId | null;
   /** 用户消息文本（审批/澄清恢复轮为「（批准/拒绝 xx）」「（需求澄清：…）」标记） */
@@ -61,6 +63,9 @@ export interface TurnRecord {
   files?: Array<{ name: string; source: string; image: boolean }>;
   /** 该轮 SSE 推给前端的全部事件（含 usage/error/interrupt，不含 done） */
   events: AgentEvent[];
+  startedAt: number;
+  finishedAt?: number;
+  durationMs?: number;
 }
 
 const MAX_TURN_RECORDS = 100;   // 每会话最多保留轮数
@@ -186,16 +191,20 @@ export function beginTurnRecord(
   session: Session,
   user: string,
   files?: Array<{ name: string; source: string; image: boolean }>
-): void {
-  session.turnHistory.push({
+): TurnRecord {
+  const record: TurnRecord = {
+    turnId: randomUUID(),
     agentProfileId: session.agentProfileId,
     user,
     files,
     events: [],
-  });
+    startedAt: Date.now(),
+  };
+  session.turnHistory.push(record);
   if (session.turnHistory.length > MAX_TURN_RECORDS) {
     session.turnHistory.splice(0, session.turnHistory.length - MAX_TURN_RECORDS);
   }
+  return record;
 }
 
 /** 流结束后调用：把该轮实际推送的事件挂到最后一条记录上（含被中止的部分轮） */
@@ -203,8 +212,19 @@ export function completeTurnRecord(session: Session, events: AgentEvent[]): void
   const record = session.turnHistory.at(-1);
   if (!record) return;
   record.events = events.length > MAX_RECORD_EVENTS ? events.slice(-MAX_RECORD_EVENTS) : events;
+  record.finishedAt = Date.now();
+  record.durationMs = Math.max(0, record.finishedAt - record.startedAt);
   // T2-2：完整轮次落 journal（含被中止的部分轮；失败自吞，不影响回答流）
-  journalTurn(session.id, session.kind, record.user, record.files, record.events);
+  journalTurn(
+    session.id,
+    session.kind,
+    record.turnId,
+    record.startedAt,
+    record.durationMs,
+    record.user,
+    record.files,
+    record.events
+  );
   void maybeCompactJournal(); // 后台探 journal 大小，超阈值自动 compact
 }
 
@@ -323,10 +343,14 @@ export async function restoreSessions(): Promise<number> {
       configVersion: currentConfigVersion(),
       turns: rec.turns,
       turnHistory: rec.turnHistory.map((t) => ({
+        turnId: t.turnId ?? randomUUID(),
         agentProfileId: profileIdForKind(kind),
         user: t.user,
         files: t.files,
         events: t.events as AgentEvent[],
+        startedAt: t.startedAt ?? rec.createdAt,
+        finishedAt: t.finishedAt,
+        durationMs: t.durationMs,
       })),
       // T2-3：pendingApproval 跨重启不可 resume（图 interrupt 状态未持久化）
       resumeUnavailable: Boolean(pend && pend.status === "pending"),

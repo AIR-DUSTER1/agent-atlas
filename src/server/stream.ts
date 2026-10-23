@@ -23,6 +23,7 @@ import {
 } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentEvent, InterruptPayload } from "./events.js";
+import { log } from "./logging.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
 const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review"]);
@@ -42,6 +43,9 @@ type AnyGraph = {
 interface NormalizeOptions {
   threadId: string;
   signal?: AbortSignal;
+  /** 观测字段：只写结构化日志，不进入模型上下文或前端事件。 */
+  agentProfileId?: "general" | "estate" | null;
+  turnId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,8 @@ export async function* runGraphEvents(
   let streamedSinceBoundary = false;     // 距上个「边界消息」（工具结果等）是否已有流式文本
   let toolSeq = 0;                       // 网关不给 tool_call id 时兜底编号
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
+  const announcedTools = new Set<string>();
+  const loggedToolResults = new Set<string>();
   // 用量分片累积（Anthropic 系 input/output 分片到达）；切换节点时重置，避免跨节点污染
   let usageAccum: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null = null;
   let usageNode: string | undefined;
@@ -234,6 +240,14 @@ export async function* runGraphEvents(
           }
           const name = typeof tc.name === "string" && tc.name ? tc.name : undefined;
           const frag = typeof tc.args === "string" ? tc.args : tc.args ? JSON.stringify(tc.args) : "";
+          if (name && !announcedTools.has(id)) {
+            announcedTools.add(id);
+            log("debug", "agent_tool_started", {
+              agentProfileId: options.agentProfileId,
+              turnId: options.turnId,
+              toolName: name,
+            });
+          }
           if (name || frag) {
             yield { type: "tool_call", id, name, argsFragment: frag };
           }
@@ -245,9 +259,19 @@ export async function* runGraphEvents(
         // 整条工具结果（id 与 tool_call 配对）
         if (msg.id) streamedIds.add(msg.id);
         streamedSinceBoundary = false;
+        const resultId = msg.tool_call_id ?? "";
+        if (!loggedToolResults.has(resultId)) {
+          loggedToolResults.add(resultId);
+          log("debug", "agent_tool_finished", {
+            agentProfileId: options.agentProfileId,
+            turnId: options.turnId,
+            toolName: msg.name ?? "unknown",
+            status: msg.status ?? "success",
+          });
+        }
         yield {
           type: "tool_result",
-          id: msg.tool_call_id ?? "",
+          id: resultId,
           content: contentText(msg.content),
           isError: msg.status === "error",
         };
@@ -272,6 +296,11 @@ export async function* runGraphEvents(
           continue;
         }
         if (!nodeKey.startsWith("__")) {
+          log("debug", "agent_step_started", {
+            agentProfileId: options.agentProfileId,
+            turnId: options.turnId,
+            step: nodeKey,
+          });
           yield { type: "node", name: nodeKey };
         }
         if (INTERNAL_LLM_NODES.has(nodeKey)) continue;

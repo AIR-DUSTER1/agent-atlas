@@ -60,7 +60,16 @@ export interface SessionRecord {
   /** 累计轮数（由回放统计而来，新创建为 0） */
   turns: number;
   /** 回放出的对话轮（user + events），与 sessions.ts 的 TurnRecord 同形 */
-  turnHistory: Array<{ agentProfileId?: AgentProfileId | null; user: string; files?: Array<{ name: string; source: string; image: boolean }>; events: unknown[] }>;
+  turnHistory: Array<{
+    turnId?: string;
+    agentProfileId?: AgentProfileId | null;
+    user: string;
+    files?: Array<{ name: string; source: string; image: boolean }>;
+    events: unknown[];
+    startedAt?: number;
+    finishedAt?: number;
+    durationMs?: number;
+  }>;
 }
 
 export type SessionKind = "agent" | "estate" | "demo" | "external";
@@ -141,6 +150,9 @@ export function journalDecided(id: string, status: "approved" | "rejected" | "an
 export function journalTurn(
   id: string,
   kind: SessionKind,
+  turnId: string,
+  startedAt: number,
+  durationMs: number,
   user: string,
   files: Array<{ name: string; source: string; image: boolean }> | undefined,
   events: unknown[]
@@ -150,10 +162,14 @@ export function journalTurn(
     ts: Date.now(),
     ev: "turn",
     id,
+    turnId,
+    agentProfileId: profileIdForKind(kind),
+    startedAt,
+    finishedAt: startedAt + durationMs,
+    durationMs,
     user,
     files,
     events,
-    agentProfileId: profileIdForKind(kind),
   });
 }
 
@@ -237,10 +253,14 @@ function applyEvent(ev: Record<string, unknown>): void {
     const base = findOrMake(id);
     base.turns += 1;
     base.turnHistory.push({
+      turnId: typeof ev.turnId === "string" ? ev.turnId : undefined,
       agentProfileId: profileIdForKind(base.kind),
       user: typeof ev.user === "string" ? ev.user : "",
       files: Array.isArray(ev.files) ? (ev.files as SessionRecord["turnHistory"][0]["files"]) : undefined,
       events: Array.isArray(ev.events) ? ev.events : [],
+      startedAt: typeof ev.startedAt === "number" ? ev.startedAt : undefined,
+      finishedAt: typeof ev.finishedAt === "number" ? ev.finishedAt : undefined,
+      durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
     });
   }
 }
@@ -277,7 +297,12 @@ async function compactJournal(): Promise<void> {
       lines.push(JSON.stringify({ ts: rec.createdAt, ev: "approval", id: rec.id, toolName: rec.pendingApproval.toolName, payload: rec.pendingApproval.payload }));
     }
     for (const t of rec.turnHistory) {
-      lines.push(JSON.stringify({ ts: Date.now(), ev: "turn", id: rec.id, user: t.user, files: t.files, events: t.events, agentProfileId: t.agentProfileId ?? rec.agentProfileId }));
+      lines.push(JSON.stringify({
+        ts: Date.now(), ev: "turn", id: rec.id, turnId: t.turnId,
+        user: t.user, files: t.files, events: t.events,
+        agentProfileId: t.agentProfileId ?? rec.agentProfileId,
+        startedAt: t.startedAt, finishedAt: t.finishedAt, durationMs: t.durationMs,
+      }));
     }
   }
   const body = lines.join("\n") + "\n";

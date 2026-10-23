@@ -47,8 +47,8 @@ test("restoreSessions：只恢复 status=pending 的审批/澄清", async () => 
     },
   };
   const spoofedTurn = {
-    ev: "turn", id: "spoofed-general", agentProfileId: "estate",
-    user: "伪造轮次身份", events: [],
+    ev: "turn", id: "spoofed-general", turnId: "turn-spoofed", agentProfileId: "estate",
+    user: "伪造轮次身份", events: [], startedAt: 100, finishedAt: 150, durationMs: 50,
   };
   const invalidKind = {
     ev: "session",
@@ -93,6 +93,8 @@ test("restoreSessions：只恢复 status=pending 的审批/澄清", async () => 
     const spoofedAgent = getSession("spoofed-general");
     assert.equal(spoofedAgent?.agentProfileId, "general", "journal 自报 profile 不能覆盖 kind");
     assert.equal(spoofedAgent?.turnHistory[0]?.agentProfileId, "general");
+    assert.equal(spoofedAgent?.turnHistory[0]?.turnId, "turn-spoofed");
+    assert.equal(spoofedAgent?.turnHistory[0]?.durationMs, 50);
 
     const spoofedEstateSession = getSession("spoofed-estate");
     assert.equal(spoofedEstateSession?.agentProfileId, "estate");

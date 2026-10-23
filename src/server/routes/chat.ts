@@ -19,6 +19,7 @@ import {
 import { getActiveModality } from "../settings.js";
 import { lifecycle } from "../lifecycle.js";
 import { writeAudit } from "../audit.js";
+import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
 
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
@@ -55,6 +56,15 @@ async function streamToClient(
     }
   });
 
+  const turn = session.turnHistory.at(-1);
+  const turnStartedAt = turn?.startedAt ?? Date.now();
+  log("info", "agent_turn_started", {
+    sessionId: session.id,
+    turnId: turn?.turnId ?? "",
+    agentProfileId: session.agentProfileId,
+    kind: session.kind,
+  });
+
   const collected: AgentEvent[] = [];
   let sawInterrupt = false;
   try {
@@ -80,6 +90,19 @@ async function streamToClient(
     unregisterSse();
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过
     onDone?.(collected);
+    log("info", "agent_turn_finished", {
+      sessionId: session.id,
+      turnId: turn?.turnId ?? "",
+      agentProfileId: session.agentProfileId,
+      kind: session.kind,
+      status: controller.signal.aborted
+        ? "aborted"
+        : collected.some((event) => event.type === "error")
+          ? "error"
+          : sawInterrupt ? "waiting" : "completed",
+      events: collected.length,
+      durationMs: Math.max(0, Date.now() - turnStartedAt),
+    });
     if (!clientGone) {
       writeEvent(res, { type: "done" });
       res.end();
@@ -191,6 +214,8 @@ async function handleChatInner(
     runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: graphInput }, {
       threadId: session.threadId,
       signal,
+      agentProfileId: session.agentProfileId,
+      turnId: session.turnHistory.at(-1)?.turnId,
     })
   , (events) => completeTurnRecord(session, events));
 }
@@ -310,7 +335,12 @@ async function handleResumeInner(
     (signal) => runGraphEvents(
       session.graph as Parameters<typeof runGraphEvents>[0],
       buildResumeCommand(resumeValue),
-      { threadId: session.threadId, signal }
+      {
+        threadId: session.threadId,
+        signal,
+        agentProfileId: session.agentProfileId,
+        turnId: session.turnHistory.at(-1)?.turnId,
+      }
     ),
     (events) => {
       if (!events.some((event) => event.type === "interrupt")) {

@@ -90,6 +90,8 @@ test("会话创建 / 列表 / transcript 均携带 agentProfileId", async () => 
   const transcript = await json(`/api/sessions/${general.body.id}/transcript`);
   assert.equal(transcript.status, 200);
   assert.equal(transcript.body.records.at(-1)?.agentProfileId, "general");
+  assert.match(transcript.body.records.at(-1)?.turnId ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(typeof transcript.body.records.at(-1)?.durationMs, "number");
 });
 
 test("审批审计 hitl.decided 携带 agentProfileId", async () => {
