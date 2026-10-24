@@ -852,6 +852,35 @@ profile，不判断具体业务名。
   SSE 的 `tool_result` 事件与 journal 回放只取其中的 text 块（`contentText` 拍平），
   base64 不进前端不进 journal。
 
+### 3.24 `src/agent/subagent.ts` + `src/tools-team.ts` — 多智能体协同（委派子 Agent）
+
+**形态**：子 Agent = 工具。主 Agent（general）调 `delegate_agent({ profile, task })`，
+内部用目标 profile 的 workflow 子图后台跑完任务书，结果文本截断 4000 字符作为 ToolMessage
+回填 —— 是 Demo 4（supervisor）/ Demo 5（并行 map-reduce）概念的产品化。
+
+阶段 1 的三条安全默认：
+
+| 默认 | 实现 |
+|---|---|
+| 子 Agent 强制只读 | `runSubagent` 固定 `permission_mode:"readonly"` 传子图 configurable，写操作全部被权限闸门拒绝（§3.23）；写需求由主 Agent 自己走完整审批链 |
+| 深度 = 1 | `subagentProfileOf` 剔除子 profile 的 `delegate_agent` 工具，子 Agent 无法再委派，防递归套娃与配额失控 |
+| 黑盒交互 | 子图在工具函数内运行，`interrupt` 无法冒泡：澄清 interrupt / 超时（180s）/ 空产出 一律转「模型可读中文错误」，主 Agent 重试或接手，绝不静默挂死 |
+
+上下文隔离：每次委派独立 `threadId` + 全新 MemorySaver，子 Agent 只看到任务书（外加追加的
+「不要请求澄清、按合理假设继续」分析规则），主会话只看到结果文本 —— 双向不污染。
+
+实现坑：
+
+- **import 环**：general.ts 挂载 delegate 工具（import tools-team），而 tools-team 要按
+  profileId 取 generalProfile / estateProfile —— 静态 import 会成环。工具函数内用
+  **动态 `await import()`**（模块缓存无性能损耗）在运行时取 profile；
+- 委派本身登记审批（`delegate_agent` → 「委派 xx 子 Agent 执行：…（一次委派 = 多轮模型调用）」），
+  复用 §3.23 权限三档：readonly 拒 / approve 卡 / auto 直通；
+- estate 不挂 delegate（域纯粹，不反向委派）—— 工具隔离测试断言。
+
+阶段边界（后续）：同轮多委派并行（tools 节点 Promise.all）、子 Agent token 流转发前端、
+审批冒泡（需图节点式改造）、子 Agent usage 并入主会话容量条。
+
 ---
 
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）

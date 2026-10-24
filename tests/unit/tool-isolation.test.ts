@@ -75,6 +75,10 @@ test("profile 工具集互不越界，审批项都包含在各自 allowlist 内"
   for (const name of Object.keys(estateProfile.approvalDescriptions)) {
     assert.ok(estateNames.includes(name), `房产审批项缺少工具：${name}`);
   }
+
+  // 多智能体协同：delegate_agent 只属于 general（estate 保持域纯粹，不能反向委派）
+  assert.ok(generalNames.includes("delegate_agent"));
+  assert.ok(!estateNames.includes("delegate_agent"));
 });
 
 test("通用 Agent 图拒绝伪造的房产工具调用，不执行也不中断", async () => {

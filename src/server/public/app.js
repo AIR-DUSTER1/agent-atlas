@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-24-2";
+const APP_VERSION = "web-2026-10-24-3";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"

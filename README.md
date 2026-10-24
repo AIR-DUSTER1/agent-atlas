@@ -74,6 +74,9 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
   **自动**（全部工具直接执行）。只对新发起的请求生效，会话内随时可切回；
 - **电脑控制（Computer Use）**：通用 Agent 可截屏「看」屏幕（多模态模型），并按坐标点击 /
   输入文本 / 发送组合键 / 滚动（操作类动作按当前权限模式执行或拒绝）；
+- **多智能体协同**：通用 Agent 可用 `delegate_agent` 把独立子任务委派给子 Agent 后台执行
+  （通用 / 房产两个候选，独立上下文互不污染，结果汇总回主回答）。子 Agent 强制只读、
+  不可再委派（防递归）；委派属高风险操作会先弹审批卡（一次委派 = 多轮模型调用）；
 - **需求理解与澄清（默认 / 房产 Agent）**：先判断请求是否明确；缺少关键信息时弹出
   2–4 个选项 + 自定义输入，选择后继续执行；最终回答会做一次反思，明显遗漏时
   带反馈重答（最多回炉三次）。Mock 模式不经过该流程，需配置真实模型观察；
@@ -199,6 +202,13 @@ npm run web                 # http://localhost:3000（PORT 环境变量可改端
 | `computer_type` | 向当前窗口输入文本（中文经剪贴板粘贴） | ✅ 需批准 |
 | `computer_key` | 发送组合键（ctrl+s / alt+f4 / enter，不支持徽标键） | ✅ 需批准 |
 | `computer_scroll` | 在鼠标位置上下滚动滚轮 | ✅ 需批准 |
+| `delegate_agent` | 委派子 Agent 后台执行独立子任务（通用 / 房产候选，只读 + 独立上下文） | ✅ 需批准 |
+
+**多智能体协同**（`src/agent/subagent.ts` + `src/tools-team.ts`）：`delegate_agent` 内部用目标
+profile 的 workflow 子图（analyze→ReAct→review）跑完任务书，结果截断 4000 字符回填。三条安全默认：
+子 Agent 强制只读（写操作必须主 Agent 自己走审批）；深度 = 1（子 Agent 看不到委派工具，防套娃）；
+黑盒交互（子图的澄清 / 超时转模型可读错误，让主 Agent 重试或接手，绝不挂死）。子 Agent 过程
+对用户黑盒（一张委派卡），适合信息收集型子任务。
 
 电脑控制仅支持 Windows 桌面（零依赖实现：powershell.exe + .NET + user32.dll，中文参数走
 `-EncodedCommand` 规避 GBK 控制台乱码）；无桌面会话（CI 等）截图会返回中文错误并由模型转述。

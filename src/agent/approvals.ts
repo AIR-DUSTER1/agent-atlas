@@ -20,6 +20,8 @@ export const generalApprovals: ApprovalDescriptions = {
   computer_type: (a) => `向当前窗口输入 ${String(a.text ?? "").length} 字符文本：${String(a.text ?? "").slice(0, 40)}`,
   computer_key: (a) => `发送组合按键 ${String(a.combo)}`,
   computer_scroll: (a) => `在鼠标位置${a.direction === "up" ? "向上" : "向下"}滚动 ${String(a.lines ?? 3)} 行`,
+  delegate_agent: (a) =>
+    `委派「${a.profile === "estate" ? "房产找房" : "通用"}」子 Agent 执行：${String(a.task ?? "").slice(0, 60)}（一次委派 = 多轮模型调用）`,
 };
 
 export const estateApprovals: ApprovalDescriptions = {

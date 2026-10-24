@@ -14,7 +14,7 @@
     "demo:5": "tsx src/cli.ts 5",
     "start": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-concurrency=1 tests/unit/format.test.ts tests/unit/workflow.test.ts tests/unit/tool-isolation.test.ts tests/unit/permission.test.ts tests/unit/tools-computer.test.ts tests/unit/context-builder.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/stream.test.ts tests/unit/limits.test.ts tests/unit/files.test.ts tests/unit/prehistory.test.ts tests/unit/restore.test.ts tests/unit/logging.test.ts tests/unit/lifecycle.test.ts tests/unit/subprocess.test.ts tests/integration/server.test.ts tests/integration/agent-profile.test.ts tests/security/http.test.ts"
+    "test": "tsx --test --test-concurrency=1 tests/unit/format.test.ts tests/unit/workflow.test.ts tests/unit/tool-isolation.test.ts tests/unit/permission.test.ts tests/unit/tools-computer.test.ts tests/unit/subagent.test.ts tests/unit/context-builder.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/stream.test.ts tests/unit/limits.test.ts tests/unit/files.test.ts tests/unit/prehistory.test.ts tests/unit/restore.test.ts tests/unit/logging.test.ts tests/unit/lifecycle.test.ts tests/unit/subprocess.test.ts tests/integration/server.test.ts tests/integration/agent-profile.test.ts tests/security/http.test.ts"
   },
   "keywords": [
     "langgraph",
