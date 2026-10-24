@@ -454,6 +454,11 @@ async function routeFromSupervisor(state) {
 Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建步骤**（原生 HTML/CSS/JS + SSE），
 服务端也只用 `node:http`，不引入 Express。
 
+**工具调用抽屉**（app.js `mountToolCard` 一族）：一个助手块里连续调用 ≥ 2 个工具时，
+全部工具卡自动收进「🔧 N 个工具调用 · 全部完成 / N 个运行中… / N 个失败」折叠条，
+点击展开/收起；流式与 journal 历史回放共用同一条 `mountPart` 挂载路径，回放自动重建；
+审批 / 澄清卡片不进抽屉（用户必须看见）。
+
 ```
 浏览器 (public/)                       服务端 (index.ts)
 ┌─────────────────────────┐   POST /api/chat   ┌──────────────────────────┐
@@ -753,7 +758,7 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 | `clarify` | `interrupt({ type:"clarification", question, options, allowCustom })` | 2–4 个互斥选项；服务端 `/api/resume {choice}`；选项 id 映射成可读标签；答案同时写入 `clarificationHistory` |
 | `agent` | 绑定工具的 ReAct 节点 | 通过 `context-builder.ts` 组装稳定 system、内部注记与投影后的消息窗口；工具结果按 profile 预算裁剪 |
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
-| `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多一次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
+| `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
 
 **关键坑**：
 
@@ -810,6 +815,42 @@ profile，不判断具体业务名。
 | 原文保留 | 只 clone 投影后的 `ToolMessage`，原 checkpoint、transcript 与前端卡片不变 |
 | 轮次观测 | `TurnRecord.turnId` 贯穿 journal / transcript；`agent_turn_started/finished` 记录 profile、状态、耗时，debug 级记录 step/tool 开始与结束 |
 | 日志隐私 | 结构化日志不记录用户消息、工具参数或完整工具输出，只记 id、名称、状态和计数 |
+| 图片投影 | `computer_screenshot` 的多模态内容块（text + image_url）整体保留、不做字符截断 —— 截断 base64 等于毁掉整张图 |
+
+### 3.23 `src/agent/permission.ts` + `src/tools-computer.ts` — 会话权限模式与电脑控制
+
+**permission.ts（纯函数闸门）**：会话级权限模式的单一事实来源，三种裁决 ——
+`readonly`（登记审批的工具 = 改世界操作，一律 `deny`）、`approve`（默认，`interrupt` 审批）、
+`auto`（全部 `run`）。判定基准**复用 profile 的 `approvalDescriptions`**，刻意不维护第二份
+「只读禁用清单」：会改世界的操作必然登记审批，两份清单迟早漂移。
+
+链路：前端输入框上方 🛡 chip → `POST /api/sessions/:id/permission` →
+`Session.permissionMode`（journal `permission` 事件持久化，重启延续；旧 journal 缺字段按
+`approve` 兼容）→ `chat.ts` 把它交给 `runGraphEvents` → `graph.stream({ configurable.permission_mode })`
+→ LangGraph 把 configurable 透传给节点函数第二参数 → `hitl.ts` 执行节点逐 call 裁决；
+`workflow.ts` 的 agent 节点同时把权限说明注入 system 注记（readonly 时明确告诉模型别发起写调用）。
+切权限**不需要重建图** —— 全程走 configurable，对下一条消息立即生效。
+
+**tools-computer.ts（零依赖 Computer Use，仅 Windows）**：五个工具全部经
+`powershell.exe` 调 .NET / user32.dll 实现，不引入 robotjs 类原生依赖：
+
+| 工具 | 实现 | 审批 |
+|---|---|---|
+| `computer_screenshot` | `CopyFromScreen` + 等比缩到最长边 1280 + JPEG(q72)；多模态模型收到 image_url 内容块 | 直接执行（只读） |
+| `computer_click` | `SetCursorPos` + `mouse_event` down/up（双击两次、右键 RIGHTDOWN/UP） | ✅ |
+| `computer_type` | 纯 ASCII 走 SendKeys（转义后）；中文等走 `Set-Clipboard` + Ctrl+V（会覆盖剪贴板，描述已注明） | ✅ |
+| `computer_key` | 组合键解析成 SendKeys 语法（ctrl `^` / alt `%` / shift `+`；不支持徽标键） | ✅ |
+| `computer_scroll` | `mouse_event(0x0800)`，dwData = ±120×行数（P/Invoke 签明 int，负值按补码传） | ✅ |
+
+两个关键实现坑：
+
+- **PS5.1 GBK 控制台**：中文参数内联脚本必乱码。统一 `-EncodedCommand`（脚本 UTF-16LE →
+  base64），从根上绕开编码问题，脚本本身保持全英文；
+- **多模态工具结果**：LangChain `tool()` 会把非字符串返回值 `JSON.stringify` 成文本，
+  图片内容块会因此丢失。`computer_screenshot` 继承 `StructuredTool` 并**覆写 `invoke()`**
+  直接返回内容块数组，`hitl.ts` 的 `invokeTool` 对数组原样透传成 `ToolMessage.content`；
+  SSE 的 `tool_result` 事件与 journal 回放只取其中的 text 块（`contentText` 拍平），
+  base64 不进前端不进 journal。
 
 ---
 
@@ -1276,6 +1317,10 @@ console.log(result.messages.at(-1).content);
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
 | Docker 日志里混入人类横幅 / 非 JSON | 启动横幅、无认证警告、配置抢救提示原来无条件 `console.*`，采集器逐行 `JSON.parse` 会报错。人类提示只在 `stdout/stderr.isTTY` 时输出；配置恢复/启动失败等改走 `log("info"/"warn"/"error", event)`，容器 `docker logs` 才能保持纯 NDJSON |
 | 子进程超时返回 `code=1` 而非文档写的 `-1`，单测还莫名多等 5 秒 | `taskkill` 后 `close` 事件带回真实退出码，覆盖了终止时写的 `-1`；同时强杀兜底 `setTimeout(5s)` 没在 close 时清掉，Node 事件循环被拖住。对策：异常终止统一 `code:-1`（调用方看 `killedBy`），`done()` 里同时 `clearTimeout` 正常超时 timer 与强杀兜底 timer |
+| computer use 中文参数打进来的全是乱码 / 动作错乱 | PS5.1 控制台默认 GBK：中文内联脚本 + `SendKeys` 直发非 ASCII 都不可靠。对策：PowerShell 全走 `-EncodedCommand`（UTF-16LE → base64）；中文文本改 `Set-Clipboard` + Ctrl+V；SendKeys 特殊字符（`+^%~()[]{}{}`）必须大括号转义（§3.23） |
+| 多模态工具结果到模型那里变成一串 JSON 文本 | LangChain `tool()` 对非字符串返回值做 `JSON.stringify`，image_url 内容块被拍扁成字符串、模型看不到图。对策：继承 `StructuredTool` 覆写 `invoke()` 直接返回内容块数组，执行节点（`hitl.invokeTool`）对数组原样透传 |
+| 权限切了但会话行为没变 | 权限模式经 `graph.stream({ configurable.permission_mode })` 传入，对**下一条**消息生效；配置重建（rebuildIfStale）与权限无关，不要去重建图。demo / 外部 Agent 会话没有执行图，权限 chip 前端直接隐藏 |
+| 思考模型多轮回炉/工具轮报 `400 reasoning_content must be passed back` | DeepSeek 等 thinking 网关校验「请求里末条 assistant（含 tool 消息序列中的）必须带 reasoning_content」，而 @langchain/openai 序列化必丢弃它。已修两处：①回炉草稿在 context-builder 投影时全部弹出、并入 system 注记（请求以 HumanMessage 结尾，连续多版草稿都要弹）；②复杂历史（连续 assistant + tool_calls 混合）仍可能触发网关深层校验 —— 规避：把思考等级切「关闭思考」（thinking.type=disabled，实测彻底消失），或换非思考模型。与 multi.ts 的 supervisor 包装 ToolMessage 是同一个坑的三张面孔 |
 
 ***
 

@@ -69,7 +69,7 @@ flowchart TB
               → 高风险工具 interrupt 等审批
               → ToolMessage 回填
       → 回到 agent
-      → review：不通过且未修订：带反馈回炉一次；否则结束
+      → review：不通过且未达修订上限：带反馈回炉；否则结束
   → runGraphEvents（AgentEvent）
   → SSE data: {json}
   → TurnRecord + journal
@@ -77,7 +77,7 @@ flowchart TB
 
 关键点：一次 `/api/chat` 就是一轮图执行；进入 ReAct 前先做需求理解，必要时用
 `interrupt` 请求澄清；工具循环由 `agent ⇄ tools` 条件边完成；最终回答再经过一次
-轻量反思，不通过时最多回炉一次。前端只消费规范化后的 `AgentEvent`。
+轻量反思，不通过时最多回炉三次。前端只消费规范化后的 `AgentEvent`。
 
 ### 2.2 ZCode
 
@@ -176,7 +176,7 @@ flowchart LR
 | 一次模型调用 | `agent` 节点一次执行；另有 analyze / review 内部调用 | Turn 中的 model step | 一个 step |
 | 工具循环 | `tools → agent` 条件边 | Turn 状态机循环 | step 结束后欠请求则开下一个 step |
 | 中途输入 | 同会话第二条流直接拒绝；澄清通过 `interrupt` 暂停 | 队列 / 抢占 / 前台租约 | `followup` / `steer` / `inject` |
-| 结束条件 | 无 `tool_calls` 且 review 通过（或已修订一次） | Turn 进入 `Completing` | 不再欠工作，`turn/end` |
+| 结束条件 | 无 `tool_calls` 且 review 通过（或达修订上限三次） | Turn 进入 `Completing` | 不再欠工作，`turn/end` |
 
 ## 4. 逐阶段对比
 

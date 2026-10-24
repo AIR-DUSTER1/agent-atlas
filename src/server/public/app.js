@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-23-2";
+const APP_VERSION = "web-2026-10-24-2";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -493,6 +493,79 @@ function showChatState(session) {
   inputEl.placeholder = stale
     ? "这是历史会话（服务已重启），仅供查看 —— 点击「＋ 新建对话」继续"
     : "给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）";
+  renderPermChip(session);
+}
+
+/* ---------------------------------------------------------------------------
+ * 会话权限模式：输入框上方 🛡 chip（只读 / 审批 / 自动），随会话切换联动
+ * 只读 = 改世界工具一律拒绝；审批 = 高风险先确认（默认）；自动 = 全部直接执行。
+ * ------------------------------------------------------------------------- */
+const PERMISSION_MODES = [
+  { id: "readonly", label: "只读", desc: "只允许只读工具：写文件 / 执行命令 / 发消息 / 控制电脑一律拒绝" },
+  { id: "approve", label: "审批", desc: "高风险操作执行前弹审批卡片，人工批准才执行（默认）" },
+  { id: "auto", label: "自动", desc: "全部工具直接执行，不再逐项审批（信任当前会话时使用）" },
+];
+
+/** 权限 chip 只对有 Agent 执行力的会话显示（demo / external / 历史失效会话隐藏） */
+function renderPermChip(session) {
+  const group = $("perm-group");
+  const chip = $("cm-perm");
+  if (!group || !chip) return;
+  const current = session || state.sessions.find((x) => x.id === state.currentId);
+  const available = current && !current.stale && (current.kind === "agent" || current.kind === "estate");
+  group.classList.toggle("hidden", !available);
+  if (!available) return;
+  const mode = PERMISSION_MODES.find((m) => m.id === (current.permissionMode || "approve"));
+  const text = document.querySelector("#cm-perm .cm-text");
+  if (text) text.textContent = `权限·${mode?.label || "审批"}`;
+  chip.title = `会话权限模式：${mode?.label || "审批"} —— ${mode?.desc || ""}`;
+  // 弹出菜单开着时同步刷新勾选
+  if (!$("cm-perm-menu")?.classList.contains("hidden")) renderPermMenu($("cm-perm-menu"));
+}
+
+function renderPermMenu(menu) {
+  const current = state.sessions.find((x) => x.id === state.currentId);
+  const active = current?.permissionMode || "approve";
+  menu.innerHTML = "";
+  const sec = document.createElement("div");
+  sec.className = "cm-sec";
+  const head = document.createElement("span");
+  head.textContent = "会话权限模式";
+  const sub = document.createElement("span");
+  sub.className = "cm-sub";
+  sub.textContent = "当前会话";
+  sec.append(head, sub);
+  menu.appendChild(sec);
+  for (const mode of PERMISSION_MODES) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "cm-item" + (mode.id === active ? " active" : "");
+    item.innerHTML = `<span class="ck">${mode.id === active ? "✓" : ""}</span><span class="cm-label"></span>`;
+    item.querySelector(".cm-label").textContent = mode.label;
+    item.title = mode.desc;
+    item.addEventListener("click", async () => {
+      if (mode.id === active || !state.currentId) { closeCmMenus(); return; }
+      item.disabled = true;
+      try {
+        await api(`/api/sessions/${state.currentId}/permission`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: mode.id }),
+        });
+        const session = state.sessions.find((x) => x.id === state.currentId);
+        if (session) session.permissionMode = mode.id;
+        renderPermChip();
+      } catch (err) {
+        uiAlert(`切换失败：${err.message}`, "会话权限");
+      }
+      closeCmMenus();
+    });
+    menu.appendChild(item);
+  }
+  const desc = document.createElement("div");
+  desc.className = "cm-desc";
+  desc.textContent = PERMISSION_MODES.find((m) => m.id === active)?.desc || "";
+  menu.appendChild(desc);
 }
 
 function selectSession(sid) {
@@ -885,7 +958,7 @@ function mountPart(block, part) {
     card.querySelector(".tool-icon").textContent = TOOL_ICONS[part.name] || "🔧";
     card.querySelector(".tool-name").textContent = part.name || "tool";
     card.querySelector(".tool-head").addEventListener("click", () => card.classList.toggle("open"));
-    body.appendChild(card);
+    mountToolCard(block, card);
     partEls.set(part, { el: card });
     updateToolCard(part);
     return;
@@ -908,6 +981,77 @@ function mountPart(block, part) {
     partEls.set(part, { el });
     return;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * 工具调用抽屉：一个助手块里连续调用 ≥ TOOL_DRAWER_MIN 个工具时，
+ * 全部收进可展开/收起的下拉容器（流式与历史回放走同一条挂载路径）。
+ * 单个工具保持原样平铺；审批/澄清卡片永远不进抽屉（需要用户看见）。
+ * ------------------------------------------------------------------------- */
+const TOOL_DRAWER_MIN = 2;
+
+/** 挂载工具卡：不足阈值直接平铺；达标后把裸卡迁入抽屉 */
+function mountToolCard(block, card) {
+  const body = blockBodies.get(block);
+  if (!body) return;
+  const toolCount = block.parts.filter((p) => p.p === "tool").length;
+  if (toolCount < TOOL_DRAWER_MIN) {
+    body.appendChild(card);
+    return;
+  }
+  const drawer = ensureToolDrawer(block, body);
+  // 第二个工具出现时才建抽屉：先建容器插到首卡位置，再把 body 里已有的裸卡迁入
+  for (const bare of [...body.querySelectorAll(":scope > .tool-card")]) {
+    drawer.items.appendChild(bare);
+  }
+  drawer.items.appendChild(card);
+  refreshToolDrawer(block);
+}
+
+/** 创建（或复用）当前块的抽屉容器；插入位置 = 第一张工具卡处 */
+function ensureToolDrawer(block, body) {
+  if (block._drawerEl?.isConnected) return block._drawer;
+  const wrap = document.createElement("div");
+  wrap.className = "tool-drawer";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "drawer-head";
+  // innerHTML 搭骨架 + textContent 填文案（§5.5 防 XSS 约定）
+  head.innerHTML = `<span class="drawer-caret">▸</span><span class="drawer-icon">🔧</span><span class="drawer-label"></span><span class="drawer-sub"></span>`;
+  const items = document.createElement("div");
+  items.className = "drawer-items hidden";
+  head.addEventListener("click", () => {
+    block._drawerOpen = !block._drawerOpen;
+    syncToolDrawer(block);
+  });
+  wrap.append(head, items);
+  const firstCard = body.querySelector(":scope > .tool-card");
+  if (firstCard) body.insertBefore(wrap, firstCard);
+  else body.appendChild(wrap);
+  block._drawerEl = wrap;
+  block._drawer = { wrap, head, items };
+  return block._drawer;
+}
+
+/** 刷新抽屉汇总文案与展开态（新卡挂载 / 结果回填 / 流结束时调用） */
+function refreshToolDrawer(block) {
+  const drawer = block._drawer;
+  if (!drawer || !block._drawerEl?.isConnected) return;
+  const tools = block.parts.filter((p) => p.p === "tool");
+  const running = tools.filter((t) => !t.result).length;
+  const errors = tools.filter((t) => t.result?.isError).length;
+  drawer.head.querySelector(".drawer-label").textContent = `${tools.length} 个工具调用`;
+  drawer.head.querySelector(".drawer-sub").textContent = running
+    ? `${running} 个运行中…`
+    : errors ? `${errors} 个失败` : "全部完成";
+  syncToolDrawer(block);
+}
+
+function syncToolDrawer(block) {
+  const drawer = block._drawer;
+  if (!drawer) return;
+  drawer.items.classList.toggle("hidden", !block._drawerOpen);
+  drawer.wrap.classList.toggle("open", Boolean(block._drawerOpen));
 }
 
 function renderClarificationCard(part, el) {
@@ -1093,6 +1237,7 @@ function fillToolResult(ablock, ev) {
   if (!part) return;
   part.result = { content: ev.content, isError: Boolean(ev.isError) };
   updateToolCard(part);
+  refreshToolDrawer(ablock);
   scrollBottom();
 }
 
@@ -1174,6 +1319,8 @@ function finalize(ablock) {
           renderTextPart(p);
         }
       }
+      // 流结束：抽屉汇总定格为最终状态（无「运行中」残留）
+      refreshToolDrawer(ablock);
     }
   }
   state.streaming = null;
@@ -3375,6 +3522,7 @@ async function init() {
   buildDemoCards($("demo-cards"));
   buildDemoCards($("modal-cards"));
   buildExampleChips();
+  renderPermChip(); // 初始态无选中会话 → 权限 chip 隐藏（选中 agent/estate 会话后再出现）
 
   // 事件绑定（on()：元素缺失时告警但不中断，避免单个弹窗缺失拖垮全部交互）
   const on = (id, event, fn) => {
@@ -3396,9 +3544,10 @@ async function init() {
   on("sidebar-toggle", "click", () => setSidebarOpen(!$("sidebar").classList.contains("open")));
   on("sidebar-scrim", "click", () => setSidebarOpen(false));
 
-  // 输入框上方：模型 / 思考等级快捷切换
+  // 输入框上方：模型 / 思考等级 / 会话权限快捷切换
   on("cm-model", "click", (e) => { e.stopPropagation(); toggleCmMenu("cm-model", "cm-model-menu", renderModelMenu); });
   on("cm-thinking", "click", (e) => { e.stopPropagation(); toggleCmMenu("cm-thinking", "cm-thinking-menu", renderThinkingMenu); });
+  on("cm-perm", "click", (e) => { e.stopPropagation(); toggleCmMenu("cm-perm", "cm-perm-menu", renderPermMenu); });
 
   // 供应商 / 模型：设置弹窗 + 顶栏切换器
   const closeSettings = () => { $("settings-mask").classList.add("hidden"); closeProviderForm(); };

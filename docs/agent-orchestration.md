@@ -156,7 +156,7 @@ flowchart LR
   AGENT -->|"无 tool_calls"| REVIEW["review<br/>结果反思"]
   TOOLS --> AGENT
   REVIEW -->|"不通过且未修订"| AGENT
-  REVIEW -->|"通过 / 已修订一次"| END
+  REVIEW -->|"通过 / 已修订三次"| END
 ```
 
 ### 4.1 State 与节点
@@ -174,7 +174,7 @@ flowchart LR
 - `tools`：使用 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建的
   profile-local 执行节点；工具表在装配期封闭，跨域 tool call 会 fail-closed；
 - `review`：只检查最终非工具回答，并对照需求理解与最近 3 条工具结果；明确不通过时把反馈写回 `reviewFeedback`，
-  让 `agent` 再答一次；最多修订一次（`MAX_REVIEW_REVISIONS = 1`），坏 JSON 默认通过；
+  让 `agent` 再答一次；最多修订三次（`MAX_REVIEW_REVISIONS = 3`），坏 JSON 默认通过；
 - 边：`START → analyze`，`analyze → clarify | agent`，`clarify → agent`，
   `agent → tools | review`，`tools → agent`，`review → agent | END`。
 
