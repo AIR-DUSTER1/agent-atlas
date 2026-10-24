@@ -162,3 +162,30 @@ test("工作流：反思不通过时带反馈回炉一次，然后结束", async
   assert.ok(answers.every((content) => !String(content).includes("补充你能做什么")));
   assert.equal(result.reviewAttempts, 2);
 });
+
+test("工作流：反思连续不通过时最多回炉三次，第四次失败强制结束", async () => {
+  // 消费序列：analyze → (答1, 拒) → (答2, 拒) → (答3, 拒) → (答4, 拒·达上限)
+  const fake = new FakeListChatModel({
+    responses: [
+      JSON.stringify({ understood: true, brief: "用户要求覆盖四个要点", question: "", options: [] }),
+      "答1", JSON.stringify({ passes: false, reason: "缺要点", feedback: "补要点" }),
+      "答2", JSON.stringify({ passes: false, reason: "缺要点", feedback: "补要点" }),
+      "答3", JSON.stringify({ passes: false, reason: "缺要点", feedback: "补要点" }),
+      "答4", JSON.stringify({ passes: false, reason: "缺要点", feedback: "补要点" }),
+    ],
+  });
+  const graph = createWorkflowGraph(testProfile, {
+    agent: fake as unknown as WorkflowChatModel,
+    analyst: fake as unknown as WorkflowChatModel,
+    reviewer: fake as unknown as WorkflowChatModel,
+  });
+  const threadId = `workflow-${randomUUID()}`;
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("请覆盖四个要点")] },
+    { configurable: { thread_id: threadId } }
+  ) as unknown as { messages: Array<{ content: unknown }>; reviewAttempts?: number };
+
+  const answers = result.messages.map((message) => message.content);
+  assert.ok(answers.includes("答4"));
+  assert.equal(result.reviewAttempts, 4);
+});

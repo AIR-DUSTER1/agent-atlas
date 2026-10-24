@@ -6,7 +6,7 @@
  *   analyze  用一次独立模型调用判断最新请求是否足够明确；
  *   clarify  interrupt() 生成 2-4 个选项，用户选择后继续；
  *   agent    原有 ReAct 节点（工具循环与人工审批完全复用 hitl.ts）；
- *   review   最终回答不满意时带反馈回炉一次，最多修订一次防止死循环。
+ *   review   最终回答不满意时带反馈回炉，最多修订三次防止死循环。
  *
  * 约束：本文件属于 agent 层，只依赖 src 顶层与 @langchain/*，不得 import server/*。
  * 关键坑：分析/反思发生在图节点里，但它们的模型 token 不属于用户回答，
@@ -27,6 +27,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { buildAgentContext } from "./context-builder.js";
 import { createApprovalToolsNode } from "./hitl.js";
+import { permissionModeNote, type PermissionMode } from "./permission.js";
 import type { AgentProfile } from "./profile.js";
 
 const MAX_USER_TEXT = 8_000;
@@ -38,7 +39,7 @@ const MAX_OPTION_DESCRIPTION = 200;
 const MAX_ANSWER_TEXT = 2_000;
 const MAX_FEEDBACK_TEXT = 1_200;
 const MAX_OPTIONS = 4;
-const MAX_REVIEW_REVISIONS = 1;
+const MAX_REVIEW_REVISIONS = 3;
 const RECENT_MESSAGE_COUNT = 8;
 const RECENT_MESSAGE_CHARS = 700;
 const RECENT_TOOL_RESULT_COUNT = 3;
@@ -354,21 +355,21 @@ export function createWorkflowGraph(
     };
   }
 
-  async function agentNode(state: WorkflowStateType) {
-    const clarificationNote = state.clarificationHistory && !state.requirementBrief.includes(state.clarificationHistory)
-      ? `【历史澄清（仅在相关时参考）】${state.clarificationHistory}`
-      : "";
-    const notes = [
-      state.requirementBrief ? `【需求理解】${state.requirementBrief}` : "",
-      clarificationNote,
-      state.reviewFeedback ? `【上一轮反思反馈】${state.reviewFeedback}` : "",
-    ].filter(Boolean);
-
-    const response = await agentModel.invoke([
-      { role: "system", content: profile.systemPrompt },
-      ...(notes.length ? [{ role: "system" as const, content: notes.join("\n\n") }] : []),
-      ...state.messages,
-    ]);
+  async function agentNode(
+    state: WorkflowStateType,
+    config?: { configurable?: { permission_mode?: PermissionMode } }
+  ) {
+    // 上下文投影 + 内部注记统一走 context-builder：需求 brief / 历史澄清 /
+    // 反思反馈 / 权限模式在这里组装成稳定 system，消息窗口与工具结果按预算裁剪
+    const context = buildAgentContext({
+      profile,
+      messages: state.messages,
+      requirementBrief: state.requirementBrief,
+      clarificationHistory: state.clarificationHistory,
+      reviewFeedback: state.reviewFeedback,
+      permissionNote: permissionModeNote(config?.configurable?.permission_mode),
+    });
+    const response = await agentModel.invoke(context.messages);
     return { messages: [response] };
   }
 

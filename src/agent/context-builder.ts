@@ -13,6 +13,8 @@ import type { AgentContextPolicy, AgentProfile } from "./profile.js";
 const DEFAULT_MAX_RECENT_MESSAGES = 32;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 8_000;
 const TRUNCATION_MARKER_MIN = 40;
+/** 回炉草稿并入注记的字符上限（草稿过长时截头部，反思反馈会指明要改哪里） */
+const MAX_REVISION_DRAFT_CHARS = 4_000;
 
 export interface AgentContextInput {
   profile: AgentProfile;
@@ -20,6 +22,8 @@ export interface AgentContextInput {
   requirementBrief?: string;
   clarificationHistory?: string;
   reviewFeedback?: string;
+  /** 会话权限模式注记（permission.ts 生成；approve 默认行为时为空串不注入） */
+  permissionNote?: string;
 }
 
 export interface AgentContextResult {
@@ -69,11 +73,28 @@ function cloneProjectedToolMessage(message: ToolMessage, maxChars: number): Tool
   });
 }
 
+/** 图片内容块判定：多模态工具结果（computer_screenshot）整体保留，不做字符截断 */
+function hasImageContent(content: BaseMessage["content"]): boolean {
+  return Array.isArray(content) && content.some(
+    (part) => typeof part === "object" && part !== null && "type" in part && (part as { type: unknown }).type === "image_url"
+  );
+}
+
+/** 消息 content（string 或内容块数组）拍平成纯文本 */
+function messageText(content: BaseMessage["content"]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (typeof part === "string" ? part : typeof part === "object" && part && "text" in part ? String((part as { text: unknown }).text ?? "") : ""))
+    .join("");
+}
+
 /**
  * 构建本轮模型可见消息。
  * - 不把 review/analysis 的 JSON 写入 messages；
  * - 最近消息窗口不会从 ToolMessage 中间切断工具调用；
- * - 只投影工具结果，不改 checkpoint 中的原消息。
+ * - 只投影工具结果，不改 checkpoint 中的原消息；
+ * - 截屏等多模态工具结果保留图片块（截断 base64 等于毁掉整张图）。
  */
 export function buildAgentContext(input: AgentContextInput): AgentContextResult {
   const policy = resolveContextPolicy(input.profile);
@@ -86,10 +107,27 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
   let truncatedToolResults = 0;
   const projected = input.messages.slice(start).map((message) => {
     if (!(message instanceof ToolMessage)) return message;
+    if (hasImageContent(message.content)) return message;
     const next = cloneProjectedToolMessage(message, policy.maxToolResultChars);
     if (next !== message) truncatedToolResults += 1;
     return next;
   });
+
+  // 回炉投影：review 不通过时消息末尾是本轮草稿（可能连续多版：二次回炉后是
+  // v1、v2 两条 AIMessage 排在末尾）。思考型网关（DeepSeek thinking 等）硬校验
+  // 「请求末条 assistant 必带 reasoning_content」，而 @langchain/openai 序列化会
+  // 把它丢弃 → 400（与 multi.ts 的坑同源）。把草稿全部移出消息列表、最新一版
+  // 并入 system 注记，请求以 HumanMessage 结尾，模型仍有完整草稿可修订。
+  let revisionNote = "";
+  while (input.reviewFeedback && projected.length && projected[projected.length - 1]?.getType() === "ai") {
+    const draftMsg = projected.pop();
+    if (draftMsg) {
+      const draft = messageText(draftMsg.content).trim();
+      if (draft && !revisionNote) {
+        revisionNote = `【上一轮草稿（按下面的反思反馈修订后重新回答）】\n${draft.slice(0, MAX_REVISION_DRAFT_CHARS)}`;
+      }
+    }
+  }
 
   const notes = [
     input.requirementBrief ? `【需求理解】${input.requirementBrief}` : "",
@@ -98,7 +136,9 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
         ? ""
         : `【历史澄清（仅在相关时参考）】${input.clarificationHistory}`)
       : "",
+    revisionNote,
     input.reviewFeedback ? `【上一轮反思反馈】${input.reviewFeedback}` : "",
+    input.permissionNote || "",
     omittedMessages ? `【上下文窗口】已省略较早的 ${omittedMessages} 条消息，完整历史仍保存在会话记录中。` : "",
   ].filter(Boolean);
 

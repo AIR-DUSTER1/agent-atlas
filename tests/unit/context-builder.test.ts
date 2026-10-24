@@ -98,3 +98,55 @@ test("需求 brief、澄清和反思注记进入 system 上下文，不混入用
   assert.match(String(built.messages[1].content), /历史澄清/);
   assert.match(String(built.messages[1].content), /上一轮反思反馈/);
 });
+
+test("回炉投影：反思反馈存在时末尾草稿并入注记，请求以 HumanMessage 结尾", () => {
+  const built = buildAgentContext({
+    profile: profile(),
+    messages: [
+      new HumanMessage("介绍你自己"),
+      new AIMessage("第一版回答"),
+    ],
+    reviewFeedback: "补充能力说明",
+  });
+
+  const notes = String(built.messages[1].content);
+  assert.match(notes, /上一轮草稿/);
+  assert.match(notes, /第一版回答/);
+  assert.match(notes, /上一轮反思反馈/);
+  // 草稿被移出消息列表：末尾必须是 HumanMessage（思考型网关要求末条 assistant 带
+  // reasoning_content，@langchain/openai 序列化会丢弃 → 400）
+  const last = built.messages[built.messages.length - 1];
+  assert.equal(last.getType(), "human");
+});
+
+test("无反思反馈时末尾 AIMessage 保持在消息列表（正常轮不误伤）", () => {
+  const built = buildAgentContext({
+    profile: profile(),
+    messages: [
+      new HumanMessage("介绍你自己"),
+      new AIMessage("正常回答"),
+    ],
+  });
+  const last = built.messages[built.messages.length - 1];
+  assert.equal(last.getType(), "ai");
+});
+
+test("二次回炉：连续多版草稿全部移出消息列表，注记保留最新一版", () => {
+  const built = buildAgentContext({
+    profile: profile(),
+    messages: [
+      new HumanMessage("介绍你自己"),
+      new AIMessage("第一版回答"),
+      new AIMessage("第二版回答（更新）"),
+    ],
+    reviewFeedback: "还是不够好",
+  });
+
+  const notes = String(built.messages[1].content);
+  assert.match(notes, /第二版回答（更新）/);
+  assert.doesNotMatch(notes, /第一版回答/);
+  // 连续草稿全部弹出：末尾回到 HumanMessage
+  const last = built.messages[built.messages.length - 1];
+  assert.equal(last.getType(), "human");
+  assert.equal(built.messages.filter((m) => m.getType() === "ai").length, 0);
+});
