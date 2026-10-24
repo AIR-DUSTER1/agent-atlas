@@ -23,6 +23,7 @@ import {
 } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentEvent, InterruptPayload } from "./events.js";
+import type { PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
@@ -46,6 +47,8 @@ interface NormalizeOptions {
   /** 观测字段：只写结构化日志，不进入模型上下文或前端事件。 */
   agentProfileId?: "general" | "estate" | null;
   turnId?: string;
+  /** 会话权限模式：经 configurable 传进图，工具执行节点（hitl.ts）按它裁决 */
+  permissionMode?: PermissionMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +192,11 @@ export async function* runGraphEvents(
 ): AsyncGenerator<AgentEvent> {
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
-    configurable: { thread_id: options.threadId },
+    // permission_mode 会被 LangGraph 透传给每个节点函数的 config（不传 = 默认审批行为）
+    configurable: {
+      thread_id: options.threadId,
+      ...(options.permissionMode ? { permission_mode: options.permissionMode } : {}),
+    },
     signal: options.signal,
   });
 

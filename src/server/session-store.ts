@@ -9,6 +9,7 @@
  *   session   会话创建 / 元数据全量（upsert 形）
  *   rename    标题变更
  *   project   项目归属变更
+ *   permission 会话权限模式变更（readonly / approve / auto）
  *   approval  人工审批 / 需求澄清进入 pending（payload 全量）
  *   decided   用户已做出决定（approve / reject / answered）—— 之后不再改写
  *   delete    会话删除（回放时丢弃，同样也允许 compact 时省空间）
@@ -28,6 +29,7 @@ import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises"
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
+import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
@@ -57,6 +59,8 @@ export interface SessionRecord {
   createdAt: number;
   threadId: string;
   pendingApproval: ApprovalSnapshot | null;
+  /** 会话权限模式；旧 journal 没有该字段时按默认 approve 处理 */
+  permissionMode?: PermissionMode;
   /** 累计轮数（由回放统计而来，新创建为 0） */
   turns: number;
   /** 回放出的对话轮（user + events），与 sessions.ts 的 TurnRecord 同形 */
@@ -118,6 +122,7 @@ export function journalSession(rec: {
   id: string; kind: SessionKind;
   demo: 1 | 2 | 3 | 4 | null;
   agentId: string | null; projectId: string; title: string; createdAt: number; threadId: string;
+  permissionMode?: PermissionMode;
 }): void {
   // profile identity 只由服务端从 kind 派生，不接受调用方注入。
   journalWrite({
@@ -133,6 +138,10 @@ export function journalRename(id: string, title: string): void {
 
 export function journalProject(id: string, projectId: string): void {
   journalWrite({ ts: Date.now(), ev: "project", id, projectId });
+}
+
+export function journalPermission(id: string, permissionMode: PermissionMode): void {
+  journalWrite({ ts: Date.now(), ev: "permission", id, permissionMode });
 }
 
 export function journalDelete(id: string): void {
@@ -224,6 +233,7 @@ function applyEvent(ev: Record<string, unknown>): void {
       title: s.title ?? base.title,
       createdAt: typeof s.createdAt === "number" ? s.createdAt : base.createdAt,
       threadId: s.threadId ?? base.threadId,
+      permissionMode: isPermissionMode(s.permissionMode) ? s.permissionMode : "approve",
     });
   } else if (evName === "rename") {
     const base = findOrMake(String(ev.id ?? ""));
@@ -231,6 +241,9 @@ function applyEvent(ev: Record<string, unknown>): void {
   } else if (evName === "project") {
     const base = findOrMake(String(ev.id ?? ""));
     if (typeof ev.projectId === "string") base.projectId = ev.projectId;
+  } else if (evName === "permission") {
+    const base = findOrMake(String(ev.id ?? ""));
+    if (isPermissionMode(ev.permissionMode)) base.permissionMode = ev.permissionMode;
   } else if (evName === "approval") {
     const base = findOrMake(String(ev.id ?? ""));
     base.pendingApproval = {
@@ -292,7 +305,7 @@ async function compactJournal(): Promise<void> {
   const snapshot = journalSnapshot();
   const lines: string[] = [];
   for (const rec of snapshot) {
-    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId } }));
+    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
     if (rec.pendingApproval && rec.pendingApproval.status === "pending") {
       lines.push(JSON.stringify({ ts: rec.createdAt, ev: "approval", id: rec.id, toolName: rec.pendingApproval.toolName, payload: rec.pendingApproval.payload }));
     }

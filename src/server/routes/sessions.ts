@@ -5,15 +5,18 @@
  * / { kind: "external", agentId } / { kind: "estate" }；兼容旧 { demo: N }。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory } from "../sessions.js";
+import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory, updatePermissionMode } from "../sessions.js";
 import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
+import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
+import { writeAudit } from "../audit.js";
 
 export async function handleSessions(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
   if (req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(listSessions().map((s) => ({
       id: s.id, kind: s.kind, agentProfileId: s.agentProfileId, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
+      permissionMode: s.permissionMode,
       pendingApproval: Boolean(s.pendingApproval),
     }))));
     return;
@@ -76,4 +79,29 @@ export async function handleTranscript(res: import("node:http").ServerResponse, 
   }
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ records: getTurnHistory(session), pendingApproval: Boolean(session.pendingApproval) }));
+}
+
+/** POST /api/sessions/:id/permission —— 切换会话权限模式（只读 / 审批 / 自动）
+ *  安全边界动作：audit 记会话与模式，不落用户输入之外的敏感内容。 */
+export async function handleSessionPermission(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  id: string
+): Promise<void> {
+  const session = getSession(id);
+  if (!session) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    return;
+  }
+  const body = JSON.parse((await readBody(req)) || "{}") as { mode?: unknown };
+  if (!isPermissionMode(body.mode)) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: `mode 必须是 ${PERMISSION_MODES.join(" / ")} 之一` }));
+    return;
+  }
+  updatePermissionMode(session, body.mode);
+  writeAudit("permission.changed", { sessionId: session.id, mode: body.mode });
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ ok: true, permissionMode: session.permissionMode }));
 }

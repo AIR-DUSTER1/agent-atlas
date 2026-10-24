@@ -23,9 +23,10 @@ import { createMultiAgentGraph } from "../agent/multi.js";
 import { createAgentGraph } from "../agent/general.js";
 import { createEstateGraph } from "../agent/estate.js";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
+import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
 import { getExternalAgent } from "./external.js";
 import {
-  journalSession, journalDelete, journalApproval, journalDecided, journalTurn,
+  journalSession, journalDelete, journalApproval, journalDecided, journalTurn, journalPermission,
   replaySessions, journalSnapshot, maybeCompactJournal, type SessionRecord,
 } from "./session-store.js";
 import type { AgentEvent, InterruptPayload } from "./events.js";
@@ -103,6 +104,8 @@ export interface Session {
   contextSummary: string | null;
   /** 摘要是否已注入当前线程（注入后不再重复占预算） */
   contextSummaryInjected: boolean;
+  /** 会话级权限模式：只读 / 审批（默认）/ 自动 —— 工具执行闸门（permission.ts） */
+  permissionMode: PermissionMode;
 }
 
 const sessions = new Map<string, Session>();
@@ -171,6 +174,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     resumeUnavailable: false,
     contextSummary: null,
     contextSummaryInjected: false,
+    permissionMode: "approve",
   };
   sessions.set(session.id, session);
   // T2-2：创建即落 journal —— 白名单挑字段（Session 内含编译图/内存结构，严禁整只序列化）
@@ -178,6 +182,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     id: session.id, kind: session.kind,
     demo: session.demo, agentId: session.agentId,
     projectId: session.projectId, title: session.title, createdAt: session.createdAt, threadId: session.threadId,
+    permissionMode: session.permissionMode,
   });
   return session;
 }
@@ -250,6 +255,13 @@ export function getSession(id: string): Session | undefined {
 
 export function listSessions(): Session[] {
   return [...sessions.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** 切换会话权限模式：只改字段 + 落 journal，下一轮消息即生效（无需重建图）。
+ *  值合法性由路由层校验（isPermissionMode），这里只做赋值。 */
+export function updatePermissionMode(session: Session, mode: PermissionMode): void {
+  session.permissionMode = mode;
+  journalPermission(session.id, mode);
 }
 
 export function deleteSession(id: string): boolean {
@@ -358,6 +370,7 @@ export async function restoreSessions(): Promise<number> {
       resumeUninjected: rec.turns > 0,
       contextSummary: null,
       contextSummaryInjected: false,
+      permissionMode: rec.permissionMode ?? "approve",
     };
     sessions.set(session.id, session);
     restored += 1;

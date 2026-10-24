@@ -110,7 +110,7 @@
             <span id="ctx-cache" class="ctx-cache hidden"></span>
           </div>
         </div>
-        <!-- 模型 / 思考等级快捷切换（ZCode 风格：输入框上方随手切） -->
+        <!-- 模型 / 思考等级 / 会话权限 快捷切换（ZCode 风格：输入框上方随手切） -->
         <div id="composer-bar">
           <div class="cm-group">
             <button id="cm-model" class="cm-chip" type="button" title="切换模型">
@@ -123,6 +123,12 @@
               <span class="cm-ic">🧠</span><span class="cm-text"></span><span class="cm-arr">▾</span>
             </button>
             <div id="cm-thinking-menu" class="cm-menu hidden"></div>
+          </div>
+          <div class="cm-group" id="perm-group">
+            <button id="cm-perm" class="cm-chip" type="button" title="会话权限模式：只读 / 审批 / 自动">
+              <span class="cm-ic">🛡</span><span class="cm-text"></span><span class="cm-arr">▾</span>
+            </button>
+            <div id="cm-perm-menu" class="cm-menu hidden"></div>
           </div>
           <div class="cm-spacer"></div>
         </div>
@@ -139,7 +145,7 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </div>
-        <div id="composer-hint" class="composer-hint">📎 可附加项目文件 / 远程文件夹 / 本地文件 · 输入 / 压缩上下文 · @ 搜索文件 · 发送邮件等高风险操作会先请求人工确认</div>
+        <div id="composer-hint" class="composer-hint">📎 可附加项目文件 / 远程文件夹 / 本地文件 · 输入 / 压缩上下文 · @ 搜索文件 · 🛡 可切换会话权限（只读 / 审批 / 自动）</div>
       </footer>
     </main>
   </div>

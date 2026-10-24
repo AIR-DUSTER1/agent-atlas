@@ -216,6 +216,7 @@ async function handleChatInner(
       signal,
       agentProfileId: session.agentProfileId,
       turnId: session.turnHistory.at(-1)?.turnId,
+      permissionMode: session.permissionMode,
     })
   , (events) => completeTurnRecord(session, events));
 }
@@ -340,6 +341,7 @@ async function handleResumeInner(
         signal,
         agentProfileId: session.agentProfileId,
         turnId: session.turnHistory.at(-1)?.turnId,
+        permissionMode: session.permissionMode,
       }
     ),
     (events) => {

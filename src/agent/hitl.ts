@@ -31,6 +31,7 @@ import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { demoApprovals } from "./approvals.js";
 import { createToolMap, type ApprovalDescriptions } from "./profile.js";
+import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
 
 // ---------------------------------------------------------------------------
 // 工具集：多了一个「高风险」的 send_email
@@ -63,7 +64,8 @@ function toolResultText(value: unknown): string {
 }
 
 interface ToolInvocationResult {
-  content: string;
+  /** 字符串或多模态内容块（截屏工具返回 text + image_url 块），类型对齐 ToolMessage.content */
+  content: ToolMessage["content"];
   status: "success" | "error";
 }
 
@@ -72,7 +74,10 @@ async function invokeTool(
   args: Record<string, unknown>
 ): Promise<ToolInvocationResult> {
   try {
-    return { content: toolResultText(await toolFn.invoke(args)), status: "success" };
+    const value = await toolFn.invoke(args);
+    // 多模态工具（如 computer_screenshot）覆写 invoke 直接返回内容块数组，原样透传
+    if (Array.isArray(value)) return { content: value as ToolMessage["content"], status: "success" };
+    return { content: toolResultText(value), status: "success" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -87,13 +92,21 @@ async function invokeTool(
 //   ★ 高风险工具执行前先 interrupt() 暂停；工具不在 profile allowlist 时
 //     fail-closed 返回 ToolMessage，绝不按全局名字去别的 Agent 找工具。
 // ---------------------------------------------------------------------------
+/** LangGraph 注入节点的 config 子集：只取我们关心的 configurable 权限字段 */
+interface NodeConfig {
+  configurable?: { permission_mode?: PermissionMode };
+}
+
 export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
   const toolMap = createToolMap(options.tools);
   for (const name of Object.keys(options.approvalDescriptions)) {
     if (!toolMap.has(name)) throw new Error(`Agent 审批项未绑定工具：${name}`);
   }
 
-  return async function approvalToolsNode(state: typeof MessagesAnnotation.State) {
+  return async function approvalToolsNode(state: typeof MessagesAnnotation.State, config?: NodeConfig) {
+    // 会话级权限模式由 server 经 graph.stream({ configurable }) 传入；
+    // 不传 = approve（引入权限模式之前的默认行为，demo / CLI 路径走这里）
+    const permissionMode = config?.configurable?.permission_mode;
     const lastMessage = state.messages.at(-1) as AIMessage;
     const toolResults: ToolMessage[] = [];
 
@@ -110,16 +123,20 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         continue;
       }
 
-      const describe = options.approvalDescriptions[call.name];
-      let content: string;
+      const action = resolveToolPermission(permissionMode, call.name, options.approvalDescriptions);
+      let content: ToolInvocationResult["content"];
       let status: "success" | "error" = "success";
-      if (describe) {
+      if (action === "deny") {
+        // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
+        content = readonlyDenyText(call.name);
+        status = "error";
+      } else if (action === "interrupt") {
         // interrupt() 的参数会原样出现在流输出里（__interrupt__），
         // 返回值则是 CLI / Web 通过 Command({ resume }) 传回来的内容。
         const decision = interrupt<ApprovalRequest, "approve" | "reject">({
           type: "approval",
           toolName: call.name,
-          description: describe(call.args as Record<string, unknown>),
+          description: options.approvalDescriptions[call.name](call.args as Record<string, unknown>),
           args: call.args as Record<string, unknown>,
         });
         if (decision === "approve") {
@@ -130,6 +147,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           content = `用户拒绝了本次 ${call.name} 操作，不要执行。`;
         }
       } else {
+        // 未登记审批（只读工具）或 auto 权限：直接执行
         const result = await invokeTool(toolFn, call.args);
         content = result.content;
         status = result.status;

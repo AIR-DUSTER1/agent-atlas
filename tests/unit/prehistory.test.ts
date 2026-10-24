@@ -29,6 +29,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     resumeUnavailable: false,
     contextSummary: null,
     contextSummaryInjected: false,
+    permissionMode: "approve",
     ...overrides,
   };
 }

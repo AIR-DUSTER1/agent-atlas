@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { calculator } from "../../src/tools.js";
 import { generalProfile } from "../../src/agent/general.js";
@@ -163,6 +165,67 @@ test("同名工具在装配期直接失败，避免静默覆盖", () => {
     () => createApprovalToolsNode({ tools: duplicate, approvalDescriptions: {} }),
     /Agent 工具名重复：calculator/
   );
+});
+
+// ---------------------------------------------------------------------------
+// 会话权限模式 × 工具执行闸门
+// ---------------------------------------------------------------------------
+
+test("只读权限：general 图的 terminal 被直接拒绝，不触发审批中断", async () => {
+  const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
+    toolCall("terminal", { command: "echo hi" }),
+    new AIMessage("当前会话只读，无法执行命令。"),
+  ])));
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("执行 echo")] },
+    { configurable: { thread_id: "perm-readonly-general", permission_mode: "readonly" } }
+  ) as unknown as GraphResult;
+
+  const rejected = result.messages.find((message) => message.getType?.() === "tool");
+  assert.ok(rejected instanceof ToolMessage);
+  assert.match(String(rejected.content), /只读/);
+  assert.equal(rejected.status, "error");
+  assert.equal(result.__interrupt__, undefined);
+});
+
+test("只读权限：computer_click 同样被拒绝（电脑动作全部属于改世界操作）", async () => {
+  const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
+    toolCall("computer_click", { x: 100, y: 200 }),
+    new AIMessage("当前会话只读，无法操作电脑。"),
+  ])));
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("点一下那个按钮")] },
+    { configurable: { thread_id: "perm-readonly-computer", permission_mode: "readonly" } }
+  ) as unknown as GraphResult;
+
+  const rejected = result.messages.find((message) => message.getType?.() === "tool");
+  assert.ok(rejected instanceof ToolMessage);
+  assert.match(String(rejected.content), /只读/);
+  assert.equal(rejected.status, "error");
+});
+
+test("节点级：auto 权限跳过审批直接执行，readonly 拒绝登记工具", async () => {
+  // 受控假工具：auto 分支真实执行它也不碰系统
+  const probe = tool(async () => "probe-executed", {
+    name: "probe_risky",
+    description: "测试用高风险工具",
+    schema: z.object({}),
+  });
+  const node = createApprovalToolsNode({
+    tools: [probe],
+    approvalDescriptions: { probe_risky: () => "测试审批" },
+  });
+  const state = { messages: [toolCall("probe_risky", {})] };
+
+  const auto = await node(state as never, { configurable: { permission_mode: "auto" } });
+  const autoTool = auto.messages[0] as ToolMessage;
+  assert.equal(autoTool.status, "success");
+  assert.equal(String(autoTool.content), "probe-executed");
+
+  const readonly = await node(state as never, { configurable: { permission_mode: "readonly" } });
+  const deniedTool = readonly.messages[0] as ToolMessage;
+  assert.equal(deniedTool.status, "error");
+  assert.match(String(deniedTool.content), /只读/);
 });
 
 test("审批项未绑定当前 profile 工具时在装配期直接失败", () => {

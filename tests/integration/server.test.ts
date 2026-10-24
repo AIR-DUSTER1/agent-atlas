@@ -130,6 +130,47 @@ test("resume：没有待确认事项时 choice 返回 400，不误当审批处�
   assert.match(res.body.error, /没有待确认/);
 });
 
+test("权限模式：切换成功 / 坏值 400 / 未知会话 404，列表回显当前模式", async () => {
+  const mk = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const id = mk.body.id;
+
+  // 新会话默认审批
+  let list = await json("/api/sessions");
+  assert.equal(list.body.find((s: any) => s.id === id).permissionMode, "approve");
+
+  // 切到只读 → 列表回显；再切自动
+  assert.equal((await json(`/api/sessions/${id}/permission`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "readonly" }),
+  })).status, 200);
+  assert.equal((await json(`/api/sessions/${id}/permission`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "auto" }),
+  })).status, 200);
+  list = await json("/api/sessions");
+  assert.equal(list.body.find((s: any) => s.id === id).permissionMode, "auto");
+
+  const bad = await json(`/api/sessions/${id}/permission`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "yolo" }),
+  });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /mode 必须是/);
+
+  assert.equal((await json("/api/sessions/no-such-session/permission", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "readonly" }),
+  })).status, 404);
+});
+
 test("审批：interrupt 后保留 pending，批准能恢复并执行工具", async () => {
   const mk = await json("/api/sessions", {
     method: "POST",

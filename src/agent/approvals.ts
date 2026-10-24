@@ -15,6 +15,11 @@ export const generalApprovals: ApprovalDescriptions = {
   ...demoApprovals,
   terminal: (a) => `在项目根目录执行命令：${String(a.command)}`,
   write_file: (a) => `写入文件「${String(a.path)}」（${String(a.content ?? "").length} 字符）`,
+  computer_click: (a) =>
+    `点击屏幕坐标 (${String(a.x)}, ${String(a.y)})${a.double ? "（双击）" : ""}${a.button === "right" ? "（右键）" : ""}`,
+  computer_type: (a) => `向当前窗口输入 ${String(a.text ?? "").length} 字符文本：${String(a.text ?? "").slice(0, 40)}`,
+  computer_key: (a) => `发送组合按键 ${String(a.combo)}`,
+  computer_scroll: (a) => `在鼠标位置${a.direction === "up" ? "向上" : "向下"}滚动 ${String(a.lines ?? 3)} 行`,
 };
 
 export const estateApprovals: ApprovalDescriptions = {

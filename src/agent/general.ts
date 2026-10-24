@@ -16,6 +16,7 @@
  */
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { terminal, readFileTool, writeFileTool, listDirTool, grepSearch } from "../tools-dev.js";
+import { computerTools } from "../tools-computer.js";
 import { retrieveDocs } from "../tools-rag.js";
 import { generalApprovals } from "./approvals.js";
 import type { AgentProfile } from "./profile.js";
@@ -26,6 +27,9 @@ const tools = [
   calculator, getCurrentTime, getWeather, sendEmail,
   // 编程/开发工具（terminal 与 write_file 为高风险，走人工审批）
   terminal, readFileTool, writeFileTool, listDirTool, grepSearch,
+  // 电脑控制（截屏只读直接执行；点击/输入/按键/滚动为高风险，走人工审批；
+  // 会话权限切到「只读」时四项动作全部拒绝，切到「自动」时不再逐项审批）
+  ...computerTools,
   // 知识库检索（外部 RAG 服务，只读低风险，直接执行）
   retrieveDocs,
 ];
@@ -40,6 +44,8 @@ const SYSTEM_PROMPT = [
   "- read_file / list_dir / grep_search 直接执行；terminal 和 write_file 是高风险操作，" +
     "系统会在你调用后自动请求用户确认，你无需额外追问",
   "- 用户附加了文件时，基于附件内容回答（在消息中以「--- 附件 N: 名 ---」标注，可能超长截断）",
+  "- 电脑控制：先 computer_screenshot 看屏幕并确认坐标，再 click/type/key/scroll 操作；" +
+    "这些动作是高风险操作，系统会请求用户确认（会话切到只读权限时会被直接拒绝，切到自动权限则直接执行）",
   "- 发送邮件同样属于高风险操作，会先请求用户确认",
   "- 回答简洁准确，代码放在 Markdown 代码块里",
 ].join("\n");

@@ -56,7 +56,7 @@ import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
   handleSetReasoning, handleUpdateProvider, handleDeleteProvider, handleActivate, handleModels,
 } from "./routes/config.js";
-import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession } from "./routes/sessions.js";
+import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
@@ -168,6 +168,7 @@ const server = createServer(async (req, res) => {
     const sessionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
     const transcriptMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/transcript$/);
     const compactMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/compact$/);
+    const permissionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/permission$/);
     const extMatch = pathname.match(/^\/api\/external-agents\/([\w-]+)$/);
     const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
@@ -189,6 +190,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }
     if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, sessionMatch[1]); return; }
     if (compactMatch && req.method === "POST") { await handleCompactSession(res, req, compactMatch[1]); return; }
+    if (permissionMatch && req.method === "POST") { await handleSessionPermission(res, req, permissionMatch[1]); return; }
     if (transcriptMatch && req.method === "GET") { await handleTranscript(res, transcriptMatch[1]); return; }
 
     // 外部 Agent
