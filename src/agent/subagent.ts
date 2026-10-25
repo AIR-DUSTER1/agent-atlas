@@ -22,6 +22,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { HumanMessage } from "@langchain/core/messages";
+import { MemorySaver } from "@langchain/langgraph";
 import { createWorkflowGraph, type WorkflowModels } from "./workflow.js";
 import type { AgentProfile } from "./profile.js";
 
@@ -92,7 +93,11 @@ export async function runSubagent(
     return { ok: false, text: "委派失败：任务书为空，请写明目标与期望输出。", durationMs: 0 };
   }
 
-  const graph = createWorkflowGraph(subagentProfileOf(profile), models);
+  // 子 Agent 是一次性后台执行：显式传自建 MemorySaver（不落盘），
+  // 避免每次委派把整段子任务消息写进共享的 checkpoints.ndjson。
+  const graph = createWorkflowGraph(subagentProfileOf(profile), models, {
+    checkpointer: new MemorySaver(),
+  });
   const threadId = `subagent-${randomUUID()}`;
 
   let finalState: unknown;

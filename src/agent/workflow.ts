@@ -25,6 +25,7 @@ import {
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
+import { getCheckpointSaver } from "../checkpoint.js";
 import { buildAgentContext } from "./context-builder.js";
 import { createApprovalToolsNode } from "./hitl.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
@@ -273,7 +274,8 @@ function recentToolResults(messages: BaseMessage[]): string {
  */
 export function createWorkflowGraph(
   profile: AgentProfile,
-  models?: WorkflowModels
+  models?: WorkflowModels,
+  options?: { checkpointer?: MemorySaver }
 ) {
   const tools = profile.tools;
   const agentModel = models?.agent
@@ -427,5 +429,9 @@ export function createWorkflowGraph(
     .addConditionalEdges("agent", afterAgent)
     .addEdge("tools", "agent")
     .addConditionalEdges("review", afterReview)
-    .compile({ checkpointer: new MemorySaver() });
+    .compile({
+      // 默认挂共享持久检查点（重启续命，见 src/checkpoint.ts）；
+      // 子 Agent / 单测可传自建 MemorySaver 保持一次性内存态。
+      checkpointer: options?.checkpointer ?? getCheckpointSaver(),
+    });
 }

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { config } from "../config.js";
 import { createChatModel } from "../llm.js";
+import { getCheckpointSaver } from "../checkpoint.js";
 import { log } from "./logging.js";
 import { buildGraph, currentConfigVersion, type Session, type TurnRecord } from "./sessions.js";
 
@@ -116,7 +117,12 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   if (!summary) summary = localSummary(session.turnHistory);
   summary = summary.slice(0, MAX_SUMMARY_CHARS);
 
-  // 旧图 / 旧 threadId 的内存消息无法直接删除：换一张新图，让摘要成为新线程的起点。
+  // 旧图 / 旧 threadId 的线程记忆处理：产品图的持久检查点随换线程一并删除
+  // （摘要已接管上下文，旧 thread 留在 checkpoints.ndjson 只会无限增长）；
+  // 新线程以注入的摘要为起点，模型不再看到被压缩掉的原始消息。
+  if (session.kind === "agent" || session.kind === "estate") {
+    void getCheckpointSaver().deleteThread(session.threadId);
+  }
   session.graph = buildGraph(session.kind, session.demo);
   session.threadId = `web-${randomUUID()}`;
   session.configVersion = currentConfigVersion();

@@ -50,6 +50,7 @@ import { handleHealthz, handleReadyz } from "./health.js";
 import { lifecycle } from "./lifecycle.js";
 import { flushAudit, writeAudit } from "./audit.js";
 import { flushJournal } from "./session-store.js";
+import { flushCheckpointLog } from "../checkpoint.js";
 import { log, newRequestId } from "./logging.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -306,6 +307,7 @@ function handleSignal(signal: string): void {
     flush: async () => {
       await flushJournal();
       await flushAudit();
+      await flushCheckpointLog(); // 持久检查点的在途追加也等落盘（F0）
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，
     // 并留一个 1s 的兜底定时器（不 hold 事件循环）

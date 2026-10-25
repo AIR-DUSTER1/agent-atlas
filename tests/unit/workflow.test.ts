@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { Command } from "@langchain/langgraph";
+import { Command, MemorySaver } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { FakeListChatModel } from "@langchain/core/utils/testing";
 import {
@@ -113,7 +113,7 @@ test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反
     analyst: fake as unknown as WorkflowChatModel,
     reviewer: fake as unknown as WorkflowChatModel,
   };
-  const graph = createWorkflowGraph(testProfile, models);
+  const graph = createWorkflowGraph(testProfile, models, { checkpointer: new MemorySaver() });
   const threadId = `workflow-${randomUUID()}`;
   const config = { configurable: { thread_id: threadId } };
 
@@ -149,7 +149,7 @@ test("工作流：反思不通过时带反馈回炉一次，然后结束", async
     agent: fake as unknown as WorkflowChatModel,
     analyst: fake as unknown as WorkflowChatModel,
     reviewer: fake as unknown as WorkflowChatModel,
-  });
+  }, { checkpointer: new MemorySaver() });
   const threadId = `workflow-${randomUUID()}`;
   const result = await graph.invoke(
     { messages: [new HumanMessage("介绍一下你自己")] },
@@ -178,7 +178,7 @@ test("工作流：反思连续不通过时最多回炉三次，第四次失败�
     agent: fake as unknown as WorkflowChatModel,
     analyst: fake as unknown as WorkflowChatModel,
     reviewer: fake as unknown as WorkflowChatModel,
-  });
+  }, { checkpointer: new MemorySaver() });
   const threadId = `workflow-${randomUUID()}`;
   const result = await graph.invoke(
     { messages: [new HumanMessage("请覆盖四个要点")] },

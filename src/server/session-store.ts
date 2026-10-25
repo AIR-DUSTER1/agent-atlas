@@ -34,8 +34,12 @@ import { log } from "./logging.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
 // 避免跑测试把假会话写进开发者真实的 .setting/sessions.ndjson。
-const JOURNAL_FILE = process.env.SESSIONS_FILE
-  || join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".setting", "sessions.ndjson");
+// 用函数而非常量：resetJournalStore 换 env 后要能重新绑定文件。
+function resolveJournalFile(): string {
+  return process.env.SESSIONS_FILE
+    || join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".setting", "sessions.ndjson");
+}
+let JOURNAL_FILE = resolveJournalFile();
 /** journal 大小上限：超过触发 compact（按当前在内存的会话快照重写） */
 const JOURNAL_MAX_BYTES = 2_000_000;
 /** 回放/快照 时保留的会话数上限（超出按 createdAt 丢最旧） */
@@ -185,6 +189,13 @@ export function journalTurn(
 // ---------------------------------------------------------------------------
 // 回放 / compact
 // ---------------------------------------------------------------------------
+
+/** 测试专用：丢弃内存回放态并重读 SESSIONS_FILE，让下一个用例能换 journal 重新回放 */
+export function resetJournalStore(): void {
+  state.clear();
+  loaded = false;
+  JOURNAL_FILE = resolveJournalFile();
+}
 
 /** 启动时有一次调用；把 journal 变成内存 state */
 export async function replaySessions(): Promise<void> {

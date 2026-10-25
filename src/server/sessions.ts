@@ -1,19 +1,16 @@
 /**
  * ============================================================
- * sessions.ts — Web 会话存储（内存版）
+ * sessions.ts — Web 会话存储（内存索引 + journal 持久化）
  * ============================================================
  * 会话分两种：
  *   - kind: "agent"  通用 Agent（默认，正常产品逻辑：工具 + 审批 + 多轮记忆）
  *   - kind: "demo"   内置示例（学习 Demo 1-4，图结构刻意保持教学形态）
  *
- * 每个会话一张图实例：
- *   - 通用 Agent / Demo 2 / Demo 3：编译时持有 MemorySaver，
- *     thread_id 绑定 session id → 多轮记忆与审批状态延续；
- *   - Demo 1 / Demo 4：教学上故意不带 checkpointer（展示无记忆的行为差异），本身无状态。
- *
- * 这是学习项目，故与 MemorySaver 一样选择「进程内存」方案：
- * 服务重启后会话即消失（前端会标注历史会话为「已失效」）。
- * 生产环境可换 SqliteSaver / PostgresSaver 并把 session 落库。
+ * 每个会话一张图实例，产品图（agent / estate）共享文件版持久检查点
+ * （src/checkpoint.ts）：thread_id 绑定 session id，服务重启后多轮上下文
+ * 完整延续；demo 2/3 教学上仍用每图自建的 MemorySaver（进程内记忆）。
+ * 会话壳/轮次历史的持久化仍走 journal（session-store.ts），
+ * 两层各司其职：journal 管「发生过什么」，checkpoint 管「模型还记得什么」。
  */
 import { randomUUID } from "node:crypto";
 import { createBasicGraph } from "../agent/basic.js";
@@ -24,6 +21,7 @@ import { createAgentGraph } from "../agent/general.js";
 import { createEstateGraph } from "../agent/estate.js";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
+import { ensureCheckpointsLoaded, getCheckpointSaver } from "../checkpoint.js";
 import { getExternalAgent } from "./external.js";
 import {
   journalSession, journalDelete, journalApproval, journalDecided, journalTurn, journalPermission,
@@ -134,12 +132,18 @@ export function buildGraph(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null): unkno
 
 /**
  * 配置变更后该会话首次使用时：用当前配置重建图。
- * 注意：重建会得到新的 MemorySaver —— 通用 Agent / Demo 2/3 的多轮记忆
- * 因此重置（等价于「改配置后重启服务」，UI 会提示这一点）。
+ * 产品图（agent / estate）共享持久检查点 —— 重建只换「模型接线」，
+ * 对话记忆保留在原线程上（改配置不再失忆）；
+ * 唯一例外：重建时若挂着未决审批，interrupt 残留的线程状态不可与新输入
+ * 续用，删掉持久线程（等价旧行为：重建即失忆），并清空审批标记。
+ * demo 2/3 重建后自建 MemorySaver 空态（教学形态，记忆随重建重置）。
  */
-export function rebuildIfStale(session: Session): boolean {
+export async function rebuildIfStale(session: Session): Promise<boolean> {
   if (session.kind === "external") return false; // 外部会话无图，不需要重建
   if (session.configVersion === configVersionCounter) return false;
+  if (session.pendingApproval) {
+    void getCheckpointSaver().deleteThread(session.threadId); // fire-and-forget：内存态在 promise 体内同步先删
+  }
   session.graph = buildGraph(session.kind, session.demo);
   session.configVersion = configVersionCounter;
   session.pendingApproval = null; // 旧图上的 interrupt 状态随重建失效
@@ -265,8 +269,14 @@ export function updatePermissionMode(session: Session, mode: PermissionMode): vo
 }
 
 export function deleteSession(id: string): boolean {
+  const session = sessions.get(id);
   const gone = sessions.delete(id);
-  if (gone) journalDelete(id); // T2-2：删除也落 journal（重启后同样消失）
+  if (gone) {
+    journalDelete(id); // T2-2：删除也落 journal（重启后同样消失）
+    // 产品图的持久检查点一并清理，否则 checkpoints.ndjson 里的死线程只增不减；
+    // demo / external 线程从没写过日志，deleteThread 是无害空操作。
+    if (session) void getCheckpointSaver().deleteThread(session.threadId);
+  }
   return gone;
 }
 
@@ -292,9 +302,10 @@ export function recordDecision(session: Session, status: "approved" | "rejected"
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// T2-4：重启后历史注入 —— journal 回放的会话无 MemorySaver 历史线程，
-// 第一轮真图调用时把最近几轮对话拼成一条「上文摘录」注入，让模型有连续上下文。
-// 一次性：注入后 resumeUninjected 置 false，不重复占上下文预算。
+// T2-4：重启后历史注入（降级路径）—— 产品图有持久检查点时不再走这里
+// （restoreSessions 已按 hasCheckpoint 关掉 resumeUninjected）；仍命中的是
+// demo 2/3、旧数据或纯 mock 轮次：第一轮真图调用时把最近几轮对话拼成
+// 一条「上文摘录」注入。一次性：注入后 resumeUninjected 置 false。
 // ---------------------------------------------------------------------------
 const PREHISTORY_MAX_TURNS = 12;   // 最多注入最近 12 轮
 const PREHISTORY_USER_MAX = 2_000; // 单轮用户话上限（字符）
@@ -330,6 +341,9 @@ export function takeContextSummary(session: Session): string | null {
 }
 
 export async function restoreSessions(): Promise<number> {
+  // F0：先回放持久检查点 —— 产品图的图实例虽是新建的，但共享检查点里
+  // 已有各 thread 的完整多轮状态，重启后第三轮依然记得前两轮。
+  const saver = await ensureCheckpointsLoaded();
   await replaySessions();
   const records = journalSnapshot();
   let restored = 0;
@@ -339,6 +353,11 @@ export async function restoreSessions(): Promise<number> {
     const hasGraph = kind !== "external";
     const graph = hasGraph ? buildGraph(kind, rec.demo) : null;
     const pend = rec.pendingApproval;
+    const threadId = rec.threadId || `web-${randomUUID()}`;
+    // 有持久检查点的产品会话：完整线程记忆已随检查点恢复，不再注入
+    // journal 摘录（避免同一历史进两遍上下文）；无检查点的（旧数据 / demo /
+    // 纯 mock 轮次）维持摘录注入路径不变。
+    const hasCheckpoint = saver.hasThread(threadId);
     const session: Session = {
       id: rec.id,
       kind,
@@ -350,7 +369,7 @@ export async function restoreSessions(): Promise<number> {
       title: rec.title || "已恢复的对话",
       createdAt: rec.createdAt,
       graph,
-      threadId: rec.threadId || `web-${randomUUID()}`,
+      threadId,
       pendingApproval: pend && pend.status === "pending" ? (pend.payload as InterruptPayload) : null,
       configVersion: currentConfigVersion(),
       turns: rec.turns,
@@ -364,10 +383,11 @@ export async function restoreSessions(): Promise<number> {
         finishedAt: t.finishedAt,
         durationMs: t.durationMs,
       })),
-      // T2-3：pendingApproval 跨重启不可 resume（图 interrupt 状态未持久化）
+      // T2-3：pendingApproval 跨重启仍不放开 resume —— 检查点层虽已具备
+      // 中断恢复的数据，上层维持「明确拒绝重复执行」策略（后续再评估放开）。
       resumeUnavailable: Boolean(pend && pend.status === "pending"),
-      // T2-4：带历史轮的会话在下一轮真图调用时注入上文
-      resumeUninjected: rec.turns > 0,
+      // T2-4：带历史轮且无持久检查点的会话，下一轮真图调用时注入上文
+      resumeUninjected: rec.turns > 0 && !hasCheckpoint,
       contextSummary: null,
       contextSummaryInjected: false,
       permissionMode: rec.permissionMode ?? "approve",

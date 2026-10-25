@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { MemorySaver } from "@langchain/langgraph";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { StructuredToolInterface } from "@langchain/core/tools";
@@ -85,7 +86,7 @@ test("通用 Agent 图拒绝伪造的房产工具调用，不执行也不中断"
   const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
     toolCall("house_search", { query: "北京" }),
     new AIMessage("当前 Agent 不支持该操作。"),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("帮我找房")] },
     { configurable: { thread_id: "isolation-general" } }
@@ -102,7 +103,7 @@ test("房产 Agent 图拒绝伪造的开发工具调用，不执行也不中断"
   const graph = createWorkflowGraph(estateProfile, models(scriptedAgent([
     toolCall("terminal", { command: "echo hacked" }),
     new AIMessage("当前 Agent 不支持该操作。"),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("执行命令")] },
     { configurable: { thread_id: "isolation-estate" } }
@@ -119,7 +120,7 @@ test("房产 Agent 图拒绝伪造的 write_file 调用，不执行也不中断"
   const graph = createWorkflowGraph(estateProfile, models(scriptedAgent([
     toolCall("write_file", { path: "hacked.txt", content: "x" }),
     new AIMessage("当前 Agent 不支持该操作。"),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("写一个文件")] },
     { configurable: { thread_id: "isolation-estate-write" } }
@@ -135,7 +136,7 @@ test("房产 Agent 图拒绝伪造的 write_file 调用，不执行也不中断"
 test("通用 Agent 的 terminal 进入审批，停在工具执行之前", async () => {
   const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
     toolCall("terminal", { command: "echo hi" }),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("执行 echo")] },
     { configurable: { thread_id: "approval-general" } }
@@ -153,7 +154,7 @@ test("房产 Agent 的 house_appoint 进入审批，停在工具执行之前", a
       start: "10",
       end: "12",
     }),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("帮我预约看房")] },
     { configurable: { thread_id: "approval-estate" } }
@@ -179,7 +180,7 @@ test("只读权限：general 图的 terminal 被直接拒绝，不触发审批�
   const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
     toolCall("terminal", { command: "echo hi" }),
     new AIMessage("当前会话只读，无法执行命令。"),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("执行 echo")] },
     { configurable: { thread_id: "perm-readonly-general", permission_mode: "readonly" } }
@@ -196,7 +197,7 @@ test("只读权限：computer_click 同样被拒绝（电脑动作全部属于�
   const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
     toolCall("computer_click", { x: 100, y: 200 }),
     new AIMessage("当前会话只读，无法操作电脑。"),
-  ])));
+  ])), { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("点一下那个按钮")] },
     { configurable: { thread_id: "perm-readonly-computer", permission_mode: "readonly" } }

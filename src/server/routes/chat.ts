@@ -130,8 +130,9 @@ export async function handleChat(
     res.end(JSON.stringify({ error: "消息不能为空" }));
     return;
   }
-  // 配置在会话创建后被改过 → 先用当前配置重建图（Demo 2/3 的记忆会重置）
-  rebuildIfStale(session);
+  // 配置在会话创建后被改过 → 先用当前配置重建图（产品图共享持久检查点，
+  // 重建不再丢对话记忆；demo 2/3 的记忆仍会随重建重置）
+  await rebuildIfStale(session);
 
   // T2-5 并发闸：连点节流 + 同会话唯一流（在登记对话记录之前，拒绝即零痕迹）
   assertChatInterval(sessionId);
@@ -282,9 +283,9 @@ async function handleResumeInner(
     res.end(JSON.stringify({ error }));
     return;
   }
-  // 配置变更后不重建审批中的图：旧图的 interrupt 状态无法跨 checkpointer 恢复，
+  // 配置变更后不重建审批中的图：resume 必须回到产生 interrupt 的同一图实例，
   // 让本次 resume 在原图上完成（配置从下一条消息起生效）
-  if (!approval) rebuildIfStale(session);
+  if (!approval) await rebuildIfStale(session);
 
   if (!config.apiKey && clarification) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
