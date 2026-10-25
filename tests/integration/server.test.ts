@@ -288,3 +288,22 @@ test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async 
   const recheck = await json(`/api/memories/${id}`, { method: "DELETE" });
   assert.equal(recheck.status, 404);
 });
+
+test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async () => {
+  // 先建会话聊一轮（mock 模式也产 usage 事件，model 标「模拟模式」）
+  const created = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const sid = created.body.id;
+  await readSse("/api/chat", { sessionId: sid, message: "统计验证轮" });
+
+  const stats = await json("/api/stats");
+  assert.equal(stats.status, 200);
+  assert.ok(stats.body.totals.turns >= 1);
+  assert.ok(stats.body.totals.inputTokens > 0);
+  assert.ok(stats.body.byModel.some((m: { model: string }) => m.model === "模拟模式"), "mock 用量应标注模拟模式");
+  assert.ok(stats.body.byDay.length >= 1);
+  assert.ok(stats.body.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
+});

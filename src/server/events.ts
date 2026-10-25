@@ -72,6 +72,8 @@ export type AgentEvent =
       outputTokens: number;
       totalTokens: number;
       cacheReadTokens: number;
+      /** 产生该用量的模型显示名（F2 统计按模型聚合；旧事件 / mock 外未知场景缺省） */
+      model?: string;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }

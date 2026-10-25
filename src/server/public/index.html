@@ -77,6 +77,7 @@
             <div id="provider-menu" class="provider-menu hidden"></div>
           </div>
           <button id="memories-btn" class="settings-btn" title="跨会话长期记忆：查看 / 新增 / 删除 Agent 记住的事实与偏好">🧠</button>
+          <button id="stats-btn" class="settings-btn" title="使用统计：token 用量 / 按天与模型分布 / 活跃会话">📊</button>
           <button id="theme-btn" class="settings-btn" title="切换浅色主题">☀️</button>
           <button id="settings-btn" class="settings-btn" title="供应商管理：添加 / 编辑 / 删除">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -309,6 +310,25 @@
         <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
       </div>
       <div id="memories-status" class="settings-status"></div>
+    </div>
+  </div>
+
+  <!-- ============ 统计弹窗：token 用量 / 按天与模型分布 / 活跃会话 ============ -->
+  <div id="stats-mask" class="hidden">
+    <div id="stats-modal" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+      <h2 id="stats-title">📊 使用统计</h2>
+      <p class="settings-sub">聚合本服务全部会话的逐轮用量（journal 回放后同样计入）；inputTokens 是各次模型调用的上下文快照之和，含分析/反思节点。</p>
+
+      <div id="stats-totals" class="stats-totals"></div>
+
+      <div class="field-label">按天用量（近 30 天）</div>
+      <div id="stats-days" class="stats-bars"></div>
+
+      <div class="field-label">按模型分布</div>
+      <div id="stats-models" class="stats-bars"></div>
+
+      <div class="field-label">最活跃会话</div>
+      <div id="stats-sessions" class="stats-sessions"></div>
     </div>
   </div>
 

@@ -944,6 +944,23 @@ memory_save/recall —— 后台黑盒任务无权写用户长期记忆，防污
 memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论、两句话收束；
 🧠 面板新增 / 删除 / Esc 关闭全通过。
 
+### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
+
+**问题**：每轮 usage 事件从第一天起就写进 journal，但从未被消费 —— 用户看不到
+「我花了多少 token」。
+
+**链路**：`GET /api/stats` → `buildStats(listSessions())` 纯函数聚合内存 turnHistory
+（journal 回放后同样在内存，重启不丢统计）→ 前端 📊 弹窗渲染（汇总卡片 + div 宽度
+百分比条形图，零依赖）。
+
+**协议改动（§5.3 流程）**：usage 事件加可选 `model` 字段 —— events.ts 变体 →
+stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（固定「模拟模式」）
+→ 前端无需新 case（多余字段忽略）→ stats 聚合按 `model ?? "未知模型"` 分桶。
+
+**聚合语义**：totals/byDay 按轮累加全部 usage 事件的 input/output（同轮多条 usage
+= 分析/回答/反思多节点各自的上下文快照，全部计入）；byModel 的 turns 按 usage
+条数计（≈模型调用次数）；`delegate_agent` 的 tool_call 计委派次数。
+
 ---
 
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）

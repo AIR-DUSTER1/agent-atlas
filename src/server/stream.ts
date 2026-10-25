@@ -25,6 +25,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentEvent, InterruptPayload } from "./events.js";
 import type { PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
+import { getActiveModelLabel } from "./settings.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
 const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review"]);
@@ -190,6 +191,8 @@ export async function* runGraphEvents(
   input: unknown,
   options: NormalizeOptions
 ): AsyncGenerator<AgentEvent> {
+  // 本轮用量事件的模型标注：一次流一次取值（轮中途切模型不影响进行中的流）
+  const usageModel = getActiveModelLabel() || undefined;
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
     // permission_mode 会被 LangGraph 透传给每个节点函数的 config（不传 = 默认审批行为）
@@ -227,7 +230,7 @@ export async function* runGraphEvents(
         // -- token 用量（分片累积合并；Anthropic 系 input/output 分散在多个 chunk）--
         if (node !== usageNode) { usageAccum = null; usageNode = node; }
         usageAccum = mergeUsage(usageAccum, extractUsage(msg));
-        if (usageAccum) yield { type: "usage", ...usageAccum };
+        if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
         // -- 文本 token --
         const text = contentText(msg.content);
         if (text) {
@@ -329,7 +332,7 @@ export async function* runGraphEvents(
             // 用量在去重前提取：即使这条消息因「子图回显」被跳过，它携带的用量依然有效
             if (nodeKey !== usageNode) { usageAccum = null; usageNode = nodeKey; }
             usageAccum = mergeUsage(usageAccum, extractUsage(msg));
-            if (usageAccum) yield { type: "usage", ...usageAccum };
+            if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
             const text = contentText(msg.content);
             if (!text) continue;
             if (msg.id && streamedIds.has(msg.id)) continue; // 已流式输出过 → 去重

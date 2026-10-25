@@ -72,6 +72,7 @@ export async function* mockRun(input: MockInput): AsyncGenerator<AgentEvent> {
   if (!input.signal?.aborted) {
     yield {
       type: "usage",
+      model: "模拟模式",
       ...fabricateUsage(input.message ?? "", input.turnIndex ?? 0, outputChars),
     };
   }

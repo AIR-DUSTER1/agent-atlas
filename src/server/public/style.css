@@ -1171,6 +1171,40 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   color: var(--text-3); cursor: pointer;
 }
 .memory-item .p-del:hover { color: var(--red); border-color: var(--red); }
+
+/* ---------- 统计弹窗 ---------- */
+#stats-modal {
+  width: min(620px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  animation: slideIn .2s ease;
+}
+#stats-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.stats-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+.stats-cell {
+  padding: 10px 12px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 10px; text-align: center;
+}
+.stats-cell .sc-value { font-size: 17px; font-weight: 700; color: var(--text); font-family: var(--mono); }
+.stats-cell .sc-label { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.stats-bars { margin-bottom: 16px; }
+.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.bar-label { flex: 0 0 92px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.bar-track { flex: 1; height: 10px; background: var(--bg-input); border-radius: 5px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 5px; min-width: 2px; }
+.bar-value { flex: 0 0 56px; text-align: right; color: var(--text); font-family: var(--mono); }
+.bar-sub { flex: 0 0 72px; color: var(--text-3); }
+.stats-session-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 8px 12px; margin-bottom: 6px; font-size: 13px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+}
+.stats-session-row .ss-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-session-row .ss-meta { color: var(--text-3); flex-shrink: 0; font-size: 12px; font-family: var(--mono); }
 .settings-status.err { color: var(--red); }
 
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }

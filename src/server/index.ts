@@ -64,6 +64,7 @@ import { handleListProjects, handleAddProject, handleSetActiveProject, handleDel
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import { handleListMemories, handleSaveMemory, handleDeleteMemory } from "./routes/memories.js";
+import { handleStats } from "./routes/stats.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 const PORT = Number(process.env.PORT ?? 3000);
 /**
@@ -244,6 +245,9 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
     if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1]); return; }
+
+    // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
+    if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res); return; }
 
     // RAG（外部知识库）
     if (pathname === "/api/rag" && req.method === "GET") { await handleGetRag(res); return; }    if (pathname === "/api/rag/config" && req.method === "POST") { await handleSaveRagConfig(res, req); return; }

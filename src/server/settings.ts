@@ -110,6 +110,12 @@ function activeModelOf(p: Provider | undefined): ModelEntry | undefined {
   return p.models.find((m) => m.id === p.activeModelId) ?? p.models[0];
 }
 
+/** 当前启用模型的显示名（usage 事件 / 统计页按模型聚合用；无配置时给空串） */
+export function getActiveModelLabel(): string {
+  const m = activeModelOf(activeProvider());
+  return m ? (m.label || m.name) : "";
+}
+
 /** 把「启用的供应商 + 它的启用模型」真正套到运行时 config 上（llm.ts 建模型时读它） */
 function applyActiveToConfig(): void {
   const p = activeProvider();

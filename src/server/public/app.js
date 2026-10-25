@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-25-1";
+const APP_VERSION = "web-2026-10-25-2";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2314,6 +2314,103 @@ function openMemories() {
   refreshMemories().catch((err) => memStatus(`✗ ${err.message}`, "err"));
 }
 
+/* ----- 统计弹窗：token 用量 / 按天与模型分布 / 活跃会话 ----- */
+/* fmtTokens 已由 modules/format.js 导入复用 */
+
+function renderStats(data) {
+  const t = data.totals || {};
+  const totals = $("stats-totals");
+  totals.innerHTML = "";
+  const cells = [
+    ["轮次", String(t.turns ?? 0)],
+    ["输入 tokens", fmtTokens(t.inputTokens ?? 0)],
+    ["输出 tokens", fmtTokens(t.outputTokens ?? 0)],
+    ["缓存命中", fmtTokens(t.cacheReadTokens ?? 0)],
+    ["有记录会话", String(t.sessions ?? 0)],
+    ["子 Agent 委派", String(t.delegateCalls ?? 0)],
+  ];
+  for (const [label, value] of cells) {
+    const cell = document.createElement("div");
+    cell.className = "stats-cell";
+    cell.innerHTML = `<div class="sc-value"></div><div class="sc-label"></div>`;
+    cell.querySelector(".sc-value").textContent = value;
+    cell.querySelector(".sc-label").textContent = label;
+    totals.appendChild(cell);
+  }
+
+  // 条形图：div 宽度百分比（零依赖），最大值为基准
+  const barRow = (labelText, valueText, ratio, sub) => `
+    <div class="bar-row">
+      <span class="bar-label"></span>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(ratio * 100)}%"></div></div>
+      <span class="bar-value"></span>${sub ? `<span class="bar-sub"></span>` : ""}
+    </div>`;
+
+  const renderBars = (containerId, rows) => {
+    const el = $(containerId);
+    el.innerHTML = "";
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.className = "memories-empty";
+      empty.textContent = "暂无数据（发起几轮对话后这里会出现统计）";
+      el.appendChild(empty);
+      return;
+    }
+    const max = Math.max(...rows.map((r) => r.metric), 1);
+    for (const row of rows) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = barRow("", "", row.metric / max, row.sub || "");
+      wrap.querySelector(".bar-label").textContent = row.label;
+      wrap.querySelector(".bar-value").textContent = row.value;
+      if (row.sub) wrap.querySelector(".bar-sub").textContent = row.sub;
+      el.appendChild(wrap.firstElementChild);
+    }
+  };
+
+  renderBars("stats-days", (data.byDay || []).map((d) => ({
+    label: d.date.slice(5), // MM-DD
+    metric: d.inputTokens + d.outputTokens,
+    value: fmtTokens(d.inputTokens + d.outputTokens),
+    sub: `${d.turns} 轮`,
+  })));
+  renderBars("stats-models", (data.byModel || []).map((m) => ({
+    label: m.model,
+    metric: m.inputTokens + m.outputTokens,
+    value: fmtTokens(m.inputTokens + m.outputTokens),
+    sub: `${m.turns} 次调用`,
+  })));
+
+  const sessions = $("stats-sessions");
+  sessions.innerHTML = "";
+  if (!(data.topSessions || []).length) {
+    const empty = document.createElement("p");
+    empty.className = "memories-empty";
+    empty.textContent = "暂无会话记录";
+    sessions.appendChild(empty);
+    return;
+  }
+  for (const s of data.topSessions) {
+    const row = document.createElement("div");
+    row.className = "stats-session-row";
+    row.innerHTML = `<span class="ss-title"></span><span class="ss-meta"></span>`;
+    row.querySelector(".ss-title").textContent = s.title;
+    row.querySelector(".ss-meta").textContent = `${s.turns} 轮 · ${fmtTokens(s.tokens)} tokens`;
+    sessions.appendChild(row);
+  }
+}
+
+function openStats() {
+  $("stats-mask").classList.remove("hidden");
+  api("/api/stats").then(renderStats).catch((err) => {
+    $("stats-totals").innerHTML = "";
+    const empty = document.createElement("p");
+    empty.className = "memories-empty";
+    empty.textContent = `加载失败：${err.message}`;
+    $("stats-days").innerHTML = "";
+    $("stats-days").appendChild(empty);
+  });
+}
+
 function renderProviderList() {
   const list = $("provider-list");
   list.innerHTML = "";
@@ -3635,6 +3732,11 @@ async function init() {
   on("memories-btn", "click", openMemories);
   on("mem-add-btn", "click", saveMemoryFromForm);
   on("memories-mask", "click", (e) => { if (e.target === $("memories-mask")) closeMemories(); });
+
+  // 使用统计弹窗
+  const closeStats = () => { $("stats-mask").classList.add("hidden"); };
+  on("stats-btn", "click", openStats);
+  on("stats-mask", "click", (e) => { if (e.target === $("stats-mask")) closeStats(); });
   on("provider-btn", "click", (e) => {
     e.stopPropagation();
     const menu = $("provider-menu");
@@ -3785,6 +3887,7 @@ async function init() {
       closeModal();
       closeSettings();
       closeMemories();
+      closeStats();
       closeFsModal();
       closeKb();
       closeEstate();
