@@ -58,7 +58,7 @@ import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
   handleSetReasoning, handleUpdateProvider, handleDeleteProvider, handleActivate, handleModels,
 } from "./routes/config.js";
-import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission } from "./routes/sessions.js";
+import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission, handleExportSession, handleCleanupSessions } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
@@ -194,10 +194,14 @@ const server = createServer(async (req, res) => {
 
     // 会话
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }
+    // 批量清理要放在 sessionMatch 之前：/api/sessions/cleanup 不能被当成会话 id
+    if (pathname === "/api/sessions/cleanup" && req.method === "POST") { await handleCleanupSessions(res, req); return; }
     if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, sessionMatch[1]); return; }
     if (compactMatch && req.method === "POST") { await handleCompactSession(res, req, compactMatch[1]); return; }
     if (permissionMatch && req.method === "POST") { await handleSessionPermission(res, req, permissionMatch[1]); return; }
     if (transcriptMatch && req.method === "GET") { await handleTranscript(res, transcriptMatch[1]); return; }
+    const exportMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/export$/);
+    if (exportMatch && req.method === "GET") { await handleExportSession(res, exportMatch[1]); return; }
 
     // 外部 Agent
     if (pathname === "/api/external-agents" && req.method === "GET") { await handleListExternalAgents(res); return; }

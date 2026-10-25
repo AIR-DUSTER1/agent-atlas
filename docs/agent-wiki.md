@@ -961,6 +961,19 @@ stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（�
 = 分析/回答/反思多节点各自的上下文快照，全部计入）；byModel 的 turns 按 usage
 条数计（≈模型调用次数）；`delegate_agent` 的 tool_call 计委派次数。
 
+### 3.28 会话归档（F3）：导出 / 搜索 / 批量清理
+
+三件事都挂在既有链路上，无新存储：
+
+| 能力 | 实现 |
+|---|---|
+| 导出 | `GET /api/sessions/:id/export`（routes/sessions.ts）→ Markdown 附件：标题头（kind/创建时间/轮数/权限模式）+ 每轮「用户原话 + 工具调用摘要（结果截 300 字）+ 助手回答」；中文文件名走 RFC 5987（`filename*=UTF-8''…` + ASCII 兜底名） |
+| 搜索 | 侧栏搜索框纯前端过滤：标题必查，本浏览器缓存的会话块（state.blocks）参与匹配；没有缓存到的会话按标题兜底 —— 不加后端搜索接口，保持零开销 |
+| 批量清理 | `POST /api/sessions/cleanup {daysBefore}`：删除创建超 N 天的会话，内部走 `deleteSession`（journal delete 行 + 持久检查点线程同步清理）+ audit 记条数；路由顺序上必须放在 `sessionMatch` 分支之前（`cleanup` 不能被当成会话 id） |
+
+坑：IAB 自动化里 `fill("")` 清空搜索框可能不触发 input 事件（真实键盘退格路径
+正常）——自动化清空输入框要用原生 value setter + `InputEvent`，产品代码无此问题。
+
 ---
 
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）

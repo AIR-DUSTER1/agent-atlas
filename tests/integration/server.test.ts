@@ -307,3 +307,55 @@ test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async (
   assert.ok(stats.body.byDay.length >= 1);
   assert.ok(stats.body.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
 });
+
+test("会话导出：Markdown 附件可读，含用户话与助手回答", async () => {
+  const created = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent", title: "导出验证" }),
+  });
+  const sid = created.body.id;
+  await readSse("/api/chat", { sessionId: sid, message: "导出验证轮的内容" });
+
+  const res = await fetch(`${srv.base}/api/sessions/${sid}/export`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /text\/markdown/);
+  assert.match(res.headers.get("content-disposition") ?? "", /filename\*=UTF-8''/, "中文文件名走 RFC 5987");
+  const md = await res.text();
+  assert.match(md, /^# 导出验证/, "标题打头");
+  assert.match(md, /导出验证轮的内容/, "用户原话进导出");
+  assert.match(md, /### 🤖 助手/, "助手回答进导出");
+
+  // 不存在的会话 → 404
+  const miss = await json("/api/sessions/no-such-id/export");
+  assert.equal(miss.status, 404);
+});
+
+test("批量清理：按创建时间删旧会话，坏参数 400", async () => {
+  // 造一个「旧」会话（把 createdAt 拨回 40 天前做不到 —— 接口按真实时间删，
+  // 所以这里用 daysBefore=1 兜底验证语义：刚建的会话不该被 1 天规则误删）
+  const created = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent", title: "清理验证-新会话" }),
+  });
+  const sid = created.body.id;
+
+  const bad = await json("/api/sessions/cleanup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ daysBefore: 0 }),
+  });
+  assert.equal(bad.status, 400, "daysBefore=0 应 400");
+
+  const ok1 = await json("/api/sessions/cleanup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ daysBefore: 1 }),
+  });
+  assert.equal(ok1.status, 200);
+  assert.equal(ok1.body.removed, 0, "刚创建的会话不该被 1 天规则删除");
+
+  const list = await json("/api/sessions");
+  assert.ok(list.body.some((s: { id: string }) => s.id === sid), "清理后新会话仍在列表");
+});

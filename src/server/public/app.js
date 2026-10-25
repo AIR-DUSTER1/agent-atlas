@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-25-2";
+const APP_VERSION = "web-2026-10-25-3";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -371,13 +371,25 @@ async function addProjectFolder(type) {
 /* ---------------------------------------------------------------------------
  * 侧栏会话列表（按项目分组）
  * ------------------------------------------------------------------------- */
+/** 会话搜索：标题必查；本浏览器缓存的消息块（state.blocks）参与匹配，
+ *  没缓存到的会话按标题兜底 —— 服务端无搜索接口，保持零开销本地过滤。 */
+function sessionMatchesSearch(s, term) {
+  if (!term) return true;
+  const q = term.toLowerCase();
+  if ((s.title || "").toLowerCase().includes(q)) return true;
+  const blocks = state.blocks?.[s.id];
+  if (!blocks) return false;
+  return blocks.some((b) => (b.text || "").toLowerCase().includes(q));
+}
+
 function renderSessions() {
   const list = $("session-list");
   list.innerHTML = "";
+  const term = $("session-search")?.value?.trim() ?? "";
 
   // 按项目过滤 + 分组（保持 projects 定义顺序；无匹配项目的会话归入「其他」）
   const filtered = state.sessions.filter(
-    (s) => state.projectView === "all" || s.projectId === state.projectView
+    (s) => (state.projectView === "all" || s.projectId === state.projectView) && sessionMatchesSearch(s, term)
   );
   const groups = [];
   const byId = new Map();
@@ -404,7 +416,9 @@ function renderSessions() {
   if (!list.children.length) {
     const empty = document.createElement("div");
     empty.className = "fs-empty";
-    empty.textContent = state.projectView === "all" ? "还没有会话，点上方「＋ 新建对话」" : "该项目下还没有会话";
+    empty.textContent = term
+      ? "没有命中搜索的会话"
+      : state.projectView === "all" ? "还没有会话，点上方「＋ 新建对话」" : "该项目下还没有会话";
     list.appendChild(empty);
   }
 }
@@ -435,6 +449,17 @@ function renderSessionItem(s) {
     meta.appendChild(pend);
   }
   item.appendChild(meta);
+
+  const exportBtn = document.createElement("button");
+  exportBtn.className = "s-del s-export";
+  exportBtn.textContent = "⬇";
+  exportBtn.title = "导出为 Markdown";
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // 附件下载走浏览器原生（新开同源 URL 触发 Content-Disposition，不打断当前页）
+    window.open(`/api/sessions/${s.id}/export`, "_blank");
+  });
+  item.appendChild(exportBtn);
 
   const del = document.createElement("button");
   del.className = "s-del";
@@ -582,9 +607,20 @@ function selectSession(sid) {
   hydrateFromServer(s); // 本地没有该会话的记录 → 从服务端拉取回放（修复历史会话打开为空）
 }
 
+/** 重拉服务端会话列表（批量清理后用）：保留 stale 条目与本地标题覆盖 */
+async function loadSessionList() {
+  const serverSessions = await api("/api/sessions");
+  const keepStale = state.sessions.filter((s) => s.stale);
+  const keptTitles = new Map(state.sessions.map((s) => [s.id, s.title]));
+  state.sessions = [
+    ...serverSessions.map((s) => ({ ...s, stale: false, title: keptTitles.get(s.id) || s.title })),
+    ...keepStale,
+  ];
+  renderSessions();
+}
+
 /** 历史回放中的 interrupt 只代表「当时暂停过」，服务端无 pending 时不再可操作 */
-function markInterruptsResolved(sid) {
-  for (const block of transcript(sid)) {
+function markInterruptsResolved(sid) {  for (const block of transcript(sid)) {
     if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
     for (const part of block.parts) {
       if (part.status !== "pending") continue;
@@ -3737,6 +3773,31 @@ async function init() {
   const closeStats = () => { $("stats-mask").classList.add("hidden"); };
   on("stats-btn", "click", openStats);
   on("stats-mask", "click", (e) => { if (e.target === $("stats-mask")) closeStats(); });
+
+  // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
+  $("session-search").addEventListener("input", () => renderSessions());
+  on("cleanup-btn", "click", async () => {
+    const daysRaw = await uiPrompt("清理创建时间超过多少天的会话？（默认 30）", {
+      title: "批量清理旧会话",
+      placeholder: "30",
+    });
+    if (daysRaw === null) return;
+    const days = Number(daysRaw.trim() || "30");
+    if (!Number.isInteger(days) || days < 1 || days > 365) { uiAlert("请输入 1-365 之间的整数天数", "批量清理旧会话"); return; }
+    const ok = await uiConfirm(`确定删除所有创建超过 ${days} 天的会话吗？\n（journal 与检查点会同步清理，删除后不可恢复）`, { title: "批量清理旧会话", okText: "删除" });
+    if (!ok) return;
+    try {
+      const res = await api("/api/sessions/cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ daysBefore: days }),
+      });
+      uiAlert(`已清理 ${res.removed} 个超过 ${days} 天的会话`, "批量清理完成");
+      await loadSessionList();
+    } catch (err) {
+      uiAlert(`清理失败：${err.message}`, "批量清理旧会话");
+    }
+  });
   on("provider-btn", "click", (e) => {
     e.stopPropagation();
     const menu = $("provider-menu");

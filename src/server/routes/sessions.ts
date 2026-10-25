@@ -5,7 +5,7 @@
  * / { kind: "external", agentId } / { kind: "estate" }；兼容旧 { demo: N }。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory, updatePermissionMode } from "../sessions.js";
+import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
 import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
 import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
@@ -104,4 +104,109 @@ export async function handleSessionPermission(
   writeAudit("permission.changed", { sessionId: session.id, mode: body.mode });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ ok: true, permissionMode: session.permissionMode }));
+}
+
+// ---------------------------------------------------------------------------
+// F3 归档：导出 Markdown / 批量清理
+// ---------------------------------------------------------------------------
+
+const EXPORT_TOOL_RESULT_CHARS = 300; // 导出里单条工具结果的字符上限
+const EXPORT_FILENAME_MAX = 40;       // 导出文件名里标题的最大长度
+
+/** 单轮转 Markdown：用户原话 + 助手回答（token/ai_message 拼接）+ 工具调用摘要 */
+function turnToMarkdown(record: TurnRecord): string {
+  const lines: string[] = [];
+  const time = new Date(record.startedAt).toLocaleString("zh-CN");
+  lines.push(`### 🧑 用户 · ${time}`);
+  lines.push("");
+  lines.push(record.user || "（空消息）");
+  lines.push("");
+  // 工具调用摘要：按事件顺序配对（tool_call → 运行中，tool_result 填结果）
+  const toolNames = new Map<string, string>();
+  for (const ev of record.events) {
+    if (ev.type === "tool_call" && ev.name) toolNames.set(ev.id, ev.name);
+    if (ev.type === "tool_result") {
+      const name = toolNames.get(ev.id) ?? "工具";
+      const brief = String(ev.content ?? "").slice(0, EXPORT_TOOL_RESULT_CHARS);
+      lines.push(`> 🔧 \`${name}\`：${brief}${String(ev.content ?? "").length > EXPORT_TOOL_RESULT_CHARS ? "…" : ""}`);
+    }
+  }
+  const ai = record.events
+    .filter((ev) => ev.type === "token")
+    .map((ev) => (ev as { text: string }).text)
+    .join("");
+  const fallback = record.events
+    .filter((ev) => ev.type === "ai_message")
+    .map((ev) => (ev as { content: string }).content)
+    .join("\n\n");
+  const answer = (ai || fallback).trim();
+  if (answer) {
+    lines.push("");
+    lines.push("### 🤖 助手");
+    lines.push("");
+    lines.push(answer);
+  }
+  return lines.join("\n");
+}
+
+/** GET /api/sessions/:id/export —— 导出为 Markdown 附件（任何编辑器可读） */
+export async function handleExportSession(
+  res: import("node:http").ServerResponse,
+  id: string
+): Promise<void> {
+  const session = getSession(id);
+  if (!session) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    return;
+  }
+  const records = getTurnHistory(session);
+  const created = new Date(session.createdAt).toLocaleString("zh-CN");
+  const header = [
+    `# ${session.title}`,
+    "",
+    `- 类型：${session.kind}${session.demo ? `（示例 ${session.demo}）` : ""}`,
+    `- 创建时间：${created}`,
+    `- 对话轮数：${records.length}`,
+    `- 权限模式：${session.permissionMode}`,
+    "",
+    "---",
+    "",
+  ].join("\n");
+  const body = records.map(turnToMarkdown).join("\n\n---\n\n") || "_（该会话还没有对话记录）_";
+  const markdown = header + body + "\n";
+
+  // 文件名：中文走 RFC 5987（filename*=UTF-8''…），ASCII 兜底
+  const safeTitle = session.title.replace(/[\\/:*?"<>|\r\n]/g, " ").trim().slice(0, EXPORT_FILENAME_MAX) || "会话";
+  const asciiName = `session-${session.id.slice(0, 8)}.md`;
+  res.writeHead(200, {
+    "Content-Type": "text/markdown; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(`${safeTitle}.md`)}`,
+  });
+  res.end(markdown);
+}
+
+const CLEANUP_MIN_DAYS = 1;
+const CLEANUP_MAX_DAYS = 365;
+
+/** POST /api/sessions/cleanup {daysBefore} —— 批量清理创建超过 N 天的会话。
+ *  删除走 deleteSession（journal 落 delete 行 + 持久检查点线程同步清理）；
+ *  audit 记条数与天数，不记会话内容。 */
+export async function handleCleanupSessions(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const body = JSON.parse((await readBody(req)) || "{}") as { daysBefore?: unknown };
+  const days = typeof body.daysBefore === "number" ? Math.floor(body.daysBefore) : NaN;
+  if (!Number.isFinite(days) || days < CLEANUP_MIN_DAYS || days > CLEANUP_MAX_DAYS) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: `daysBefore 必须是 ${CLEANUP_MIN_DAYS}-${CLEANUP_MAX_DAYS} 之间的整数（天）` }));
+    return;
+  }
+  const cutoff = Date.now() - days * 86_400_000;
+  const victims: Session[] = listSessions().filter((s) => s.createdAt < cutoff);
+  for (const s of victims) deleteSession(s.id);
+  writeAudit("sessions.cleanup", { daysBefore: days, removed: victims.length });
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ ok: true, removed: victims.length, daysBefore: days }));
 }

@@ -39,10 +39,14 @@
           <span id="kb-entry-state" class="kb-entry-state">未配置</span>
         </button>
         <button id="estate-btn" class="kb-entry" title="房产数据源（贝壳 CLI）：检测 / 安装 / 保存授权 Key">
-          <span class="kb-entry-icon">🏠</span>
-          <span class="kb-entry-text">找房数据源（贝壳）</span>
-          <span id="estate-entry-state" class="kb-entry-state">未安装</span>
+          <span class="estate-entry-icon">🏠</span>
+          <span class="estate-entry-text">找房数据源（贝壳）</span>
+          <span id="estate-entry-state" class="estate-entry-state">未安装</span>
         </button>
+        <div class="session-tools">
+          <input id="session-search" type="text" spellcheck="false" placeholder="🔍 搜索会话标题 / 内容" title="按标题或本浏览器缓存的消息内容实时过滤" />
+          <button id="cleanup-btn" class="ghost-btn small" title="批量清理创建超过 N 天的旧会话">🧹</button>
+        </div>
       </div>
 
       <nav id="session-list" aria-label="会话列表"></nav>

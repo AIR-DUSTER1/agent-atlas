@@ -1205,6 +1205,19 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 }
 .stats-session-row .ss-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-session-row .ss-meta { color: var(--text-3); flex-shrink: 0; font-size: 12px; font-family: var(--mono); }
+
+/* ---------- 侧栏：会话搜索 + 批量清理 ---------- */
+.session-tools { display: flex; gap: 6px; margin-top: 10px; }
+.session-tools input {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px;
+  color: var(--text); font-size: 12.5px; outline: none; transition: border-color .15s;
+}
+.session-tools input:focus { border-color: var(--accent); }
+.session-tools button { flex-shrink: 0; }
+/* 会话项的导出小按钮：与删除同款形态，hover 才显形（与 .s-del 行为一致） */
+.session-item:hover .s-export { display: block; }
+.s-export:hover { color: var(--accent); }
 .settings-status.err { color: var(--red); }
 
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
