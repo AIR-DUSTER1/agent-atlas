@@ -51,6 +51,7 @@ import { lifecycle } from "./lifecycle.js";
 import { flushAudit, writeAudit } from "./audit.js";
 import { flushJournal } from "./session-store.js";
 import { flushCheckpointLog } from "../checkpoint.js";
+import { loadMemories } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -62,6 +63,7 @@ import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalA
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
+import { handleListMemories, handleSaveMemory, handleDeleteMemory } from "./routes/memories.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 const PORT = Number(process.env.PORT ?? 3000);
 /**
@@ -81,6 +83,8 @@ await loadProjects();
 await loadExternalAgents();
 await loadRag();
 await loadEstate();
+// F1：跨会话长期记忆（agent 层 memoryNote 每轮读内存索引，这里启动时预热落盘数据）
+await loadMemories();
 // T2-2：journal 回放 —— 重启后恢复会话壳 / 轮次历史 / pending 审批标记
 const restoredSessions = await restoreSessions();
 if (restoredSessions > 0) {
@@ -235,9 +239,14 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧经 memory_save 工具同一存储）
+    if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res); return; }
+    if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
+    const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
+    if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1]); return; }
+
     // RAG（外部知识库）
-    if (pathname === "/api/rag" && req.method === "GET") { await handleGetRag(res); return; }
-    if (pathname === "/api/rag/config" && req.method === "POST") { await handleSaveRagConfig(res, req); return; }
+    if (pathname === "/api/rag" && req.method === "GET") { await handleGetRag(res); return; }    if (pathname === "/api/rag/config" && req.method === "POST") { await handleSaveRagConfig(res, req); return; }
     if (pathname === "/api/rag/test" && req.method === "POST") { await handleTestRag(res, req); return; }
     if (pathname === "/api/rag/ingest" && req.method === "POST") { await handleIngest(res, req); return; }
     if (pathname === "/api/rag/search" && req.method === "POST") { await handleRagSearch(res, req); return; }

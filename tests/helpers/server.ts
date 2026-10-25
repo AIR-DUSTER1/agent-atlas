@@ -80,6 +80,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
       BEIKE_DISABLE_AUTO_INSTALL: "1",
       SESSIONS_FILE: journalPath,
       CHECKPOINT_FILE: join(dir, "checkpoints.ndjson"), // 隔离真实检查点日志（restore 会读它做续聊判定）
+      MEMORIES_FILE: join(dir, "memories.json"), // 隔离真实长期记忆（启动 loadMemories / 记忆 API 都碰它）
       WEB_CONFIG_FILE: configPath, // 隔离真实 .web-config.json（其中可能有供应商 Key）
       AUDIT_FILE: join(dir, "audit.ndjson"), // 隔离真实审计日志（认证失败等事件）
       LOG_LEVEL: "error",          // 集成测试不刷请求日志；启动失败仍有 console 输出

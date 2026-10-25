@@ -76,6 +76,7 @@
             </button>
             <div id="provider-menu" class="provider-menu hidden"></div>
           </div>
+          <button id="memories-btn" class="settings-btn" title="跨会话长期记忆：查看 / 新增 / 删除 Agent 记住的事实与偏好">🧠</button>
           <button id="theme-btn" class="settings-btn" title="切换浅色主题">☀️</button>
           <button id="settings-btn" class="settings-btn" title="供应商管理：添加 / 编辑 / 删除">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -288,6 +289,26 @@
         选「自定义 JSON」还能直接手写网关需要的字段。
         配置保存在本地 <code>.web-config.json</code>（已 gitignore），优先于 <code>.env</code>。
       </p>
+    </div>
+  </div>
+
+  <!-- ============ 记忆弹窗：跨会话长期记忆的查看 / 新增 / 删除 ============ -->
+  <div id="memories-mask" class="hidden">
+    <div id="memories-modal" role="dialog" aria-modal="true" aria-labelledby="memories-title">
+      <h2 id="memories-title">🧠 跨会话长期记忆</h2>
+      <p class="settings-sub">Agent 在对话中「值得跨会话记住」的事实与偏好（用户说「以后都…」「记住…」时会自动调用 memory_save）。
+        每轮对话自动注入最近 30 条，跨会话生效；这里可以查看、手动补充与删除。</p>
+
+      <div class="field-label">记忆列表</div>
+      <div id="memories-list" class="memories-list"></div>
+
+      <div class="field-label">手动添加 / 更新（同主题再保存 = 覆盖更新）</div>
+      <div class="key-row">
+        <input id="mem-key" type="text" spellcheck="false" placeholder="主题，如：回答风格（50 字内）" />
+        <input id="mem-content" type="text" spellcheck="false" placeholder="内容，如：结论先行，少用列表（500 字内）" />
+        <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
+      </div>
+      <div id="memories-status" class="settings-status"></div>
     </div>
   </div>
 

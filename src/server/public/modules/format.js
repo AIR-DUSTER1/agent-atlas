@@ -18,6 +18,8 @@ export const TOOL_ICONS = {
   delegate: "🧭", retrieve_docs: "📚",
   // 多智能体协同（委派子 Agent）
   delegate_agent: "👥",
+  // 跨会话长期记忆
+  memory_save: "🧠", memory_recall: "🔎",
   // 房产 Agent（贝壳）
   house_search: "🏙", house_lookup: "🔍", house_market: "📈", house_map: "🗺️",
   house_agents: "👤", house_appoint: "📅", house_contact: "🤝",

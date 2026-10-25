@@ -921,6 +921,29 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 文件悄悄写去了 `src/.setting/`（服务照常工作，极难察觉）。相对仓库根定位一律以
 **本文件自身位置**起算。
 
+### 3.26 `src/memory-store.ts` + `src/tools-memory.ts` — 跨会话长期记忆（F1）
+
+**问题**：F0 解决了「同一会话跨重启」，但每个**新会话**仍是白纸 —— 用户偏好
+（「回答结论先行」）、项目事实（「测试用 npm test」）每次都要重新交代。
+
+**三件套**：
+
+| 层 | 实现 |
+|---|---|
+| 存储（`memory-store.ts`，src 顶层） | `.setting/memories.json` 小白名单（上限 200 条 × 500 字）：内存权威 + 每次变更**全量原子重写**（temp+rename，config-store 模式）—— 与 journal/checkpoint 的大日志 append 方案刻意不同，规模小不值得 compact 复杂度；同 key 保存 = 覆盖更新（id 稳定）；坏文件降级空记忆不炸服务；测试钩子 `MEMORIES_FILE` |
+| 工具（`tools-memory.ts`） | `memory_save({key, content})`（中文错误文本返回，不 throw 穿透图）/ `memory_recall({query})`（分词 OR 匹配，注入 30 条之外的补充通道）。只写自家记忆文件 → 不登记审批，三档权限全直通 |
+| 注入（workflow agentNode） | `memoryNoteForPrompt()` 每轮动态拼进第二条 system 注记（context-builder 的 notes 机制）——**不落 checkpoint**，长会话不累积重复占预算；新会话 / 重启后第一轮即生效 |
+
+**边界**：general 挂两工具 + 系统提示规则（「用户说以后都…时立即 memory_save」）；
+estate 不挂（域纯粹）；**子 Agent 剔除**（`subagentProfileOf` 的排除名单加了
+memory_save/recall —— 后台黑盒任务无权写用户长期记忆，防污染）。
+管理面板：顶栏 🧠 弹窗（列表 / 手动添加更新 / 删除），API
+`GET/POST /api/memories`、`DELETE /api/memories/:id`（routes/memories.ts）。
+
+**验收（真实 DeepSeek）**：会话 A 说「以后回答结论先行、简洁」→ 模型真实调用
+memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论、两句话收束；
+🧠 面板新增 / 删除 / Esc 关闭全通过。
+
 ---
 
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）

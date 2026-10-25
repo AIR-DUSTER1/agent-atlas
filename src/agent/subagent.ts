@@ -52,12 +52,15 @@ export interface SubagentResult {
   durationMs: number;
 }
 
-/** 构造子 Agent 专用 profile 副本：剔除委派工具（深度 1）+ 追加黑盒分析规则 */
+/** 子 Agent 不能携带的工具名（深度 1 + 防污染）：委派自身 + 跨会话记忆写入 */
+const SUBAGENT_EXCLUDED_TOOLS = [DELEGATE_TOOL_NAME, "memory_save", "memory_recall"];
+
+/** 构造子 Agent 专用 profile 副本：剔除受限工具 + 追加黑盒分析规则 */
 export function subagentProfileOf(profile: AgentProfile): AgentProfile {
   return {
     ...profile,
     id: profile.id,
-    tools: profile.tools.filter((item) => item.name !== DELEGATE_TOOL_NAME),
+    tools: profile.tools.filter((item) => !SUBAGENT_EXCLUDED_TOOLS.includes(item.name)),
     analystGuidance: [
       ...(profile.analystGuidance ? [profile.analystGuidance] : []),
       SUBAGENT_ANALYST_RULES,

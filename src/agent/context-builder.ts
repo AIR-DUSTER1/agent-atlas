@@ -24,6 +24,8 @@ export interface AgentContextInput {
   reviewFeedback?: string;
   /** 会话权限模式注记（permission.ts 生成；approve 默认行为时为空串不注入） */
   permissionNote?: string;
+  /** 跨会话长期记忆注记（memory-store 生成；无记忆时为空不注入） */
+  memoryNote?: string;
 }
 
 export interface AgentContextResult {
@@ -139,6 +141,7 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     revisionNote,
     input.reviewFeedback ? `【上一轮反思反馈】${input.reviewFeedback}` : "",
     input.permissionNote || "",
+    input.memoryNote || "",
     omittedMessages ? `【上下文窗口】已省略较早的 ${omittedMessages} 条消息，完整历史仍保存在会话记录中。` : "",
   ].filter(Boolean);
 

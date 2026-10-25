@@ -18,6 +18,7 @@ import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { terminal, readFileTool, writeFileTool, listDirTool, grepSearch } from "../tools-dev.js";
 import { computerTools } from "../tools-computer.js";
 import { teamTools } from "../tools-team.js";
+import { memoryTools } from "../tools-memory.js";
 import { retrieveDocs } from "../tools-rag.js";
 import { generalApprovals } from "./approvals.js";
 import type { AgentProfile } from "./profile.js";
@@ -34,6 +35,8 @@ const tools = [
   // 多智能体协同（delegate_agent：委派子 Agent 后台跑独立子任务，需审批；
   // 子 Agent 强制只读 + 不可再委派，见 subagent.ts）
   ...teamTools,
+  // 跨会话长期记忆（memory_save/recall 只写本服务记忆文件，低风险直接执行）
+  ...memoryTools,
   // 知识库检索（外部 RAG 服务，只读低风险，直接执行）
   retrieveDocs,
 ];
@@ -53,6 +56,9 @@ const SYSTEM_PROMPT = [
   "- 多智能体协同：独立的信息收集或跨域子任务（如查房产行情）可用 delegate_agent 委派子 Agent 后台执行" +
     "（子 Agent 只读、独立上下文、结果以文本返回）；自己几个工具能完成的事不要委派",
   "- 发送邮件同样属于高风险操作，会先请求用户确认",
+  "- 跨会话长期记忆：用户表达长期偏好、项目事实或纠正既往回答时（「以后都…」「记住…」），" +
+    "立即调用 memory_save 记录；每轮上下文里已带【跨会话长期记忆】清单，回答时遵循它，" +
+    "与当前对话冲突时以用户最新说法为准（并更新记忆）",
   "- 回答简洁准确，代码放在 Markdown 代码块里",
 ].join("\n");
 

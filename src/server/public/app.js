@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-24-3";
+const APP_VERSION = "web-2026-10-25-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2238,6 +2238,82 @@ function openSettings(focusProviderId) {
   $("settings-mask").classList.remove("hidden");
 }
 
+/* ----- 记忆弹窗：跨会话长期记忆的查看 / 新增 / 删除 ----- */
+function memStatus(text, cls) {
+  const el = $("memories-status");
+  el.textContent = text;
+  el.className = "settings-status" + (cls ? " " + cls : "");
+  if (text) setTimeout(() => { if (el.textContent === text) { el.textContent = ""; el.className = "settings-status"; } }, 4000);
+}
+
+function renderMemoriesList(memories) {
+  const list = $("memories-list");
+  list.innerHTML = "";
+  if (!memories.length) {
+    const empty = document.createElement("p");
+    empty.className = "memories-empty";
+    empty.textContent = "还没有长期记忆。在对话里说「记住：…」或用下面的表单手动添加。";
+    list.appendChild(empty);
+    return;
+  }
+  for (const m of memories) {
+    // innerHTML 搭骨架 + textContent 填正文（天然防注入，见 AGENTS.md §5.5）
+    const row = document.createElement("div");
+    row.className = "memory-item";
+    row.innerHTML = `
+      <div class="m-body">
+        <div class="m-key"></div>
+        <div class="m-content"></div>
+        <div class="m-meta"></div>
+      </div>
+      <button class="p-del" title="删除这条记忆">删除</button>`;
+    row.querySelector(".m-key").textContent = m.key;
+    row.querySelector(".m-content").textContent = m.content;
+    const when = new Date(m.updatedAt).toLocaleString();
+    row.querySelector(".m-meta").textContent = `${m.source === "agent" ? "Agent 保存" : "手动添加"} · ${when}`;
+    row.querySelector(".p-del").addEventListener("click", async () => {
+      try {
+        await api(`/api/memories/${encodeURIComponent(m.id)}`, { method: "DELETE" });
+        await refreshMemories();
+        memStatus("已删除", "ok");
+      } catch (err) {
+        memStatus(`✗ ${err.message}`, "err");
+      }
+    });
+    list.appendChild(row);
+  }
+}
+
+async function refreshMemories() {
+  const data = await api("/api/memories");
+  renderMemoriesList(data.memories || []);
+  return data.memories || [];
+}
+
+async function saveMemoryFromForm() {
+  const key = $("mem-key").value.trim();
+  const content = $("mem-content").value.trim();
+  if (!key || !content) { memStatus("主题与内容都要填", "err"); return; }
+  try {
+    await api("/api/memories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, content }),
+    });
+    $("mem-key").value = "";
+    $("mem-content").value = "";
+    await refreshMemories();
+    memStatus("已保存（下轮对话即生效）", "ok");
+  } catch (err) {
+    memStatus(`✗ ${err.message}`, "err");
+  }
+}
+
+function openMemories() {
+  $("memories-mask").classList.remove("hidden");
+  refreshMemories().catch((err) => memStatus(`✗ ${err.message}`, "err"));
+}
+
 function renderProviderList() {
   const list = $("provider-list");
   list.innerHTML = "";
@@ -3553,6 +3629,12 @@ async function init() {
   const closeSettings = () => { $("settings-mask").classList.add("hidden"); closeProviderForm(); };
   on("settings-btn", "click", openSettings);
   on("side-model", "click", openSettings);
+
+  // 跨会话长期记忆弹窗
+  const closeMemories = () => { $("memories-mask").classList.add("hidden"); };
+  on("memories-btn", "click", openMemories);
+  on("mem-add-btn", "click", saveMemoryFromForm);
+  on("memories-mask", "click", (e) => { if (e.target === $("memories-mask")) closeMemories(); });
   on("provider-btn", "click", (e) => {
     e.stopPropagation();
     const menu = $("provider-menu");
@@ -3702,6 +3784,7 @@ async function init() {
       closeComposerMenu();
       closeModal();
       closeSettings();
+      closeMemories();
       closeFsModal();
       closeKb();
       closeEstate();
@@ -3712,6 +3795,10 @@ async function init() {
     if (e.key === "Enter" && ["pf-name", "pf-base-url", "pf-api-key"].includes(e.target.id)) {
       e.preventDefault();
       saveProvider();
+    }
+    if (e.key === "Enter" && ["mem-key", "mem-content"].includes(e.target.id)) {
+      e.preventDefault();
+      saveMemoryFromForm();
     }
     if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(e.target.id)) {
       e.preventDefault();

@@ -1140,6 +1140,37 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   line-height: 1.5;
 }
 .settings-status.ok { color: var(--green); }
+
+/* ---------- 记忆弹窗（复用设置弹窗外观） ---------- */
+#memories-modal {
+  width: min(620px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  animation: slideIn .2s ease;
+}
+#memories-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.memories-list { margin-bottom: 16px; max-height: 46vh; overflow-y: auto; }
+.memories-empty { color: var(--text-3); font-size: 13px; padding: 8px 2px; }
+.memory-item {
+  display: flex; gap: 10px; align-items: flex-start; justify-content: space-between;
+  padding: 10px 12px; margin-bottom: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.memory-item .m-key { font-size: 13px; font-weight: 600; color: var(--text); }
+.memory-item .m-content { font-size: 13px; color: var(--text-2); margin-top: 2px; word-break: break-word; }
+.memory-item .m-meta { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+.memory-item .p-del {
+  flex-shrink: 0; padding: 5px 10px; font-size: 12px;
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-3); cursor: pointer;
+}
+.memory-item .p-del:hover { color: var(--red); border-color: var(--red); }
 .settings-status.err { color: var(--red); }
 
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }

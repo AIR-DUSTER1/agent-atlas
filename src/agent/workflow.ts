@@ -26,6 +26,7 @@ import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { getCheckpointSaver } from "../checkpoint.js";
+import { memoryNoteForPrompt } from "../memory-store.js";
 import { buildAgentContext } from "./context-builder.js";
 import { createApprovalToolsNode } from "./hitl.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
@@ -362,7 +363,9 @@ export function createWorkflowGraph(
     config?: { configurable?: { permission_mode?: PermissionMode } }
   ) {
     // 上下文投影 + 内部注记统一走 context-builder：需求 brief / 历史澄清 /
-    // 反思反馈 / 权限模式在这里组装成稳定 system，消息窗口与工具结果按预算裁剪
+    // 反思反馈 / 权限模式 / 跨会话长期记忆在这里组装成稳定 system，
+    // 消息窗口与工具结果按预算裁剪。记忆注记每轮动态拼（不落 checkpoint），
+    // 新会话、甚至服务重启后的第一轮就能看到全部记忆。
     const context = buildAgentContext({
       profile,
       messages: state.messages,
@@ -370,6 +373,7 @@ export function createWorkflowGraph(
       clarificationHistory: state.clarificationHistory,
       reviewFeedback: state.reviewFeedback,
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
+      memoryNote: memoryNoteForPrompt() ?? undefined,
     });
     const response = await agentModel.invoke(context.messages);
     return { messages: [response] };

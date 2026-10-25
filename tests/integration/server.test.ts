@@ -244,3 +244,47 @@ test("静态分发：index 引用 module 脚本，modules/*.js 可达且 MIME �
     assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);
   }
 });
+
+test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async () => {
+  // 新增
+  const created = await json("/api/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "测试偏好", content: "回答要结论先行" }),
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.entry.key, "测试偏好");
+  const id = created.body.entry.id;
+
+  // 同 key 更新（id 稳定）
+  const updated = await json("/api/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "测试偏好", content: "回答要结论先行、少用列表" }),
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.entry.id, id);
+
+  // 列表
+  const listed = await json("/api/memories");
+  assert.equal(listed.status, 200);
+  const found = (listed.body.memories || []).find((m: { id: string; content: string }) => m.id === id);
+  assert.ok(found, "列表应包含刚保存的记忆");
+  assert.equal(found.content, "回答要结论先行、少用列表");
+  assert.equal(found.source, "user");
+
+  // 坏请求：缺 content → 400 中文错误
+  const bad = await json("/api/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "只有主题" }),
+  });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /不能为空/);
+
+  // 删除 → 再删 404
+  const gone = await json(`/api/memories/${id}`, { method: "DELETE" });
+  assert.equal(gone.status, 200);
+  const recheck = await json(`/api/memories/${id}`, { method: "DELETE" });
+  assert.equal(recheck.status, 404);
+});
