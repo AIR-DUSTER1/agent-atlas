@@ -1218,6 +1218,18 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 /* 会话项的导出小按钮：与删除同款形态，hover 才显形（与 .s-del 行为一致） */
 .session-item:hover .s-export { display: block; }
 .s-export:hover { color: var(--accent); }
+
+/* ---------- 设置弹窗：备份与恢复 ---------- */
+.backup-head { margin-top: 18px; }
+.backup-actions { margin-bottom: 10px; align-items: center; }
+.backup-list { margin-bottom: 8px; }
+.backup-row {
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  padding: 9px 12px; margin-bottom: 6px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+}
+.backup-row .b-name { font-size: 13px; color: var(--text); font-family: var(--mono); }
+.backup-row .b-meta { font-size: 11px; color: var(--text-3); margin-top: 2px; }
 .settings-status.err { color: var(--red); }
 
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }

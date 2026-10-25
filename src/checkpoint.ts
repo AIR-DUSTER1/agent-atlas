@@ -87,6 +87,8 @@ function fromB64(text: string): Uint8Array {
 
 export class PersistentSaver extends MemorySaver {
   private readonly filePath: string;
+  /** 当前实例的日志路径（备份枚举用；类外只读） */
+  filePathOf(): string { return this.filePath; }
   /** 串行写链：保证行序 = 调用序（NDJSON 追加日志的收敛前提） */
   private writeChain: Promise<void> = Promise.resolve();
   private appendCount = 0;
@@ -357,6 +359,12 @@ export async function ensureCheckpointsLoaded(): Promise<PersistentSaver> {
 /** 优雅退出前等待检查点日志写完（index.ts 关停序列里与 flushJournal 并列） */
 export async function flushCheckpointLog(): Promise<void> {
   await saverSingleton?.flush();
+}
+
+/** 当前检查点日志的实际路径（备份/恢复枚举用；env 钩子重绑后随之变化） */
+export function checkpointFilePath(): string {
+  if (saverSingleton) return saverSingleton.filePathOf();
+  return process.env.CHECKPOINT_FILE || DEFAULT_FILE;
 }
 
 /** 测试专用：丢弃单例以便下一个用例换 CHECKPOINT_FILE 重建 */

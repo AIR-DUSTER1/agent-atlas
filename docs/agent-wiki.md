@@ -974,6 +974,29 @@ stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（�
 坑：IAB 自动化里 `fill("")` 清空搜索框可能不触发 input 事件（真实键盘退格路径
 正常）——自动化清空输入框要用原生 value setter + `InputEvent`，产品代码无此问题。
 
+### 3.29 `src/server/backup.ts` — 数据备份与恢复（F9，可用性主线收尾）
+
+**问题**：journal / 检查点 / 记忆 / 配置散在 `.setting/` 与仓库根
+`.web-config.json` —— 换机、误删、升级前没有一键带走全部状态的办法。
+
+**设计**：平铺目录快照（不压缩打包，肉眼可检）+ manifest.json：
+`.setting/backups/backup-<yyyyMMdd-HHmmss-SSS>/`。
+
+| 机制 | 实现 |
+|---|---|
+| 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoriesFilePath` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
+| 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / audit）再拷贝 —— 「恢复前快照」也拿到完整状态 |
+| 恢复 | `restoreBackup(name)`：名字白名单 `^backup-\d{8}-\d{6}(-\d+)*$`（纯数字段，天然防路径穿越）→ 先自动快照当前态 → 逐文件 temp+rename 原子写回 → **只动磁盘不动内存单例，必须重启生效**（内存 journal/配置会把旧态写回去） |
+| 前端 | 设置弹窗底部区块（列表 / 创建 / 恢复按钮 + uiConfirm 重启提示）；audit 记 `backup.created` / `backup.restored` |
+
+**踩坑（实测）**：备份名只到秒 → 「恢复前快照」与原备份同秒同名 → `mkdir
+recursive` 不报错，**快照把破坏态覆盖进刚建的备份目录**，恢复出来的就是坏数据
+且测试几乎不可能从断言上发现（restored 列表完全正常）。修法：名字带毫秒段 +
+`manifest.json` 存在性探测追加序号段。
+
+**安全**：备份含 API Key 明文 —— 目录在 gitignore 内 + README/前端 hint 双重
+警示「妥善保管、不要外发」。
+
 ---
 
 ## 4. 调用链分析（5 个 Demo 的完整执行流程）

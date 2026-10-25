@@ -287,6 +287,14 @@
 
       <div id="settings-status" class="settings-status"></div>
 
+      <!-- ---------- 备份与恢复（F9）：整机本地状态快照 ---------- -->
+      <div class="field-label backup-head">备份与恢复 <em class="key-state">含 API Key，请妥善保管备份目录</em></div>
+      <div class="key-row backup-actions">
+        <button id="backup-create-btn" type="button" class="ghost-btn small">📦 创建备份</button>
+        <span id="backup-list-hint" class="key-state">会话记录 / 检查点 / 长期记忆 / 供应商配置 / 审计日志</span>
+      </div>
+      <div id="backup-list" class="backup-list"></div>
+
       <p class="settings-note">
         「启用」的供应商 + 它当前的模型决定聊天用哪个模型；顶栏 <strong>▾</strong> 可以直接切换「任意供应商的任意模型」并调整思考等级。
         思考等级按各家供应商的划分方式适配：OpenAI 是 <code>reasoning_effort</code> 强度档（minimal→high），

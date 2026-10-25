@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-25-3";
+const APP_VERSION = "web-2026-10-25-4";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2272,6 +2272,50 @@ function openSettings(focusProviderId) {
   api("/api/config").then(applyConfigState).catch(() => {});
   closeProviderForm();
   $("settings-mask").classList.remove("hidden");
+  refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
+}
+
+/* ----- 备份与恢复（F9） ----- */
+async function refreshBackups() {
+  const data = await api("/api/backup");
+  const list = $("backup-list");
+  if (!list) return;
+  list.innerHTML = "";
+  const backups = data.backups || [];
+  if (!backups.length) {
+    const empty = document.createElement("p");
+    empty.className = "memories-empty";
+    empty.textContent = "还没有备份。升级版本 / 迁移机器前建议先创建一份。";
+    list.appendChild(empty);
+    return;
+  }
+  for (const b of backups) {
+    const row = document.createElement("div");
+    row.className = "backup-row";
+    row.innerHTML = `<div class="b-info"><div class="b-name"></div><div class="b-meta"></div></div><button class="ghost-btn small b-restore">恢复</button>`;
+    row.querySelector(".b-name").textContent = b.name;
+    const when = b.createdAt ? new Date(b.createdAt).toLocaleString("zh-CN") : "时间未知";
+    row.querySelector(".b-meta").textContent = `${when} · ${b.files.length} 个文件`;
+    row.querySelector(".b-restore").addEventListener("click", async () => {
+      const ok = await uiConfirm(
+        `确定恢复备份 ${b.name} 吗？\n\n恢复前会自动创建一份当前状态的快照（可退回）。\n恢复后需要重启服务（npm run web）才生效。`,
+        { title: "恢复备份", okText: "恢复" }
+      );
+      if (!ok) return;
+      try {
+        const res = await api("/api/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: b.name }),
+        });
+        uiAlert(res.hint || "已恢复，请重启服务生效", "恢复完成");
+        await refreshBackups();
+      } catch (err) {
+        uiAlert(`恢复失败：${err.message}`, "恢复备份");
+      }
+    });
+    list.appendChild(row);
+  }
 }
 
 /* ----- 记忆弹窗：跨会话长期记忆的查看 / 新增 / 删除 ----- */
@@ -3823,6 +3867,15 @@ async function init() {
   });
   on("settings-mask", "click", (e) => { if (e.target === $("settings-mask")) closeSettings(); });
   on("add-provider-btn", "click", () => openProviderForm(null));
+  on("backup-create-btn", "click", async () => {
+    try {
+      const res = await api("/api/backup", { method: "POST" });
+      uiAlert(res.hint || `备份已创建：${res.name}`, "备份完成");
+      await refreshBackups();
+    } catch (err) {
+      uiAlert(`备份失败：${err.message}`, "备份");
+    }
+  });
   on("pf-cancel-edit", "click", closeProviderForm);
   on("pf-key-toggle", "click", () => {
     const keyInput = $("pf-api-key");

@@ -179,6 +179,11 @@ export function memoryNoteForPrompt(): string | null {
   return `【跨会话长期记忆（此前会话沉淀的事实与偏好，回答时遵循；与当前对话冲突时以用户最新说法为准）】\n${lines.join("\n")}${tail}`;
 }
 
+/** 当前记忆文件的实际路径（备份/恢复枚举用） */
+export function memoriesFilePath(): string {
+  return storeFile;
+}
+
 /** 测试专用：清空内存态并重绑 MEMORIES_FILE */
 export function resetMemoryStore(): void {
   entries.clear();
