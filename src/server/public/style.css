@@ -687,31 +687,6 @@ body {
 }
 .tool-body .result-pre { color: var(--green-soft); }
 
-/* --- 工具调用抽屉：连续多工具时折叠为一条可展开的汇总行 --- */
-.tool-drawer { min-width: 0; max-width: 100%; margin: 8px 0; }
-.drawer-head {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%;
-  padding: 7px 12px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12.5px;
-  font-family: var(--mono);
-  color: var(--text-2);
-  text-align: left;
-}
-.drawer-head:hover { background: var(--bg-hover); color: var(--text); }
-.drawer-caret { font-size: 10px; color: var(--text-3); transition: transform .15s; }
-.tool-drawer.open .drawer-caret { transform: rotate(90deg); }
-.drawer-icon { font-size: 13px; }
-.drawer-label { color: var(--text); font-weight: 600; }
-.drawer-sub { margin-left: auto; font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.drawer-items { margin-top: 6px; display: grid; gap: 8px; }
-.drawer-items .tool-card { margin: 0; }
-
 /* --- 审批卡片（Human-in-the-loop） --- */
 .approval-card {
   min-width: 0; max-width: 100%;

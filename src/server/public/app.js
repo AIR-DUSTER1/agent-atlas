@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-7";
+const APP_VERSION = "web-2026-10-26-8";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -1104,75 +1104,9 @@ function mountPart(block, part) {
   }
 }
 
-/* ---------------------------------------------------------------------------
- * 工具调用抽屉：一个助手块里连续调用 ≥ TOOL_DRAWER_MIN 个工具时，
- * 全部收进可展开/收起的下拉容器（流式与历史回放走同一条挂载路径）。
- * 单个工具保持原样平铺；审批/澄清卡片永远不进抽屉（需要用户看见）。
- * ------------------------------------------------------------------------- */
-const TOOL_DRAWER_MIN = 2;
-
-/** 挂载工具卡：不足阈值直接平铺；达标后把裸卡迁入抽屉 */
+/** 每次工具调用固定内联一张卡片，保证调用名、参数预览与节点事件保持时间顺序。 */
 function mountToolCard(block, card) {
-  const body = blockBodies.get(block);
-  if (!body) return;
-  const toolCount = block.parts.filter((p) => p.p === "tool").length;
-  if (toolCount < TOOL_DRAWER_MIN) {
-    body.appendChild(card);
-    return;
-  }
-  const drawer = ensureToolDrawer(block, body);
-  // 第二个工具出现时才建抽屉：先建容器插到首卡位置，再把 body 里已有的裸卡迁入
-  for (const bare of [...body.querySelectorAll(":scope > .tool-card")]) {
-    drawer.items.appendChild(bare);
-  }
-  drawer.items.appendChild(card);
-  refreshToolDrawer(block);
-}
-
-/** 创建（或复用）当前块的抽屉容器；插入位置 = 第一张工具卡处 */
-function ensureToolDrawer(block, body) {
-  if (block._drawerEl?.isConnected) return block._drawer;
-  const wrap = document.createElement("div");
-  wrap.className = "tool-drawer";
-  const head = document.createElement("button");
-  head.type = "button";
-  head.className = "drawer-head";
-  // innerHTML 搭骨架 + textContent 填文案（§5.5 防 XSS 约定）
-  head.innerHTML = `<span class="drawer-caret">▸</span><span class="drawer-icon">🔧</span><span class="drawer-label"></span><span class="drawer-sub"></span>`;
-  const items = document.createElement("div");
-  items.className = "drawer-items hidden";
-  head.addEventListener("click", () => {
-    block._drawerOpen = !block._drawerOpen;
-    syncToolDrawer(block);
-  });
-  wrap.append(head, items);
-  const firstCard = body.querySelector(":scope > .tool-card");
-  if (firstCard) body.insertBefore(wrap, firstCard);
-  else body.appendChild(wrap);
-  block._drawerEl = wrap;
-  block._drawer = { wrap, head, items };
-  return block._drawer;
-}
-
-/** 刷新抽屉汇总文案与展开态（新卡挂载 / 结果回填 / 流结束时调用） */
-function refreshToolDrawer(block) {
-  const drawer = block._drawer;
-  if (!drawer || !block._drawerEl?.isConnected) return;
-  const tools = block.parts.filter((p) => p.p === "tool");
-  const running = tools.filter((t) => !t.result).length;
-  const errors = tools.filter((t) => t.result?.isError).length;
-  drawer.head.querySelector(".drawer-label").textContent = `${tools.length} 个工具调用`;
-  drawer.head.querySelector(".drawer-sub").textContent = running
-    ? `${running} 个运行中…`
-    : errors ? `${errors} 个失败` : "全部完成";
-  syncToolDrawer(block);
-}
-
-function syncToolDrawer(block) {
-  const drawer = block._drawer;
-  if (!drawer) return;
-  drawer.items.classList.toggle("hidden", !block._drawerOpen);
-  drawer.wrap.classList.toggle("open", Boolean(block._drawerOpen));
+  blockBodies.get(block)?.appendChild(card);
 }
 
 function renderClarificationCard(part, el) {
@@ -1380,7 +1314,6 @@ function fillToolResult(ablock, ev) {
   if (!part) return;
   part.result = { content: ev.content, isError: Boolean(ev.isError) };
   updateToolCard(part);
-  refreshToolDrawer(ablock);
   scrollBottom();
 }
 
@@ -1473,8 +1406,6 @@ function finalize(ablock) {
           updateThinkingPart(p);
         }
       }
-      // 流结束：抽屉汇总定格为最终状态（无「运行中」残留）
-      refreshToolDrawer(ablock);
     }
   }
   state.streaming = null;
