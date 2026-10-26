@@ -25,6 +25,14 @@ interface UsageLite {
   outputTokens: number;
   cacheReadTokens?: number;
   model?: string;
+  callId?: string;
+}
+
+interface UsageCall {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  model?: string;
 }
 
 export interface StatsTotals {
@@ -34,6 +42,8 @@ export interface StatsTotals {
   cacheReadTokens: number;
   sessions: number;
   delegateCalls: number;
+  /** 实际模型 API 调用次数；按 callId 或旧数据连续快照去重后计算。 */
+  modelCalls: number;
 }
 
 export interface StatsDayBucket {
@@ -73,6 +83,51 @@ function isUsageEvent(ev: unknown): ev is UsageLite & { type: "usage" } {
   if (typeof ev !== "object" || ev === null) return false;
   const rec = ev as { type?: unknown; inputTokens?: unknown };
   return rec.type === "usage" && typeof rec.inputTokens === "number" && Number.isFinite(rec.inputTokens);
+}
+
+/**
+ * 把一轮 events 还原成真实的模型调用列表。
+ * 新事件用 stream.ts 的 callId 精确归并；旧 journal 没有 callId，
+ * 但同一调用会把相同 usage 快照重复写入多片，因此按连续签名去重。
+ */
+function extractUsageCalls(events: unknown[]): UsageCall[] {
+  const calls: UsageCall[] = [];
+  const byCallId = new Map<string, UsageCall>();
+  let lastLegacySignature: string | null = null;
+
+  for (const ev of events) {
+    if (!isUsageEvent(ev)) continue;
+    const inputTokens = Math.max(0, ev.inputTokens);
+    const outputTokens = typeof ev.outputTokens === "number" && Number.isFinite(ev.outputTokens)
+      ? Math.max(0, ev.outputTokens)
+      : 0;
+    const cacheReadTokens = typeof ev.cacheReadTokens === "number" && Number.isFinite(ev.cacheReadTokens)
+      ? Math.max(0, ev.cacheReadTokens)
+      : 0;
+    const callId = typeof ev.callId === "string" && ev.callId ? ev.callId : null;
+
+    if (callId) {
+      const existing = byCallId.get(callId);
+      if (existing) {
+        // 同一次调用可能有 input / output / cache 分片；最终快照取各字段最大值。
+        existing.inputTokens = Math.max(existing.inputTokens, inputTokens);
+        existing.outputTokens = Math.max(existing.outputTokens, outputTokens);
+        existing.cacheReadTokens = Math.max(existing.cacheReadTokens, cacheReadTokens);
+        if (!existing.model && ev.model) existing.model = ev.model;
+      } else {
+        const call = { inputTokens, outputTokens, cacheReadTokens, model: ev.model };
+        byCallId.set(callId, call);
+        calls.push(call);
+      }
+      continue;
+    }
+
+    const signature = `${ev.model || ""}|${inputTokens}|${outputTokens}|${cacheReadTokens}`;
+    if (signature === lastLegacySignature) continue;
+    lastLegacySignature = signature;
+    calls.push({ inputTokens, outputTokens, cacheReadTokens, model: ev.model });
+  }
+  return calls;
 }
 
 function startOfLocalDay(ts: number): number {
@@ -116,6 +171,7 @@ function buildRange(
     cacheReadTokens: 0,
     sessions: 0,
     delegateCalls: 0,
+    modelCalls: 0,
   };
 
   for (const session of sessions) {
@@ -130,33 +186,31 @@ function buildRange(
       totals.turns += 1;
       sessionTurns += 1;
 
+      for (const call of extractUsageCalls(record.events)) {
+        const model = call.model || UNKNOWN_MODEL;
+        day.inputTokens += call.inputTokens;
+        day.outputTokens += call.outputTokens;
+        day.cacheReadTokens += call.cacheReadTokens;
+        totals.inputTokens += call.inputTokens;
+        totals.outputTokens += call.outputTokens;
+        totals.cacheReadTokens += call.cacheReadTokens;
+        totals.modelCalls += 1;
+        sessionTokens += call.inputTokens + call.outputTokens;
+        const bucket = modelMap.get(model) ?? {
+          model,
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+        };
+        bucket.calls += 1;
+        bucket.inputTokens += call.inputTokens;
+        bucket.outputTokens += call.outputTokens;
+        bucket.cacheReadTokens += call.cacheReadTokens;
+        modelMap.set(model, bucket);
+      }
       for (const ev of record.events) {
-        if (isUsageEvent(ev)) {
-          const outputTokens = typeof ev.outputTokens === "number" && Number.isFinite(ev.outputTokens) ? ev.outputTokens : 0;
-          const cacheReadTokens = typeof ev.cacheReadTokens === "number" && Number.isFinite(ev.cacheReadTokens)
-            ? ev.cacheReadTokens
-            : 0;
-          const model = ev.model || UNKNOWN_MODEL;
-          day.inputTokens += ev.inputTokens;
-          day.outputTokens += outputTokens;
-          day.cacheReadTokens += cacheReadTokens;
-          totals.inputTokens += ev.inputTokens;
-          totals.outputTokens += outputTokens;
-          totals.cacheReadTokens += cacheReadTokens;
-          sessionTokens += ev.inputTokens + outputTokens;
-          const bucket = modelMap.get(model) ?? {
-            model,
-            calls: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-          };
-          bucket.calls += 1;
-          bucket.inputTokens += ev.inputTokens;
-          bucket.outputTokens += outputTokens;
-          bucket.cacheReadTokens += cacheReadTokens;
-          modelMap.set(model, bucket);
-        } else if (
+        if (
           typeof ev === "object" && ev !== null &&
           (ev as { type?: unknown }).type === "tool_call" &&
           (ev as { name?: unknown }).name === DELEGATE_TOOL

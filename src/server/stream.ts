@@ -262,9 +262,27 @@ export async function* runGraphEvents(
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
   const announcedTools = new Set<string>();
   const loggedToolResults = new Set<string>();
-  // 用量分片累积（Anthropic 系 input/output 分片到达）；切换节点时重置，避免跨节点污染
+  // 用量分片累积（Anthropic 系 input/output 分片到达）；同一调用只落一次快照。
   let usageAccum: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null = null;
   let usageNode: string | undefined;
+  let usageCallSeq = 0;
+  let usageCallId: string | undefined;
+  let usageSignature = "";
+
+  const beginUsageCall = (node: string | undefined) => {
+    usageAccum = null;
+    usageNode = node;
+    usageCallSeq += 1;
+    usageCallId = `usage-${usageCallSeq}`;
+    usageSignature = "";
+  };
+
+  const resetUsageCall = () => {
+    usageAccum = null;
+    usageNode = undefined;
+    usageCallId = undefined;
+    usageSignature = "";
+  };
 
   for await (const tagged of stream) {
     if (options.signal?.aborted) return;
@@ -281,9 +299,15 @@ export async function* runGraphEvents(
 
       if (msg instanceof AIMessageChunk) {
         // -- token 用量（分片累积合并；Anthropic 系 input/output 分散在多个 chunk）--
-        if (node !== usageNode) { usageAccum = null; usageNode = node; }
+        if (node !== usageNode || !usageCallId) beginUsageCall(node);
         usageAccum = mergeUsage(usageAccum, extractUsage(msg));
-        if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
+        if (usageAccum) {
+          const signature = `${usageAccum.inputTokens}/${usageAccum.outputTokens}/${usageAccum.cacheReadTokens}`;
+          if (signature !== usageSignature) {
+            usageSignature = signature;
+            yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
+          }
+        }
         // -- 原生思考内容：内部 JSON 节点的正文要过滤，但思考过程仍允许用户查看 --
         const reasoning = reasoningText(msg);
         if (reasoning) {
@@ -346,6 +370,7 @@ export async function* runGraphEvents(
           content: contentText(msg.content),
           isError: msg.status === "error",
         };
+        resetUsageCall(); // 下一次工具返回后的模型请求是新的 API 调用
         continue;
       }
       continue;
@@ -389,13 +414,20 @@ export async function* runGraphEvents(
               content: contentText(msg.content),
               isError: msg.status === "error",
             };
+            resetUsageCall();
             continue;
           }
           if (msg instanceof AIMessage) {
             // 用量在去重前提取：即使这条消息因「子图回显」被跳过，它携带的用量依然有效
-            if (nodeKey !== usageNode) { usageAccum = null; usageNode = nodeKey; }
+            if (nodeKey !== usageNode || !usageCallId) beginUsageCall(nodeKey);
             usageAccum = mergeUsage(usageAccum, extractUsage(msg));
-            if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
+            if (usageAccum) {
+              const signature = `${usageAccum.inputTokens}/${usageAccum.outputTokens}/${usageAccum.cacheReadTokens}`;
+              if (signature !== usageSignature) {
+                usageSignature = signature;
+                yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
+              }
+            }
             // 非流式兜底同样保留思考过程；同一消息已流式产出思考时不重复。
             const reasoning = reasoningText(msg);
             if (reasoning && !(msg.id && streamedReasoningIds.has(msg.id))) {

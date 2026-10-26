@@ -1,8 +1,9 @@
 /**
  * stats.test.ts — 使用统计聚合（近 7 天 / 近 30 天）回归
  * ============================================================
- * 守：空数据补齐自然日；双窗口边界；多轮多模型累加；delegate 计数；
- * 按天/模型桶与 Top 会话排序。所有断言固定 generatedAt，避免跨日波动。
+ * 守：空数据补齐自然日；双窗口边界；usage 流式重复快照去重；多轮多模型累加；
+ * 真实模型调用次数；delegate 计数；按天/模型桶与 Top 会话排序。
+ * 所有断言固定 generatedAt，避免跨日波动。
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -24,8 +25,12 @@ function turn(startedAt: number, events: unknown[]): TurnRecord {
   };
 }
 
-const usage = (inputTokens: number, outputTokens: number, model?: string, cacheReadTokens = 0) =>
-  ({ type: "usage", inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadTokens, ...(model ? { model } : {}) });
+const usage = (inputTokens: number, outputTokens: number, model?: string, cacheReadTokens = 0, callId?: string) =>
+  ({
+    type: "usage", inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadTokens,
+    ...(model ? { model } : {}),
+    ...(callId ? { callId } : {}),
+  });
 
 const DAY = 86_400_000;
 const NOW = new Date(2026, 9, 26, 12, 0, 0).getTime();
@@ -48,6 +53,7 @@ test("空数据返回近 7/30 天零值形状，并补齐每天桶", () => {
     assert.equal(item.totals.turns, 0);
     assert.equal(item.totals.inputTokens, 0);
     assert.equal(item.totals.sessions, 0);
+    assert.equal(item.totals.modelCalls, 0);
     assert.deepEqual(item.byModel, []);
     assert.deepEqual(item.topSessions, []);
   }
@@ -74,6 +80,8 @@ test("多轮多模型聚合：双窗口 totals/byDay/byModel 与逐轮 usage 累
     assert.equal(item.totals.cacheReadTokens, 35);
     assert.equal(item.totals.sessions, 1);
     assert.equal(item.totals.delegateCalls, 1);
+    assert.equal(item.totals.modelCalls, 4);
+    assert.equal(item.byModel.reduce((sum, model) => sum + model.calls, 0), item.totals.modelCalls);
     assert.equal(item.topSessions[0]?.title, "会话一");
     assert.equal(item.topSessions[0]?.turns, 3);
   }
@@ -108,9 +116,11 @@ test("近 7 天与近 30 天分别按自然日边界过滤", () => {
   assert.equal(week.totals.turns, 1);
   assert.equal(week.totals.sessions, 1);
   assert.equal(week.totals.inputTokens, 7);
+  assert.equal(week.totals.modelCalls, 1);
   assert.equal(month.totals.turns, 3);
   assert.equal(month.totals.sessions, 3);
   assert.equal(month.totals.inputTokens, 44);
+  assert.equal(month.totals.modelCalls, 3);
   assert.ok(!month.topSessions.some((item) => item.sessionId === "outside"));
   assert.equal(month.byDay.at(-1)?.date, "2026-10-26");
   assert.equal(month.byDay[0]?.date, "2026-09-27");
@@ -123,4 +133,33 @@ test("Top 会话按区间轮次排序，无记录会话不入榜", () => {
   const week = range(buildStats([idle, busy, quiet], NOW), "7d");
   assert.equal(week.totals.sessions, 2, "无轮次的会话不计入有记录会话数");
   assert.deepEqual(week.topSessions.map((item) => item.sessionId), ["busy", "quiet"]);
+});
+
+test("流式重复 usage 快照只算一次调用；callId 分片按最终字段归并", () => {
+  const session = fakeSession("dedupe", "去重", [
+    turn(T0, [
+      usage(2849, 450, "模型A"),
+      usage(2849, 450, "模型A"),
+      { type: "node", name: "agent" },
+      usage(2849, 450, "模型A"),
+      usage(3292, 288, "模型A"),
+      usage(3292, 288, "模型A"),
+    ]),
+    turn(T0 + DAY, [
+      usage(100, 0, "模型B", 0, "call-A"),
+      usage(100, 50, "模型B", 10, "call-A"),
+      usage(200, 20, "模型B", 20, "call-B"),
+      usage(200, 20, "模型B", 20, "call-B"),
+    ]),
+  ]);
+  const week = range(buildStats([session], NOW), "7d");
+
+  assert.equal(week.totals.modelCalls, 4, "旧数据连续快照去重 + 新 callId 精确归并");
+  assert.equal(week.totals.inputTokens, 6441);
+  assert.equal(week.totals.outputTokens, 808);
+  assert.equal(week.totals.cacheReadTokens, 30);
+  assert.equal(week.byModel.find((item) => item.model === "模型A")?.calls, 2);
+  assert.equal(week.byModel.find((item) => item.model === "模型B")?.calls, 2);
+  assert.equal(week.byDay.find((day) => day.date === "2026-10-24")?.inputTokens, 6141);
+  assert.equal(week.topSessions[0]?.tokens, 7249);
 });

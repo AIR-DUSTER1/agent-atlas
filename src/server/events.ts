@@ -80,6 +80,11 @@ export type AgentEvent =
       cacheReadTokens: number;
       /** 产生该用量的模型显示名（F2 统计按模型聚合；旧事件 / mock 外未知场景缺省） */
       model?: string;
+      /**
+       * 同一次模型调用的稳定 id。流式 usage 可能分多片到达，统计按此归并；
+       * 旧 journal 没有该字段时，统计层按连续快照去重。
+       */
+      callId?: string;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }

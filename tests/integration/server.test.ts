@@ -320,6 +320,12 @@ test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async (
   for (const range of [week, month]) {
     assert.ok(range.totals.turns >= 1);
     assert.ok(range.totals.inputTokens > 0);
+    assert.ok(range.totals.modelCalls > 0);
+    assert.equal(
+      range.byModel.reduce((sum: number, model: { calls: number }) => sum + model.calls, 0),
+      range.totals.modelCalls,
+      "模型调用总数必须等于按模型调用数之和",
+    );
     assert.ok(range.byModel.some((m: { model: string }) => m.model === "模拟模式"), "mock 用量应标注模拟模式");
     assert.equal(range.byDay.at(-1).date, range.endDate, "应补齐到区间结束日");
     assert.ok(range.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
