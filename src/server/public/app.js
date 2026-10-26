@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-8";
+const APP_VERSION = "web-2026-10-26-9";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2582,7 +2582,7 @@ function renderStatsOverview(data) {
     button.querySelector(".sw-turns").textContent = `${range.totals.turns} 轮`;
     button.querySelector(".sw-tokens").textContent = `${fmtTokens(statsTokens(range))} tokens`;
     button.querySelector(".sw-sub").textContent =
-      `${range.totals.sessions} 个会话 · ${range.startDate.slice(5)} ~ ${range.endDate.slice(5)}`;
+      `${range.totals.sessions} 个会话 · ${range.totals.modelCalls ?? 0} 次模型调用 · ${range.startDate.slice(5)} ~ ${range.endDate.slice(5)}`;
     button.addEventListener("click", () => {
       if (activeStatsRange === range.id) return;
       activeStatsRange = range.id;
@@ -2699,8 +2699,8 @@ function renderStatsBars(rows) {
     wrap.querySelector(".bar-label").textContent = row.model;
     wrap.querySelector(".bar-fill").style.width = `${Math.round((total / max) * 100)}%`;
     wrap.querySelector(".bar-value").textContent = fmtTokens(total);
-    wrap.querySelector(".bar-sub").textContent = `${row.calls} 次调用`;
-    wrap.title = `${row.model}\n输入 ${fmtTokens(row.inputTokens)} · 输出 ${fmtTokens(row.outputTokens)} · 缓存读取 ${fmtTokens(row.cacheReadTokens)}`;
+    wrap.querySelector(".bar-sub").textContent = `${row.calls} 次模型调用`;
+    wrap.title = `${row.model}\n${row.calls} 次模型调用 · 输入 ${fmtTokens(row.inputTokens)} · 输出 ${fmtTokens(row.outputTokens)} · 缓存读取 ${fmtTokens(row.cacheReadTokens)}`;
     container.appendChild(wrap);
   }
 }
@@ -2730,7 +2730,7 @@ function renderStatsRange(range) {
   const totals = range.totals || {};
   $("stats-selected-title").textContent = `${range.label}明细`;
   $("stats-range-meta").textContent =
-    `${range.startDate} 至 ${range.endDate} · 按服务器本地自然日统计（含今天）`;
+    `${range.startDate} 至 ${range.endDate} · ${totals.modelCalls ?? 0} 次模型调用 · 按服务器本地自然日统计（含今天）`;
   const cells = [
     ["轮次", String(totals.turns ?? 0)],
     ["输入 tokens", fmtTokens(totals.inputTokens ?? 0)],

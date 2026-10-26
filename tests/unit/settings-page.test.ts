@@ -74,4 +74,6 @@ test("使用统计展示近 7 天与近 30 天，并用原生 SVG 图表渲染",
   assert.match(app, /document\.createElementNS\(SVG_NS/);
   assert.match(app, /stats-window-card/);
   assert.match(app, /stats-chart-svg/);
+  assert.match(app, /totals\.modelCalls/);
+  assert.match(app, /次模型调用/);
 });

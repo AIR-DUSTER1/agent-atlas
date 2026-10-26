@@ -1572,7 +1572,7 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 .stats-window-card.active .sw-arrow { color: var(--accent-soft); }
 .stats-window-card .sw-turns { color: var(--text); font-size: 22px; line-height: 1.2; font-family: var(--mono); }
 .stats-window-card .sw-tokens { color: var(--accent-soft); font-size: 12px; font-family: var(--mono); }
-.stats-window-card .sw-sub { color: var(--text-3); font-size: 10.5px; }
+.stats-window-card .sw-sub { max-width: 100%; color: var(--text-3); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stats-selected-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
   margin: 18px 0 10px;
@@ -1627,7 +1627,7 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
 .bar-track { flex: 1; height: 10px; background: var(--bg-elev); border-radius: 5px; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2-soft)); border-radius: 5px; min-width: 2px; }
 .bar-value { flex: 0 0 58px; text-align: right; color: var(--text); font-family: var(--mono); }
-.bar-sub { flex: 0 0 66px; color: var(--text-3); }
+.bar-sub { flex: 0 0 90px; color: var(--text-3); white-space: nowrap; }
 .stats-sessions { max-height: 310px; overflow-y: auto; }
 .stats-session-row {
   display: flex; justify-content: space-between; gap: 10px;

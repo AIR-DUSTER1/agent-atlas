@@ -74,6 +74,9 @@ test("fmtTokens / fmtSize / nodeIcon 边界", () => {
   assert.equal(fmtTokens(9999), "9,999");
   assert.equal(fmtTokens(10000), "10.0k");
   assert.equal(fmtTokens(123456), "123k");
+  assert.equal(fmtTokens(1_000_000), "1.0M");
+  assert.equal(fmtTokens(17_726_000), "17.7M");
+  assert.equal(fmtTokens(999_999), "1000k");
   assert.equal(fmtSize(999), "999 B");
   assert.equal(fmtSize(1536), "1.5 KB");
   assert.equal(fmtSize(2 * 1048576), "2.0 MB");
