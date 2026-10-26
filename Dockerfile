@@ -24,7 +24,8 @@ ENV NODE_ENV=production \
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node . .
-RUN mkdir -p /data && chown node:node /data
+# 前端是 TypeScript，必须先构建成浏览器可执行的 ESM（src/server/public/）
+RUN npm run build:client && mkdir -p /data && chown node:node /data
 
 USER node
 EXPOSE 3000

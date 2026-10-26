@@ -1,10 +1,20 @@
 /**
- * agent-profile.js — 前端 Agent profile 元数据（零依赖）
+ * modules/agent-profile.ts — 前端 Agent profile 元数据（零依赖）
  * ============================================================
  * 只用 agentProfileId 决定展示名称 / 图标 / 短标签；kind 仅用于 demo、external
  * 和旧会话兼容，不在各个 UI 组件里散落回答「这是不是通用/房产 Agent」。
  */
-export const AGENT_PROFILES = Object.freeze({
+
+export interface AgentProfileMeta {
+  id: string;
+  label: string;
+  shortLabel: string;
+  icon: string;
+  description: string;
+  example: string;
+}
+
+export const AGENT_PROFILES: Readonly<Record<string, AgentProfileMeta>> = Object.freeze({
   general: Object.freeze({
     id: "general",
     label: "通用 Agent",
@@ -23,14 +33,19 @@ export const AGENT_PROFILES = Object.freeze({
   }),
 });
 
-export function agentProfileMeta(agentProfileId) {
+export function agentProfileMeta(agentProfileId: unknown): AgentProfileMeta | null {
   return typeof agentProfileId === "string" && AGENT_PROFILES[agentProfileId]
     ? AGENT_PROFILES[agentProfileId]
     : null;
 }
 
+interface SessionLike {
+  agentProfileId?: string;
+  kind?: string;
+}
+
 /** 新会话优先看 agentProfileId；旧会话/本地缓存缺失时按 kind 派生。 */
-export function profileMetaForSession(session) {
+export function profileMetaForSession(session: SessionLike | null | undefined): AgentProfileMeta | null {
   const direct = agentProfileMeta(session?.agentProfileId);
   if (direct) return direct;
   if (session?.kind === "agent") return AGENT_PROFILES.general;

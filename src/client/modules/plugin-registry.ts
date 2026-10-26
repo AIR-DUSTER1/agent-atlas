@@ -1,5 +1,5 @@
 /**
- * plugin-registry.js — 插件目录与真实接入类型
+ * modules/plugin-registry.ts — 插件目录与真实接入类型
  *
  * 接入类型必须与后端实现一致：
  *   http — 自定义 REST 契约（当前 RAG：ingest / search / reset）
@@ -7,7 +7,24 @@
  *   mcp  — 标准 MCP server（目录预留；当前 RAG 不是 MCP）
  */
 
-export const PLUGIN_TRANSPORTS = {
+export interface PluginTransport {
+  id: string;
+  label: string;
+  short: string;
+  description: string;
+}
+
+export interface BuiltinPlugin {
+  id: string;
+  icon: string;
+  name: string;
+  transport: string;
+  runtime: string;
+  description: string;
+  manageLabel: string;
+}
+
+export const PLUGIN_TRANSPORTS: Record<string, PluginTransport> = {
   http: {
     id: "http",
     label: "HTTP 插件",
@@ -28,7 +45,7 @@ export const PLUGIN_TRANSPORTS = {
   },
 };
 
-export const BUILTIN_PLUGINS = [
+export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
   {
     id: "rag",
     icon: "📚",
@@ -49,6 +66,6 @@ export const BUILTIN_PLUGINS = [
   },
 ];
 
-export function pluginTransportMeta(id) {
+export function pluginTransportMeta(id: string): PluginTransport {
   return PLUGIN_TRANSPORTS[id] ?? PLUGIN_TRANSPORTS.http;
 }

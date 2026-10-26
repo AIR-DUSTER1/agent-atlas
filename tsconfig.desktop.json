@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "rootDir": "desktop",
+    "outDir": "desktop/build",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["desktop/main.ts", "desktop/preload.ts", "desktop/electron-ambient.d.ts"]
+}

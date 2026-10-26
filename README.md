@@ -283,7 +283,7 @@ usage 事件，重启并从 journal 回放后历史仍在。Token 数会自动�
 | MCP 插件 | 暂无内置项 | 后续插件若声明为 MCP，使用 MCP server 配置，不复用 HTTP 表单 |
 
 当前 RAG **不是 MCP**，因此不会强行套 MCP；以后接入真正的 MCP 插件时再走 MCP 通道。
-`src/server/public/modules/plugin-registry.js` 是插件目录与类型标签的唯一来源。
+`src/client/modules/plugin-registry.ts` 是插件目录与类型标签的唯一来源。
 
 ## 知识库（外部 RAG）
 
@@ -400,15 +400,27 @@ src/
   checkpoint.ts    # 检查点持久化（重启不丢上下文）
   agent/           # 全部 LangGraph 图：workflow 编排 / profile / 5 个示例
   cli.ts           # CLI 入口（demo:1~5）
-  server/          # Web 服务：index 路由分发 + routes/ 各域 + 前端 public/
-desktop/main.cjs   # Electron 桌面端
+  server/          # Web 服务：index 路由分发 + routes/ 各域 + public/（前端构建产物）
+  client/          # 前端源码（TypeScript）：main + core/modules/render/stream/views/actions
+desktop/           # Electron 桌面端（main.ts / preload.ts → build/）
 tests/             # unit / integration / security 三档（node:test）
 docs/              # 学习与部署文档
 ```
 
-后端按「入口 + 路由 + 域模块」分层，`node:http` 直写无框架；前端原生 HTML/CSS/JS
-无构建，通用组件拆在 `public/modules/`。CI（`.github/workflows/ci.yml`）在 push / PR
-时自动跑类型检查、语法门和全部测试。
+后端按「入口 + 路由 + 域模块」分层，`node:http` 直写无框架。
+
+**前端是 TypeScript，但依然没有打包器**：源码在 `src/client/`，`npm run build:client`
+只用 `tsc` 一比一编译成浏览器原生 ESM（`src/server/public/`，构建产物已 gitignore），
+import 路径保持 `.js` 后缀原样加载，没有 webpack/vite。目标是「有类型安全、无构建复杂度」：
+每个文件单一职责且不超过 500 行，`npm run check:size` 在 CI 里把关。
+
+```bash
+npm run typecheck      # 后端 + 前端 + 桌面端三套 tsconfig
+npm run check:size     # 单文件 ≤500 行
+npm run build:client   # 前端 TS → 浏览器 ESM（npm run web / test 前置自动执行）
+```
+
+CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查、行数门、构建产物校验和全部测试。
 
 ## 安全与可靠性（默认已做好）
 

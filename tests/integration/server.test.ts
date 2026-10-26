@@ -218,7 +218,7 @@ test("文件搜索接口：最多 20 条，跳过依赖目录", async () => {
   const res = await json("/api/fs/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "app.js" }),
+    body: JSON.stringify({ query: "format.ts" }),
   });
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.files));
@@ -251,13 +251,22 @@ test("压缩上下文：mock 模式走本地摘录并保留轮次回放", async 
   assert.equal(tr.body.records.at(-1).user, "记住暗号：蓝鲸");
 });
 
-test("静态分发：index 引用 module 脚本，modules/*.js 可达且 MIME 正确", async () => {
+test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 正确", async () => {
   const index = await fetch(srv.base + "/");
   assert.equal(index.status, 200);
   const html = await index.text();
-  assert.match(html, /<script type="module" src="\/app\.js"><\/script>/);
+  assert.match(html, /<script type="module" src="\/main\.js"><\/script>/);
 
-  for (const file of ["/app.js", "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js", "/modules/plugin-registry.js"]) {
+  // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
+  for (const file of [
+    "/main.js",
+    "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js",
+    "/modules/plugin-registry.js", "/modules/types.js",
+    "/core/state.js", "/core/dom.js", "/core/api.js",
+    "/render/parts.js", "/render/messages.js",
+    "/stream/events.js", "/stream/turn.js",
+    "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",
+  ]) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);

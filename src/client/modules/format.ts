@@ -1,19 +1,20 @@
 /* ============================================================
-   modules/format.js — 纯文本渲染与格式化（无 DOM 状态依赖）
+   modules/format.ts — 纯文本渲染与格式化（无 DOM 状态依赖）
    ============================================================
-   从 app.js 拆出的「无副作用」层：Markdown 迷你渲染（先转义再解析，
+   从 app 拆出的「无副作用」层：Markdown 迷你渲染（先转义再解析，
    天然防注入）/ token 与字节大小格式化 / 思考角标 / URL 白名单。
    支持：围栏代码块 / 行内代码 / 加粗斜体 / 链接 / 标题 / 列表 / 引用 /
    表格 / 分割线；对「流式中途未闭合的围栏」也能正确渲染成代码块。
    ============================================================ */
-"use strict";
 
-export const NODE_ICONS = {
+import type { ToolPart } from "./types.js";
+
+export const NODE_ICONS: Record<string, string> = {
   analyze: "🧭", clarify: "❓", review: "🔎",
   agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️",
 };
-export const NODE_LABELS = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思" };
-export const TOOL_ICONS = {
+export const NODE_LABELS: Record<string, string> = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思" };
+export const TOOL_ICONS: Record<string, string> = {
   calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧",
   delegate: "🧭", retrieve_docs: "📚",
   // 多智能体协同（委派子 Agent）
@@ -25,14 +26,18 @@ export const TOOL_ICONS = {
   house_agents: "👤", house_appoint: "📅", house_contact: "🤝",
 };
 
-export function nodeIcon(name) { return NODE_ICONS[name.split("/")[0]] || "⚙️"; }
-export function nodeLabel(name) { return NODE_LABELS[name.split("/")[0]] || name; }
+export function nodeIcon(name: string): string {
+  return NODE_ICONS[name.split("/")[0]] || "⚙️";
+}
+export function nodeLabel(name: string): string {
+  return NODE_LABELS[name.split("/")[0]] || name;
+}
 
-export function escapeHtml(s) {
+export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function renderInline(text) {
+export function renderInline(text: string): string {
   let h = escapeHtml(text);
   h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
   h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -41,19 +46,19 @@ export function renderInline(text) {
   return h;
 }
 
-export function renderMarkdown(src) {
-  const fences = [];
+export function renderMarkdown(src: string): string {
+  const fences: Array<{ lang: string; code: string }> = [];
   // 1. 提取围栏代码块（含未闭合的流式半截）
-  src = src.replace(/```(\w*)[ \t]*\n?([\s\S]*?)(?:```|$)/g, (_m, lang, code) => {
+  src = src.replace(/```(\w*)[ \t]*\n?([\s\S]*?)(?:```|$)/g, (_m, lang: string, code: string) => {
     fences.push({ lang, code: code.replace(/\n$/, "") });
     return `\u0000F${fences.length - 1}\u0000`;
   });
 
   // 2. 逐行做块级解析
   const lines = src.split("\n");
-  const out = [];
+  const out: string[] = [];
   let i = 0;
-  const isFence = (l) => /^\u0000F\d+\u0000\s*$/.test(l);
+  const isFence = (l: string): boolean => /^\u0000F\d+\u0000\s*$/.test(l);
 
   while (i < lines.length) {
     const line = lines[i];
@@ -67,7 +72,7 @@ export function renderMarkdown(src) {
     if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
 
     if (/^\s*>/.test(line)) {
-      const buf = [];
+      const buf: string[] = [];
       while (i < lines.length && /^\s*>/.test(lines[i])) {
         buf.push(lines[i].replace(/^\s*>\s?/, ""));
         i++;
@@ -79,10 +84,10 @@ export function renderMarkdown(src) {
 
     // 表格：| a | b | 换行 |---|---|
     if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
-      const parseRow = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const parseRow = (l: string): string[] => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
       const head = parseRow(line);
       i += 2;
-      const rows = [];
+      const rows: string[][] = [];
       while (i < lines.length && /^\s*\|.*\|?\s*$/.test(lines[i]) && lines[i].includes("|")) { rows.push(parseRow(lines[i])); i++; }
       out.push(
         `<table><thead><tr>${head.map((c) => `<th>${renderInline(c)}</th>`).join("")}</tr></thead>` +
@@ -96,7 +101,7 @@ export function renderMarkdown(src) {
     const ol = line.match(/^\s*\d+[.、]\s+(.*)$/);
     if (ul || ol) {
       const tag = ul ? "ul" : "ol";
-      const items = [];
+      const items: string[] = [];
       while (i < lines.length) {
         const m = lines[i].match(ul ? /^\s*[-*]\s+(.*)$/ : /^\s*\d+[.、]\s+(.*)$/);
         if (!m) break;
@@ -108,7 +113,7 @@ export function renderMarkdown(src) {
     }
 
     // 普通段落（连续非空行，行间以 <br> 连接）
-    const buf = [];
+    const buf: string[] = [];
     while (i < lines.length && lines[i].trim() && !isFence(lines[i]) &&
       !/^(#{1,4})\s/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) &&
       !/^\s*\d+[.、]\s+/.test(lines[i]) && !/^\s*\|.*\|\s*$/.test(lines[i]) &&
@@ -127,44 +132,44 @@ export function renderMarkdown(src) {
 
   let html = out.join("\n");
   // 3. 还原代码块
-  html = html.replace(/\u0000F(\d+)\u0000/g, (_m, n) => {
+  html = html.replace(/\u0000F(\d+)\u0000/g, (_m, n: string) => {
     const f = fences[Number(n)];
     return `<pre><code>${escapeHtml(f.code)}</code></pre>`;
   });
   return html;
 }
 
-export function fmtArgs(part) {
+export function fmtArgs(part: Pick<ToolPart, "argsText">): string {
   try { return JSON.stringify(JSON.parse(part.argsText), null, 2); } catch { return part.argsText || "…"; }
 }
 
-export function fmtTokens(n) {
-  if (n == null || isNaN(n)) return "–";
+export function fmtTokens(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "–";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 100_000) return Math.round(n / 1000) + "k";
   if (n >= 10_000) return (n / 1000).toFixed(1) + "k";
   return n.toLocaleString("zh-CN");
 }
 
-export function fmtSize(n) {
+export function fmtSize(n: number): string {
   if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
   if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
   return n + " B";
 }
 
 /** 思考等级角标：供应商默认时不显示，避免噪音 */
-export function reasoningTag(model) {
-  return model?.reasoningLevel && model.reasoningLevel !== "default" ? model.reasoningLabel : "";
+export function reasoningTag(model: { reasoningLevel?: string; reasoningLabel?: string } | null | undefined): string {
+  return model?.reasoningLevel && model.reasoningLevel !== "default" ? model.reasoningLabel || "" : "";
 }
 
 /** 房源图片来源白名单：只放行 https 与 data:image（拒绝 http:// / 相对路径等） */
-export function safeImageSrc(url) {
+export function safeImageSrc(url: unknown): string {
   if (typeof url === "string" && (/^https:\/\//i.test(url) || /^data:image\//i.test(url))) return url;
   return "";
 }
 
 /** 链接 href 白名单：只放行 https（javascript: / data: 一律拒绝） */
-export function safeHref(url) {
+export function safeHref(url: unknown): string | null {
   if (typeof url === "string" && /^https:\/\//i.test(url)) return url;
   return null;
 }

@@ -6,13 +6,15 @@
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import type { AssistantPart, ChatBlock } from "../../src/client/modules/types.js";
 import { test } from "node:test";
+import { readClientSource } from "../helpers/client-source.js";
 import {
   assistantBlockContaining,
   isContinuationRecord,
   lastAssistantBlock,
   mergeAdjacentAssistantBlocks,
-} from "../../src/server/public/modules/chat-flow.js";
+} from "../../src/client/modules/chat-flow.js";
 
 test("continuation 标记与旧审批文案都能识别为恢复轮", () => {
   assert.equal(isContinuationRecord({ continuation: true, user: "任意" }), true);
@@ -22,30 +24,36 @@ test("continuation 标记与旧审批文案都能识别为恢复轮", () => {
 });
 
 test("旧缓存中的连续助手块合并，并保留最后用量", () => {
-  const first = { t: "assistant", parts: [{ p: "tool", id: "1" }], _usage: { lastInput: 1 } };
-  const second = { t: "assistant", parts: [{ p: "text", text: "完成" }], _usage: { lastInput: 2 } };
-  const blocks = [{ t: "user", text: "查天气" }, first, second];
+  // 这些 fixture 刻意做成「旧缓存里可能出现的残缺形状」，故用 as 收窄到 ChatBlock
+  const first = {
+    t: "assistant", parts: [{ p: "tool", id: "1" }], _usage: { lastInput: 1 },
+  } as unknown as ChatBlock;
+  const second = {
+    t: "assistant", parts: [{ p: "text", text: "完成" }], _usage: { lastInput: 2 },
+  } as unknown as ChatBlock;
+  const blocks: ChatBlock[] = [{ t: "user", text: "查天气" }, first, second];
   const merged = mergeAdjacentAssistantBlocks(blocks);
   assert.equal(merged.length, 2);
   assert.equal(merged[1], first);
-  assert.deepEqual(merged[1].parts.map((part) => part.p), ["tool", "text"]);
-  assert.deepEqual(merged[1]._usage, { lastInput: 2 });
+  const parts = (merged[1] as { parts: Array<{ p: string }> }).parts;
+  assert.deepEqual(parts.map((part) => part.p), ["tool", "text"]);
+  assert.deepEqual((merged[1] as { _usage?: unknown })._usage, { lastInput: 2 });
 });
 
 test("审批 part 能定位所属助手块，用户消息分隔的块不会被误合并", () => {
-  const approval = { p: "approval" };
-  const first = { t: "assistant", parts: [approval] };
-  const blocks = [first, { t: "user", text: "下一问" }, { t: "assistant", parts: [] }];
+  const approval = { p: "approval" } as unknown as AssistantPart;
+  const first = { t: "assistant", parts: [approval] } as unknown as ChatBlock;
+  const blocks: ChatBlock[] = [first, { t: "user", text: "下一问" }, { t: "assistant", parts: [] }];
   assert.equal(assistantBlockContaining(blocks, approval), first);
   assert.equal(lastAssistantBlock(blocks), blocks[2]);
   assert.equal(mergeAdjacentAssistantBlocks(blocks).length, 3);
 });
 
 test("前端恢复流复用原助手块，审批内容样式允许任意长串换行", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const css = await readFile(new URL("style.css", root), "utf8");
-  assert.match(app, /async function runResume\(payload, targetBlock = null\)/);
+  assert.match(app, /export async function runResume\(/);
   assert.match(app, /mountTyping\(ablock\)/);
   assert.match(app, /isContinuationRecord\(rec\)/);
   assert.match(app, /mergeAdjacentAssistantBlocks\(blocks\)/);
@@ -55,8 +63,8 @@ test("前端恢复流复用原助手块，审批内容样式允许任意长串�
 });
 
 test("审批完成后默认折叠为摘要行，仍可手动展开详情", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const css = await readFile(new URL("style.css", root), "utf8");
   assert.match(app, /part\.collapsed = true/);
   assert.match(app, /class="approval-summary"/);
@@ -66,11 +74,11 @@ test("审批完成后默认折叠为摘要行，仍可手动展开详情", async
 });
 
 test("思考过程使用默认折叠的 details，点击摘要可手动展开", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const css = await readFile(new URL("style.css", root), "utf8");
   assert.match(app, /case "reasoning": appendReasoning\(ablock, ev\)/);
-  assert.match(app, /function appendReasoning\(ablock, ev\)/);
+  assert.match(app, /export function appendReasoning\(ablock: AssistantBlock, ev: \{ text\?: string; node\?: string \}\): void/);
   assert.match(app, /document\.createElement\("details"\)/);
   assert.match(app, /<summary class="thinking-summary">/);
   assert.doesNotMatch(app, /details\.open\s*=\s*true/, "思考内容不能默认展开");
@@ -82,12 +90,12 @@ test("思考过程使用默认折叠的 details，点击摘要可手动展开", 
 });
 
 test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–2 个继续平铺", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const css = await readFile(new URL("style.css", root), "utf8");
-  assert.match(app, /function mountToolCard\(block, card\) \{\s*blockBodies\.get\(block\)\?\.appendChild\(card\);/s);
+  assert.match(app, /export function mountToolCard\(block: AssistantBlock, card: HTMLElement\): void \{\s*blockBodies\.get\(block\)\?\.appendChild\(card\);/s);
   assert.match(app, /const TOOL_GROUP_MIN = 3/);
-  assert.match(app, /function groupToolCallsIfNeeded\(block, body, nodePart\)/);
+  assert.match(app, /export function groupToolCallsIfNeeded\(/);
   assert.match(app, /tools\.length < TOOL_GROUP_MIN/);
   assert.match(app, /tool-group-names/);
   assert.doesNotMatch(app, /tool-drawer|ensureToolDrawer|refreshToolDrawer/);
@@ -97,8 +105,8 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const css = await readFile(new URL("style.css", root), "utf8");
   assert.match(app, /const actions = document\.createElement\("div"\);\s*actions\.className = "s-actions";/);
   assert.match(app, /actions\.appendChild\(exportBtn\);\s*[\s\S]*actions\.appendChild\(del\);\s*item\.appendChild\(actions\);/);

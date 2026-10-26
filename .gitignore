@@ -7,6 +7,10 @@ node_modules/
 # 构建产物
 dist/
 *.tsbuildinfo
+# 前端构建产物（源码在 src/client/，由 npm run build:client 生成）
+src/server/public/
+# 桌面端构建产物（源码在 desktop/*.ts，由 npm run build:desktop 生成）
+desktop/build/
 # 本地跑服务的临时打包产物（esbuild 输出，仅供自检/调试）
 src/server/.dev-server.mjs
 

@@ -9,7 +9,7 @@
 ## 1. 项目定位一句话
 
 LangGraph.js（TypeScript）+ 零框架实现的 Agent 工作台：`node:http` + SSE 后端、
-原生 HTML/CSS/JS 前端（无构建）、多供应商模型配置、外加 Electron 桌面端壳
+TypeScript 前端（tsc 编译，仍无打包器）、多供应商模型配置、外加 Electron 桌面端壳
 与「外部 RAG 知识库」HTTP 客户端。**学习项目形态，可正常当产品用**。
 
 ## 2. 技术栈红线（不许随意突破）
@@ -18,7 +18,9 @@ LangGraph.js（TypeScript）+ 零框架实现的 Agent 工作台：`node:http` +
 |---|---|
 | TS 配置 | `strict` + `NodeNext` + `noEmit`；ESM 导入**必须带 `.js` 后缀**（`import x from "./foo.js"`） |
 | 运行时依赖白名单 | `@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod`；electron 仅 devDependency |
-| 前端零依赖 | `public/` 内禁止引入任何 npm 包、禁止构建步骤；需要新能力自己写原生 JS 微实现 |
+| 前端零依赖 | `src/client/` 禁止引入任何 npm 包（只用原生 DOM/Web API）；需要新能力自己写微实现 |
+| 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
+| 单文件 ≤500 行 | 所有源码（`src/`、`scripts/`、`desktop/`）单文件不超过 500 行，按单一职责拆分；`npm run check:size` 把关 |
 | HTTP 后端零框架 | 不引入 Express/Fastify 等；路由照 §4 模式写顺序 `if` 分支 |
 | 直跑 TS | `tsx` 直跑，不做编译产物；新增脚本能被 `tsx` 直接执行 |
 
@@ -37,7 +39,17 @@ src/
   agent/           # LangGraph 图定义（State/Node/Edge 全在这里；general.ts = 产品默认图）
   cli.ts           # CLI 入口；server/ 不 import cli，cli 可 import 一切
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
-  server/public/   # 前端三件套 index.html / style.css / app.js + 版本号常量 APP_VERSION
+  client/          # 前端源码（TypeScript，唯一真相）
+    main.ts        #   入口：初始化与全部 DOM 事件绑定
+    core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
+    modules/       #   纯函数与协议类型（format / ui-dialog / types…）
+    render/        #   渲染层（parts 部件 / messages 块）
+    stream/        #   SSE 消费与一轮对话生命周期
+    composer/      #   输入框 / 命令与 @ 文件菜单
+    views/         #   各业务视图（会话/项目/设置/RAG/房产…）
+    actions/       #   审批、压缩等动作
+    index.html / style.css
+  server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
 desktop/main.cjs   # Electron 主进程（CJS！package.json 是 "type":"module"，桌面端必须 .cjs）
 docs/              # 公开文档（agent-wiki.md 等），只放用户可读内容
 .plans/            # 开发过程内部文档：架构计划 / 阶段清单 / 攻面分析 / 私有交接。
@@ -49,7 +61,7 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
 
 - `src/agent/*` 只依赖 `src/` 顶层与 `@langchain/*`，**禁止 import `server/*`**（图要在 CLI 下可独立运行）。
 - `src/server/*` 可以 import `src/` 顶层；互相之间通过导出函数协作，不做隐式单例外的全局状态。
-- 前端 `public/app.js` 只能与 `/api/*` 通信，不 import 服务端代码。
+- 前端 `src/client/**` 只能与 `/api/*` 通信，不 import 服务端代码（类型也不允许）。
 
 ## 4. 代码风格（全仓库统一）
 
@@ -85,7 +97,8 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
 ### 5.3 事件协议（server ↔ 前端）
 - 新增事件类型：`server/events.ts` 加变体（注释写清对应哪块 UI）→
   产出端在 `server/stream.ts`（或 mock.ts / external.ts）吐出 →
-  前端 `app.js` 的 `handleEvent` switch 加 case → 空数据/半途错误测试回放路径。
+  前端 `stream/events.ts` 的 `handleEvent` switch 加 case（尾部 never 断言会强制穷尽）
+  → `modules/types-api.ts` 的 `AgentEvent` 联合加变体 → 空数据/半途错误测试回放路径。
 - SSE 帧即 `data: {json}\n\n`；一帧一事件；`done` 由 streamToClient 兜底补发，不要手写。
 
 ### 5.4 高风险操作审批（hitl.ts 为唯一登记处）
@@ -123,7 +136,8 @@ session 级；持久化字段的**读取处要兼容字段缺失**（旧配置�
 
 ```bash
 npm run typecheck            # tsc --noEmit，零报错
-node --check src/server/public/app.js   # 前端语法门（无构建、无 lint，只能这样守）
+npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
+npm run check:size           # 单文件 ≤500 行门
 node --check desktop/main.cjs           # 桌面端语法门
 ```
 

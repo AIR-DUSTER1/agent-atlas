@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { readClientSource } from "../helpers/client-source.js";
 
-const root = new URL("../../src/server/public/", import.meta.url);
+const root = new URL("../../src/client/", import.meta.url);
 
 test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
@@ -23,30 +24,30 @@ test("设置页包含返回按钮、全部分区与集中面板", async () => {
 });
 
 test("前端通过独立页面函数切换分区并统一关闭", async () => {
-  const app = await readFile(new URL("app.js", root), "utf8");
+    const app = await readClientSource();
   assert.match(app, /function openSettings\(view = "models"/);
-  assert.match(app, /function showSettingsView\(view\)/);
-  assert.match(app, /function closeSettingsPage\(\)/);
+  assert.match(app, /function showSettingsView\(view(?:: string)?\): void/);
+  assert.match(app, /function closeSettingsPage\(\): void/);
   assert.match(app, /dataset\.settingsView/);
   assert.doesNotMatch(app, /settings-mask|memories-mask|stats-mask/);
 });
 test("模型与供应商采用左栏选择、右栏模型详情", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
+  const root = new URL("../../src/client/", import.meta.url);
   const html = await readFile(new URL("index.html", root), "utf8");
-  const app = await readFile(new URL("app.js", root), "utf8");
+    const app = await readClientSource();
   assert.match(html, /class="provider-workspace"/);
   assert.match(html, /id="provider-list"/);
   assert.match(html, /id="provider-detail"/);
   assert.match(html, /id="pf-model-list"/);
-  assert.match(app, /function selectProvider\(providerId\)/);
-  assert.match(app, /function renderProviderDetail\(\)/);
+  assert.match(app, /function selectProvider\(providerId: string \| null\): void/);
+  assert.match(app, /function renderProviderDetail\(\): void/);
   assert.match(app, /provider-nav-item/);
   assert.doesNotMatch(app, /row\.querySelector\("\.p-use"\)/);
 });
 
 test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创建态覆盖", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
-  const app = await readFile(new URL("app.js", root), "utf8");
+    const app = await readClientSource();
   const detailStart = html.indexOf('id="provider-detail"');
   const detailEnd = html.indexOf('id="settings-status"', detailStart);
   const detail = html.slice(detailStart, detailEnd);
@@ -55,14 +56,14 @@ test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创�
   assert.match(html, /id="provider-modal-close"/);
   assert.doesNotMatch(detail, /id="provider-form-wrap"/, "连接表单不能继续占用右栏详情");
   assert.match(app, /provider-modal-mask/);
-  assert.match(app, /function closeProviderForm\(\)/);
+  assert.match(app, /function closeProviderForm\(\): void/);
   assert.match(app, /\(p\.id === selectedProviderId \? " active" : ""\)/);
   assert.doesNotMatch(app, /providerFormMode !== "create" && p\.id === selectedProviderId/);
 });
 
 test("使用统计展示近 7 天与近 30 天，并用原生 SVG 图表渲染", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
-  const app = await readFile(new URL("app.js", root), "utf8");
+    const app = await readClientSource();
   assert.match(html, /id="stats-window-overview"/);
   assert.match(html, /id="stats-chart"/);
   assert.match(html, /id="stats-refresh"/);
@@ -70,7 +71,7 @@ test("使用统计展示近 7 天与近 30 天，并用原生 SVG 图表渲染",
   assert.match(html, /id="stats-sessions"/);
   assert.doesNotMatch(html, /id="stats-days"/, "旧的单区间按天列表应已移除");
   assert.match(app, /activeStatsRange = "7d"/);
-  assert.match(app, /function renderStatsChart\(range\)/);
+  assert.match(app, /function renderStatsChart\(range: StatsRange\): void/);
   assert.match(app, /document\.createElementNS\(SVG_NS/);
   assert.match(app, /stats-window-card/);
   assert.match(app, /stats-chart-svg/);

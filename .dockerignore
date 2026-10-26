@@ -3,6 +3,10 @@ node_modules
 dist
 *.tsbuildinfo
 
+# 构建产物（镜像内重新构建）
+src/server/public
+desktop/build
+
 # 版本库与开发过程文档
 .git
 .gitignore

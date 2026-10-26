@@ -15,7 +15,7 @@ import {
   renderMarkdown,
   safeHref,
   safeImageSrc,
-} from "../../src/server/public/modules/format.js";
+} from "../../src/client/modules/format.js";
 
 test("escapeHtml：五个危险字符全部转义", () => {
   assert.equal(escapeHtml(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;'");

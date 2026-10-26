@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readClientSource } from "../helpers/client-source.js";
 import { readFile } from "node:fs/promises";
 import {
   resolveToolPermission,
@@ -63,8 +64,8 @@ test("拒绝文案与权限注记面向模型可读", () => {
   assert.equal(permissionModeNote(undefined), "");
 });
 test("前端权限菜单包含自主模式，并展示 AI 风险判断理由", async () => {
-  const root = new URL("../../src/server/public/", import.meta.url);
-  const app = await readFile(new URL("app.js", root), "utf8");
+  const root = new URL("../../src/client/", import.meta.url);
+    const app = await readClientSource();
   const html = await readFile(new URL("index.html", root), "utf8");
   assert.match(app, /id: "autonomous", label: "自主"/);
   assert.match(app, /高风险才申请人工审批/);

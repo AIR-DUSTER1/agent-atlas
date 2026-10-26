@@ -81,7 +81,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
         ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
         ├── events.ts     # SSE 事件协议定义
-        └── public/       # 前端：index.html / style.css / app.js + modules/（原生 ESM，零构建）
+        └── public/       # ★ 前端构建产物（tsc 编译 src/client/**.ts，gitignore）
+  client/               # 前端源码（TypeScript）：main + core/modules/render/stream/views/actions
 ```
 
 ### 1.3 运行方式（3 秒上手）
@@ -456,7 +457,8 @@ async function routeFromSupervisor(state) {
 ### 3.12 `src/server/` — Web 聊天界面（参考 ZCode）
 
 **职责**：给 4 个 Demo 套上一个 ZCode 风格的聊天界面 —— 流式回答、工具调用卡片、
-Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建步骤**（原生 HTML/CSS/JS + SSE），
+Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包器**（TypeScript 经 tsc
+一比一编译成浏览器原生 ESM + SSE），
 服务端也只用 `node:http`，不引入 Express。
 
 **工具调用卡片**（app.js `mountToolCard` / `groupToolCallsIfNeeded`）：每次调用先按事件顺序
@@ -468,7 +470,7 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
 ```
 浏览器 (public/)                       服务端 (index.ts)
 ┌─────────────────────────┐   POST /api/chat   ┌──────────────────────────┐
-│ app.js  ── fetch SSE ──▶│ ── graph.stream ──▶│ 4 个 Demo 的图（agent/）  │
+│ main.ts ── fetch SSE ──▶│ ── graph.stream ──▶│ 4 个 Demo 的图（agent/）  │
 │  ▸ 渲染 AgentEvent      │ ◀── data: {...} ── │          or               │
 │  ▸ 流式 Markdown        │     (SSE 事件帧)    │ mock.ts（无 KEY 时）      │
 │  ▸ 工具卡 / 审批按钮    │                    └──────────────────────────┘
@@ -482,7 +484,12 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   `http-body.ts`，静态文件收在 `static.ts`，各业务域 handler 收在 `routes/*.ts`
   （chat / config / sessions / external / projects / files / rag / estate）。
   新增接口照 §6 检查单插一条 `if` 分支，不要往 index.ts 里堆业务；
-- **前端结构（Phase 3 拆分）**：`app.js` 以原生 ESM 引入 `modules/format.js`
+- **前端结构（TypeScript 化，单文件 ≤500 行）**：源码在 `src/client/`，按职责分目录 ——
+  `core/`（state 唯一可变状态源、dom、api）、`modules/`（纯函数与协议类型）、
+  `render/`（parts 部件 / messages 块）、`stream/`（SSE 消费 / 一轮对话生命周期）、
+  `composer/`（输入框菜单）、`views/`（各业务视图）、`actions/`（审批、压缩）。
+  `npm run build:client` 用 tsc 输出到 `src/server/public/`（构建产物 gitignore）；
+  `npm run check:size` 在 CI 里把守 500 行上限。旧结构 `app.js` 以原生 ESM 引入 `modules/format.js`
   （Markdown 渲染 / token 与字节格式化 / 图标映射 / 图片与链接白名单，纯函数）、
   `modules/ui-dialog.js`（全局错误横幅 + 页面内 alert/confirm/prompt 队列）、
   `modules/chat-flow.js`（审批恢复合并）与 `modules/plugin-registry.js`
@@ -531,7 +538,7 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   前端只传「引用」（路径 / uploadId），内容由服务端在发送时读取并校验
   （授权前缀校验防穿越、二进制拒绝、单文件超长截断），再以
   `--- 附件 N: 名 ---` 边界拼进用户消息，因此 4 个 Demo 的图与 mock 无需任何改动；
-- **输入辅助 `app.js`**：输入框以「行首或空白后的 `/` / `@`」识别触发器，避免正文邮箱误触。
+- **输入辅助 `composer/menu.ts`**：输入框以「行首或空白后的 `/` / `@`」识别触发器，避免正文邮箱误触。
   `@` 走 `POST /api/fs/search`（`files.ts:searchFiles`，最多 20 条、跳过依赖/密钥文件），
   选中后复用附件 chips，不把路径文本塞进消息；`/` 菜单当前只有「压缩上下文」。
 - **上下文压缩 `compaction.ts`**：`POST /api/sessions/:id/compact` 取最近最多 40 轮、
@@ -717,7 +724,8 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 ```
 
 **CI（`.github/workflows/ci.yml`）**：push/PR 到 main 时跑 `npm ci` → `npm run typecheck`
-→ 前端/桌面 `node --check` → `npm test`；`npm audit` 作为 advisory（continue-on-error，
+→ 三套 `npm run typecheck` → `npm run check:size` → 构建产物校验 → `npm test`；
+`npm audit` 作为 advisory（continue-on-error，
 不阻塞合并）。CI 不读真实 `.env`（测试侧强制 mock + 临时配置）。
 
 **测试钩子（生产默认行为不变）**：
@@ -746,7 +754,7 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 
 **SSE 退出帧**：`AgentEvent` 新增 `{type:"shutdown", message}`；`routes/chat.ts` 把
 连接登记进 lifecycle。退出时 lifecycle 直接往 `res` 写一帧再 abort，前端
-`app.js` 的 `handleEvent` 显示顶部常驻提示 —— 客户端能区分「服务重启」与「网络故障」。
+`stream/events.ts` 的 `handleEvent` 显示顶部常驻提示 —— 客户端能区分「服务重启」与「网络故障」。
 
 **为什么 node 直接作 PID 1**：`npm run web` / npx 包装层不会把 SIGTERM 转发给
 node 子进程，容器停止时只能等宽限期结束吃 SIGKILL，journal/audit 可能丢尾部。
@@ -1506,6 +1514,12 @@ console.log(result.messages.at(-1).content);
 | 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
+| 前端 TS 化后页面白屏、控制台报 `Failed to load module script` | `src/server/public/` 是构建产物且已 gitignore —— 直接 `npm run web` 会读到空目录。`web`/`test`/`desktop` 都挂了 `pre*` 钩子自动构建，但**直接用 `npx tsx src/server/index.ts` 启动**会绕过它，必须先 `npm run build:client` |
+| 后端单测因 `src/client/**` 报类型错 | 测试改了 import 指向 TS 源码后，`tsconfig.json`（后端）也会把前端源码纳入检查。两套配置都要过：`tsc --noEmit`（含 tests）与 `tsc -p tsconfig.client.json --noEmit`（浏览器环境、`lib: DOM`）—— 后者才是前端真正的类型门 |
+| 拆 `app.js` 后结构断言测试全红 | 一批测试用正则匹配源码文本（思考卡必须 default collapsed 等）。拆分后应改读 `tests/helpers/client-source.ts` 的 `readClientSource()`，并在断言里写 TS 签名（`(view: string): void`），别继续匹配无类型参数列表 |
+| Electron `desktop/main.cjs` 转 TS 后 preload 失效 | sandbox:true 下 preload **只支持 CommonJS**，而 `package.json` 是 `"type":"module"`。构建必须分两步：主进程编 ESM（`.js`）+ preload 用 `module: CommonJS` 编完改名 `.cjs`（`scripts/build-desktop.ts` 已实现） |
+| `tsc` 报 `Option 'moduleResolution=node10' has been removed` | TypeScript 7 移除了 node10 解析模式。CJS 编译直接省略该项（`module: CommonJS` 自带默认），不要在 tsconfig 里显式写 |
+| 本地 typecheck 报「找不到模块 electron」 | electron 是 devDependency，`npm ci --ignore-scripts` 只跳过二进制；本地精简安装常缺类型。用 `desktop/electron-ambient.d.ts` 最小声明兜底（真实类型存在时自动优先） |
 | CI 上单测报 `ENOTEMPTY: directory not empty, rmdir '/tmp/agent-ckpt-…'`，本地却一直绿 | 检查点落盘是 **fire-and-forget**（写链自吞异常）。测试 `finally` 里直接 `rm` 临时目录时，在途的 `appendFile` 可能后于删除执行，把 ndjson 重新创建出来 → `rmdir` 撞 ENOTEMPTY（先删文件、后删空目录的两步语义）。Windows 上通常侥幸赢下这场竞速，Linux CI 上稳定输。对策：`finally` 里**先 `await saver.flush()`** 再 `rm`（每个在使用的 saver 实例都要等，不只是最后一个）|
 | Docker 日志里混入人类横幅 / 非 JSON | 启动横幅、无认证警告、配置抢救提示原来无条件 `console.*`，采集器逐行 `JSON.parse` 会报错。人类提示只在 `stdout/stderr.isTTY` 时输出；配置恢复/启动失败等改走 `log("info"/"warn"/"error", event)`，容器 `docker logs` 才能保持纯 NDJSON |
 | 子进程超时返回 `code=1` 而非文档写的 `-1`，单测还莫名多等 5 秒 | `taskkill` 后 `close` 事件带回真实退出码，覆盖了终止时写的 `-1`；同时强杀兜底 `setTimeout(5s)` 没在 close 时清掉，Node 事件循环被拖住。对策：异常终止统一 `code:-1`（调用方看 `killedBy`），`done()` 里同时 `clearTimeout` 正常超时 timer 与强杀兜底 timer |
