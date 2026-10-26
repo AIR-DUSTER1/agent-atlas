@@ -66,7 +66,7 @@ flowchart TD
 - `threadId`：同一会话多轮记忆的键；
 - `configVersion`：建图时的模型配置版本；
 - `pendingApproval`：当前是否在等待人工审批或需求澄清；
-- `turnHistory`：服务端保存的逐轮用户消息、事件、稳定 `turnId` 与耗时，用于回放和重启后的摘要注入；
+- `turnHistory`：服务端保存的逐轮用户消息、事件、稳定 `turnId`、耗时与 `continuation` 标记，用于回放和重启后的摘要注入；
 - `contextSummary` / `contextSummaryInjected`：压缩上下文后的摘要及其注入状态。
 
 ## 3. 一次 `/api/chat` 请求的固定编排
@@ -193,6 +193,8 @@ flowchart LR
   同时保存到 `clarificationHistory` 供后续轮次的 `analyze` / `agent` 参考；
   用户选择不写入图的 `messages`，`turnHistory` 会记一条 `（需求澄清：…）`
   审计轮次供回放，但不会作为新的 HumanMessage 再喂给模型；
+- resume 产生的回放记录带 `continuation: true`；前端把它的全部事件并回上一助手块，
+  历史旧数据也按文案兼容合并，因此一次用户请求无论经历多少次审批都只有一个头像；
 - 历史回放时 `pendingApproval` 只作为「是否仍可操作」的布尔信号；服务端仍有
   pending 时只恢复最后一张 interrupt 卡，其余卡片标为已处理，避免旧卡误点；
   已完成的澄清卡片显示“已选择”，不会在刷新后重新提交；

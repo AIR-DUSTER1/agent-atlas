@@ -541,7 +541,10 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   启动时校验目录仍在才恢复；
 - **审批 / 澄清交互**：`interrupt` 事件（`approval` 或 `clarification` 载荷）→
   前端渲染批准/拒绝或选项/自定义输入 → `POST /api/resume`（`{decision}` 或 `{choice}`）→
-  服务端 `Command({ resume })` 继续被暂停的图（与 CLI 的 Demo 3 同一条路径）；
+  服务端 `Command({ resume })` 继续被暂停的图（与 CLI 的 Demo 3 同一条路径）。
+  resume 轮在 `turnHistory` 标记 `continuation`，前端复用原助手块；
+  `modules/chat-flow.js` 同时迁移旧缓存里的连续助手块，保证一个用户回合只有一个头像。
+  审批参数使用 `overflow-wrap:anywhere`，超长命令 / URL / JSON 不会撑破容器；
 - **多协议模型工厂 `llm.ts`**：供应商档案带 `protocol` 字段（openai / openai-responses /
   anthropic / gemini），`createChatModel` 据此返回 `ChatOpenAI(useResponsesApi)` /
   `ChatAnthropic` / `ChatGoogleGenerativeAI` —— 四个客户端都是 LangChain
@@ -697,7 +700,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构与入口（`settings-page.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构与入口（`settings-page.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
