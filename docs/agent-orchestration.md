@@ -486,7 +486,9 @@ clone 仓库
 | 边界 | 当前实现 |
 |---|---|
 | 模型配置 | 建图时 `createChatModel()` 读取当前供应商；保存配置后新会话生效，旧会话延迟重建 |
+| 上下文窗口 | 手动值 > 网关 `context_length` > 默认 200k；容量条始终有可计算分母 |
 | 协议适配 | `llm.ts` 统一 OpenAI / OpenAI Responses / Anthropic / Gemini |
+| 插件接入 | `plugin-registry.js` 按真实类型管理：当前 RAG = HTTP 自有契约，贝壳 = CLI；MCP 插件不套 HTTP 配置 |
 | 会话路由头 | OpenCode.ai 网关按 `Session.threadId` 注入 `x-opencode-session`；同会话重建稳定，压缩后换新线程 |
 | 同会话并发 | 同时只允许一个流；两次发送至少间隔 1.5 秒 |
 | 附件 | 单条消息最多 5 个；服务端授权校验、二进制拒绝、超长截断 |

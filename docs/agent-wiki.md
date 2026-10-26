@@ -482,8 +482,10 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   （chat / config / sessions / external / projects / files / rag / estate）。
   新增接口照 §6 检查单插一条 `if` 分支，不要往 index.ts 里堆业务；
 - **前端结构（Phase 3 拆分）**：`app.js` 以原生 ESM 引入 `modules/format.js`
-  （Markdown 渲染 / token 与字节格式化 / 图标映射 / 图片与链接白名单，纯函数）
-  与 `modules/ui-dialog.js`（全局错误横幅 + 页面内 alert/confirm/prompt 队列），
+  （Markdown 渲染 / token 与字节格式化 / 图标映射 / 图片与链接白名单，纯函数）、
+  `modules/ui-dialog.js`（全局错误横幅 + 页面内 alert/confirm/prompt 队列）、
+  `modules/chat-flow.js`（审批恢复合并）与 `modules/plugin-registry.js`
+  （插件目录和 HTTP / CLI / MCP 类型标签），
   `index.html` 用 `<script type="module">`。`static.ts` 白名单只额外放开
   `modules/` 一层子目录，其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
@@ -494,7 +496,7 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   只保留节点徽章和 interrupt（见 §3.20）；
 - **会话绑定 `sessions.ts`**：每个会话一张图实例，Demo 2/3 的 `thread_id` 绑定会话 id，
   多轮记忆与 interrupt 状态因此得以延续；
-- **在线配置 `settings.ts`（多供应商）**：设置页（⚙）可添加任意多个供应商档案
+- **在线配置 `settings.ts`（多供应商）**：侧栏左下设置页（⚙）可添加任意多个供应商档案
   （名称 + BASE_URL + API Key + 模型），列表中「启用」一键切换，顶栏 ▾ 也有快捷菜单。
   配置分三层：`.env` < `.web-config.json`（保存的供应商列表 + activeId，gitignore）< 运行中内存。
   切换/修改启用中的供应商 → 配置版本号 +1，**已有会话在下次发消息时自动重建图**
@@ -509,9 +511,9 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   （`usage_metadata`，兼容旧 `tokenUsage` 形状）被翻译成 `usage` 事件 ——
   `input_tokens` ≈ 当时整段对话的上下文大小，`input_token_details.cache_read`
   是提示词缓存命中；前端汇总为输入框上方的「上下文容量条 + 缓存命中」，
-  分母（窗口长度）= 供应商设置里**手动填写的上下文窗口**（优先），
-  否则取网关 `/models` 的 `context_length`（服务端按供应商缓存，
-  启动/切换供应商时后台刷新；两者都没有时容量条只显示 token 数）。
+  分母（窗口长度）优先级：供应商设置里**手动填写的上下文窗口** →
+  网关 `/models` 的 `context_length`（服务端按供应商缓存，启动/切换时后台刷新）→
+  **默认 200k**。因此未手动配置时容量条也会显示占比，不再出现“容量未知”。
   每个助手回合末尾还展示 `↑ 输入 · ↓ 输出 · 缓存 N%` 小字。模拟模式下由 `mock.ts`
   合成同协议的假用量（轮次越多上下文越大、命中率递增）；
 - **图片与多模态 `files.ts`**：上传/拖拽/粘贴的图片以 dataURL 暂存，
@@ -623,7 +625,7 @@ Header: Authorization: Bearer <key>（可留空）
 
 ---
 
-### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI）
+### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI，插件入口：设置 → 插件 → CLI）
 
 **设计立场**：贝壳能力由官方 `beike` CLI（LianjiaTech/beike-ai-platform）提供，
 工作台只做「子进程包装 + JSON 解析 + 错误兜底 + 工具 schema」；(indexPath) 不引入贝壳私有
@@ -700,7 +702,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构与入口（`settings-page.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构与入口（`settings-page.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -1297,7 +1299,7 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 
 - **一个供应商 = 一套网关凭据**，下面可以挂任意多个模型；每个模型有自己的
   显示名 / 多模态开关 / 上下文窗口 / 思考等级；
-- 保存供应商成功后返回工作台；模型上下文窗口等参数在模型行「编辑」里配置，
+- 保存供应商成功后返回工作台；模型上下文窗口等参数在模型行「编辑」里配置，留空自动读网关，未知时默认 200k，
   点「保存模型」后持久化，重新打开设置仍可继续修改；
 - **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
