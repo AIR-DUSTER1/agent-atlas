@@ -486,18 +486,18 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   `http-body.ts`，静态文件收在 `static.ts`，各业务域 handler 收在 `routes/*.ts`
   （chat / config / sessions / external / projects / files / rag / estate）。
   新增接口照 §6 检查单插一条 `if` 分支，不要往 index.ts 里堆业务；
-- **前端结构（TypeScript 化，单文件 ≤500 行）**：源码在 `src/client/`，按职责分目录 ——
+- **前端结构（TypeScript 化，无打包器）**：源码在 `src/client/`，按职责分目录 ——
   `core/`（state 唯一可变状态源、dom、api）、`modules/`（纯函数与协议类型）、
   `render/`（parts 部件 / messages 块）、`stream/`（SSE 消费 / 一轮对话生命周期）、
   `composer/`（输入框菜单）、`views/`（各业务视图）、`actions/`（审批、压缩）。
-  `npm run build:client` 用 tsc 输出到 `src/server/public/`（构建产物 gitignore）；
-  `npm run check:size` 在 CI 里把守 500 行上限。旧结构 `app.js` 以原生 ESM 引入 `modules/format.js`
-  （Markdown 渲染 / token 与字节格式化 / 图标映射 / 图片与链接白名单，纯函数）、
-  `modules/ui-dialog.js`（全局错误横幅 + 页面内 alert/confirm/prompt 队列）、
-  `modules/chat-flow.js`（审批恢复合并）与 `modules/plugin-registry.js`
-  （插件目录和 HTTP / CLI / MCP 类型标签），
-  `index.html` 用 `<script type="module">`。`static.ts` 白名单只额外放开
-  `modules/` 一层子目录，其余多级路径一律 404（防穿越）；
+  `npm run build:client` 用 tsc 输出到 `src/server/public/`（构建产物 gitignore）。
+  前端可引第三方库（图表 / 图标 / 语法高亮 / Markdown），但只接受浏览器可直接加载的
+  ESM、许可证宽松、且登记在 `AGENTS.md §2.1`（含实测体积）；禁止 UI 框架与打包器。
+  引入方式：esbuild 把库打成自包含 ESM 放 `public/vendor/`，应用代码用 import map
+  解析裸名（`chart.js` → `/vendor/chart.js`），tsc 照旧从 `node_modules` 读类型。
+  `index.html` 用 `<script type="module">`。`static.ts` 白名单放一层子目录
+  （`core/ composer/ render/ stream/ views/ actions/ modules/`，引入图表后加 `vendor/`），
+  其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
   （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 8 种 `AgentEvent`
   （node / reasoning / token / tool_call / tool_result / interrupt / ai_message / error）。
@@ -732,7 +732,7 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 ```
 
 **CI（`.github/workflows/ci.yml`）**：push/PR 到 main 时跑 `npm ci` → `npm run typecheck`
-→ 三套 `npm run typecheck` → `npm run check:size` → 构建产物校验 → `npm test`；
+→ 构建产物校验（前端 + 桌面端）→ `npm test`；
 `npm audit` 作为 advisory（continue-on-error，
 不阻塞合并）。CI 不读真实 `.env`（测试侧强制 mock + 临时配置）。
 

@@ -19,8 +19,7 @@
     "preweb": "npm run build:client",
     "predesktop": "npm run build:desktop",
     "pretest": "npm run build:client",
-    "check:size": "tsx scripts/check-file-size.ts",
-    "test:all": "npm run typecheck && npm run check:size && npm test",
+    "test:all": "npm run typecheck && npm test",
     "build:desktop": "tsx scripts/build-desktop.ts"
   },
   "keywords": [

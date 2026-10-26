@@ -12,7 +12,7 @@ triggers: 提交信息, 写commit, commit message, 提交说明
 - 说清「做了什么」；修 bug 时用「：」补原因，例如
   `修复 CI 测试竞态：检查点写出是 fire-and-forget，删临时目录前必须 flush`。
 - 一次提交只做一件逻辑相邻的事，不混入无关改动。
-- 提交前必须过质量门：`npm run typecheck`、`npm run check:size`、`npm test`。
+- 提交前必须过质量门：`npm run typecheck`、`npm test`。
 - 提交前清点 `git status --short`，`\.plans/`、`.env`、`.web-config.json` 绝不入库。
 
 ## 反面例子

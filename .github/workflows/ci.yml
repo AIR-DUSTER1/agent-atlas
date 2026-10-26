@@ -31,9 +31,6 @@ jobs:
       - name: Typecheck (server + client)
         run: npm run typecheck
 
-      - name: File size gate (≤500 lines/file)
-        run: npm run check:size
-
       # 前端与桌面端源码已 TypeScript 化：语法正确性由 tsc 三配置覆盖，
       # 这里只需确认两侧的构建产物真的生成了（否则白屏/preload 失效而 CI 仍是绿的）
       - name: Build artifacts (client + desktop)

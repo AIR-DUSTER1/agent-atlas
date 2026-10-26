@@ -9,7 +9,7 @@
 ## 1. 项目定位一句话
 
 LangGraph.js（TypeScript）+ 零框架实现的 Agent 工作台：`node:http` + SSE 后端、
-TypeScript 前端（tsc 编译，仍无打包器）、多供应商模型配置、外加 Electron 桌面端壳
+TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、外加 Electron 桌面端壳
 与「外部 RAG 知识库」HTTP 客户端。**学习项目形态，可正常当产品用**。
 
 ## 2. 技术栈红线（不许随意突破）
@@ -17,14 +17,34 @@ TypeScript 前端（tsc 编译，仍无打包器）、多供应商模型配置�
 | 约束 | 说明 |
 |---|---|
 | TS 配置 | `strict` + `NodeNext` + `noEmit`；ESM 导入**必须带 `.js` 后缀**（`import x from "./foo.js"`） |
-| 运行时依赖白名单 | `@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod`；electron 仅 devDependency |
-| 前端零依赖 | `src/client/` 禁止引入任何 npm 包（只用原生 DOM/Web API）；需要新能力自己写微实现 |
+| 运行时依赖 | 服务端白名单：`@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod`；electron 仅 devDependency |
+| 前端依赖 | `src/client/` 可引入 npm 库（图表 / 图标 / 语法高亮 / Markdown 等），但须在 §2.1 登记版本、许可证与产物体积；**禁止引入 UI 框架**（React/Vue/Svelte）与需要打包器的构建链（Vite/Webpack/Tailwind CLI） |
 | 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
-| 单文件 ≤500 行 | 所有源码（`src/`、`scripts/`、`desktop/`）单文件不超过 500 行，按单一职责拆分；`npm run check:size` 把关 |
+| 单一职责 | 文件按职责拆分，不设行数硬指标：一个文件只做一件事、能被一句话说清即可；超过 ~500 行时先问「是不是混了两件事」 |
 | HTTP 后端零框架 | 不引入 Express/Fastify 等；路由照 §4 模式写顺序 `if` 分支 |
 | 直跑 TS | `tsx` 直跑，不做编译产物；新增脚本能被 `tsx` 直接执行 |
 
-新增依赖前先问：现有白名单能否解决？不能时在方案里单独说明理由。
+新增依赖前先问：标准库 / 现有依赖能否解决？不能时在方案里单独说明理由，并登记到下表。
+
+### 2.1 前端依赖登记表
+
+只允许「浏览器可直接加载的 ESM、无 Node 内置依赖、许可证宽松」的库。新增一行时必须实测
+`esbuild --bundle --minify` 后的 raw/gzip 体积，避免悄悄把首屏拖垮。
+「状态」列区分「已安装」与「已定选型、尚未落地」——未落地的不算进 `package.json`。
+
+| 依赖 | 用途 | 许可证 | 体积（min / gzip） | 状态 |
+|---|---|---|---|---|
+| `chart.js` | 统计页柱状 / 折线 / 环形图 | MIT | ~192 KB / ~67 KB（按需注册控制器） | 已选型，待引入 |
+| `lucide` | 线性图标（按图标具名导入，勿整包） | ISC | 每个图标 ~0.2 KB；34 个图标合计 ~8 KB / ~2.7 KB | 已选型，待引入 |
+| `marked` | Markdown 解析（必须与 DOMPurify 同批引入） | MIT | 与 DOMPurify 合计 ~78 KB / ~26 KB | 已选型，待引入 |
+| `dompurify` | 渲染前 HTML 净化，守住注入防线 | MPL-2.0 OR Apache-2.0 | 见上一行 | 已选型，待引入 |
+| `highlight.js` | 代码块语法高亮（按语言子包导入） | BSD-3-Clause | ~69 KB / ~22 KB（10 种语言） | 已选型，待引入 |
+
+引入方式：不引 Vite/Webpack。用 esbuild（已是 `tsx` 的传递依赖）把每个库打成**自包含**
+ESM 放 `public/vendor/`；`tsc` 照旧从 `node_modules` 读类型；浏览器用 `<script type="importmap">`
+把裸名映射到 `/vendor/<name>.js`。因此应用代码写标准 `import { Chart } from "chart.js"`，
+既类型安全又无需打包整个前端。新增 vendor 库要同时更新 `scripts/build-vendor.ts` 的入口清单
+与 `src/server/static.ts` 的目录白名单。
 
 ## 3. 目录职责（放错位置 = 架构破坏）
 
@@ -152,10 +172,10 @@ session 级；持久化字段的**读取处要兼容字段缺失**（旧配置�
 ## 7. 质量门（交付前必须全绿）
 
 ```bash
-npm run typecheck            # tsc --noEmit，零报错
 npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
-npm run check:size           # 单文件 ≤500 行门
+npm run build:client         # 前端构建门：编译 + 自检 main.js / index.html / style.css 产物
 npm run build:desktop        # 桌面端构建门：编译 + 自检 main.js / preload.cjs 产物
+npm test                     # 单测 / 集成 / 安全三档（mock 模式，不耗真实配额）
 ```
 
 桌面端源码已是 TypeScript，`typecheck` 已含 `tsconfig.desktop.json`，因此不再需要
