@@ -526,6 +526,61 @@ body {
 }
 .node-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
 
+/* ---------- 模型原生思考过程：默认折叠，仅保留一行可点击摘要 ---------- */
+.thinking-block {
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px 0 8px;
+  background: rgba(139,92,246,.07);
+  border: 1px solid rgba(139,92,246,.26);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.thinking-block[open] { width: 100%; background: rgba(139,92,246,.045); }
+.thinking-summary {
+  display: flex; align-items: center; gap: 7px;
+  min-width: 0;
+  padding: 3px 9px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.thinking-summary::-webkit-details-marker { display: none; }
+.thinking-summary:hover { background: rgba(139,92,246,.08); color: var(--text); }
+.thinking-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.thinking-spark { flex: none; font-size: 12px; }
+.thinking-title { flex: none; color: var(--accent-2-soft); font-weight: 600; }
+.thinking-node {
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(139,92,246,.12);
+  color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.thinking-meta { flex: none; color: var(--text-3); font-size: 10px; }
+.thinking-chevron { flex: none; color: var(--text-3); font-size: 9px; transition: transform .15s; }
+.thinking-block[open] .thinking-chevron { transform: rotate(90deg); }
+.thinking-body {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(139,92,246,.18);
+}
+.thinking-text {
+  margin: 0;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* --- Markdown 正文 --- */
 .md { line-height: 1.75; word-break: break-word; overflow-wrap: anywhere; }
 .md p { margin: 0 0 10px; }

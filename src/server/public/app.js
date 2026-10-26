@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-6";
+const APP_VERSION = "web-2026-10-26-7";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -47,8 +47,9 @@ const state = {
 /** 流式期间每个 part 对应的 DOM 引用（内存 Map，不参与持久化） */
 const partEls = new Map();      // part -> 渲染所需 DOM 引用
 const blockBodies = new Map();  // assistant block -> 正文容器
-const textTimers = new Map();   // part -> 节流定时器
-const usageEls = new Map();     // assistant block -> 用量小字元素
+const textTimers = new Map();     // part -> 节流定时器
+const thinkingTimers = new Map(); // thinking part -> 节流定时器
+const usageEls = new Map();       // assistant block -> 用量小字元素
 
 const FILE_MENTION_LIMIT = 20;
 const SLASH_COMMANDS = [
@@ -968,6 +969,48 @@ function unmountTyping(block) {
   if (block._typing) { block._typing.remove(); block._typing = null; }
 }
 
+/** 思考内容节流渲染：token 很碎，逐片重排会拖慢长回答。 */
+function scheduleThinkingRender(part) {
+  if (thinkingTimers.has(part)) return;
+  thinkingTimers.set(part, setTimeout(() => {
+    thinkingTimers.delete(part);
+    updateThinkingPart(part);
+  }, 55));
+}
+
+function updateThinkingPart(part) {
+  const refs = partEls.get(part);
+  if (!refs) return;
+  refs.textEl.textContent = part.text;
+  const stateText = part.streaming ? "思考中" : `${part.text.length} 字`;
+  refs.metaEl.textContent = `${stateText} · ${refs.el.open ? "收起" : "展开"}`;
+}
+
+/** 供应商原生思考增量：同一节点的连续分片合并；新一轮思考另起折叠块。 */
+function appendReasoning(ablock, ev) {
+  const text = String(ev.text || "");
+  if (!text) return;
+  const node = ev.node || "agent";
+  let last = ablock.parts[ablock.parts.length - 1];
+  let nodeSeen = false;
+  // 事件顺序可能是 node 更新先于 messages 分片：把刚出现的静态 chip 升级为折叠卡。
+  if (last && last.p === "node" && last.name === node) {
+    partEls.get(last)?.el.remove();
+    ablock.parts.pop();
+    nodeSeen = true;
+    last = ablock.parts[ablock.parts.length - 1];
+  }
+  if (!last || last.p !== "thinking" || last.node !== node || !last.streaming) {
+    const part = { p: "thinking", node, text: "", streaming: true, nodeSeen };
+    ablock.parts.push(part);
+    mountPart(ablock, part);
+    last = part;
+  }
+  last.text += text;
+  scheduleThinkingRender(last);
+  scrollBottom();
+}
+
 /** 把一个 part 挂到 assistant 正文里，并记录 DOM 引用 */
 function mountPart(block, part) {
   const body = blockBodies.get(block);
@@ -980,6 +1023,30 @@ function mountPart(block, part) {
     body.appendChild(el);
     partEls.set(part, { el });
     renderTextPart(part);
+    return;
+  }
+
+  if (part.p === "thinking") {
+    const details = document.createElement("details");
+    details.className = "thinking-block";
+    details.innerHTML = `
+      <summary class="thinking-summary">
+        <span class="thinking-spark">💭</span>
+        <span class="thinking-title">思考过程</span>
+        <span class="thinking-node"></span>
+        <span class="thinking-meta"></span>
+        <span class="thinking-chevron">▶</span>
+      </summary>
+      <div class="thinking-body"><pre class="thinking-text"></pre></div>`;
+    details.querySelector(".thinking-node").textContent = `${nodeIcon(part.node)} ${nodeLabel(part.node)}`;
+    body.appendChild(details);
+    partEls.set(part, {
+      el: details,
+      textEl: details.querySelector(".thinking-text"),
+      metaEl: details.querySelector(".thinking-meta"),
+    });
+    details.addEventListener("toggle", () => updateThinkingPart(part));
+    updateThinkingPart(part);
     return;
   }
 
@@ -1318,6 +1385,14 @@ function fillToolResult(ablock, ev) {
 }
 
 function addNodeChip(ablock, name) {
+  // 同一节点的思考卡已经承担了步骤标题，不再重复生成静态 chip。
+  const thinking = [...ablock.parts].reverse().find(
+    (part) => part.p === "thinking" && part.node === name && !part.nodeSeen
+  );
+  if (thinking) {
+    thinking.nodeSeen = true;
+    return;
+  }
   const last = ablock.parts[ablock.parts.length - 1];
   if (last && last.p === "node" && last.name === name) return; // 相邻去重
   const part = { p: "node", name };
@@ -1393,6 +1468,9 @@ function finalize(ablock) {
         if (p.p === "text" && p.streaming) {
           p.streaming = false;
           renderTextPart(p);
+        } else if (p.p === "thinking" && p.streaming) {
+          p.streaming = false;
+          updateThinkingPart(p);
         }
       }
       // 流结束：抽屉汇总定格为最终状态（无「运行中」残留）
@@ -1439,6 +1517,7 @@ async function consumeSSE(res, onEvent) {
 function handleEvent(ev, ablock) {
   switch (ev.type) {
     case "token": appendToken(ablock, ev.text); break;
+    case "reasoning": appendReasoning(ablock, ev); break;
     case "tool_call": upsertToolCall(ablock, ev); break;
     case "tool_result": fillToolResult(ablock, ev); break;
     case "node": addNodeChip(ablock, ev.name); break;

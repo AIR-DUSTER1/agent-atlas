@@ -64,3 +64,19 @@ test("审批完成后默认折叠为摘要行，仍可手动展开详情", async
   assert.match(app, /part\.collapsed = !part\.collapsed/);
   assert.match(css, /\.approval-card\.collapsed \.approval-body\s*\{\s*display:\s*none/s);
 });
+
+test("思考过程使用默认折叠的 details，点击摘要可手动展开", async () => {
+  const root = new URL("../../src/server/public/", import.meta.url);
+  const app = await readFile(new URL("app.js", root), "utf8");
+  const css = await readFile(new URL("style.css", root), "utf8");
+  assert.match(app, /case "reasoning": appendReasoning\(ablock, ev\)/);
+  assert.match(app, /function appendReasoning\(ablock, ev\)/);
+  assert.match(app, /document\.createElement\("details"\)/);
+  assert.match(app, /<summary class="thinking-summary">/);
+  assert.doesNotMatch(app, /details\.open\s*=\s*true/, "思考内容不能默认展开");
+  assert.match(app, /thinking-node/);
+  assert.match(app, /details\.addEventListener\("toggle"/);
+  assert.match(css, /\.thinking-block\s*\{/);
+  assert.match(css, /\.thinking-block\[open\]\s*\{/);
+  assert.match(css, /\.thinking-text\s*\{[^}]*white-space:\s*pre-wrap/s);
+});
