@@ -697,7 +697,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构与入口（`settings-page.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -942,12 +942,12 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 **边界**：general 挂两工具 + 系统提示规则（「用户说以后都…时立即 memory_save」）；
 estate 不挂（域纯粹）；**子 Agent 剔除**（`subagentProfileOf` 的排除名单加了
 memory_save/recall —— 后台黑盒任务无权写用户长期记忆，防污染）。
-管理面板：顶栏 🧠 弹窗（列表 / 手动添加更新 / 删除），API
+管理面板：侧栏左下 ⚙ 设置 →「长期记忆」（列表 / 手动添加更新 / 删除），API
 `GET/POST /api/memories`、`DELETE /api/memories/:id`（routes/memories.ts）。
 
 **验收（真实 DeepSeek）**：会话 A 说「以后回答结论先行、简洁」→ 模型真实调用
 memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论、两句话收束；
-🧠 面板新增 / 删除 / Esc 关闭全通过。
+长期记忆分区新增 / 删除 / 返回与 Esc 关闭全通过。
 
 ### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
 
@@ -955,7 +955,7 @@ memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论�
 「我花了多少 token」。
 
 **链路**：`GET /api/stats` → `buildStats(listSessions())` 纯函数聚合内存 turnHistory
-（journal 回放后同样在内存，重启不丢统计）→ 前端 📊 弹窗渲染（汇总卡片 + div 宽度
+（journal 回放后同样在内存，重启不丢统计）→ 前端设置页「使用统计」分区渲染（汇总卡片 + div 宽度
 百分比条形图，零依赖）。
 
 **协议改动（§5.3 流程）**：usage 事件加可选 `model` 字段 —— events.ts 变体 →
@@ -992,7 +992,7 @@ stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（�
 | 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoriesFilePath` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
 | 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / audit）再拷贝 —— 「恢复前快照」也拿到完整状态 |
 | 恢复 | `restoreBackup(name)`：名字白名单 `^backup-\d{8}-\d{6}(-\d+)*$`（纯数字段，天然防路径穿越）→ 先自动快照当前态 → 逐文件 temp+rename 原子写回 → **只动磁盘不动内存单例，必须重启生效**（内存 journal/配置会把旧态写回去） |
-| 前端 | 设置弹窗底部区块（列表 / 创建 / 恢复按钮 + uiConfirm 重启提示）；audit 记 `backup.created` / `backup.restored` |
+| 前端 | 设置页「模型与供应商」底部区块（列表 / 创建 / 恢复按钮 + uiConfirm 重启提示）；audit 记 `backup.created` / `backup.restored` |
 
 **踩坑（实测）**：备份名只到秒 → 「恢复前快照」与原备份同秒同名 → `mkdir
 recursive` 不报错，**快照把破坏态覆盖进刚建的备份目录**，恢复出来的就是坏数据
@@ -1288,13 +1288,13 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 
 也支持本地模型：Ollama 开启 OpenAI 兼容层（`http://localhost:11434/v1`）、vLLM、LM Studio 同理。
 
-**② 在 Web 界面里管理（推荐，可挂多个供应商 × 多个模型）**：右上角 ⚙ 设置 →
+**② 在 Web 界面里管理（推荐，可挂多个供应商 × 多个模型）**：侧栏左下 ⚙ 设置 → 模型与供应商 →
 添加供应商（BASE_URL + Key + 协议）→ 在它的「模型列表」里点「获取列表」把网关返回的模型
 逐个加进来（`.web-config.json` 持久化，优先于 `.env`）。
 
 - **一个供应商 = 一套网关凭据**，下面可以挂任意多个模型；每个模型有自己的
   显示名 / 多模态开关 / 上下文窗口 / 思考等级；
-- 保存供应商成功后设置弹窗自动关闭；模型上下文窗口等参数在模型行「编辑」里配置，
+- 保存供应商成功后返回工作台；模型上下文窗口等参数在模型行「编辑」里配置，
   点「保存模型」后持久化，重新打开设置仍可继续修改；
 - **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
