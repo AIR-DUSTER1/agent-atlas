@@ -32,8 +32,8 @@ const tools = [calculator, getCurrentTime, getWeather];
 // 2. 节点 1「agent」：把整段对话历史交给模型，让模型决定「直接回答」还是「调用工具」
 //    返回值 { messages: [response] } 会按 State 的 reducer 追加到消息列表
 // ---------------------------------------------------------------------------
-export function createBasicGraph() {
-  const model = createChatModel().bindTools(tools);
+export function createBasicGraph(sessionId?: string) {
+  const model = createChatModel(0, { sessionId }).bindTools(tools);
 
   async function agentNode(state: typeof MessagesAnnotation.State) {
     const response = await model.invoke(state.messages);

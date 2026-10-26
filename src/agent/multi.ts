@@ -74,11 +74,11 @@ function routeFromSupervisor(state: typeof MessagesAnnotation.State) {
   return END; // 主管不再分派 → 全图结束
 }
 
-export function createMultiAgentGraph() {
+export function createMultiAgentGraph(sessionId?: string) {
   // ★ 模型在建图时创建：Web 端修改供应商/模型后，新建会话即用新配置
-  const researcherModel = createChatModel().bindTools(researchTools);
-  const writerModel = createChatModel();
-  const supervisorModel = createChatModel().bindTools([delegateTool]);
+  const researcherModel = createChatModel(0, { sessionId }).bindTools(researchTools);
+  const writerModel = createChatModel(0, { sessionId });
+  const supervisorModel = createChatModel(0, { sessionId }).bindTools([delegateTool]);
 
   async function researcherAgentNode(state: typeof MessagesAnnotation.State) {
     const response = await researcherModel.invoke([

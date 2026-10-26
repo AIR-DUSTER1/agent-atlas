@@ -87,7 +87,8 @@ export const generalProfile: AgentProfile = {
   },
 };
 
-export function createAgentGraph() {
-  // 模型与 checkpointer 都在建图时创建；换配置后由 sessions.rebuildIfStale 重建
-  return createWorkflowGraph(generalProfile);
+export function createAgentGraph(sessionId?: string) {
+  // 模型与 checkpointer 都在建图时创建；换配置后由 sessions.rebuildIfStale 重建。
+  // sessionId 会变成 OpenCode 等网关的路由头，不能所有会话复用同一个值。
+  return createWorkflowGraph(generalProfile, undefined, { sessionId });
 }

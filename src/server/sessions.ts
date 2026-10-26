@@ -117,16 +117,20 @@ export function currentConfigVersion(): number {
   return configVersionCounter;
 }
 
-export function buildGraph(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null): unknown {
-  if (kind === "agent") return createAgentGraph();
+export function buildGraph(
+  kind: SessionKind,
+  demo: 1 | 2 | 3 | 4 | null,
+  sessionId?: string
+): unknown {
+  if (kind === "agent") return createAgentGraph(sessionId);
   // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
-  if (kind === "estate") return createEstateGraph();
+  if (kind === "estate") return createEstateGraph(sessionId);
   switch (demo) {
-    case 1: return createBasicGraph();
-    case 2: return createMemoryGraph();
-    case 3: return createHitlGraph();
-    case 4: return createMultiAgentGraph();
-    default: return createAgentGraph();
+    case 1: return createBasicGraph(sessionId);
+    case 2: return createMemoryGraph(sessionId);
+    case 3: return createHitlGraph(sessionId);
+    case 4: return createMultiAgentGraph(sessionId);
+    default: return createAgentGraph(sessionId);
   }
 }
 
@@ -144,7 +148,7 @@ export async function rebuildIfStale(session: Session): Promise<boolean> {
   if (session.pendingApproval) {
     void getCheckpointSaver().deleteThread(session.threadId); // fire-and-forget：内存态在 promise 体内同步先删
   }
-  session.graph = buildGraph(session.kind, session.demo);
+  session.graph = buildGraph(session.kind, session.demo, session.threadId);
   session.configVersion = configVersionCounter;
   session.pendingApproval = null; // 旧图上的 interrupt 状态随重建失效
   if (session.contextSummary) session.contextSummaryInjected = false;
@@ -159,8 +163,10 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     : kind === "demo" ? `${DEMOS.find((d) => d.id === demo)?.name ?? "示例"} 示例`
     : kind === "estate" ? "房产找房"
     : "新对话";
+  const sessionId = randomUUID();
+  const threadId = `web-${randomUUID()}`;
   const session: Session = {
-    id: randomUUID(),
+    id: sessionId,
     kind,
     agentProfileId: profileIdForKind(kind),
     demo: kind === "demo" ? demo : null,
@@ -168,8 +174,8 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     projectId: projectId || "default",
     title: title?.trim() || defaultTitle,
     createdAt: Date.now(),
-    graph: kind === "external" ? null : buildGraph(kind, demo),
-    threadId: `web-${randomUUID()}`,
+    graph: kind === "external" ? null : buildGraph(kind, demo, threadId),
+    threadId,
     pendingApproval: null,
     configVersion: currentConfigVersion(),
     turns: 0,
@@ -351,9 +357,9 @@ export async function restoreSessions(): Promise<number> {
     const kind = rec.kind;
     // 外部 Agent 没有可执行图；journal 在回放阶段已拒绝未知 kind。
     const hasGraph = kind !== "external";
-    const graph = hasGraph ? buildGraph(kind, rec.demo) : null;
     const pend = rec.pendingApproval;
     const threadId = rec.threadId || `web-${randomUUID()}`;
+    const graph = hasGraph ? buildGraph(kind, rec.demo, threadId) : null;
     // 有持久检查点的产品会话：完整线程记忆已随检查点恢复，不再注入
     // journal 摘录（避免同一历史进两遍上下文）；无检查点的（旧数据 / demo /
     // 纯 mock 轮次）维持摘录注入路径不变。

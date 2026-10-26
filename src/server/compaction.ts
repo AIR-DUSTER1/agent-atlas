@@ -71,8 +71,8 @@ function contentToText(content: unknown): string {
     .join("");
 }
 
-async function summarizeWithModel(transcript: string): Promise<string> {
-  const model = createChatModel(0);
+async function summarizeWithModel(transcript: string, sessionId: string): Promise<string> {
+  const model = createChatModel(0, { sessionId });
   const response = await model.invoke([
     new SystemMessage(
       "你是会话上下文压缩器。把用户与助手的对话压缩成一段中文摘要，供后续对话继续使用。" +
@@ -105,7 +105,7 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   let usedModel = false;
   if (config.apiKey) {
     try {
-      summary = await summarizeWithModel(transcript);
+      summary = await summarizeWithModel(transcript, session.threadId);
       usedModel = Boolean(summary);
     } catch (err) {
       log("warn", "context_compact_failed", {
@@ -120,11 +120,12 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   // 旧图 / 旧 threadId 的线程记忆处理：产品图的持久检查点随换线程一并删除
   // （摘要已接管上下文，旧 thread 留在 checkpoints.ndjson 只会无限增长）；
   // 新线程以注入的摘要为起点，模型不再看到被压缩掉的原始消息。
+  const nextThreadId = `web-${randomUUID()}`;
   if (session.kind === "agent" || session.kind === "estate") {
     void getCheckpointSaver().deleteThread(session.threadId);
   }
-  session.graph = buildGraph(session.kind, session.demo);
-  session.threadId = `web-${randomUUID()}`;
+  session.graph = buildGraph(session.kind, session.demo, nextThreadId);
+  session.threadId = nextThreadId;
   session.configVersion = currentConfigVersion();
   session.pendingApproval = null;
   session.resumeUninjected = false;

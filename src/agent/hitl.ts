@@ -166,9 +166,9 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
   };
 }
 
-export function createHitlGraph() {
+export function createHitlGraph(sessionId?: string) {
   // ★ 模型在建图时创建：Web 端修改供应商/模型后，新建会话即用新配置
-  const model = createChatModel().bindTools(tools);
+  const model = createChatModel(0, { sessionId }).bindTools(tools);
   const toolsNode = createApprovalToolsNode({ tools, approvalDescriptions: demoApprovals });
 
   // 节点「agent」：与 Demo 1 相同，让模型决定回答还是调工具

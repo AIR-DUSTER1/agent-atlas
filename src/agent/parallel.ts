@@ -49,42 +49,50 @@ const ParallelState = Annotation.Root({
   }),
 });
 
-const model = createChatModel(0.7); // 写文案稍微放开一点创造性
+/**
+ * 模型按图实例创建，避免 CLI/Web 并发时共享可变模型。
+ * sessionId 继续透传给需要会话路由头的网关（如 OpenCode Go）。
+ */
+function createParallelNodes(sessionId?: string) {
+  const model = createChatModel(0.7, { sessionId }); // 写文案稍微放开一点创造性
 
-// ---------------------------------------------------------------------------
-// 2. map：worker 节点 —— 注意它的输入不是整个 State！
-//    Send 发来什么它就收到什么（这里是 { subject: string }），
-//    所以可以在同一张图里给同一个节点发 N 份不同的私有输入
-// ---------------------------------------------------------------------------
-async function workerNode(input: { subject: string }) {
-  const response = await model.invoke([
-    {
-      role: "user",
-      content:
-        `请为「${input.subject}」这个主题写一句 20 字以内、有创意的中文宣传语。` +
-        `只输出宣传语本身，不要任何解释。`,
-    },
-  ]);
-  const slogan = typeof response.content === "string" ? response.content.trim() : "";
-  // 每个 worker 只贡献一条结果；reducer 负责把大家的贡献合并成一个数组
-  return { results: [`「${input.subject}」：${slogan}`] };
-}
+  // -------------------------------------------------------------------------
+  // 2. map：worker 节点 —— 注意它的输入不是整个 State！
+  //    Send 发来什么它就收到什么（这里是 { subject: string }），
+  //    所以可以在同一张图里给同一个节点发 N 份不同的私有输入
+  // -------------------------------------------------------------------------
+  async function workerNode(input: { subject: string }) {
+    const response = await model.invoke([
+      {
+        role: "user",
+        content:
+          `请为「${input.subject}」这个主题写一句 20 字以内、有创意的中文宣传语。` +
+          `只输出宣传语本身，不要任何解释。`,
+      },
+    ]);
+    const slogan = typeof response.content === "string" ? response.content.trim() : "";
+    // 每个 worker 只贡献一条结果；reducer 负责把大家的贡献合并成一个数组
+    return { results: [`「${input.subject}」：${slogan}`] };
+  }
 
-// ---------------------------------------------------------------------------
-// 3. reduce：combine 节点 —— 所有 worker 都完成后才会执行（超步屏障），
-//    此时 state.results 已经是汇聚好的完整列表
-// ---------------------------------------------------------------------------
-async function combineNode(state: typeof ParallelState.State) {
-  const response = await model.invoke([
-    {
-      role: "user",
-      content:
-        `以下是几条主题宣传语：\n${state.results.map((r) => `- ${r}`).join("\n")}\n` +
-        `请把它们整合成一段 80 字以内的连贯介绍文案。只输出文案本身。`,
-    },
-  ]);
-  const summary = typeof response.content === "string" ? response.content.trim() : "";
-  return { summary };
+  // -------------------------------------------------------------------------
+  // 3. reduce：combine 节点 —— 所有 worker 都完成后才会执行（超步屏障），
+  //    此时 state.results 已经是汇聚好的完整列表
+  // -------------------------------------------------------------------------
+  async function combineNode(state: typeof ParallelState.State) {
+    const response = await model.invoke([
+      {
+        role: "user",
+        content:
+          `以下是几条主题宣传语：\n${state.results.map((r) => `- ${r}`).join("\n")}\n` +
+          `请把它们整合成一段 80 字以内的连贯介绍文案。只输出文案本身。`,
+      },
+    ]);
+    const summary = typeof response.content === "string" ? response.content.trim() : "";
+    return { summary };
+  }
+
+  return { workerNode, combineNode };
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +103,8 @@ function dispatch(state: typeof ParallelState.State): Send[] {
   return state.subjects.map((subject) => new Send("worker", { subject }));
 }
 
-export function createParallelGraph() {
+export function createParallelGraph(sessionId?: string) {
+  const { workerNode, combineNode } = createParallelNodes(sessionId);
   const graph = new StateGraph(ParallelState)
     .addNode("worker", workerNode)
     .addNode("combine", combineNode)

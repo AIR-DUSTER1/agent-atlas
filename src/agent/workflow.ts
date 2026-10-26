@@ -276,15 +276,16 @@ function recentToolResults(messages: BaseMessage[]): string {
 export function createWorkflowGraph(
   profile: AgentProfile,
   models?: WorkflowModels,
-  options?: { checkpointer?: MemorySaver }
+  options?: { checkpointer?: MemorySaver; sessionId?: string }
 ) {
   const tools = profile.tools;
+  const modelOptions = { sessionId: options?.sessionId };
   const agentModel = models?.agent
-    ?? (createChatModel().bindTools(tools) as unknown as WorkflowChatModel);
+    ?? (createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel);
   const analystModel = models?.analyst
-    ?? (createChatModel() as unknown as WorkflowChatModel);
+    ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
   const reviewerModel = models?.reviewer
-    ?? (createChatModel() as unknown as WorkflowChatModel);
+    ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
   const toolsNode = createApprovalToolsNode({
     tools,
     approvalDescriptions: profile.approvalDescriptions,

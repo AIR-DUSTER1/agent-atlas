@@ -22,6 +22,7 @@
  *     · Gemini：thinkingConfig.thinkingBudget / thinkingLevel
  *   所以这里按协议做一次「归一化参数 → 客户端字段」的翻译。
  */
+import { randomUUID } from "node:crypto";
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
@@ -33,6 +34,72 @@ import { resolveReasoning } from "./reasoning.js";
 type ChatModelLike = BaseChatModel & {
   bindTools: NonNullable<BaseChatModel["bindTools"]>;
 };
+
+/** 建模型时的运行时选项：不落配置，也不进入模型上下文。 */
+export interface ChatModelOptions {
+  /** 一次对话的稳定 ID，供 OpenCode Go 做路由与提示词缓存；Web 端传 threadId。 */
+  sessionId?: string;
+  /** 测试或嵌入调用可替换底层 fetch；生产路径保持默认。 */
+  fetch?: typeof fetch;
+}
+
+const MODEL_USER_AGENT = "langgraph-agent-workbench/1.0";
+// CLI 没显式传 sessionId 时也在进程内保持稳定；Web 每个会话会传自己的 threadId。
+const FALLBACK_MODEL_SESSION_ID = `langgraph-agent-${randomUUID()}`;
+
+/** OpenCode Go 要求客户端用稳定会话头发请求，缺失会直接 400。 */
+function isOpenCodeGateway(baseURL: string): boolean {
+  try {
+    const hostname = new URL(baseURL).hostname.toLowerCase();
+    return hostname === "opencode.ai" || hostname.endsWith(".opencode.ai");
+  } catch {
+    return false;
+  }
+}
+
+/** 请求头只接受安全 ASCII；内部 threadId 正常情况下已经满足。 */
+function normalizeSessionHeader(value: string | undefined): string {
+  const normalized = (value ?? FALLBACK_MODEL_SESSION_ID)
+    .trim()
+    .replace(/[^A-Za-z0-9._:-]/g, "-")
+    .slice(0, 128);
+  return normalized || FALLBACK_MODEL_SESSION_ID;
+}
+
+/**
+ * 仅对已知需要专用路由头的网关加头，避免把私有头透传给其它供应商。
+ * User-Agent 同时用于让 OpenCode 识别为真实客户端，而不是通用 SDK。
+ */
+export function buildGatewayTransportHeaders(
+  baseURL: string,
+  sessionId?: string
+): Record<string, string> | undefined {
+  if (!isOpenCodeGateway(baseURL)) return undefined;
+  return {
+    "User-Agent": MODEL_USER_AGENT,
+    "x-opencode-session": normalizeSessionHeader(sessionId),
+  };
+}
+
+/**
+ * LangChain 的 OpenAI 客户端会把自定义 User-Agent 归一化成小写后再去查大写键，
+ * 结果最终仍发 SDK 的 UA。这里在 fetch 边界再写一次，保证网关能识别真实客户端；
+ * 自定义 fetch 也走同一封装，测试能覆盖生产实际请求头。
+ */
+function createGatewayFetch(
+  baseURL: string,
+  sessionId: string | undefined,
+  fetchImpl: typeof fetch | undefined
+): typeof fetch | undefined {
+  const headers = buildGatewayTransportHeaders(baseURL, sessionId);
+  if (!headers) return fetchImpl;
+  return async (input, init) => {
+    const merged = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(headers)) merged.set(name, value);
+    const doFetch = fetchImpl ?? globalThis.fetch;
+    return doFetch(input, { ...init, headers: merged });
+  };
+}
 
 /** 本次请求要用的思考参数（未设置 / 供应商默认时为 null） */
 function currentReasoning() {
@@ -112,10 +179,12 @@ function fallbackGeminiConfig(params: Record<string, unknown>): { thinkingBudget
  *
  * @param temperature 采样温度：0 表示尽量确定性输出（适合工具调用 demo）
  */
-export function createChatModel(temperature = 0): ChatModelLike {
+export function createChatModel(temperature = 0, options: ChatModelOptions = {}): ChatModelLike {
   // 各客户端都要求 Key 非空；留空时给占位符，让网关给出真实的鉴权错误
   const apiKey = config.apiKey || "missing-key";
   const reasoning = currentReasoning();
+  const defaultHeaders = buildGatewayTransportHeaders(config.baseURL, options.sessionId);
+  const gatewayFetch = createGatewayFetch(config.baseURL, options.sessionId, options.fetch);
   const params = reasoning.params ?? {};
   const { reasoning_effort: reasoningEffort, ...rest } = params as { reasoning_effort?: unknown } & Record<string, unknown>;
 
@@ -171,7 +240,11 @@ export function createChatModel(temperature = 0): ChatModelLike {
         ...(params && Object.keys(params).length
           ? { modelKwargs: { ...rest, ...(reasoningEffort !== undefined ? { reasoning: { effort: reasoningEffort } } : {}) } }
           : {}),
-        ...(config.baseURL ? { configuration: { baseURL: config.baseURL } } : {}),
+        configuration: {
+          baseURL: config.baseURL,
+          ...(defaultHeaders ? { defaultHeaders } : {}),
+          ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
+        },
       }) as unknown as ChatModelLike;
 
     case "openai":
@@ -187,6 +260,8 @@ export function createChatModel(temperature = 0): ChatModelLike {
         configuration: {
           // 关键：指向自定义网关地址（OpenAI 兼容格式）
           baseURL: config.baseURL,
+          ...(defaultHeaders ? { defaultHeaders } : {}),
+          ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
         },
       });
   }

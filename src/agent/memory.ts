@@ -21,9 +21,9 @@ import { calculator, getCurrentTime, getWeather } from "../tools.js";
 
 const tools = [calculator, getCurrentTime, getWeather];
 
-export function createMemoryGraph() {
+export function createMemoryGraph(sessionId?: string) {
   // ★ 模型在建图时创建，Web 端改配置后新建会话即用新模型
-  const model = createChatModel().bindTools(tools);
+  const model = createChatModel(0, { sessionId }).bindTools(tools);
 
   async function agentNode(state: typeof MessagesAnnotation.State) {
     const response = await model.invoke(state.messages);

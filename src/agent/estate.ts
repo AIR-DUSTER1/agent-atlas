@@ -65,7 +65,7 @@ export const estateProfile: AgentProfile = {
   },
 };
 
-export function createEstateGraph() {
+export function createEstateGraph(sessionId?: string) {
   // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(estateProfile);
+  return createWorkflowGraph(estateProfile, undefined, { sessionId });
 }

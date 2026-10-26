@@ -98,10 +98,11 @@ export async function runSubagent(
 
   // 子 Agent 是一次性后台执行：显式传自建 MemorySaver（不落盘），
   // 避免每次委派把整段子任务消息写进共享的 checkpoints.ndjson。
+  const threadId = `subagent-${randomUUID()}`;
   const graph = createWorkflowGraph(subagentProfileOf(profile), models, {
     checkpointer: new MemorySaver(),
+    sessionId: threadId,
   });
-  const threadId = `subagent-${randomUUID()}`;
 
   let finalState: unknown;
   try {
