@@ -43,6 +43,7 @@ import { refreshStats } from "./views/settings-stats.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
 import { saveSkillFromForm } from "./views/settings-skills.js";
+import { saveMcpFromForm } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
 import { compactContext } from "./actions/compact.js";
@@ -180,6 +181,11 @@ async function init(): Promise<void> {
   on("skill-id", "keydown", (e) => {
     const ke = e as KeyboardEvent;
     if (ke.key === "Enter") { ke.preventDefault(); void saveSkillFromForm(); }
+  });
+  on("mcp-add-btn", "click", () => { void saveMcpFromForm(); });
+  on("mcp-command", "keydown", (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Enter") { ke.preventDefault(); void saveMcpFromForm(); }
   });
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话

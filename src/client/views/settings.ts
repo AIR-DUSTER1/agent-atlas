@@ -20,10 +20,11 @@ import { refreshBackups } from "./settings-backup.js";
 import { refreshMemories, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills } from "./settings-skills.js";
+import { refreshMcp } from "./settings-mcp.js";
 import { refreshStats } from "./settings-stats.js";
 import type { AppConfig, EstateState, RagState } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "mcp", "stats"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -56,6 +57,8 @@ export function showSettingsView(view: string): void {
     void refreshCommands().catch((err) => cmdStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "skills") {
     void refreshSkills().catch(() => {});
+  } else if (next === "mcp") {
+    void refreshMcp().catch(() => {});
   } else {
     refreshStats();
   }

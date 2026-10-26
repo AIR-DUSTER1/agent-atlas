@@ -50,6 +50,12 @@ export interface SubagentResult {
   /** 最终回答文本（ok=false 时为模型可读的中文失败说明） */
   text: string;
   durationMs: number;
+  /**
+   * 子 Agent 用过的工具名（按调用顺序去重）。
+   * 前端委派卡据此展示「它干了什么」—— 子 Agent 的完整对话仍是黑盒，
+   * 但「用了哪几个工具」足以让用户判断这个结论可不可信。
+   */
+  toolsUsed?: string[];
 }
 
 /** 子 Agent 不能携带的工具名（深度 1 + 防污染）：委派自身 + 跨会话记忆写入 */
@@ -78,6 +84,21 @@ function contentToText(content: unknown): string {
       return "";
     })
     .join("");
+}
+
+/** 从子图的消息历史里抽出用过的工具名（按首次出现顺序去重） */
+function collectToolsUsed(messages: Array<{ tool_calls?: Array<{ name?: string }> }>): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const m of messages) {
+    for (const call of m.tool_calls ?? []) {
+      const name = call?.name;
+      if (typeof name !== "string" || !name || seen.has(name)) continue;
+      seen.add(name);
+      order.push(name);
+    }
+  }
+  return order;
 }
 
 /**

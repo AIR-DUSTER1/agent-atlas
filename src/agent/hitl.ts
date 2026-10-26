@@ -144,6 +144,21 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     const toolResults: ToolMessage[] = [];
     const userIntent = lastHumanIntent(state.messages);
 
+    // 阶段 2（F8）：把「可直接执行」的调用攒成一批并发跑，审批类仍逐个串行。
+    //
+    // 为什么这样分：
+    //  - 审批必须串行 —— 一次只给用户看一张卡片，否则 interrupt 语义会打架；
+    //  - 拒绝（readonly）也是即时判定，归入批处理；
+    //  - 真正的收益在 delegate_agent / browser_fetch / 各类 MCP 调用：
+    //    模型一轮里发起多个独立子任务时，不必一个跑完再跑下一个。
+    type ToolCallItem = NonNullable<typeof lastMessage.tool_calls>[number];
+    const parallelBatch: Array<{
+      callIndex: number;
+      call: ToolCallItem;
+      action: "run" | "deny";
+      toolFn: StructuredToolInterface;
+    }> = [];
+
     for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
       const toolFn = toolMap.get(call.name);
       if (!toolFn) {
@@ -158,6 +173,12 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
       }
 
       const action = resolveToolPermission(permissionMode, call.name, options.approvalDescriptions);
+      // 可并行的三类：只读拒绝（立即有结论）、auto/未登记审批的直接执行、自主低风险。
+      // interrupt 类必须留在外面串行处理。
+      if (action === "deny" || action === "run") {
+        parallelBatch.push({ callIndex, call, action, toolFn });
+        continue;
+      }
       const description = options.approvalDescriptions[call.name]?.(call.args as Record<string, unknown>)
         || `执行工具 ${call.name}`;
       let shouldInterrupt = action === "interrupt";
@@ -196,11 +217,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
 
       let content: ToolInvocationResult["content"];
       let status: "success" | "error" = "success";
-      if (action === "deny") {
-        // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
-        content = readonlyDenyText(call.name);
-        status = "error";
-      } else if (shouldInterrupt) {
+      if (shouldInterrupt) {
         // interrupt() 的参数会原样出现在流输出里（__interrupt__），
         // 返回值则是 CLI / Web 通过 Command({ resume }) 传回来的内容。
         const decision = interrupt<ApprovalRequest, "approve" | "reject">({
@@ -218,7 +235,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           content = `用户拒绝了本次 ${call.name} 操作，不要执行。`;
         }
       } else {
-        // 未登记审批（只读工具）、自主低风险或 auto 权限：直接执行
+        // 自主模式判定为低风险：直接执行（其余「可直接执行」的已在批处理里）
         const result = await invokeTool(toolFn, call.args);
         content = result.content;
         status = result.status;
@@ -235,6 +252,29 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           },
         } : {}),
       }));
+    }
+
+    // ── 批量并发执行「可直接执行」的调用（F8 阶段 2）──
+    // 并发不改变结果顺序：按原始 tool_calls 下标回填，模型看到的顺序与它发起的一致。
+    if (parallelBatch.length) {
+      const settled = await Promise.all(
+        parallelBatch.map(async (item) => {
+          if (item.action === "deny") {
+            // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
+            return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
+          }
+          const result = await invokeTool(item.toolFn, item.call.args);
+          return { item, content: result.content, status: result.status };
+        })
+      );
+      for (const entry of settled) {
+        toolResults.push(new ToolMessageCls({
+          content: entry.content,
+          tool_call_id: entry.item.call.id ?? "",
+          name: entry.item.call.name,
+          status: entry.status,
+        }));
+      }
     }
 
     // 把工具结果追加进消息历史，agent 下一轮才能「看到结果并总结」

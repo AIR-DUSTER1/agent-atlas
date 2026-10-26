@@ -47,7 +47,15 @@ export const delegateAgent = tool(
     try {
       const target = await loadSubagentProfile(profile);
       const result = await runSubagent(target, task);
-      return result.text;
+      // 返回结构化 JSON：前端委派卡要渲染「耗时 / 用了哪些工具」，
+      // 纯文本的话这些信息只能靠正则再抠一遍。
+      return JSON.stringify({
+        ok: result.ok,
+        text: result.text,
+        durationMs: result.durationMs,
+        toolsUsed: result.toolsUsed ?? [],
+        profile,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return `委派失败：${message.slice(0, 200)}。请转述原因，不要盲目重试。`;

@@ -69,6 +69,12 @@ import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./ro
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 import { handleListCommands, handleSaveCommand, handleDeleteCommand } from "./routes/commands.js";
 import { handleListSkills, handleSaveSkill, handleDeleteSkill } from "./routes/skills.js";
+import {
+  handleListMcp, handleSaveMcp, handleDeleteMcp, handleTestMcp,
+} from "./routes/mcp.js";
+import { disconnectAll } from "./mcp.js";
+import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
+import { setExternalTools } from "../agent/general.js";
 const PORT = Number(process.env.PORT ?? 3000);
 /**
  * Phase 0 安全止血：默认只监听 loopback。
@@ -80,6 +86,24 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 /** 认证是否已启用（Phase 1：auth.ts 提供判定，本常量用于启动提示与 Phase 0 边界短路） */
 const AUTH_ENABLED = isAuthEnabled();
 
+/**
+ * 重新加载 MCP 工具并注入 general profile。
+ * 每次增删 MCP server / 配置变更后调用；单个 server 失败不阻断其它 server。
+ */
+async function refreshMcpTools(): Promise<void> {
+  try {
+    const [tools, approvals] = await Promise.all([loadMcpTools(), mcpApprovalDescriptions()]);
+    setExternalTools(tools, approvals);
+    log("info", "mcp_tools_loaded", { count: tools.length });
+  } catch (err) {
+    // MCP 是增强能力：加载失败只降级，不影响内置工具
+    log("warn", "mcp_tools_load_failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    setExternalTools([], {});
+  }
+}
+
 // 启动时先叠加 Web 设置页保存的覆盖配置（.web-config.json → 覆盖 .env），
 // 加载项目文件夹列表，并后台拉一次启用中供应商的模型元信息（上下文窗口长度）
 await loadSettings();
@@ -89,6 +113,10 @@ await loadRag();
 await loadEstate();
 // F1：跨会话长期记忆（agent 层 memoryNote 每轮读内存索引，这里启动时预热落盘数据）
 await loadMemories();
+// MCP：启动时连接已配置的 server 并把工具注入 general profile。
+// 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
+await refreshMcpTools();
+
 // T2-2：journal 回放 —— 重启后恢复会话壳 / 轮次历史 / pending 审批标记
 const restoredSessions = await restoreSessions();
 if (restoredSessions > 0) {
@@ -265,6 +293,18 @@ const server = createServer(async (req, res) => {
     const skillDelMatch = pathname.match(/^\/api\/skills\/(.+)$/);
     if (skillDelMatch && req.method === "DELETE") { await handleDeleteSkill(res, skillDelMatch[1]); return; }
 
+    // MCP 客户端（JSON-RPC over stdio 自实现；工具默认全登记审批）
+    if (pathname === "/api/mcp" && req.method === "GET") { await handleListMcp(res); return; }
+    if (pathname === "/api/mcp" && req.method === "POST") { await handleSaveMcp(res, req); return; }
+    const mcpTestMatch = pathname.match(/^\/api\/mcp\/([\w-]+)\/test$/);
+    if (mcpTestMatch && req.method === "POST") { await handleTestMcp(res, mcpTestMatch[1]); return; }
+    const mcpDelMatch = pathname.match(/^\/api\/mcp\/([\w-]+)$/);
+    if (mcpDelMatch && req.method === "DELETE") {
+      await handleDeleteMcp(res, mcpDelMatch[1]);
+      await refreshMcpTools();
+      return;
+    }
+
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
     if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res); return; }
 
@@ -344,7 +384,8 @@ function handleSignal(signal: string): void {
     flush: async () => {
       await flushJournal();
       await flushAudit();
-      await flushCheckpointLog(); // 持久检查点的在途追加也等落盘（F0）
+      await flushCheckpointLog();
+  await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，
     // 并留一个 1s 的兜底定时器（不 hold 事件循环）

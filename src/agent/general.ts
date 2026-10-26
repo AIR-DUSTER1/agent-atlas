@@ -22,7 +22,8 @@ import { memoryTools } from "../tools-memory.js";
 import { retrieveDocs } from "../tools-rag.js";
 import { browserFetch } from "../tools-web.js";
 import { generalApprovals } from "./approvals.js";
-import type { AgentProfile } from "./profile.js";
+import type { StructuredToolInterface } from "@langchain/core/tools";
+import type { AgentProfile, ApprovalDescriptions } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 
 const tools = [
@@ -67,6 +68,29 @@ const SYSTEM_PROMPT = [
   "- 回答简洁准确，代码放在 Markdown 代码块里",
 ].join("\n");
 
+/**
+ * 外部工具槽（MCP 等）：由 server 层在启动/配置变更时注入。
+ *
+ * 为什么用可变的槽而不是参数：agent 层禁止 import server/*（AGENTS.md §3），
+ * 所以「有哪些 MCP 工具」不能由这里去问 server。反向由 server 把工具推进来，
+ * 是最小耦合的接法。读取时做快照（见 generalProfileWithExternal），
+ * 避免构建图的过程中槽被并发改写。
+ */
+let externalTools: StructuredToolInterface[] = [];
+let externalApprovals: ApprovalDescriptions = {};
+
+export function setExternalTools(
+  tools: StructuredToolInterface[],
+  approvals: ApprovalDescriptions
+): void {
+  externalTools = tools;
+  externalApprovals = approvals;
+}
+
+export function currentExternalTools(): StructuredToolInterface[] {
+  return externalTools;
+}
+
 /** 通用 profile 的能力边界：只含开发 / 知识库 / 基础工具，绝不包含 house_*。 */
 export const generalProfile: AgentProfile = {
   id: "general",
@@ -92,8 +116,27 @@ export const generalProfile: AgentProfile = {
   },
 };
 
+/**
+ * 取「当前生效」的 profile：内置工具 + 已注入的外部工具（MCP）。
+ * 每次建图都重新拼，这样新接入的 MCP server 在下一条消息就生效。
+ * 外部工具名重复时直接抛错（装配期失败，不静默覆盖内置工具）。
+ */
+export function generalProfileWithExternal(): AgentProfile {
+  if (!externalTools.length) return generalProfile;
+  const names = new Set(generalProfile.tools.map((t) => t.name));
+  for (const t of externalTools) {
+    if (names.has(t.name)) throw new Error(`外部工具与内置工具重名：${t.name}`);
+    names.add(t.name);
+  }
+  return {
+    ...generalProfile,
+    tools: [...generalProfile.tools, ...externalTools],
+    approvalDescriptions: { ...generalProfile.approvalDescriptions, ...externalApprovals },
+  };
+}
+
 export function createAgentGraph(sessionId?: string) {
   // 模型与 checkpointer 都在建图时创建；换配置后由 sessions.rebuildIfStale 重建。
   // sessionId 会变成 OpenCode 等网关的路由头，不能所有会话复用同一个值。
-  return createWorkflowGraph(generalProfile, undefined, { sessionId });
+  return createWorkflowGraph(generalProfileWithExternal(), undefined, { sessionId });
 }

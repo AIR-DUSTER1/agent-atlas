@@ -2333,3 +2333,38 @@ body.in-desktop .settings-page-head {
 body.in-desktop .settings-page-head button {
   -webkit-app-region: no-drag;
 }
+
+/* 委派卡（delegate_agent）：子 Agent 耗时 + 用过的工具，F8 过程可见 */
+.delegate-wrap {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.03));
+}
+.delegate-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.delegate-icon { flex: none; }
+.delegate-title { font-weight: 600; color: var(--text-1); }
+.delegate-meta { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.delegate-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.delegate-tools-label { color: var(--text-2); }
+.delegate-tool-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}

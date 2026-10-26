@@ -200,6 +200,10 @@
           <span class="sn-icon">📘</span>
           <span class="sn-copy"><strong>技能库</strong><small>按关键词自动加载的领域指南</small></span>
         </button>
+        <button type="button" class="settings-nav-item" data-settings-view="mcp" role="tab" aria-selected="false" aria-controls="settings-view-mcp">
+          <span class="sn-icon">🔌</span>
+          <span class="sn-copy"><strong>MCP 服务器</strong><small>接入外部工具（默认需审批）</small></span>
+        </button>
         <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
           <span class="sn-icon">📊</span>
           <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话排行</small></span>
@@ -413,6 +417,35 @@
               <button id="skill-add-btn" type="button" class="ghost-btn small">＋ 保存技能</button>
             </div>
             <div id="skills-status" class="settings-status"></div>
+          </div>
+        </section>
+
+        <section id="settings-view-mcp" class="settings-view hidden" data-settings-panel="mcp" role="tabpanel" aria-labelledby="mcp-title">
+          <div id="mcp-modal" role="region" aria-labelledby="mcp-title">
+            <h2 id="mcp-title">🔌 MCP 服务器</h2>
+            <p class="settings-sub">MCP 是本项目接入外部工具生态的方式（自实现 JSON-RPC over stdio，零额外依赖）。
+              工具会以 <code>mcp__服务器__工具</code> 出现在通用 Agent 里，<strong>默认每次调用都需要你审批</strong>。
+              ⚠ 接入 = 在本机运行第三方程序，请只添加可信来源。</p>
+
+            <div class="field-label">已配置的服务器</div>
+            <div id="mcp-list" class="memories-list"></div>
+
+            <div class="field-label">新增 / 更新（同 id 覆盖）</div>
+            <div class="key-row">
+              <input id="mcp-id" type="text" spellcheck="false" placeholder="标识，如 filesystem（字母数字下划线短横线）" />
+              <input id="mcp-name" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+            </div>
+            <div class="key-row">
+              <input id="mcp-command" type="text" spellcheck="false" placeholder="启动命令，如 npx" />
+              <input id="mcp-args" type="text" spellcheck="false" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem C:\data" />
+            </div>
+            <div class="key-row">
+              <label class="mcp-check"><input id="mcp-approval" type="checkbox" checked /> 调用需审批（推荐保持开启）</label>
+            </div>
+            <div class="key-row">
+              <button id="mcp-add-btn" type="button" class="ghost-btn small">＋ 保存服务器</button>
+            </div>
+            <div id="mcp-status" class="settings-status"></div>
           </div>
         </section>
 
