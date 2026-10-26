@@ -145,6 +145,8 @@ export interface ComposerFileItem {
 
 export interface ComposerCommandItem extends SlashCommand {
   type: "command";
+  /** 用户自定义命令的提示词模板；内置命令没有该字段 */
+  template?: string;
 }
 
 export type ComposerItem = ComposerFileItem | ComposerCommandItem;

@@ -27,6 +27,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { memoryNoteForPrompt } from "../memory-store.js";
+import { skillNoteForMessage } from "../skills.js";
 import { buildAgentContext } from "./context-builder.js";
 import { createApprovalToolsNode } from "./hitl.js";
 import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
@@ -372,6 +373,10 @@ export function createWorkflowGraph(
     // 反思反馈 / 权限模式 / 跨会话长期记忆在这里组装成稳定 system，
     // 消息窗口与工具结果按预算裁剪。记忆注记每轮动态拼（不落 checkpoint），
     // 新会话、甚至服务重启后的第一轮就能看到全部记忆。
+    // 技能：只匹配「最近一条用户消息」（不看整段历史，避免旧话题的关键词
+    // 每轮都把技能拽进来）。未命中返回 null，上下文里不会多出任何内容。
+    const lastUserText = lastHumanText(state.messages);
+    const skillNote = await skillNoteForMessage(lastUserText);
     const context = buildAgentContext({
       profile,
       messages: state.messages,
@@ -380,6 +385,7 @@ export function createWorkflowGraph(
       reviewFeedback: state.reviewFeedback,
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
       memoryNote: memoryNoteForPrompt() ?? undefined,
+      skillNote: skillNote ?? undefined,
     });
     const response = await agentModel.invoke(context.messages);
     return { messages: [response] };

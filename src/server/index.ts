@@ -67,6 +67,8 @@ import { handleListMemories, handleSaveMemory, handleDeleteMemory } from "./rout
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
+import { handleListCommands, handleSaveCommand, handleDeleteCommand } from "./routes/commands.js";
+import { handleListSkills, handleSaveSkill, handleDeleteSkill } from "./routes/skills.js";
 const PORT = Number(process.env.PORT ?? 3000);
 /**
  * Phase 0 安全止血：默认只监听 loopback。
@@ -250,6 +252,18 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
     if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1]); return; }
+
+    // 用户自定义命令（提示词模板；前端斜杠菜单与设置页共用）
+    if (pathname === "/api/commands" && req.method === "GET") { await handleListCommands(res); return; }
+    if (pathname === "/api/commands" && req.method === "POST") { await handleSaveCommand(res, req); return; }
+    const commandDelMatch = pathname.match(/^\/api\/commands\/([\w-]+)$/);
+    if (commandDelMatch && req.method === "DELETE") { await handleDeleteCommand(res, commandDelMatch[1]); return; }
+
+    // 技能库（按关键词命中注入的领域指南；纯文档不执行）
+    if (pathname === "/api/skills" && req.method === "GET") { await handleListSkills(res); return; }
+    if (pathname === "/api/skills" && req.method === "POST") { await handleSaveSkill(res, req); return; }
+    const skillDelMatch = pathname.match(/^\/api\/skills\/(.+)$/);
+    if (skillDelMatch && req.method === "DELETE") { await handleDeleteSkill(res, skillDelMatch[1]); return; }
 
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
     if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res); return; }

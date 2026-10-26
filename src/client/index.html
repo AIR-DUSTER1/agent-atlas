@@ -192,6 +192,14 @@
           <span class="sn-icon">🧠</span>
           <span class="sn-copy"><strong>长期记忆</strong><small>查看、新增与删除记忆</small></span>
         </button>
+        <button type="button" class="settings-nav-item" data-settings-view="commands" role="tab" aria-selected="false" aria-controls="settings-view-commands">
+          <span class="sn-icon">✳️</span>
+          <span class="sn-copy"><strong>自定义命令</strong><small>斜杠菜单里的提示词模板</small></span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-view="skills" role="tab" aria-selected="false" aria-controls="settings-view-skills">
+          <span class="sn-icon">📘</span>
+          <span class="sn-copy"><strong>技能库</strong><small>按关键词自动加载的领域指南</small></span>
+        </button>
         <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
           <span class="sn-icon">📊</span>
           <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话排行</small></span>
@@ -351,6 +359,60 @@
         <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
       </div>
       <div id="memories-status" class="settings-status"></div>
+          </div>
+        </section>
+
+        <section id="settings-view-commands" class="settings-view hidden" data-settings-panel="commands" role="tabpanel" aria-labelledby="commands-title">
+          <div id="commands-modal" role="region" aria-labelledby="commands-title">
+            <h2 id="commands-title">✳️ 自定义命令</h2>
+            <p class="settings-sub">在输入框敲 <code>/</code> 打开菜单，选中命令只会把模板填进输入框（不自动发送），
+              你可以先改再发。模板支持 <code>{{selection}}</code>（当前输入框已有内容）与 <code>{{date}}</code>（今天日期）。</p>
+
+            <div class="field-label">命令列表</div>
+            <div id="commands-list" class="memories-list"></div>
+
+            <div class="field-label">新增 / 更新（同名覆盖）</div>
+            <div class="key-row">
+              <input id="cmd-name" type="text" spellcheck="false" placeholder="命令名，如 review（字母数字下划线短横线）" />
+              <input id="cmd-title" type="text" spellcheck="false" placeholder="菜单显示名（留空 = 用命令名）" />
+            </div>
+            <div class="key-row">
+              <input id="cmd-desc" type="text" spellcheck="false" placeholder="一句话说明，如：审查本次改动" />
+            </div>
+            <textarea id="cmd-template" class="cmd-template" spellcheck="false"
+              placeholder="提示词模板，例如：请审查以下改动并指出风险：&#10;{{selection}}"></textarea>
+            <div class="key-row">
+              <button id="cmd-add-btn" type="button" class="ghost-btn small">＋ 保存命令</button>
+            </div>
+            <div id="commands-status" class="settings-status"></div>
+          </div>
+        </section>
+
+        <section id="settings-view-skills" class="settings-view hidden" data-settings-panel="skills" role="tabpanel" aria-labelledby="skills-title">
+          <div id="skills-modal" role="region" aria-labelledby="skills-title">
+            <h2 id="skills-title">📘 技能库</h2>
+            <p class="settings-sub">技能是 markdown 写的「这类任务该怎么做」指南，存在
+              <code>.setting/skills/</code>。当你的消息里出现关键词（triggers）时才自动载入，
+              没命中就完全不用（不占上下文）。每轮最多载入 2 个。</p>
+
+            <div class="field-label">已安装技能 <span id="skills-dir" class="key-state"></span></div>
+            <div id="skills-list" class="memories-list"></div>
+
+            <div class="field-label">新增 / 更新（同标识覆盖）</div>
+            <div class="key-row">
+              <input id="skill-id" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
+              <input id="skill-name" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+            </div>
+            <div class="key-row">
+              <input id="skill-desc" type="text" spellcheck="false" placeholder="一句话说明" />
+              <input id="skill-triggers" type="text" spellcheck="false" placeholder="触发关键词，逗号分隔，如：提交信息, commit" />
+            </div>
+            <textarea id="skill-body" class="cmd-template" spellcheck="false"
+              placeholder="技能正文（markdown）。例如：&#10;# 写提交信息&#10;- 一行中文短句，不加前缀&#10;- 说明原因时用「：」而不是括号"></textarea>
+            <div class="key-row">
+              <button id="skill-add-btn" type="button" class="ghost-btn small">＋ 保存技能</button>
+            </div>
+            <div id="skills-status" class="settings-status"></div>
           </div>
         </section>
 

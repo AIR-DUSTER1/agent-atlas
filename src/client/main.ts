@@ -23,7 +23,7 @@ import {
   closeCmMenus, hydrateFromServer, renderPermChip, renderPermMenu, selectSession, showChatState, showWelcomeState,
 } from "./views/navigation.js";
 import { buildDemoCards, buildExampleChips, closeModal, openModal } from "./views/shell.js";
-import { bindCreateSession as bindShellCreate, GENERAL_EXAMPLES } from "./views/shell.js";
+import { bindCreateSession as bindShellCreate } from "./views/shell.js";
 import { addExternalFlow, bindCreateSession as bindExtCreate, loadExternalAgents } from "./views/external.js";
 import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
@@ -41,11 +41,12 @@ import { closeSettingsPage, openSettings, showSettingsView } from "./views/setti
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/settings-stats.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
+import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
+import { saveSkillFromForm } from "./views/settings-skills.js";
+import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
 import { compactContext } from "./actions/compact.js";
 import type { AppConfig, Session } from "./modules/types.js";
-
-const GENERAL_EXAMPLES_INLINE = GENERAL_EXAMPLES;
 
 /* ---------------------------------------------------------------------------
  * 接线：视图层互相需要的回调统一在这里注入
@@ -77,6 +78,8 @@ async function init(): Promise<void> {
   await loadExternalAgents();
   await loadRag();
   await loadEstate();
+  // 用户自定义命令：预热带进斜杠菜单（失败静默，命令不可用不影响对话）
+  await loadUserCommands().catch(() => {});
 
   // 能力自检：前端具备但服务端缺失的接口 → 说明服务进程是旧代码启动的，提示重启。
   // （静态文件每次请求都读磁盘，浏览器能拿到新脚本；但路由是进程启动时固化的）
@@ -164,6 +167,20 @@ async function init(): Promise<void> {
   });
   on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
+  on("cmd-add-btn", "click", () => { void saveCommandFromForm(); });
+  on("cmd-name", "keydown", (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
+  });
+  on("cmd-title", "keydown", (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
+  });
+  on("skill-add-btn", "click", () => { void saveSkillFromForm(); });
+  on("skill-id", "keydown", (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Enter") { ke.preventDefault(); void saveSkillFromForm(); }
+  });
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
   $("session-search")?.addEventListener("input", () => renderSessions());
@@ -453,23 +470,7 @@ async function init(): Promise<void> {
   if (first) selectSession(first.id);
   else showWelcomeState();
 
-  // 保持引用，避免 tree-shaking 误判（这些导出供其他模块用）
-  void GENERAL_EXAMPLES_INLINE;
-  void renderProviderList;
-  void renderProjectSwitcher;
-  void renderAttachChips;
-  void hydrateFromServer;
-  void finalize;
-  void updateContextBar;
-  void closeModalImpl;
-  void openModalImpl;
-  void createSession;
-  void renderAll;
-  void showChatState;
-  void saveLocal;
-  void chatScroll;
-  void stopBtn;
-  void sendBtn;
+
 }
 
 function getAuthTokenSafe(): string {

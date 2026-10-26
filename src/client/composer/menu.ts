@@ -36,6 +36,50 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
 ];
 
+/** 用户自定义命令（服务端 /api/commands 拉取；模板 kind 与内置命令区分） */
+export interface UserCommandItem {
+  name: string;
+  title?: string;
+  description?: string;
+  template: string;
+}
+
+let userCommands: UserCommandItem[] = [];
+
+/** 拉取用户命令（失败静默：命令不可用不该阻塞对话） */
+export async function loadUserCommands(): Promise<UserCommandItem[]> {
+  try {
+    const data = await api<{ commands?: UserCommandItem[] }>("/api/commands");
+    userCommands = data.commands || [];
+  } catch {
+    userCommands = [];
+  }
+  return userCommands;
+}
+
+export function getUserCommands(): UserCommandItem[] {
+  return userCommands;
+}
+
+/** 用户命令 → 菜单项（id 加 user: 前缀，避免与内置命令同名混淆） */
+function userCommandItems(query: string): ComposerItem[] {
+  const q = query.trim().toLowerCase();
+  return userCommands
+    .filter((c) => !q
+      || c.name.toLowerCase().includes(q)
+      || (c.title || "").toLowerCase().includes(q)
+      || (c.description || "").toLowerCase().includes(q))
+    .map((c) => ({
+      type: "command" as const,
+      id: `user:${c.name}`,
+      icon: "✳️",
+      label: c.title || `/${c.name}`,
+      desc: c.description || `自定义命令 · ${c.name}`,
+      keywords: c.name,
+      template: c.template,
+    }));
+}
+
 /** 压缩上下文动作：由 turn 层注入（避免 composer → stream 的环） */
 let compactAction: () => Promise<void> = async () => {};
 export function bindCompactAction(fn: () => Promise<void>): void {
@@ -104,9 +148,11 @@ function currentComposerTrigger(): ComposerTrigger | null {
 
 function slashCommandItems(query: string): ComposerItem[] {
   const q = query.trim().toLowerCase();
-  return SLASH_COMMANDS
+  const builtin = SLASH_COMMANDS
     .filter((cmd) => !q || cmd.label.toLowerCase().includes(q) || cmd.keywords.toLowerCase().includes(q) || cmd.id.includes(q))
     .map((cmd) => ({ type: "command" as const, ...cmd }));
+  // 内置命令在前，用户命令在后（用户命令多时也不挤掉 /compact）
+  return [...builtin, ...userCommandItems(query)];
 }
 
 export function refreshComposerMenu(): void {
@@ -258,6 +304,17 @@ export function selectComposerItem(index: number): void {
   const next = value.slice(0, trigger.start) + value.slice(trigger.end);
 
   if (item.type === "command") {
+    // 用户自定义命令：把模板填进输入框（替换掉用户的「/命令名」），
+    // 由用户自己检查后再发送 —— 不自动发送，用户能看清将要发出的内容
+    const template = "template" in item && typeof item.template === "string" ? item.template : "";
+    if (template) {
+      inputEl.value = template;
+      closeComposerMenu();
+      autoGrowImpl();
+      inputEl.focus();
+      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      return;
+    }
     inputEl.value = next.replace(/\s+$/, "");
     closeComposerMenu();
     autoGrowImpl();

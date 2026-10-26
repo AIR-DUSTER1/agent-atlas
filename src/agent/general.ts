@@ -20,6 +20,7 @@ import { computerTools } from "../tools-computer.js";
 import { teamTools } from "../tools-team.js";
 import { memoryTools } from "../tools-memory.js";
 import { retrieveDocs } from "../tools-rag.js";
+import { browserFetch } from "../tools-web.js";
 import { generalApprovals } from "./approvals.js";
 import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
@@ -39,6 +40,8 @@ const tools = [
   ...memoryTools,
   // 知识库检索（外部 RAG 服务，只读低风险，直接执行）
   retrieveDocs,
+  // 网页内容抓取（只读：纯 HTTP GET + 剥标签；内网默认拒，防 SSRF）
+  browserFetch,
 ];
 
 const SYSTEM_PROMPT = [
@@ -48,6 +51,8 @@ const SYSTEM_PROMPT = [
     "grep_search 搜索代码，list_dir 看目录结构，write_file 创建或修改文件",
   "- 用户问及项目文档、需求/设计说明、团队资料等知识库内容时，调用 retrieve_docs 检索" +
     "（外部 RAG 服务，只读）；片段带来源与分数，回答请标注来源，检索不到就如实说明",
+  "- 需要读某个网页/在线文档/报错页面时调用 browser_fetch（只读，直接执行）；" +
+    "它只拿静态 HTML 正文，读不到纯 JS 渲染的页面 —— 那种情况如实说明，不要编造页面内容",
   "- read_file / list_dir / grep_search 直接执行；terminal 和 write_file 是高风险操作，" +
     "系统会在你调用后自动请求用户确认，你无需额外追问",
   "- 用户附加了文件时，基于附件内容回答（在消息中以「--- 附件 N: 名 ---」标注，可能超长截断）",

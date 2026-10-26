@@ -26,6 +26,8 @@ export interface AgentContextInput {
   permissionNote?: string;
   /** 跨会话长期记忆注记（memory-store 生成；无记忆时为空不注入） */
   memoryNote?: string;
+  /** 技能注记（skills.ts 按用户消息关键词命中生成；未命中为 undefined，零开销） */
+  skillNote?: string;
 }
 
 export interface AgentContextResult {
@@ -142,6 +144,7 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     input.reviewFeedback ? `【上一轮反思反馈】${input.reviewFeedback}` : "",
     input.permissionNote || "",
     input.memoryNote || "",
+    input.skillNote || "",
     omittedMessages ? `【上下文窗口】已省略较早的 ${omittedMessages} 条消息，完整历史仍保存在会话记录中。` : "",
   ].filter(Boolean);
 

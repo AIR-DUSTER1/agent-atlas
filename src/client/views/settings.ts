@@ -18,10 +18,12 @@ import { closeCmMenus } from "./navigation.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { refreshBackups } from "./settings-backup.js";
 import { refreshMemories, memStatus } from "./settings-memories.js";
+import { refreshCommands, cmdStatus } from "./settings-commands.js";
+import { refreshSkills } from "./settings-skills.js";
 import { refreshStats } from "./settings-stats.js";
 import type { AppConfig, EstateState, RagState } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "stats"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -50,6 +52,10 @@ export function showSettingsView(view: string): void {
     void loadPluginStates();
   } else if (next === "memories") {
     void refreshMemories().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
+  } else if (next === "commands") {
+    void refreshCommands().catch((err) => cmdStatus(`✗ ${(err as Error).message}`, "err"));
+  } else if (next === "skills") {
+    void refreshSkills().catch(() => {});
   } else {
     refreshStats();
   }
