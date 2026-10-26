@@ -151,7 +151,9 @@ Agent 会把值得跨会话记住的事存进长期记忆，新会话自动带�
   编辑时留空 = 保持不变，清空保存 = 回到模拟模式；
 - 至少保留一个供应商；删掉正在用的会自动切到列表第一个；
 - **协议**：OpenAI Chat（默认）/ OpenAI Responses / Anthropic 原生 / Gemini 原生，
-  中转站的多协议路由都能接。
+  中转站的多协议路由都能接；
+- **OpenCode Go**：使用 `https://opencode.ai/...` 网关时自动按会话 `threadId`
+  发送 `x-opencode-session`，并带本项目 User-Agent，不需要手写请求头。
 
 ### 思考等级（让模型「想多久」）
 
@@ -345,6 +347,10 @@ docs/              # 学习与部署文档
 1. `npm run models` 看网关实际支持哪些模型；
 2. 把 `.env` 里的 `MODEL` 改成列表里的 id；
 3. 重跑。
+
+如果 OpenCode Go 返回 `Request is missing x-opencode-session`，先重启到最新版本；
+本项目会对 `opencode.ai` 网关自动注入稳定会话头。若你通过自建反向代理转发且代理
+改写了 Host/BASE_URL，则需要让代理保留该请求头。
 
 `.env` 里有真实 Key，已被 `.gitignore` 排除，不会提交。
 

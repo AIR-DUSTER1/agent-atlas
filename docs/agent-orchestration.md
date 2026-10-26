@@ -485,6 +485,7 @@ clone 仓库
 |---|---|
 | 模型配置 | 建图时 `createChatModel()` 读取当前供应商；保存配置后新会话生效，旧会话延迟重建 |
 | 协议适配 | `llm.ts` 统一 OpenAI / OpenAI Responses / Anthropic / Gemini |
+| 会话路由头 | OpenCode.ai 网关按 `Session.threadId` 注入 `x-opencode-session`；同会话重建稳定，压缩后换新线程 |
 | 同会话并发 | 同时只允许一个流；两次发送至少间隔 1.5 秒 |
 | 附件 | 单条消息最多 5 个；服务端授权校验、二进制拒绝、超长截断 |
 | 文件工具 | 只能访问 `files.ts` 授权根；跳过依赖/敏感文件 |

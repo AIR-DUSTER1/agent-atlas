@@ -325,7 +325,12 @@ new ChatOpenAI({
   LangChain 客户端，图代码（`agent/*.ts`）完全不感知差异；
 - **思考等级的分离设计**：`reasoning.ts` 只描述「某家供应商怎么划分思考等级」
   （方言 → 档位 → 归一化参数），`llm.ts` 只负责「归一化参数 → 客户端字段」。
-  想接入新供应商，在 `reasoning.ts` 里加一个方言即可，其余代码零改动。
+  想接入新供应商，在 `reasoning.ts` 里加一个方言即可，其余代码零改动；
+- **会话级传输头**：`createChatModel(temperature, { sessionId })` 支持传稳定
+  会话 ID。对 `opencode.ai` 网关自动发送 `x-opencode-session` 与项目 User-Agent；
+  Web 端传 `Session.threadId`，配置重建和重启恢复保持不变，`/compact` 后切换新线程。
+  注意 LangChain 会覆盖自定义 `User-Agent`，所以实现里在最终 fetch 边界再次写入，
+  回归测试见 `tests/unit/llm-transport.test.ts`。
 
 ### 3.3 `src/tools.ts` — 工具库
 
@@ -692,7 +697,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -1294,7 +1299,9 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 - **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
 - 切换后**新建会话立即生效**，已有会话在下一条消息时自动切换
-  （带 checkpoint 的会话记忆会重置，等价于重启服务）。
+  （带 checkpoint 的会话记忆会重置，等价于重启服务）；
+- OpenCode Go 的 `x-opencode-session` 由服务端自动注入，同一会话各节点和
+  压缩摘要共用 `threadId`，不需要在设置页手工配置请求头。
 
 ### 5.4.1 思考等级（reasoning / thinking）怎么设
 
