@@ -12,11 +12,11 @@ test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮
   assert.match(html, /<div class="side-footer">[\s\S]*id="settings-btn"[\s\S]*id="side-model"/);
 });
 
-test("设置页包含返回按钮、三个分区与集中面板", async () => {
+test("设置页包含返回按钮、全部分区与集中面板", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   assert.match(html, /id="settings-page"/);
   assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('class="settings-nav-item active"'));
-  for (const view of ["models", "memories", "stats"]) {
+  for (const view of ["models", "plugins", "memories", "stats"]) {
     assert.match(html, new RegExp(`data-settings-panel="${view}"`));
   }
   assert.doesNotMatch(html, /id="(settings|memories|stats)-mask"/);

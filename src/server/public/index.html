@@ -33,16 +33,7 @@
           </button>
           <div id="project-menu" class="provider-menu hidden"></div>
         </div>
-        <button id="kb-btn" class="kb-entry" title="知识库（外部 RAG）：配置服务 / 文档入库 / 检索测试">
-          <span class="kb-entry-icon">📚</span>
-          <span class="kb-entry-text">知识库（RAG）</span>
-          <span id="kb-entry-state" class="kb-entry-state">未配置</span>
-        </button>
-        <button id="estate-btn" class="kb-entry" title="房产数据源（贝壳 CLI）：检测 / 安装 / 保存授权 Key">
-          <span class="estate-entry-icon">🏠</span>
-          <span class="estate-entry-text">找房数据源（贝壳）</span>
-          <span id="estate-entry-state" class="estate-entry-state">未安装</span>
-        </button>
+
         <div class="session-tools">
           <input id="session-search" type="text" spellcheck="false" placeholder="🔍 搜索会话标题 / 内容" title="按标题或本浏览器缓存的消息内容实时过滤" />
           <button id="cleanup-btn" class="ghost-btn small" title="批量清理创建超过 N 天的旧会话">🧹</button>
@@ -56,7 +47,7 @@
           <span class="side-settings-icon">⚙</span>
           <span class="side-settings-copy">
             <strong>设置</strong>
-            <small>模型 · 记忆 · 统计</small>
+            <small>模型 · 插件 · 统计</small>
           </span>
           <span class="side-settings-arrow">›</span>
         </button>
@@ -182,7 +173,7 @@
       </button>
       <div class="settings-page-heading">
         <h1 id="settings-title">设置</h1>
-        <p>模型、长期记忆与使用统计集中管理</p>
+        <p>模型、插件、长期记忆与使用统计集中管理</p>
       </div>
       <span class="settings-page-head-spacer"></span>
     </header>
@@ -192,6 +183,10 @@
         <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
           <span class="sn-icon">⚙</span>
           <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
+          <span class="sn-icon">🧩</span>
+          <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与接入类型</small></span>
         </button>
         <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
           <span class="sn-icon">🧠</span>
@@ -282,7 +277,7 @@
                 <span>多模态（支持图片输入）</span>
               </label>
               <input id="mf-ctx" class="cap-ctx" type="number" min="1024" step="1"
-                     placeholder="上下文窗口 tokens（留空 = 自动从网关获取）" />
+                     placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
             </div>
           </label>
 
@@ -334,6 +329,20 @@
         选「自定义 JSON」还能直接手写网关需要的字段。
         配置保存在本地 <code>.web-config.json</code>（已 gitignore），优先于 <code>.env</code>。
       </p>
+          </div>
+        </section>
+
+        <section id="settings-view-plugins" class="settings-view hidden" data-settings-panel="plugins" role="tabpanel" aria-labelledby="plugins-title">
+          <div id="plugins-panel" role="region" aria-labelledby="plugins-title">
+            <h2 id="plugins-title">🧩 插件</h2>
+            <p class="settings-sub">扩展 Agent 能力的独立工具与数据源。每项按真实接入方式管理，不把 HTTP / CLI 插件伪装成 MCP。</p>
+            <div class="plugin-transport-guide">
+              <span><b>HTTP</b> 自定义 REST 契约</span>
+              <span><b>CLI</b> 本地子进程</span>
+              <span><b>MCP</b> 标准 server（后续插件使用）</span>
+            </div>
+            <div id="plugin-list" class="plugin-list"></div>
+            <p class="settings-note">当前内置的 RAG 使用自有 HTTP 契约，不是 MCP；如果未来接入的插件声明为 MCP，应使用 MCP server 配置，而不是复用 HTTP 表单。</p>
           </div>
         </section>
 

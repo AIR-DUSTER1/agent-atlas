@@ -16,9 +16,10 @@ import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.j
 import {
   assistantBlockContaining, isContinuationRecord, lastAssistantBlock, mergeAdjacentAssistantBlocks,
 } from "./modules/chat-flow.js";
+import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-2";
+const APP_VERSION = "web-2026-10-26-3";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2289,7 +2290,7 @@ function renderProviderMenu() {
 /* ----- 独立设置页：模型与供应商 / 记忆 / 统计 ----- */
 let settingsFocusProviderId = null; // 从菜单「编辑」进来时高亮的供应商
 
-const SETTINGS_VIEWS = new Set(["models", "memories", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "stats"]);
 
 function isSettingsPageOpen() {
   return Boolean($("settings-page") && !$("settings-page").classList.contains("hidden"));
@@ -2313,10 +2314,60 @@ function showSettingsView(view) {
   if (next === "models") {
     api("/api/config").then(applyConfigState).catch(() => {});
     refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
+  } else if (next === "plugins") {
+    renderPluginCards();
+    loadRag();
+    loadEstate();
   } else if (next === "memories") {
     refreshMemories().catch((err) => memStatus(`✗ ${err.message}`, "err"));
   } else {
     refreshStats();
+  }
+}
+
+/** 插件目录按真实接入类型渲染：HTTP / CLI / MCP 不混用配置方式。 */
+function renderPluginCards() {
+  const list = $("plugin-list");
+  if (!list) return;
+  list.innerHTML = "";
+  for (const plugin of BUILTIN_PLUGINS) {
+    const transport = pluginTransportMeta(plugin.transport);
+    const ready = plugin.id === "rag"
+      ? Boolean(state.rag?.configured)
+      : Boolean(state.estate?.installed);
+    const status = plugin.id === "rag"
+      ? (ready ? "已配置" : "未配置")
+      : (ready ? `已安装${state.estate?.version ? ` ${state.estate.version}` : ""}` : "未安装");
+    const card = document.createElement("article");
+    card.className = "plugin-card";
+    card.dataset.transport = transport.id;
+    card.innerHTML = `
+      <div class="plugin-main">
+        <div class="plugin-icon"></div>
+        <div class="plugin-copy">
+          <div class="plugin-title-row"><h3></h3><span class="plugin-kind"></span></div>
+          <p class="plugin-desc"></p>
+          <div class="plugin-runtime-row"><span class="plugin-runtime"></span><span class="plugin-status"></span></div>
+        </div>
+      </div>
+      <button type="button" class="plugin-manage btn btn-approve"></button>`;
+    card.querySelector(".plugin-icon").textContent = plugin.icon;
+    card.querySelector("h3").textContent = plugin.name;
+    const kind = card.querySelector(".plugin-kind");
+    kind.textContent = transport.label;
+    kind.classList.add(`kind-${transport.id}`);
+    card.querySelector(".plugin-desc").textContent = plugin.description;
+    card.querySelector(".plugin-runtime").textContent = plugin.runtime;
+    const statusEl = card.querySelector(".plugin-status");
+    statusEl.textContent = status;
+    statusEl.classList.toggle("ready", ready);
+    const button = card.querySelector(".plugin-manage");
+    button.textContent = plugin.manageLabel;
+    button.addEventListener("click", () => {
+      if (plugin.id === "rag") openKb();
+      else if (plugin.id === "estate") openEstate();
+    });
+    list.appendChild(card);
   }
 }
 
@@ -2696,9 +2747,12 @@ function renderModelPanel() {
         <button type="button" class="m-del">删除</button>
       </div>`;
     row.querySelector(".m-name").textContent = `${m.modality === "vision" ? "🖼 " : ""}${m.displayName || m.name}`;
+    const contextSource = m.contextWindowSource === "manual"
+      ? "手动"
+      : m.contextWindowSource === "gateway" ? "网关" : "默认";
     row.querySelector(".m-detail").textContent =
       `${m.name} · 思考等级 ${m.reasoningLabel || "供应商默认"}`
-      + (m.manualContextWindow ? ` · 窗口 ${fmtTokens(m.manualContextWindow)}` : m.contextWindow ? ` · 窗口 ${fmtTokens(m.contextWindow)}（网关）` : "");
+      + (m.contextWindow ? ` · 窗口 ${fmtTokens(m.contextWindow)}（${contextSource}）` : "");
     const pick = row.querySelector(".m-pick");
     if (p) {
       pick.addEventListener("click", () => { if (!m.active) activateModel(p.id, m.id); });
@@ -3276,11 +3330,7 @@ function setKbStatus(text, kind) {
 }
 
 function updateKbBadge() {
-  const el = $("kb-entry-state");
-  if (!el) return;
-  const ready = Boolean(state.rag?.configured);
-  el.textContent = ready ? "已连接" : "未配置";
-  el.className = "kb-entry-state" + (ready ? " ready" : "");
+  renderPluginCards();
 }
 
 async function loadRag() {
@@ -3292,8 +3342,9 @@ async function loadRag() {
   updateKbBadge();
 }
 
-function openKb() {
+async function openKb() {
   $("kb-mask").classList.remove("hidden");
+  await loadRag();
   renderKb();
 }
 
@@ -3512,15 +3563,12 @@ async function loadEstate() {
 }
 
 function updateEstateBadge() {
-  const el = $("estate-entry-state");
-  if (!el) return;
-  const st = state.estate || {};
-  el.textContent = st.installed ? `已装 ${st.version || ""}` : "未安装";
-  el.className = "kb-entry-state" + (st.installed ? " ready" : "");
+  renderPluginCards();
 }
 
-function openEstate() {
+async function openEstate() {
   $("estate-mask").classList.remove("hidden");
+  await loadEstate();
   renderEstatePanel();
 }
 
@@ -3991,7 +4039,6 @@ async function init() {
   setupDragDrop();
 
   // 知识库（外部 RAG）：配置 / 测试 / 入库 / 检索 / 清空
-  on("kb-btn", "click", () => { setSidebarOpen(false); openKb(); });
   on("kb-close", "click", closeKb);
   on("kb-mask", "click", (e) => { if (e.target === $("kb-mask")) closeKb(); });
   on("kb-save", "click", saveKbConfig);
@@ -4007,7 +4054,6 @@ async function init() {
   on("kb-clear", "click", clearKb);
 
   // 房产数据源（贝壳 CLI）：面板开关 / 检测 / 安装 / 保存 Key
-  on("estate-btn", "click", () => { setSidebarOpen(false); openEstate(); });
   on("estate-close", "click", closeEstate);
   on("estate-mask", "click", (e) => { if (e.target === $("estate-mask")) closeEstate(); });
   on("estate-check", "click", async () => {

@@ -1209,6 +1209,69 @@ body {
 }
 .settings-sub { margin: 0 0 18px; font-size: 12px; color: var(--text-3); }
 
+/* ---------- 插件目录 ---------- */
+.plugin-transport-guide {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: -4px 0 18px;
+}
+.plugin-transport-guide span {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-3);
+  font-size: 11px;
+}
+.plugin-transport-guide b { color: var(--text-2); }
+.plugin-list { display: grid; gap: 12px; }
+.plugin-card {
+  display: flex; align-items: center; gap: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-input);
+}
+.plugin-main { display: flex; align-items: flex-start; gap: 13px; flex: 1; min-width: 0; }
+.plugin-icon {
+  width: 42px; height: 42px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font-size: 20px;
+}
+.plugin-copy { min-width: 0; }
+.plugin-title-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.plugin-title-row h3 { margin: 0; font-size: 14.5px; color: var(--text); }
+.plugin-kind {
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.plugin-kind.kind-http { color: var(--accent-soft); background: rgba(91,140,255,.1); border-color: rgba(91,140,255,.28); }
+.plugin-kind.kind-cli { color: var(--amber-soft); background: rgba(226,161,60,.1); border-color: rgba(226,161,60,.28); }
+.plugin-kind.kind-mcp { color: var(--accent-2-soft); background: rgba(139,92,246,.1); border-color: rgba(139,92,246,.28); }
+.plugin-desc {
+  margin: 6px 0 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.plugin-runtime-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.plugin-runtime { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+.plugin-status {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(226,161,60,.12);
+  color: var(--amber);
+  font-size: 10.5px;
+}
+.plugin-status.ready { background: rgba(63,185,111,.13); color: var(--green); }
+.plugin-manage { flex: none; margin: 0; }
+
 .field { display: block; margin-bottom: 14px; }
 .field-label {
   display: flex; align-items: center; gap: 8px;
@@ -1705,27 +1768,7 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* ---------- 侧栏「知识库」入口 + 知识库面板（外部 RAG） ---------- */
-.kb-entry {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; margin-top: 8px;
-  padding: 8px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text-2); font-size: 12.5px;
-  font-family: var(--sans); cursor: pointer;
-  transition: all .15s;
-}
-.kb-entry:hover { border-color: var(--accent); color: var(--text); background: rgba(91,140,255,.08); }
-.kb-entry-icon { flex: none; }
-.kb-entry-text { flex: 1; text-align: left; }
-.kb-entry-state {
-  flex: none; font-size: 10px; padding: 2px 7px; border-radius: 5px;
-  background: rgba(226,161,60,.12); color: var(--amber);
-}
-.kb-entry-state.ready { background: rgba(63,185,111,.14); color: var(--green); }
-
+/* ---------- 知识库配置面板（外部 RAG） ---------- */
 #kb-mask {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.55);
@@ -1850,6 +1893,8 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   .settings-nav-item .sn-copy small { display: none; }
   .settings-page-content { padding: 14px 12px 32px; }
   .settings-view { padding: 16px; border-radius: 14px; }
+  .plugin-card { align-items: flex-start; flex-direction: column; }
+  .plugin-manage { width: 100%; }
   .stats-totals { grid-template-columns: repeat(2, 1fr); }
   .bar-label { flex-basis: 70px; }
   .bar-sub { display: none; }

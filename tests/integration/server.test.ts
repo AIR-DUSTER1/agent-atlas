@@ -73,6 +73,11 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(cfg.status, 200);
   assert.equal(cfg.body.mock, true, "测试必须跑在 mock 模式");
   assert.ok(Array.isArray(cfg.body.demos));
+  assert.equal(cfg.body.contextWindow, 200_000, "未配置或网关未知时默认显示 200k");
+  const activeProvider = cfg.body.providers.find((provider: { active: boolean }) => provider.active);
+  const activeModel = activeProvider?.models.find((model: { active: boolean }) => model.active);
+  assert.equal(activeModel?.contextWindow, 200_000);
+  assert.equal(activeModel?.contextWindowSource, "default");
 });
 
 test("会话创建 → chat SSE → transcript 回放", async () => {
@@ -245,7 +250,7 @@ test("静态分发：index 引用 module 脚本，modules/*.js 可达且 MIME �
   const html = await index.text();
   assert.match(html, /<script type="module" src="\/app\.js"><\/script>/);
 
-  for (const file of ["/app.js", "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js"]) {
+  for (const file of ["/app.js", "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js", "/modules/plugin-registry.js"]) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);

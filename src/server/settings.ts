@@ -89,6 +89,9 @@ export interface GatewayModelInfo {
   supportsReasoning?: boolean;
 }
 
+/** 未手填且网关未返回窗口时的安全默认值；仅影响展示与容量条，不发送给模型。 */
+export const DEFAULT_CONTEXT_WINDOW = 200_000;
+
 let providers: Provider[] = [];
 let activeId: string | null = null;
 
@@ -330,8 +333,10 @@ export interface PublicModel {
   displayName: string;
   modality: "text" | "vision";
   manualContextWindow: number | null;
-  /** 该模型实际生效的上下文窗口（手动值优先，其次网关） */
-  contextWindow: number | null;
+  /** 该模型实际生效的上下文窗口（手动 > 网关 > 默认 200k） */
+  contextWindow: number;
+  /** 上下文窗口来源，设置页据此标注“手动 / 网关 / 默认”。 */
+  contextWindowSource: "manual" | "gateway" | "default";
   /** 思考等级设置（auto = 自动识别方言） */
   reasoning: ReasoningSetting;
   /** 解析后的方言 id 与档位（auto 会被解析成具体方言） */
@@ -374,13 +379,20 @@ function toPublicModel(p: Provider, m: ModelEntry): PublicModel {
   const ctx = { baseURL: p.baseURL, model: m.name, protocol: p.protocol };
   const resolved = resolveReasoning(m.reasoning, ctx);
   const gateway = modelInfoCache.get(p.id)?.get(m.name) ?? null;
+  const manualContextWindow = m.manualContextWindow ?? null;
+  const gatewayContextWindow = gateway?.contextWindow ?? null;
+  const contextWindow = manualContextWindow ?? gatewayContextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  const contextWindowSource = manualContextWindow
+    ? "manual"
+    : gatewayContextWindow ? "gateway" : "default";
   return {
     id: m.id,
     name: m.name,
     displayName: m.label || m.name,
     modality: m.modality ?? "text",
-    manualContextWindow: m.manualContextWindow ?? null,
-    contextWindow: m.manualContextWindow ?? gateway?.contextWindow ?? null,
+    manualContextWindow,
+    contextWindow,
+    contextWindowSource,
     reasoning: { ...DEFAULT_REASONING, ...m.reasoning },
     reasoningDialect: resolved.dialect,
     reasoningLevel: resolved.level,
@@ -412,14 +424,14 @@ export function getActiveModality(): "text" | "vision" {
   return activeModelOf(activeProvider())?.modality ?? "text";
 }
 
-/** 启用中「供应商 + 模型」的上下文窗口长度（未知返回 undefined）；
- *  手动填写的值优先于网关 /models 自动获取的 context_length */
+/** 启用中「供应商 + 模型」的上下文窗口长度（手动 > 网关 > 默认 200k）；
+ *  没有任何启用模型时才返回 undefined。 */
 export function getContextWindowForActive(): number | undefined {
   const p = activeProvider();
   const m = activeModelOf(p);
   if (!p || !m) return undefined;
   if (m.manualContextWindow) return m.manualContextWindow;
-  return modelInfoCache.get(p.id)?.get(m.name)?.contextWindow;
+  return modelInfoCache.get(p.id)?.get(m.name)?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 /**
