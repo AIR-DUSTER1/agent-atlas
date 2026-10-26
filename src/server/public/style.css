@@ -209,11 +209,13 @@ body {
 .session-item .s-title {
   font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  padding-right: 20px;
+  /* 始终给右侧操作区留位，悬停时文字和按钮不会互相覆盖 */
+  padding-right: 56px;
 }
 .session-item .s-meta {
   display: flex; align-items: center; gap: 6px;
-  margin-top: 3px;
+  min-width: 0; overflow: hidden;
+  margin-top: 3px; padding-right: 56px;
   font-size: 11px; color: var(--text-3);
 }
 .session-item .s-demo {
@@ -223,16 +225,25 @@ body {
   font-size: 10px;
 }
 .session-item.stale .s-title { color: var(--text-3); text-decoration: line-through; }
-.s-del {
+.s-actions {
   position: absolute; right: 8px; top: 50%;
+  display: flex; align-items: center; gap: 2px;
   transform: translateY(-50%);
+  opacity: 0; pointer-events: none;
+  transition: opacity .12s;
+}
+/* 鼠标悬停展示；键盘 Tab 聚焦按钮时由 focus-within 保持可见 */
+.session-item:hover .s-actions,
+.session-item:focus-within .s-actions {
+  opacity: 1; pointer-events: auto;
+}
+.s-action {
+  flex: 0 0 22px;
   width: 22px; height: 22px;
   border: 0; border-radius: 6px;
   background: transparent; color: var(--text-3);
   cursor: pointer; font-size: 13px; line-height: 1;
-  display: none;
 }
-.session-item:hover .s-del { display: block; }
 .s-del:hover { background: rgba(229,96,79,.18); color: var(--red); }
 
 .side-footer {
@@ -1694,9 +1705,12 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
 }
 .session-tools input:focus { border-color: var(--accent); }
 .session-tools button { flex-shrink: 0; }
-/* 会话项的导出小按钮：与删除同款形态，hover 才显形（与 .s-del 行为一致） */
-.session-item:hover .s-export { display: block; }
-.s-export:hover { color: var(--accent); }
+/* 会话项的导出按钮：与删除按钮共享操作区，由 .s-actions 统一管理和显隐 */
+.s-export:hover { background: rgba(91,140,255,.16); color: var(--accent); }
+/* 触屏设备没有 hover，操作区常显，避免导出/删除不可达 */
+@media (hover: none), (pointer: coarse) {
+  .s-actions { opacity: 1; pointer-events: auto; }
+}
 
 /* ---------- 设置弹窗：备份与恢复 ---------- */
 .backup-head { margin-top: 18px; }

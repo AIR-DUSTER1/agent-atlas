@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-11";
+const APP_VERSION = "web-2026-10-26-12";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -460,21 +460,26 @@ function renderSessionItem(s) {
   }
   item.appendChild(meta);
 
+  const actions = document.createElement("div");
+  actions.className = "s-actions";
+
   const exportBtn = document.createElement("button");
-  exportBtn.className = "s-del s-export";
+  exportBtn.className = "s-action s-export";
   exportBtn.textContent = "⬇";
   exportBtn.title = "导出为 Markdown";
+  exportBtn.setAttribute("aria-label", "导出当前会话为 Markdown");
   exportBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     // 附件下载走浏览器原生（新开同源 URL 触发 Content-Disposition，不打断当前页）
     window.open(`/api/sessions/${s.id}/export`, "_blank");
   });
-  item.appendChild(exportBtn);
+  actions.appendChild(exportBtn);
 
   const del = document.createElement("button");
-  del.className = "s-del";
+  del.className = "s-action s-del";
   del.textContent = "✕";
   del.title = "删除会话";
+  del.setAttribute("aria-label", "删除当前会话");
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
     if (!s.stale) { try { await api(`/api/sessions/${s.id}`, { method: "DELETE" }); } catch { /* 忽略 */ } }
@@ -489,7 +494,8 @@ function renderSessionItem(s) {
       renderSessions();
     }
   });
-  item.appendChild(del);
+  actions.appendChild(del);
+  item.appendChild(actions);
 
   item.addEventListener("click", () => selectSession(s.id));
   return item;

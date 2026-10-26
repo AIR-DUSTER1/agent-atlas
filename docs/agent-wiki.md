@@ -1008,6 +1008,10 @@ turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端
 | 搜索 | 侧栏搜索框纯前端过滤：标题必查，本浏览器缓存的会话块（state.blocks）参与匹配；没有缓存到的会话按标题兜底 —— 不加后端搜索接口，保持零开销 |
 | 批量清理 | `POST /api/sessions/cleanup {daysBefore}`：删除创建超 N 天的会话，内部走 `deleteSession`（journal delete 行 + 持久检查点线程同步清理）+ audit 记条数；路由顺序上必须放在 `sessionMatch` 分支之前（`cleanup` 不能被当成会话 id） |
 
+侧栏会话项的操作按钮统一收进 `.s-actions` 横向 flex 容器，标题与元信息固定预留
+56px；导出和删除不再各自 `position:absolute; right:8px`。按钮默认透明但仍保留 Tab
+焦点，`:focus-within` 时显形；`hover:none` / `pointer:coarse` 设备常显。
+
 坑：IAB 自动化里 `fill("")` 清空搜索框可能不触发 input 事件（真实键盘退格路径
 正常）——自动化清空输入框要用原生 value setter + `InputEvent`，产品代码无此问题。
 
@@ -1499,6 +1503,7 @@ console.log(result.messages.at(-1).content);
 | `/readyz` 在只读 rootfs 下一直 503 | 探针会 `mkdir -p` + `W_OK` 检查配置/journal 目录。K8s `readOnlyRootFilesystem` 时必须把 `/data` 挂成可写卷，否则不是误报而是真实不可用 |
 | 测试跑完后 `.setting/audit.ndjson` 多出 `auth_rejected` | Phase 4 给认证失败加了审计；测试若只隔离 journal/配置，事件会写进开发者真实审计文件。`tests/helpers/server.ts` 必须同时注入 `AUDIT_FILE` 指向临时目录 |
 | 按 Esc 关弹窗报 `uiDialogFinish is not defined` | `ui-dialog.js` 拆分后，全局 keydown 仍调用模块私有函数。模块只导出公开入口，`app.js` 改调 `cancelActiveDialog()`；静态测试同时断言 app 不得引用 `uiDialogFinish` |
+| 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
 | Docker 日志里混入人类横幅 / 非 JSON | 启动横幅、无认证警告、配置抢救提示原来无条件 `console.*`，采集器逐行 `JSON.parse` 会报错。人类提示只在 `stdout/stderr.isTTY` 时输出；配置恢复/启动失败等改走 `log("info"/"warn"/"error", event)`，容器 `docker logs` 才能保持纯 NDJSON |

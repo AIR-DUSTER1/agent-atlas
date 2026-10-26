@@ -95,3 +95,15 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
   assert.match(css, /\.tool-group\[open\]/);
   assert.doesNotMatch(css, /\.tool-drawer|\.drawer-head|\.drawer-items/);
 });
+
+test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
+  const root = new URL("../../src/server/public/", import.meta.url);
+  const app = await readFile(new URL("app.js", root), "utf8");
+  const css = await readFile(new URL("style.css", root), "utf8");
+  assert.match(app, /const actions = document\.createElement\("div"\);\s*actions\.className = "s-actions";/);
+  assert.match(app, /actions\.appendChild\(exportBtn\);\s*[\s\S]*actions\.appendChild\(del\);\s*item\.appendChild\(actions\);/);
+  assert.match(css, /\.s-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*2px/s);
+  assert.match(css, /\.session-item \.s-title\s*\{[^}]*padding-right:\s*56px/s);
+  assert.match(css, /@media \(hover: none\), \(pointer: coarse\)/);
+  assert.doesNotMatch(css, /\.s-del\s*\{[^}]*position:\s*absolute/s, "按钮本体不能各自绝对定位");
+});
