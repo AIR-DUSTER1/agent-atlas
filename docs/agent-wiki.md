@@ -489,11 +489,12 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   `index.html` 用 `<script type="module">`。`static.ts` 白名单只额外放开
   `modules/` 一层子目录，其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
-  （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 7 种 `AgentEvent`
-  （node / token / tool_call / tool_result / interrupt / ai_message / error）。
+  （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 8 种 `AgentEvent`
+  （node / reasoning / token / tool_call / tool_result / interrupt / ai_message / error）。
   内容只认 messages 模式，updates 只取「节点名 + interrupt + 兜底消息」，按消息 id 去重；
-  默认工作流的 `analyze / clarify / review` 是内部节点，token 与整段消息会被过滤，
-  只保留节点徽章和 interrupt（见 §3.20）；
+  默认工作流的 `analyze / clarify / review` 是内部节点，正文 token 与整段消息会被过滤，
+  但供应商原生 `reasoning_content` / thinking block 会作为 `reasoning` 事件保留，
+  供用户按需展开（见 §3.20）；
 - **会话绑定 `sessions.ts`**：每个会话一张图实例，Demo 2/3 的 `thread_id` 绑定会话 id，
   多轮记忆与 interrupt 状态因此得以延续；
 - **在线配置 `settings.ts`（多供应商）**：侧栏左下设置页（⚙）可添加任意多个供应商档案
@@ -705,7 +706,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口与 SVG 图表结构（`settings-page.test.ts` / `stats.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口与 SVG 图表结构（`settings-page.test.ts` / `stats.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -776,8 +777,11 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 **关键坑**：
 
 - `analyze` / `clarify` / `review` 的模型输出是内部 JSON，不能进入对话正文；
-  `server/stream.ts` 按节点名 `INTERNAL_LLM_NODES` 过滤 token 与完整消息，
-  改节点名必须同步改过滤集合；
+  `server/stream.ts` 按节点名 `INTERNAL_LLM_NODES` 过滤正文 token 与完整消息，但原生
+  `reasoning_content` / thinking block 仍以 `reasoning` 事件保留；改节点名必须同步改过滤集合；
+- 思考 content block 必须同时从正文提取里排除（`type=thinking|reasoning`、`thought=true`），
+  否则 Anthropic / Gemini 的思考文本会把最终回答污染；前端用原生 `<details>` 默认折叠，
+  不设置 `open`，点击 summary 才展开，内容用 `textContent` 防止注入；
 - 澄清答案不写入图的 `messages`，而是并入 `requirementBrief` 并保存到
   `clarificationHistory`，供后续轮次的 `analyze` / `agent` 参考；`turnHistory`
   只记一条带括号的审计轮次（回放时可见），不会作为新的用户指令重复喂给模型；
