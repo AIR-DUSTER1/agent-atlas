@@ -56,13 +56,65 @@ interface NormalizeOptions {
 // 小工具
 // ---------------------------------------------------------------------------
 
-/** 把消息 content（string 或 内容块数组）拍平成纯文本 */
+/**
+ * 识别供应商的思考内容块。Anthropic 用 type=thinking，部分兼容网关用
+ * type=reasoning，Gemini 用 thought=true —— 这些内容不能混进最终回答正文。
+ */
+function isReasoningBlock(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const block = value as { type?: unknown; thought?: unknown };
+  return block.thought === true || block.type === "thinking" || block.type === "reasoning" || block.type === "reasoning_content";
+}
+
+/** 从单个 content block 里取纯文本（思考块与正文块共用） */
+function blockText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const block = value as { text?: unknown; thinking?: unknown; reasoning?: unknown; content?: unknown };
+  for (const candidate of [block.text, block.thinking, block.reasoning, block.content]) {
+    if (typeof candidate === "string") return candidate;
+  }
+  return "";
+}
+
+/** 把消息 content（string 或内容块数组）拍平成正文；思考 block 必须排除。 */
 function contentText(content: BaseMessage["content"]): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((p) => (typeof p === "string" ? p : typeof p === "object" && p && "text" in p ? String((p as { text: unknown }).text ?? "") : ""))
+      .filter((part) => !isReasoningBlock(part))
+      .map(blockText)
       .join("");
+  }
+  return "";
+}
+
+/**
+ * 提取供应商原生思考内容。优先 additional_kwargs.reasoning_content（DeepSeek/
+ * OpenCode 等 OpenAI 兼容网关），其次 reasoning 字段与 content 里的 thinking block。
+ * 只在供应商确实返回时产出，不把最终回答或内部 JSON 伪装成思考内容。
+ */
+function reasoningText(msg: unknown): string {
+  if (!msg || typeof msg !== "object") return "";
+  const message = msg as {
+    content?: BaseMessage["content"];
+    additional_kwargs?: { reasoning_content?: unknown; reasoning?: unknown };
+    response_metadata?: { reasoning_content?: unknown };
+  };
+  const direct = [
+    message.additional_kwargs?.reasoning_content,
+    message.additional_kwargs?.reasoning,
+    message.response_metadata?.reasoning_content,
+  ];
+  for (const value of direct) {
+    if (typeof value === "string" && value) return value;
+    if (Array.isArray(value)) {
+      const text = value.map(blockText).join("");
+      if (text) return text;
+    }
+  }
+  if (Array.isArray(message.content)) {
+    return message.content.filter(isReasoningBlock).map(blockText).join("");
   }
   return "";
 }
@@ -203,8 +255,9 @@ export async function* runGraphEvents(
     signal: options.signal,
   });
 
-  const streamedIds = new Set<string>(); // messages 模式已流式输出过的消息 id
-  let streamedSinceBoundary = false;     // 距上个「边界消息」（工具结果等）是否已有流式文本
+  const streamedIds = new Set<string>();          // messages 模式已流式输出过的正文消息 id
+  const streamedReasoningIds = new Set<string>(); // messages 模式已流式输出过的思考消息 id
+  let streamedSinceBoundary = false;              // 距上个「边界消息」（工具结果等）是否已有流式正文
   let toolSeq = 0;                       // 网关不给 tool_call id 时兜底编号
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
   const announcedTools = new Set<string>();
@@ -224,13 +277,20 @@ export async function* runGraphEvents(
     if (mode === "messages" && Array.isArray(payload)) {
       const [msg, meta] = payload as [unknown, Record<string, unknown>];
       const node = nodeLabel(meta);
-      if (node && INTERNAL_LLM_NODES.has(node)) continue;
+      const internalNode = Boolean(node && INTERNAL_LLM_NODES.has(node));
 
       if (msg instanceof AIMessageChunk) {
         // -- token 用量（分片累积合并；Anthropic 系 input/output 分散在多个 chunk）--
         if (node !== usageNode) { usageAccum = null; usageNode = node; }
         usageAccum = mergeUsage(usageAccum, extractUsage(msg));
         if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
+        // -- 原生思考内容：内部 JSON 节点的正文要过滤，但思考过程仍允许用户查看 --
+        const reasoning = reasoningText(msg);
+        if (reasoning) {
+          if (msg.id) streamedReasoningIds.add(msg.id);
+          yield { type: "reasoning", text: reasoning, node };
+        }
+        if (internalNode) continue;
         // -- 文本 token --
         const text = contentText(msg.content);
         if (text) {
@@ -266,6 +326,7 @@ export async function* runGraphEvents(
       }
 
       if (msg instanceof ToolMessage) {
+        if (internalNode) continue;
         // 整条工具结果（id 与 tool_call 配对）
         if (msg.id) streamedIds.add(msg.id);
         streamedSinceBoundary = false;
@@ -313,11 +374,13 @@ export async function* runGraphEvents(
           });
           yield { type: "node", name: nodeKey };
         }
-        if (INTERNAL_LLM_NODES.has(nodeKey)) continue;
-        // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息
+        const internalNode = INTERNAL_LLM_NODES.has(nodeKey);
+        // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息。
+        // 内部 JSON 节点仍会进入循环，以便提取 usage 与原生思考内容，但正文不外泄。
         for (const [, msg] of walkUpdateMessages(nodeKey, update)) {
           if (msg instanceof HumanMessage) continue;
           if (msg instanceof ToolMessage) {
+            if (internalNode) continue;
             if (msg.id) streamedIds.add(msg.id);
             streamedSinceBoundary = false;
             yield {
@@ -333,6 +396,12 @@ export async function* runGraphEvents(
             if (nodeKey !== usageNode) { usageAccum = null; usageNode = nodeKey; }
             usageAccum = mergeUsage(usageAccum, extractUsage(msg));
             if (usageAccum) yield { type: "usage", ...usageAccum, model: usageModel };
+            // 非流式兜底同样保留思考过程；同一消息已流式产出思考时不重复。
+            const reasoning = reasoningText(msg);
+            if (reasoning && !(msg.id && streamedReasoningIds.has(msg.id))) {
+              yield { type: "reasoning", text: reasoning, node: nodeKey.split(":")[0] };
+            }
+            if (internalNode) continue;
             const text = contentText(msg.content);
             if (!text) continue;
             if (msg.id && streamedIds.has(msg.id)) continue; // 已流式输出过 → 去重

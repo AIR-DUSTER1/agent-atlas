@@ -12,6 +12,7 @@
  *
  * 每种事件对应 ZCode 聊天界面里的一块 UI：
  *   node        → 节点执行步骤小徽章（agent / tools / researcher/agent …）
+ *   reasoning   → 供应商原生思考过程（前端默认折叠）
  *   token       → 助手正文流式文本（打字机效果）
  *   tool_call   → 工具调用卡片（参数随流式增量到达，边收边渲染）
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
@@ -50,6 +51,11 @@ export type AgentEvent =
   /** 进入某个图节点（name 可能是 "agent" 或子图路径 "researcher/agent"） */
 
   | { type: "node"; name: string }
+  /**
+   * 模型供应商原生返回的思考过程增量（reasoning_content / thinking block）。
+   * 与 token 分开是为了让前端默认折叠；没有原生思考字段时不会伪造。
+   */
+  | { type: "reasoning"; text: string; node?: string }
   /** 助手文本的流式增量片段 */
   | { type: "token"; text: string; node?: string }
   /**
