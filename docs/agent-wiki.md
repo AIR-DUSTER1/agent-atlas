@@ -1514,6 +1514,11 @@ console.log(result.messages.at(-1).content);
 | 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
+| MCP 测试跑完全部用例却不退出（CI 超时） | 子进程被杀后 Node 侧 `ChildProcess` 仍持有 stdio 的 Socket 句柄。① close 回调必须只删「自己那条」连接（重连竞态下按 id 无条件删会抹掉新连接）；② 等 `close` 事件真正到达；③ `destroy()` stdout/stderr/stdin 三流并 `unref()`。单文件跑正常、全量跑才挂 —— 因为 `node --test` 多文件同进程 |
+| MCP server stdout 打了非 JSON 日志 | MCP 协议规定日志走 stderr、stdout 只走协议流。遇到非 JSON 行只能丢弃并记 `mcp_stdout_non_json` 告警 —— 否则解析器会把日志当成协议消息 |
+| 技能/命令「改了设置页但斜杠菜单没变」 | 前端把命令清单缓存在 composer 模块里。保存/删除后必须重新 `GET /api/commands` 刷新缓存，否则要刷新整页才看得到 |
+| 技能目录写到了 `src/.setting/skills/` | 与 checkpoint 同一个坑：`src/` 顶层文件回退**一层**到仓库根（`join(MODULE_DIR, "..", ".setting", "skills")`）。照抄 `src/server/` 下文件的两层写法会多退一层 |
+| 工具并发后「结果串到别的工具上」 | 并发完成顺序 ≠ 发起顺序。必须按原始 `tool_calls` 下标回填 ToolMessage，否则模型把 A 的结果当成 B 的 |
 | 前端 TS 化后页面白屏、控制台报 `Failed to load module script` | `src/server/public/` 是构建产物且已 gitignore —— 直接 `npm run web` 会读到空目录。`web`/`test`/`desktop` 都挂了 `pre*` 钩子自动构建，但**直接用 `npx tsx src/server/index.ts` 启动**会绕过它，必须先 `npm run build:client` |
 | 后端单测因 `src/client/**` 报类型错 | 测试改了 import 指向 TS 源码后，`tsconfig.json`（后端）也会把前端源码纳入检查。两套配置都要过：`tsc --noEmit`（含 tests）与 `tsc -p tsconfig.client.json --noEmit`（浏览器环境、`lib: DOM`）—— 后者才是前端真正的类型门 |
 | 拆 `app.js` 后结构断言测试全红 | 一批测试用正则匹配源码文本（思考卡必须 default collapsed 等）。拆分后应改读 `tests/helpers/client-source.ts` 的 `readClientSource()`，并在断言里写 TS 签名（`(view: string): void`），别继续匹配无类型参数列表 |
@@ -1584,3 +1589,89 @@ Docker 28.5.1 实测镜像构建、healthcheck、`docker stop` 优雅退出与�
 恢复、日志检索、60 请求资源冒烟）。**未执行**：3 天连续运行、真实反向代理/公网
 链路、子进程超时注入，以及多实例/共享存储（需要产品决策、依赖评审与连续运行
 观测；当前会话、限流、SSE 连接表都在单进程内，`data/` 只能给一个实例用）。
+
+### 3.30 `src/server/mcp.ts` + `mcp-tools.ts` — MCP 客户端（F6）
+
+**问题**：想接入外部工具生态（文件系统 / 数据库 / 浏览器类 MCP server），
+但官方 `@modelcontextprotocol/sdk` 不在运行时依赖白名单里。
+
+**决策：自实现，不引 SDK。** 本项目真正需要的只有「stdio 传输 + 三个方法」
+（initialize / tools/list / tools/call），协议本体是不到 200 行的 JSON-RPC 2.0。
+引 SDK 换来的维护便利抵不上突破零依赖红线的代价；代价是协议演进要自己跟，
+因此只实现 MCP 最稳定的核心子集。
+
+| 层次 | 文件 | 职责 |
+|---|---|---|
+| 连接与协议 | `mcp.ts` | spawn 子进程、按行收发 JSON-RPC、请求 id 配对 + 超时、stderr 尾部留存、断线重连、进程树清理 |
+| 工具包装 | `mcp-tools.ts` | `mcp__<server>__<tool>` 命名、inputSchema → 宽松 zod、结果文本化、审批文案生成 |
+| HTTP | `routes/mcp.ts` | 列表 / 增删改 / 测试连接 |
+| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：连接状态 + 工具清单 + 测试/删除 |
+
+**设计要点**：
+
+- **命名**：统一 `mcp__<server>__<tool>`（与 ZCode 约定一致），与内置工具不会撞车；
+  装配期发现重名直接抛错，不静默覆盖。
+- **风险**：MCP 工具做什么无法静态判定 → **默认全部登记审批**（宁严勿松），
+  可按 server 关（`requireApproval: false`）；只读权限下同样被拒（复用权限矩阵）。
+- **参数 schema**：故意宽松（`z.unknown().optional()` + `passthrough`）。远端 server
+  才是参数权威校验者，本地过严会挡掉合法的宽松调用。
+- **失败降级**：单个 server 连不上只记日志并跳过，绝不让整个服务起不来；
+  工具调用失败返回模型可读中文错误（AGENTS §5.4），不 throw 穿透图。
+- **装配**：agent 层禁止 import `server/*`，所以 `general.ts` 提供
+  `setExternalTools()` 注入槽，由 `index.ts` 启动/变更时推进去 —— 最小耦合。
+
+**踩坑（实测）**：MCP 子进程被杀后，Node 侧 `ChildProcess` 句柄仍持有
+stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退出」**
+（单文件跑正常，全量跑挂到超时）。修法三件套：close 回调只删「自己那条」
+（重连竞态下无条件按 id 删会把新连接抹掉）→ 等 `close` 事件真正到达 →
+`destroy()` 三个 stdio 流并 `unref()` 子进程。
+
+### 3.31 `src/skills.ts` — 技能库（F4）
+
+**问题**：「这类任务该怎么做」的领域指南写在系统提示词里，永远占上下文；
+写成文档又没有加载机制。
+
+**设计**：`.setting/skills/*.md` + 极简 frontmatter，**按关键词命中才注入**。
+
+| 机制 | 实现 |
+|---|---|
+| 格式 | `---` 包起来的 `name` / `description` / `triggers`（逗号或顿号分隔）+ markdown 正文；frontmatter 解析只支持这个子集，**坏格式降级为「无元数据的纯正文」而不报错** |
+| 匹配 | 只看**最近一条用户消息**（不看整段历史 —— 否则旧话题关键词每轮都把技能拽回来）；计分 = 命中关键词数 ×5 + 关键词总长度（越长越具体） |
+| 预算 | 每轮最多 2 个技能、单个正文上限 4000 字符；**未命中返回 null = 零 token 开销** |
+| 缓存 | 目录签名（文件数 + 最新 mtime）比较，目录没变就不重读文件 |
+| 管理 | 设置页「技能库」分区：列表 + 编辑 + 删除；面板显示目录路径，用户也可直接改 `.md` |
+| 示例 | `scripts/example-skills/` 两个打样：写提交信息、排查端口占用 |
+
+**为什么技能是安全的**：它只是**文档**，永不执行。这与 MCP（跑外部程序）和
+自定义命令（只填提示词模板）一起构成「三种扩展机制」的清晰分层。
+
+### 3.32 `src/server/commands.ts` — 用户自定义命令（F5）
+
+**设计**：`.setting/commands.json` 存 `{ name, title, description, template }`，
+前端 `/` 菜单里内置命令在前、用户命令在后。
+
+- **选中只把模板填进输入框，不自动发送** —— 用户能看清将要发给模型的确切内容；
+- 模板支持 `{{selection}}`（当前输入框内容）与 `{{date}}`；
+- 名字白名单 `^[a-z0-9][a-z0-9_-]*$`，且**不能占用内置命令名**（如 `compact`）；
+- 上限：50 条 / 单模板 8000 字符；坏数据（缺字段、非法名）静默丢弃不让设置页炸。
+
+### 3.33 工具批量并发执行（F8 阶段 2）
+
+**问题**：工具节点原本串行 `for` 循环，模型一轮发起多个独立调用（多个
+`delegate_agent`、多个检索）时要排队等。
+
+**设计**：在 `hitl.ts` 的工具节点里分流 ——
+
+| 类别 | 处理 | 理由 |
+|---|---|---|
+| `deny`（只读模式拒绝） | 进并发批次 | 判定即结论，无副作用 |
+| `run`（未登记审批 / auto 模式） | 进并发批次 | 互不依赖，可并行 |
+| `interrupt`（需审批） | **逐个串行** | 一次只给用户看一张卡，否则 interrupt 语义打架 |
+| `assess`（自主模式） | 先评估，高风险转 interrupt（串行），低风险直接执行 | 评估本身就要调模型，串行更安全 |
+
+**结果保序**：并发完成后按原始 `tool_calls` 下标回填 —— 模型读到的顺序与它发起的
+一致（否则「第一个工具的结果」会被标成第二个，模型会张冠李戴）。
+
+**过程可见**：`delegate_agent` 返回结构化 JSON（`durationMs` / `toolsUsed`），
+前端委派卡渲染「委派到哪个 Agent · 耗时 · 用了哪几个工具」。子 Agent 的完整
+对话仍是黑盒，但这两项足以让用户判断结论可信度。

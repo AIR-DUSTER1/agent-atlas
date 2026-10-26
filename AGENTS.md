@@ -35,10 +35,14 @@ src/
   tools.ts         # 基础工具（calculator / 时间 / 天气 / send_email），zod 声明参数
   tools-dev.ts     # 编程开发工具（terminal / read_file / write_file / list_dir / grep_search）
   tools-rag.ts     # 知识检索工具 retrieve_docs（只调 server/rag.ts，不直接碰网络细节）
+  tools-web.ts     # 网页抓取工具 browser_fetch（纯 HTTP + 剥标签；内网默认拒，防 SSRF）
+  skills.ts        # 技能库：扫描 .setting/skills/*.md，按关键词命中注入
+  memory-store.ts  # 跨会话长期记忆（每轮动态注入 system 注记）
   tools-*.ts       # 新增同类工具集按 tools-<主题>.ts 命名，一个文件一个主题
   agent/           # LangGraph 图定义（State/Node/Edge 全在这里；general.ts = 产品默认图）
   cli.ts           # CLI 入口；server/ 不 import cli，cli 可 import 一切
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
+                   #   mcp.ts = MCP 客户端（JSON-RPC over stdio）；commands.ts = 自定义命令
   client/          # 前端源码（TypeScript，唯一真相）
     main.ts        #   入口：初始化与全部 DOM 事件绑定
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
@@ -106,7 +110,17 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
   `hitl.ts` 的 `APPROVAL_TOOLS` 登记（含描述文案）；只读类工具（读/列/搜/检索）不登记、直接执行。
 - 工具执行失败**不要 throw 穿透图**：返回「模型可读的中文错误文本」或 JSON `{error}`，让模型转述。
 
-### 5.5 JSON 序列化陷阱（已踩两次的坑）
+### 5.5 扩展机制三层（改这三处前先想清楚层次）
+
+| 机制 | 是什么 | 是否执行代码 | 风险 |
+|---|---|---|---|
+| 技能 `.setting/skills/*.md` | 按关键词注入的**文档** | ❌ 永不执行 | 只影响提示词 |
+| 自定义命令 `.setting/commands.json` | 输入框里的**提示词模板** | ❌ 只填文本 | 只影响提示词 |
+| MCP server（`server/mcp.ts`） | 外部**程序**（子进程） | ✅ 会跑第三方代码 | 工具默认全登记审批；只接受可信来源 |
+
+新增扩展能力时先判断它属于哪一层：能做成文档/模板的就不要做成程序。
+
+### 5.6 JSON 序列化陷阱（已踩两次的坑）
 - async 导出函数（如 `getRagPublic`）在路由里**必须 await**；
   `JSON.stringify(promise)` 静默得到 `{}`，导致前端数据「凭空消失」。
 - 前端 `innerHTML` 模板搭骨架 + `textContent` 填正文（天然防注入）；
