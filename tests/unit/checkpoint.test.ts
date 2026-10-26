@@ -159,10 +159,14 @@ test("坏行容错：半行 JSON 被跳过，其余行照常回放", async () =>
 test("图级重启续聊：第二个 saver 实例上的新图仍记得第一实例的消息", async () => {
   const dir = await mkdtemp(join(tmpdir(), "agent-ckpt-"));
   const file = join(dir, "checkpoints.ndjson");
+  // 落盘是 fire-and-forget：没有引用的 saver 可能在 rm 之后才把文件写回来
+  // （先删掉 ndjson、再 rmdir 时撞 ENOTEMPTY —— Linux CI 上稳定复现，Windows 上常侥幸赢下竞速）
+  let saverA: PersistentSaver | undefined;
+  let saverB: PersistentSaver | undefined;
   try {
     // —— 第一次「进程生命」：两轮对话落盘 ——
     const round1 = new SpyModel([ANALYSIS_OK, "你好，小明。", REVIEW_OK]);
-    const saverA = new PersistentSaver(file);
+    saverA = new PersistentSaver(file);
     const graphA = createWorkflowGraph(testProfile, spyModels(round1) as never, {
       checkpointer: saverA,
     });
@@ -175,7 +179,7 @@ test("图级重启续聊：第二个 saver 实例上的新图仍记得第一实�
     await saverA.flush();
 
     // —— 第二次「进程生命」：全新 saver + 全新图实例，续问 ——
-    const saverB = new PersistentSaver(file);
+    saverB = new PersistentSaver(file);
     await saverB.loadFromDisk();
     assert.equal(saverB.hasThread(thread), true, "重启前必须已把线程落盘");
     const round2 = new SpyModel([ANALYSIS_OK, "你还记得我。", REVIEW_OK]);
@@ -196,6 +200,9 @@ test("图级重启续聊：第二个 saver 实例上的新图仍记得第一实�
     assert.ok(contents.some((text) => text.includes("我叫小明")));
     assert.ok(contents.some((text) => text.includes("我叫什么名字")));
   } finally {
+    // 必须先等两个实例把在途追加写完再删目录，否则 rmdir 会撞 ENOTEMPTY
+    await saverA?.flush();
+    await saverB?.flush();
     await rm(dir, { recursive: true, force: true });
   }
 });
