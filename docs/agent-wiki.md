@@ -707,7 +707,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用按批次阈值折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用按批次阈值折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、审批/自主权限矩阵与风险审查器（`permission.test.ts` / `tool-risk.test.ts` / `tool-isolation.test.ts`）、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -837,9 +837,9 @@ profile，不判断具体业务名。
 
 ### 3.23 `src/agent/permission.ts` + `src/tools-computer.ts` — 会话权限模式与电脑控制
 
-**permission.ts（纯函数闸门）**：会话级权限模式的单一事实来源，三种裁决 ——
+**permission.ts（纯函数闸门）**：会话级权限模式的单一事实来源，四种裁决 ——
 `readonly`（登记审批的工具 = 改世界操作，一律 `deny`）、`approve`（默认，`interrupt` 审批）、
-`auto`（全部 `run`）。判定基准**复用 profile 的 `approvalDescriptions`**，刻意不维护第二份
+`autonomous`（登记项返回 `assess`，先交给 AI 风险审查）、`auto`（全部 `run`）。判定基准**复用 profile 的 `approvalDescriptions`**，刻意不维护第二份
 「只读禁用清单」：会改世界的操作必然登记审批，两份清单迟早漂移。
 
 链路：前端输入框上方 🛡 chip → `POST /api/sessions/:id/permission` →
@@ -848,6 +848,15 @@ profile，不判断具体业务名。
 → LangGraph 把 configurable 透传给节点函数第二参数 → `hitl.ts` 执行节点逐 call 裁决；
 `workflow.ts` 的 agent 节点同时把权限说明注入 system 注记（readonly 时明确告诉模型别发起写调用）。
 切权限**不需要重建图** —— 全程走 configurable，对下一条消息立即生效。
+
+**tool-risk.ts（自主模式风险评估）**：`createToolRiskAssessor(createChatModel(...))` 为每个
+已登记的工具调用发起一次**不绑定工具**的审查模型请求，输入包含工具名、审批描述、参数和
+当前用户意图；只接受严格 JSON 的 `{"highRisk":boolean,"reason":"..."}`。明确低风险才直接
+执行，高风险则 `interrupt` 并生成审批卡，卡上附 `riskReason`。超时（15s）、异常、坏 JSON、
+缺字段一律 fail-closed 按高风险处理。`createWorkflowGraph` 默认创建审查模型，测试可通过
+`options.riskAssessor` 注入假评估器。审查调用的 usage 通过 ToolMessage 的隐藏元数据回传到
+`stream.ts`，因此会进入统计与上下文计量；节点因 interrupt 恢复而重放时，同 thread + tool call
+的风险结果在内存中复用，避免重复调用分类模型和重复计费。
 
 **tools-computer.ts（零依赖 Computer Use，仅 Windows）**：五个工具全部经
 `powershell.exe` 调 .NET / user32.dll 实现，不引入 robotjs 类原生依赖：
@@ -893,7 +902,7 @@ profile，不判断具体业务名。
   profileId 取 generalProfile / estateProfile —— 静态 import 会成环。工具函数内用
   **动态 `await import()`**（模块缓存无性能损耗）在运行时取 profile；
 - 委派本身登记审批（`delegate_agent` → 「委派 xx 子 Agent 执行：…（一次委派 = 多轮模型调用）」），
-  复用 §3.23 权限三档：readonly 拒 / approve 卡 / auto 直通；
+  复用 §3.23 权限四档：readonly 拒 / approve 卡 / autonomous AI 判风险后放行或审批 / auto 直通；
 - estate 不挂 delegate（域纯粹，不反向委派）—— 工具隔离测试断言。
 
 阶段边界（后续）：同轮多委派并行（tools 节点 Promise.all）、子 Agent token 流转发前端、
