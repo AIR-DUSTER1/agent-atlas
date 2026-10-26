@@ -81,7 +81,7 @@ export async function handleTranscript(res: import("node:http").ServerResponse, 
   res.end(JSON.stringify({ records: getTurnHistory(session), pendingApproval: Boolean(session.pendingApproval) }));
 }
 
-/** POST /api/sessions/:id/permission —— 切换会话权限模式（只读 / 审批 / 自动）
+/** POST /api/sessions/:id/permission —— 切换会话权限模式（只读 / 审批 / 自主 / 自动）
  *  安全边界动作：audit 记会话与模式，不落用户输入之外的敏感内容。 */
 export async function handleSessionPermission(
   res: import("node:http").ServerResponse,

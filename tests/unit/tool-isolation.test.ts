@@ -1,4 +1,4 @@
-﻿/**
+/**
  * tool-isolation.test.ts — Agent profile 工具隔离 / 审批边界回归
  * ============================================================
  * 守三条语义：
@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
-import { MemorySaver } from "@langchain/langgraph";
+import { Command, MemorySaver } from "@langchain/langgraph";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { StructuredToolInterface } from "@langchain/core/tools";
@@ -56,7 +56,7 @@ function toolCall(name: string, args: Record<string, unknown>): AIMessage {
 
 type GraphResult = {
   messages: Array<{ content: unknown; getType?: () => string }>;
-  __interrupt__?: Array<{ value: { type?: string; toolName?: string } }>;
+  __interrupt__?: Array<{ value: { type?: string; toolName?: string; riskReason?: string; args?: Record<string, unknown> } }>;
 };
 
 test("profile 工具集互不越界，审批项都包含在各自 allowlist 内", () => {
@@ -255,4 +255,101 @@ test("源码层不再存在跨域全局工具表", async () => {
   assert.doesNotMatch(hitlSource, /toolsByName|APPROVAL_TOOLS/);
   assert.doesNotMatch(generalSource, /estate\.js|tools-estate|house_(search|appoint|contact)/);
   assert.doesNotMatch(estateSource, /tools-dev|tools-rag|retrieveDocs|sendEmail/);
+});
+test("自主权限：AI 判低风险时直接执行，并把用户意图交给审查器", async () => {
+  let executed = 0;
+  const probe = tool(async () => {
+    executed += 1;
+    return "probe-executed";
+  }, {
+    name: "probe_risky",
+    description: "测试用可选高风险工具",
+    schema: z.object({ target: z.string() }),
+  });
+  const profile = {
+    ...generalProfile,
+    tools: [probe],
+    approvalDescriptions: { probe_risky: (args: Record<string, unknown>) => `处理 ${String(args.target)}` },
+  };
+  let seenIntent = "";
+  const graph = createWorkflowGraph(
+    profile,
+    models(scriptedAgent([toolCall("probe_risky", { target: "safe.txt" }), new AIMessage("已完成")])),
+    {
+      checkpointer: new MemorySaver(),
+      riskAssessor: async (context) => {
+        seenIntent = context.userIntent || "";
+        return { highRisk: false, reason: "仅创建用户指定的可恢复文件" };
+      },
+    }
+  );
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("在项目里创建 safe.txt")] },
+    { configurable: { thread_id: "autonomous-low", permission_mode: "autonomous" } }
+  ) as unknown as GraphResult;
+
+  const toolResult = result.messages.find((message) => message.getType?.() === "tool");
+  assert.ok(toolResult instanceof ToolMessage);
+  assert.equal(String(toolResult.content), "probe-executed");
+  assert.equal(executed, 1);
+  assert.equal(result.__interrupt__, undefined);
+  assert.match(seenIntent, /创建 safe\.txt/);
+});
+
+test("自主权限：AI 判高风险时生成审批申请且不执行工具", async () => {
+  let executed = 0;
+  const probe = tool(async () => {
+    executed += 1;
+    return "must-not-run";
+  }, {
+    name: "probe_risky",
+    description: "测试用可选高风险工具",
+    schema: z.object({ command: z.string() }),
+  });
+  const profile = {
+    ...generalProfile,
+    tools: [probe],
+    approvalDescriptions: { probe_risky: (args: Record<string, unknown>) => `执行 ${String(args.command)}` },
+  };
+  let riskCalls = 0;
+  const graph = createWorkflowGraph(
+    profile,
+    models(scriptedAgent([toolCall("probe_risky", { command: "rm -rf build" }), new AIMessage("已处理")])),
+    {
+      checkpointer: new MemorySaver(),
+      riskAssessor: async () => {
+        riskCalls += 1;
+        return {
+          highRisk: true,
+          reason: "会递归删除构建目录，属于不可逆操作",
+          usage: { inputTokens: 300, outputTokens: 20, totalTokens: 320, cacheReadTokens: 100 },
+        };
+      },
+    }
+  );
+  const config = { configurable: { thread_id: "autonomous-high", permission_mode: "autonomous" } };
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("清理构建目录")] },
+    config
+  ) as unknown as GraphResult;
+
+  assert.equal(executed, 0, "高风险操作必须先审批，不能提前执行");
+  assert.equal(riskCalls, 1);
+  const interrupt = result.__interrupt__?.[0]?.value;
+  assert.equal(interrupt?.type, "approval");
+  assert.equal(interrupt?.toolName, "probe_risky");
+  assert.match(interrupt?.riskReason || "", /不可逆/);
+  assert.equal(interrupt?.args?.command, "rm -rf build");
+
+  const resumed = await graph.invoke(new Command({ resume: "approve" }), config) as unknown as GraphResult;
+  assert.equal(executed, 1, "批准后才执行");
+  assert.equal(riskCalls, 1, "interrupt 恢复重放节点时不能重复调用风险模型");
+  const approvedTool = resumed.messages.find((message) => message.getType?.() === "tool");
+  assert.ok(approvedTool instanceof ToolMessage);
+  assert.deepEqual(approvedTool.additional_kwargs?.riskUsage, {
+    inputTokens: 300,
+    outputTokens: 20,
+    totalTokens: 320,
+    cacheReadTokens: 100,
+  });
 });

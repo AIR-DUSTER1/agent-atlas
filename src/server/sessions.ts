@@ -107,7 +107,7 @@ export interface Session {
   contextSummary: string | null;
   /** 摘要是否已注入当前线程（注入后不再重复占预算） */
   contextSummaryInjected: boolean;
-  /** 会话级权限模式：只读 / 审批（默认）/ 自动 —— 工具执行闸门（permission.ts） */
+  /** 会话级权限模式：只读 / 审批（默认）/ 自主 / 自动 —— 工具执行闸门（permission.ts） */
   permissionMode: PermissionMode;
 }
 

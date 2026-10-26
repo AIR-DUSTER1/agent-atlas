@@ -24,7 +24,7 @@ import {
   Command,
 } from "@langchain/langgraph";
 import { toolsCondition } from "@langchain/langgraph/prebuilt";
-import type { AIMessage, ToolMessage } from "@langchain/core/messages";
+import type { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import { ToolMessage as ToolMessageCls } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { createChatModel } from "../llm.js";
@@ -32,6 +32,7 @@ import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { demoApprovals } from "./approvals.js";
 import { createToolMap, type ApprovalDescriptions } from "./profile.js";
 import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
+import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor } from "./tool-risk.js";
 
 // ---------------------------------------------------------------------------
 // 工具集：多了一个「高风险」的 send_email
@@ -44,6 +45,8 @@ export interface ApprovalRequest {
   toolName: string;
   description: string;
   args: Record<string, unknown>;
+  /** 自主模式下的 AI 风险判断理由；审批卡会显式展示。 */
+  riskReason?: string;
 }
 
 export interface ApprovalToolsNodeOptions {
@@ -51,8 +54,34 @@ export interface ApprovalToolsNodeOptions {
   tools: StructuredToolInterface[];
   /** 需要人工审批的工具名 → 审批文案；未登记的工具直接执行。 */
   approvalDescriptions: ApprovalDescriptions;
+  /** 自主模式的风险评估器；缺失时 fail-closed，登记工具一律申请审批。 */
+  riskAssessor?: ToolRiskAssessor;
+  /** 领域标识，仅用于风险审查提示。 */
+  profileId?: "general" | "estate";
 }
 
+/** 把消息 content 拍平为文本，用于给风险审查器补充当前用户意图。 */
+function messageText(content: BaseMessage["content"]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return "";
+    const block = part as { text?: unknown; content?: unknown };
+    if (typeof block.text === "string") return block.text;
+    if (typeof block.content === "string") return block.content;
+    return "";
+  }).join("");
+}
+
+function lastHumanIntent(messages: BaseMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.getType() !== "human") continue;
+    return messageText(message.content).replace(/\s+/g, " ").trim().slice(0, 2_000);
+  }
+  return "";
+}
 function toolResultText(value: unknown): string {
   if (typeof value === "string") return value;
   if (value == null) return "";
@@ -94,11 +123,14 @@ async function invokeTool(
 // ---------------------------------------------------------------------------
 /** LangGraph 注入节点的 config 子集：只取我们关心的 configurable 权限字段 */
 interface NodeConfig {
-  configurable?: { permission_mode?: PermissionMode };
+  configurable?: { permission_mode?: PermissionMode; thread_id?: string };
 }
 
 export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
   const toolMap = createToolMap(options.tools);
+  // interrupt 恢复会重放节点；同一 thread + tool call 的风险判断必须缓存，避免重复计费。
+  const riskCache = new Map<string, Promise<ToolRiskAssessment>>();
+  const MAX_RISK_CACHE_ENTRIES = 200;
   for (const name of Object.keys(options.approvalDescriptions)) {
     if (!toolMap.has(name)) throw new Error(`Agent 审批项未绑定工具：${name}`);
   }
@@ -107,10 +139,12 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     // 会话级权限模式由 server 经 graph.stream({ configurable }) 传入；
     // 不传 = approve（引入权限模式之前的默认行为，demo / CLI 路径走这里）
     const permissionMode = config?.configurable?.permission_mode;
+    const threadId = config?.configurable?.thread_id || "";
     const lastMessage = state.messages.at(-1) as AIMessage;
     const toolResults: ToolMessage[] = [];
+    const userIntent = lastHumanIntent(state.messages);
 
-    for (const call of lastMessage.tool_calls ?? []) {
+    for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
       const toolFn = toolMap.get(call.name);
       if (!toolFn) {
         // 模型可能伪造或残留旧工具调用：只返回模型可读的拒绝结果，不 throw 穿透图。
@@ -124,20 +158,57 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
       }
 
       const action = resolveToolPermission(permissionMode, call.name, options.approvalDescriptions);
+      const description = options.approvalDescriptions[call.name]?.(call.args as Record<string, unknown>)
+        || `执行工具 ${call.name}`;
+      let shouldInterrupt = action === "interrupt";
+      let riskReason: string | undefined;
+      let riskUsage: ToolRiskAssessment["usage"];
+      let riskCallId: string | undefined;
+      if (action === "assess") {
+        const cacheKey = `${threadId}|${call.id || callIndex}|${call.name}|${JSON.stringify(call.args)}`;
+        let pendingAssessment = riskCache.get(cacheKey);
+        if (!pendingAssessment) {
+          if (riskCache.size >= MAX_RISK_CACHE_ENTRIES) {
+            const oldest = riskCache.keys().next().value;
+            if (oldest) riskCache.delete(oldest);
+          }
+          pendingAssessment = options.riskAssessor
+            ? options.riskAssessor({
+                toolName: call.name,
+                description,
+                args: call.args as Record<string, unknown>,
+                userIntent,
+                profileId: options.profileId,
+              })
+            : Promise.resolve({
+                highRisk: true,
+                reason: "自主风险评估器未配置，已按高风险处理",
+                failed: true,
+              });
+          riskCache.set(cacheKey, pendingAssessment);
+        }
+        const assessment = await pendingAssessment;
+        shouldInterrupt = assessment.highRisk;
+        riskReason = assessment.reason;
+        riskUsage = assessment.usage;
+        riskCallId = `risk:${threadId}:${call.id || callIndex}`;
+      }
+
       let content: ToolInvocationResult["content"];
       let status: "success" | "error" = "success";
       if (action === "deny") {
         // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
         content = readonlyDenyText(call.name);
         status = "error";
-      } else if (action === "interrupt") {
+      } else if (shouldInterrupt) {
         // interrupt() 的参数会原样出现在流输出里（__interrupt__），
         // 返回值则是 CLI / Web 通过 Command({ resume }) 传回来的内容。
         const decision = interrupt<ApprovalRequest, "approve" | "reject">({
           type: "approval",
           toolName: call.name,
-          description: options.approvalDescriptions[call.name](call.args as Record<string, unknown>),
+          description,
           args: call.args as Record<string, unknown>,
+          ...(riskReason ? { riskReason } : {}),
         });
         if (decision === "approve") {
           const result = await invokeTool(toolFn, call.args);
@@ -147,17 +218,22 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           content = `用户拒绝了本次 ${call.name} 操作，不要执行。`;
         }
       } else {
-        // 未登记审批（只读工具）或 auto 权限：直接执行
+        // 未登记审批（只读工具）、自主低风险或 auto 权限：直接执行
         const result = await invokeTool(toolFn, call.args);
         content = result.content;
         status = result.status;
       }
-
       toolResults.push(new ToolMessageCls({
         content,
         tool_call_id: call.id ?? "",
         name: call.name,
         status,
+        ...(riskUsage ? {
+          additional_kwargs: {
+            riskUsage,
+            riskCallId,
+          },
+        } : {}),
       }));
     }
 
@@ -169,7 +245,8 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
 export function createHitlGraph(sessionId?: string) {
   // ★ 模型在建图时创建：Web 端修改供应商/模型后，新建会话即用新配置
   const model = createChatModel(0, { sessionId }).bindTools(tools);
-  const toolsNode = createApprovalToolsNode({ tools, approvalDescriptions: demoApprovals });
+  const riskAssessor = createToolRiskAssessor(createChatModel(0, { sessionId }));
+  const toolsNode = createApprovalToolsNode({ tools, approvalDescriptions: demoApprovals, riskAssessor });
 
   // 节点「agent」：与 Demo 1 相同，让模型决定回答还是调工具
   async function agentNode(state: typeof MessagesAnnotation.State) {

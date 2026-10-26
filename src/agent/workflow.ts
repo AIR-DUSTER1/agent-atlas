@@ -29,6 +29,7 @@ import { getCheckpointSaver } from "../checkpoint.js";
 import { memoryNoteForPrompt } from "../memory-store.js";
 import { buildAgentContext } from "./context-builder.js";
 import { createApprovalToolsNode } from "./hitl.js";
+import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
 import type { AgentProfile } from "./profile.js";
 
@@ -276,7 +277,7 @@ function recentToolResults(messages: BaseMessage[]): string {
 export function createWorkflowGraph(
   profile: AgentProfile,
   models?: WorkflowModels,
-  options?: { checkpointer?: MemorySaver; sessionId?: string }
+  options?: { checkpointer?: MemorySaver; sessionId?: string; riskAssessor?: ToolRiskAssessor }
 ) {
   const tools = profile.tools;
   const modelOptions = { sessionId: options?.sessionId };
@@ -286,9 +287,13 @@ export function createWorkflowGraph(
     ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
   const reviewerModel = models?.reviewer
     ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
+  const riskAssessor = options?.riskAssessor
+    ?? createToolRiskAssessor(createChatModel(0, modelOptions));
   const toolsNode = createApprovalToolsNode({
     tools,
     approvalDescriptions: profile.approvalDescriptions,
+    riskAssessor,
+    profileId: profile.id,
   });
   const analyzePrompt = profile.analystGuidance
     ? `${ANALYZE_PROMPT}\n${profile.analystGuidance}`

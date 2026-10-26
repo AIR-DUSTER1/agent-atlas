@@ -5,6 +5,7 @@
  * 权限模式是「当前会话采用什么权限进行会话」的单一事实来源：
  *   readonly 只读：一切「改世界」工具（= 审批登记项）直接拒绝执行；
  *   approve 审批：默认 —— 审批登记项先 interrupt 等用户点头；
+ *   autonomous 自主：登记项由 AI 判断风险，高风险才 interrupt，低风险直接执行；
  *   auto     自动：全部工具直接执行，不再逐项审批。
  *
  * 判定基准刻意复用 profile 的 approvalDescriptions：会「改世界」的操作
@@ -13,27 +14,29 @@
  */
 import type { ApprovalDescriptions } from "./profile.js";
 
-export type PermissionMode = "readonly" | "approve" | "auto";
+export type PermissionMode = "readonly" | "approve" | "autonomous" | "auto";
 
-/** resolveToolPermission 的三种裁决：直接执行 / 先审批 / 只读拒绝 */
-export type ToolPermissionAction = "run" | "interrupt" | "deny";
+/** 工具裁决：直接执行 / 先审批 / AI 风险评估 / 只读拒绝 */
+export type ToolPermissionAction = "run" | "interrupt" | "assess" | "deny";
 
-export const PERMISSION_MODES: PermissionMode[] = ["readonly", "approve", "auto"];
+export const PERMISSION_MODES: PermissionMode[] = ["readonly", "approve", "autonomous", "auto"];
 
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
   readonly: "只读",
   approve: "审批",
+  autonomous: "自主",
   auto: "自动",
 };
 
 export const PERMISSION_MODE_DESCRIPTIONS: Record<PermissionMode, string> = {
   readonly: "只允许只读工具，写文件 / 执行命令 / 发消息 / 控制电脑一律拒绝",
   approve: "高风险操作执行前弹出审批卡片，人工批准才执行（默认）",
+  autonomous: "AI 判断当前操作风险：高风险才申请人工审批，低风险直接执行（评估失败按高风险）",
   auto: "全部工具直接执行，不再逐项审批（信任当前会话时使用）",
 };
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === "readonly" || value === "approve" || value === "auto";
+  return value === "readonly" || value === "approve" || value === "autonomous" || value === "auto";
 }
 
 /**
@@ -48,6 +51,7 @@ export function resolveToolPermission(
   const registered = Boolean(approvalDescriptions[toolName]);
   if (mode === "readonly") return registered ? "deny" : "run";
   if (mode === "auto") return "run";
+  if (mode === "autonomous") return registered ? "assess" : "run";
   return registered ? "interrupt" : "run";
 }
 
@@ -55,7 +59,7 @@ export function resolveToolPermission(
 export function readonlyDenyText(toolName: string): string {
   return `当前会话为「只读」权限，工具「${toolName}」属于会修改系统的高风险操作，已被拒绝执行。` +
     `请只用只读工具（读文件 / 列目录 / 搜索 / 检索 / 截屏 / 计算等）完成任务，` +
-    `需要写操作时向用户说明：可在输入框上方把权限切回「审批」或「自动」。`;
+    `需要写操作时向用户说明：可在输入框上方把权限切回「审批」「自主」或「自动」。`;
 }
 
 /** 注入 agent 系统提示的权限说明；approve 是默认行为，不额外占 token */
@@ -63,6 +67,11 @@ export function permissionModeNote(mode: PermissionMode | undefined): string {
   if (mode === "readonly") {
     return "【权限模式】当前会话为只读：write_file / terminal / send_email / 电脑控制等" +
       "高风险工具都会被系统直接拒绝，请规划只读方案，不要发起写操作调用。";
+  }
+  if (mode === "autonomous") {
+    return "【权限模式】当前会话为自主执行：系统会让安全审查模型判断登记的高风险工具调用，" +
+      "仅在可能造成不可逆、越权、外部副作用或敏感数据影响时申请人工审批；低风险可直接执行。" +
+      "不要试图绕过审查，也不要重复提交被拒绝的操作。";
   }
   if (mode === "auto") {
     return "【权限模式】当前会话为自动执行：工具调用将直接执行、不再逐项审批。" +

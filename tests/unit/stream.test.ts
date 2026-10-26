@@ -139,3 +139,33 @@ test("stream：重复 usage 快照不重复产出，工具返回后生成新的 
     [160, 30, 40],
   ]);
 });
+
+test("stream：自主审查 usage 从 ToolMessage 转发并跨双流去重", async () => {
+  const toolMessage = new ToolMessage({
+    id: "risk-tool-message",
+    content: "工具完成",
+    tool_call_id: "tool-1",
+    name: "terminal",
+    additional_kwargs: {
+      riskUsage: { inputTokens: 300, outputTokens: 20, totalTokens: 320, cacheReadTokens: 100 },
+      riskCallId: "risk:thread:tool-1",
+    },
+  });
+  const graph = {
+    stream: async () =>
+      (async function* () {
+        yield ["messages", [toolMessage, { langgraph_node: "tools", checkpoint_ns: "tools" }]];
+        yield ["updates", { tools: { messages: [toolMessage] } }];
+      })(),
+  };
+
+  const events: AgentEvent[] = [];
+  for await (const event of runGraphEvents(graph, {}, { threadId: "risk-usage-test" })) {
+    events.push(event);
+  }
+  const usage = events.filter((event) => event.type === "usage");
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].callId, "risk:thread:tool-1");
+  assert.deepEqual([usage[0].inputTokens, usage[0].outputTokens, usage[0].cacheReadTokens], [300, 20, 100]);
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 2);
+});

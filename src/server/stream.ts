@@ -174,6 +174,22 @@ function extractUsage(msg: unknown): {
   return null;
 }
 
+function extractRiskUsage(msg: ToolMessage): { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number; callId?: string } | null {
+  const kwargs = msg.additional_kwargs as {
+    riskUsage?: { inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown; cacheReadTokens?: unknown };
+    riskCallId?: unknown;
+  } | undefined;
+  const usage = kwargs?.riskUsage;
+  if (!usage || typeof usage.inputTokens !== "number") return null;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : 0,
+    totalTokens: typeof usage.totalTokens === "number" ? usage.totalTokens : usage.inputTokens,
+    cacheReadTokens: typeof usage.cacheReadTokens === "number" ? usage.cacheReadTokens : 0,
+    callId: typeof kwargs?.riskCallId === "string" ? kwargs.riskCallId : undefined,
+  };
+}
+
 /** 用量分片合并：分片里的 0 值 / 缺失字段不覆盖已有值（Anthropic 末片 input=0、首片 output=0） */
 function mergeUsage(
   acc: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null,
@@ -257,6 +273,7 @@ export async function* runGraphEvents(
 
   const streamedIds = new Set<string>();          // messages 模式已流式输出过的正文消息 id
   const streamedReasoningIds = new Set<string>(); // messages 模式已流式输出过的思考消息 id
+  const emittedRiskUsageIds = new Set<string>();  // 审查模型 usage 在 messages/updates 双流中的去重
   let streamedSinceBoundary = false;              // 距上个「边界消息」（工具结果等）是否已有流式正文
   let toolSeq = 0;                       // 网关不给 tool_call id 时兜底编号
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
@@ -364,6 +381,12 @@ export async function* runGraphEvents(
             status: msg.status ?? "success",
           });
         }
+        const riskUsage = extractRiskUsage(msg);
+        const riskUsageKey = riskUsage?.callId || msg.id || resultId;
+        if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
+          emittedRiskUsageIds.add(riskUsageKey);
+          yield { type: "usage", ...riskUsage, model: usageModel };
+        }
         yield {
           type: "tool_result",
           id: resultId,
@@ -408,6 +431,12 @@ export async function* runGraphEvents(
             if (internalNode) continue;
             if (msg.id) streamedIds.add(msg.id);
             streamedSinceBoundary = false;
+            const riskUsage = extractRiskUsage(msg);
+            const riskUsageKey = riskUsage?.callId || msg.id || msg.tool_call_id || "risk-usage";
+            if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
+              emittedRiskUsageIds.add(riskUsageKey);
+              yield { type: "usage", ...riskUsage, model: usageModel };
+            }
             yield {
               type: "tool_result",
               id: msg.tool_call_id ?? "",

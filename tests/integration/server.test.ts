@@ -156,6 +156,13 @@ test("权限模式：切换成功 / 坏值 400 / 未知会话 404，列表回显
   assert.equal((await json(`/api/sessions/${id}/permission`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "autonomous" }),
+  })).status, 200);
+  list = await json("/api/sessions");
+  assert.equal(list.body.find((s: any) => s.id === id).permissionMode, "autonomous");
+  assert.equal((await json(`/api/sessions/${id}/permission`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "auto" }),
   })).status, 200);
   list = await json("/api/sessions");

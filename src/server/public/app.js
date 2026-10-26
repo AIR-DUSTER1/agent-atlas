@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-10";
+const APP_VERSION = "web-2026-10-26-11";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -532,12 +532,14 @@ function showChatState(session) {
 }
 
 /* ---------------------------------------------------------------------------
- * 会话权限模式：输入框上方 🛡 chip（只读 / 审批 / 自动），随会话切换联动
- * 只读 = 改世界工具一律拒绝；审批 = 高风险先确认（默认）；自动 = 全部直接执行。
+ * 会话权限模式：输入框上方 🛡 chip（只读 / 审批 / 自主 / 自动），随会话切换联动
+ * 只读 = 改世界工具一律拒绝；审批 = 高风险先确认（默认）；
+ * 自主 = AI 判断当前操作是否高风险；自动 = 全部直接执行。
  * ------------------------------------------------------------------------- */
 const PERMISSION_MODES = [
   { id: "readonly", label: "只读", desc: "只允许只读工具：写文件 / 执行命令 / 发消息 / 控制电脑一律拒绝" },
   { id: "approve", label: "审批", desc: "高风险操作执行前弹审批卡片，人工批准才执行（默认）" },
+  { id: "autonomous", label: "自主", desc: "AI 判断当前操作风险：高风险才申请人工审批，低风险直接执行（评估失败按高风险）" },
   { id: "auto", label: "自动", desc: "全部工具直接执行，不再逐项审批（信任当前会话时使用）" },
 ];
 
@@ -1283,12 +1285,15 @@ function renderApprovalCard(part, el) {
       <span class="approval-chevron">▸</span>
     </button>
     <div class="approval-body">
+      <div class="approval-risk-reason hidden"></div>
       <div class="approval-desc"></div>
       <div class="approval-args"></div>
       <div class="approval-actions"></div>
     </div>`;
-  el.querySelector(".approval-summary-copy strong").textContent = pending ? "需要人工审批" : "人工审批已完成";
-  el.querySelector(".approval-summary-copy small").textContent = req.toolName || "工具操作";
+  el.querySelector(".approval-summary-copy strong").textContent = pending
+    ? (req.riskReason ? "AI 判定高风险 · 需要审批" : "需要人工审批")
+    : "人工审批已完成";
+  el.querySelector(".approval-summary-copy small").textContent = `${req.toolName || "工具操作"}${req.riskReason ? " · 自主评估" : ""}`;
   const verdict = el.querySelector(".approval-verdict");
   verdict.textContent = pending
     ? "待确认"
@@ -1297,6 +1302,9 @@ function renderApprovalCard(part, el) {
         : "此前已处理";
   verdict.classList.toggle("ok", approved);
   verdict.classList.toggle("err", rejected);
+  const riskEl = el.querySelector(".approval-risk-reason");
+  riskEl.classList.toggle("hidden", !req.riskReason);
+  riskEl.textContent = req.riskReason ? `自主风险评估：${req.riskReason}` : "";
   el.querySelector(".approval-desc").textContent = `Agent 请求执行高风险工具「${req.toolName}」：${req.description}`;
   el.querySelector(".approval-args").textContent = JSON.stringify(req.args, null, 2);
   el.querySelector(".approval-summary").addEventListener("click", () => {

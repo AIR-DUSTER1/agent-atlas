@@ -9,7 +9,7 @@
  *   session   会话创建 / 元数据全量（upsert 形）
  *   rename    标题变更
  *   project   项目归属变更
- *   permission 会话权限模式变更（readonly / approve / auto）
+ *   permission 会话权限模式变更（readonly / approve / autonomous / auto）
  *   approval  人工审批 / 需求澄清进入 pending（payload 全量）
  *   decided   用户已做出决定（approve / reject / answered）—— 之后不再改写
  *   delete    会话删除（回放时丢弃，同样也允许 compact 时省空间）
