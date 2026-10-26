@@ -459,10 +459,11 @@ async function routeFromSupervisor(state) {
 Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建步骤**（原生 HTML/CSS/JS + SSE），
 服务端也只用 `node:http`，不引入 Express。
 
-**工具调用卡片**（app.js `mountToolCard`）：每次调用固定生成一张内联卡片，标题直接显示
-工具名、参数首行和运行状态，卡片自身可展开参数与结果。不要再把多张工具卡移动进汇总抽屉：
-那样会把节点徽章 / 思考卡留在原处、工具卡移到别处，既破坏事件时间顺序，也让用户看不出
-到底调用了哪些工具。流式与 journal 历史回放共用同一条 `mountPart` 挂载路径。
+**工具调用卡片**（app.js `mountToolCard` / `groupToolCallsIfNeeded`）：每次调用先按事件顺序
+生成内联卡片，标题直接显示工具名、参数首行和运行状态。某个 `tools` 节点前紧邻的工具卡
+达到 3 个才折叠进该批次的「🔧 tools」分组；1–2 个保持平铺。分组摘要必须列出工具名与重复
+次数（如 `list_dir ×3 · read_file`），不能只显示“N 个工具调用”而隐藏具体内容；展开后卡片
+仍按原顺序可见。流式与 journal 历史回放共用同一条 `mountPart` 挂载路径。
 
 ```
 浏览器 (public/)                       服务端 (index.ts)
@@ -706,7 +707,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用不自动合并（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用按批次阈值折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
