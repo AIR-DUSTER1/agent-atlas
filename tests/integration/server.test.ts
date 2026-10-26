@@ -313,11 +313,19 @@ test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async (
 
   const stats = await json("/api/stats");
   assert.equal(stats.status, 200);
-  assert.ok(stats.body.totals.turns >= 1);
-  assert.ok(stats.body.totals.inputTokens > 0);
-  assert.ok(stats.body.byModel.some((m: { model: string }) => m.model === "模拟模式"), "mock 用量应标注模拟模式");
-  assert.ok(stats.body.byDay.length >= 1);
-  assert.ok(stats.body.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
+  assert.equal(stats.body.ranges.length, 2, "同时返回近 7 天与近 30 天");
+  const week = stats.body.ranges.find((range: { id: string }) => range.id === "7d");
+  const month = stats.body.ranges.find((range: { id: string }) => range.id === "30d");
+  assert.ok(week && month);
+  for (const range of [week, month]) {
+    assert.ok(range.totals.turns >= 1);
+    assert.ok(range.totals.inputTokens > 0);
+    assert.ok(range.byModel.some((m: { model: string }) => m.model === "模拟模式"), "mock 用量应标注模拟模式");
+    assert.equal(range.byDay.at(-1).date, range.endDate, "应补齐到区间结束日");
+    assert.ok(range.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
+  }
+  assert.equal(week.byDay.length, 7);
+  assert.equal(month.byDay.length, 30);
 });
 
 test("会话导出：Markdown 附件可读，含用户话与助手回答", async () => {

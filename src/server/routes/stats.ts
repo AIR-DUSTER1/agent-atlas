@@ -1,30 +1,90 @@
 /**
- * routes/stats.ts — 使用统计（F2）：把 journal 里已有但从未消费的 usage 变成报表
+ * routes/stats.ts — 使用统计：把 journal 已记录的 usage 聚合成可视图表
  * ============================================================
- * GET /api/stats —— 只读聚合，不落任何状态：
- *   totals     总轮次 / 输入输出与缓存 token / 会话数 / 委派次数
- *   byDay      近 30 天每天的轮次与 token（条形图数据源）
- *   byModel    按模型（usage 事件的 model 字段，旧数据归「未知模型」）
- *   topSessions 轮次最多的 8 个会话
- * 数据源是 sessions 的内存 turnHistory（journal 回放后同样在内存），
- * 与逐轮 usage 累加天然一致；空数据返回零值形状，前端不炸。
+ * GET /api/stats 只读，不落任何状态。响应同时给出「近 7 天」与「近 30 天」：
+ *   totals       区间内轮次 / 输入输出与缓存 token / 有记录会话 / 委派次数
+ *   byDay        自然日补齐的每日桶（无数据也返回 0，图表时间轴不断裂）
+ *   byModel      区间内按模型聚合的调用次数与 token
+ *   topSessions  区间内最活跃的会话
+ * 时间窗口按服务器本地自然日计算，包含今天；journal 回放后的 turnHistory 同样计入。
  */
 import { listSessions, type Session, type TurnRecord } from "../sessions.js";
 
-const BY_DAY_WINDOW = 30;   // 按天聚合的回看窗口（天）
-const TOP_SESSIONS = 8;     // 轮次 Top 榜长度
+const RANGE_WINDOWS = [
+  { id: "7d", label: "近 7 天", days: 7 },
+  { id: "30d", label: "近 30 天", days: 30 },
+] as const;
+const TOP_SESSIONS = 8;     // 每个区间最多返回的活跃会话数
 const DELEGATE_TOOL = "delegate_agent";
+const UNKNOWN_MODEL = "未知模型";
+
+type StatsRangeId = (typeof RANGE_WINDOWS)[number]["id"];
 
 interface UsageLite {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  model?: string;
+}
+
+export interface StatsTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  sessions: number;
+  delegateCalls: number;
+}
+
+export interface StatsDayBucket {
+  date: string;
+  turns: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
 }
 
-function isUsageEvent(ev: unknown): ev is UsageLite & { type: "usage"; model?: string } {
+export interface StatsModelBucket {
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+}
+
+export interface StatsRangeResult {
+  id: StatsRangeId;
+  label: string;
+  days: number;
+  startDate: string;
+  endDate: string;
+  totals: StatsTotals;
+  byDay: StatsDayBucket[];
+  byModel: StatsModelBucket[];
+  topSessions: Array<{ sessionId: string; title: string; turns: number; tokens: number }>;
+}
+
+export interface StatsResult {
+  generatedAt: number;
+  ranges: StatsRangeResult[];
+}
+
+function isUsageEvent(ev: unknown): ev is UsageLite & { type: "usage" } {
   if (typeof ev !== "object" || ev === null) return false;
   const rec = ev as { type?: unknown; inputTokens?: unknown };
-  return rec.type === "usage" && typeof rec.inputTokens === "number";
+  return rec.type === "usage" && typeof rec.inputTokens === "number" && Number.isFinite(rec.inputTokens);
+}
+
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function addLocalDays(ts: number, days: number): number {
+  const d = new Date(ts);
+  d.setDate(d.getDate() + days);
+  return d.getTime();
 }
 
 function dayKey(ts: number): string {
@@ -32,49 +92,69 @@ function dayKey(ts: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export interface StatsResult {
-  totals: {
-    turns: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    sessions: number;
-    delegateCalls: number;
-  };
-  byDay: Array<{ date: string; turns: number; inputTokens: number; outputTokens: number }>;
-  byModel: Array<{ model: string; turns: number; inputTokens: number; outputTokens: number }>;
-  topSessions: Array<{ sessionId: string; title: string; turns: number; tokens: number }>;
+function emptyDay(date: string): StatsDayBucket {
+  return { date, turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
 }
 
-/** 聚合纯函数（导出供单测直接构造 Session 断言） */
-export function buildStats(sessions: Session[]): StatsResult {
-  const totals = { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, sessions: 0, delegateCalls: 0 };
-  const dayMap = new Map<string, { turns: number; inputTokens: number; outputTokens: number }>();
-  const modelMap = new Map<string, { turns: number; inputTokens: number; outputTokens: number }>();
-  const sessionRows: Array<{ sessionId: string; title: string; turns: number; tokens: number }> = [];
+/** 单区间聚合；双区间共用同一批 turnHistory，保证口径完全一致。 */
+function buildRange(
+  sessions: Session[],
+  generatedAt: number,
+  definition: (typeof RANGE_WINDOWS)[number],
+): StatsRangeResult {
+  const today = startOfLocalDay(generatedAt);
+  const startAt = addLocalDays(today, -(definition.days - 1));
+  const endExclusiveAt = addLocalDays(today, 1);
+  const dateKeys = Array.from({ length: definition.days }, (_, index) => dayKey(addLocalDays(startAt, index)));
+  const dayMap = new Map(dateKeys.map((date) => [date, emptyDay(date)]));
+  const modelMap = new Map<string, StatsModelBucket>();
+  const sessionRows: StatsRangeResult["topSessions"] = [];
+  const totals: StatsTotals = {
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    sessions: 0,
+    delegateCalls: 0,
+  };
 
   for (const session of sessions) {
     let sessionTurns = 0;
     let sessionTokens = 0;
     for (const record of session.turnHistory as TurnRecord[]) {
+      if (!Number.isFinite(record.startedAt) || record.startedAt < startAt || record.startedAt >= endExclusiveAt) continue;
+      const date = dayKey(record.startedAt);
+      const day = dayMap.get(date);
+      if (!day) continue;
+      day.turns += 1;
       totals.turns += 1;
       sessionTurns += 1;
-      const day = dayMap.get(dayKey(record.startedAt)) ?? { turns: 0, inputTokens: 0, outputTokens: 0 };
-      day.turns += 1;
-      // 同一轮可能有多条 usage（多节点 / 分片），全部累加后按「净增量」进日/模型桶，
-      // 避免同一轮的重复快照把「上下文大小」当成消耗重复计费展示
-      let turnInput = 0;
-      let turnOutput = 0;
+
       for (const ev of record.events) {
         if (isUsageEvent(ev)) {
-          turnInput += ev.inputTokens;
-          turnOutput += ev.outputTokens;
-          totals.cacheReadTokens += ev.cacheReadTokens;
-          const model = ev.model || "未知模型";
-          const bucket = modelMap.get(model) ?? { turns: 0, inputTokens: 0, outputTokens: 0 };
-          bucket.turns += 1;
+          const outputTokens = typeof ev.outputTokens === "number" && Number.isFinite(ev.outputTokens) ? ev.outputTokens : 0;
+          const cacheReadTokens = typeof ev.cacheReadTokens === "number" && Number.isFinite(ev.cacheReadTokens)
+            ? ev.cacheReadTokens
+            : 0;
+          const model = ev.model || UNKNOWN_MODEL;
+          day.inputTokens += ev.inputTokens;
+          day.outputTokens += outputTokens;
+          day.cacheReadTokens += cacheReadTokens;
+          totals.inputTokens += ev.inputTokens;
+          totals.outputTokens += outputTokens;
+          totals.cacheReadTokens += cacheReadTokens;
+          sessionTokens += ev.inputTokens + outputTokens;
+          const bucket = modelMap.get(model) ?? {
+            model,
+            calls: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+          };
+          bucket.calls += 1;
           bucket.inputTokens += ev.inputTokens;
-          bucket.outputTokens += ev.outputTokens;
+          bucket.outputTokens += outputTokens;
+          bucket.cacheReadTokens += cacheReadTokens;
           modelMap.set(model, bucket);
         } else if (
           typeof ev === "object" && ev !== null &&
@@ -84,33 +164,44 @@ export function buildStats(sessions: Session[]): StatsResult {
           totals.delegateCalls += 1;
         }
       }
-      totals.inputTokens += turnInput;
-      totals.outputTokens += turnOutput;
-      sessionTokens += turnInput + turnOutput;
-      day.inputTokens += turnInput;
-      day.outputTokens += turnOutput;
-      dayMap.set(dayKey(record.startedAt), day);
     }
     if (sessionTurns > 0) {
       totals.sessions += 1;
-      sessionRows.push({ sessionId: session.id, title: session.title, turns: sessionTurns, tokens: sessionTokens });
+      sessionRows.push({
+        sessionId: session.id,
+        title: session.title || "未命名会话",
+        turns: sessionTurns,
+        tokens: sessionTokens,
+      });
     }
   }
 
-  const byDay = [...dayMap.entries()]
-    .map(([date, v]) => ({ date, ...v }))
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .slice(-BY_DAY_WINDOW);
-
-  const byModel = [...modelMap.entries()]
-    .map(([model, v]) => ({ model, ...v }))
-    .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens));
-
+  const byModel = [...modelMap.values()].sort((a, b) =>
+    (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens) || b.calls - a.calls
+  );
   const topSessions = sessionRows
     .sort((a, b) => b.turns - a.turns || b.tokens - a.tokens)
     .slice(0, TOP_SESSIONS);
 
-  return { totals, byDay, byModel, topSessions };
+  return {
+    id: definition.id,
+    label: definition.label,
+    days: definition.days,
+    startDate: dateKeys[0],
+    endDate: dateKeys[dateKeys.length - 1],
+    totals,
+    byDay: [...dayMap.values()],
+    byModel,
+    topSessions,
+  };
+}
+
+/** 聚合纯函数（导出供单测固定 generatedAt，避免跨日波动）。 */
+export function buildStats(sessions: Session[], generatedAt = Date.now()): StatsResult {
+  return {
+    generatedAt,
+    ranges: RANGE_WINDOWS.map((definition) => buildRange(sessions, generatedAt, definition)),
+  };
 }
 
 export async function handleStats(res: import("node:http").ServerResponse): Promise<void> {

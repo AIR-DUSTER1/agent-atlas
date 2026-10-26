@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-5";
+const APP_VERSION = "web-2026-10-26-6";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2529,99 +2529,254 @@ async function saveMemoryFromForm() {
   }
 }
 
-/* ----- 使用统计：token 用量 / 按天与模型分布 / 活跃会话 ----- */
+/* ----- 使用统计：近 7 天 / 近 30 天双区间 + 原生 SVG 图表 ----- */
 /* fmtTokens 已由 modules/format.js 导入复用 */
+const SVG_NS = "http://www.w3.org/2000/svg";
+const STATS_RANGE_ORDER = ["7d", "30d"];
+let statsData = null;
+let activeStatsRange = "7d";
 
-function renderStats(data) {
-  const t = data.totals || {};
-  const totals = $("stats-totals");
-  totals.innerHTML = "";
+function statsRangeById(data, id) {
+  return (data?.ranges || []).find((range) => range.id === id) ?? null;
+}
+
+function statsTokens(range) {
+  return (range?.totals?.inputTokens || 0) + (range?.totals?.outputTokens || 0);
+}
+
+function statsEmptyText(text) {
+  const empty = document.createElement("p");
+  empty.className = "memories-empty";
+  empty.textContent = text;
+  return empty;
+}
+
+function renderStatsOverview(data) {
+  const container = $("stats-window-overview");
+  container.innerHTML = "";
+  const ranges = [...(data.ranges || [])].sort(
+    (a, b) => STATS_RANGE_ORDER.indexOf(a.id) - STATS_RANGE_ORDER.indexOf(b.id)
+  );
+  for (const range of ranges) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "stats-window-card" + (range.id === activeStatsRange ? " active" : "");
+    button.dataset.statsRange = range.id;
+    button.setAttribute("aria-pressed", String(range.id === activeStatsRange));
+    button.innerHTML = `
+      <span class="sw-top"><span class="sw-label"></span><span class="sw-arrow">查看明细 →</span></span>
+      <strong class="sw-turns"></strong>
+      <span class="sw-tokens"></span>
+      <span class="sw-sub"></span>`;
+    button.querySelector(".sw-label").textContent = range.label;
+    button.querySelector(".sw-turns").textContent = `${range.totals.turns} 轮`;
+    button.querySelector(".sw-tokens").textContent = `${fmtTokens(statsTokens(range))} tokens`;
+    button.querySelector(".sw-sub").textContent =
+      `${range.totals.sessions} 个会话 · ${range.startDate.slice(5)} ~ ${range.endDate.slice(5)}`;
+    button.addEventListener("click", () => {
+      if (activeStatsRange === range.id) return;
+      activeStatsRange = range.id;
+      renderStatsOverview(data);
+      renderStatsRange(statsRangeById(data, activeStatsRange));
+    });
+    container.appendChild(button);
+  }
+}
+
+function svgElement(name, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
+  return el;
+}
+
+/** 原生 SVG 堆叠柱图：输入在下、输出在上，不引入任何前端依赖。 */
+function renderStatsChart(range) {
+  const container = $("stats-chart");
+  container.innerHTML = "";
+  const rows = range?.byDay || [];
+  const width = 860;
+  const height = 250;
+  const pad = { left: 54, right: 14, top: 16, bottom: 32 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const plotBottom = pad.top + plotHeight;
+  const tokenMax = Math.max(...rows.map((day) => day.inputTokens + day.outputTokens), 1);
+  const svg = svgElement("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    class: "stats-chart-svg",
+    role: "img",
+    "aria-label": `${range?.label || "统计区间"}每日输入与输出 token 柱状图`,
+  });
+
+  for (let index = 0; index <= 4; index += 1) {
+    const ratio = index / 4;
+    const y = pad.top + plotHeight * (1 - ratio);
+    svg.appendChild(svgElement("line", {
+      x1: pad.left, y1: y, x2: width - pad.right, y2: y, class: "stats-grid-line",
+    }));
+    const label = svgElement("text", {
+      x: pad.left - 8, y: y + 3, class: "stats-axis-label", "text-anchor": "end",
+    });
+    label.textContent = fmtTokens(Math.round(tokenMax * ratio));
+    svg.appendChild(label);
+  }
+
+  const gap = plotWidth / Math.max(rows.length, 1);
+  const barWidth = Math.max(3, Math.min(28, gap * 0.62));
+  rows.forEach((day, index) => {
+    const total = day.inputTokens + day.outputTokens;
+    const inputHeight = (day.inputTokens / tokenMax) * plotHeight;
+    const outputHeight = (day.outputTokens / tokenMax) * plotHeight;
+    const totalHeight = inputHeight + outputHeight;
+    const x = pad.left + index * gap + (gap - barWidth) / 2;
+    const group = svgElement("g", { class: "stats-bar-group" });
+    const title = svgElement("title");
+    title.textContent = `${day.date}：输入 ${fmtTokens(day.inputTokens)} · 输出 ${fmtTokens(day.outputTokens)} · 缓存读取 ${fmtTokens(day.cacheReadTokens)} · ${day.turns} 轮`;
+    group.appendChild(title);
+    if (inputHeight > 0) {
+      group.appendChild(svgElement("rect", {
+        x, y: plotBottom - inputHeight, width: barWidth, height: inputHeight,
+        rx: Math.min(3, barWidth / 3), class: "stats-bar-input",
+      }));
+    }
+    if (outputHeight > 0) {
+      group.appendChild(svgElement("rect", {
+        x, y: plotBottom - totalHeight, width: barWidth, height: outputHeight,
+        rx: Math.min(3, barWidth / 3), class: "stats-bar-output",
+      }));
+    }
+    svg.appendChild(group);
+    const showDate = rows.length <= 7 || index === 0 || index === rows.length - 1 || index % 5 === 0;
+    if (showDate) {
+      const label = svgElement("text", {
+        x: x + barWidth / 2, y: height - 9, class: "stats-date-label", "text-anchor": "middle",
+      });
+      label.textContent = day.date.slice(5);
+      svg.appendChild(label);
+    }
+  });
+
+  svg.appendChild(svgElement("line", {
+    x1: pad.left, y1: plotBottom, x2: width - pad.right, y2: plotBottom, class: "stats-axis-line",
+  }));
+  container.appendChild(svg);
+  if (!rows.some((day) => day.inputTokens + day.outputTokens > 0)) {
+    const empty = statsEmptyText("该区间暂无 token 用量；发起对话后会自动出现在这里。");
+    empty.classList.add("stats-chart-empty");
+    container.appendChild(empty);
+  }
+  $("stats-chart-caption").textContent =
+    `${range.startDate.slice(5)} 至 ${range.endDate.slice(5)} · 输入 ${fmtTokens(range.totals.inputTokens)} · 输出 ${fmtTokens(range.totals.outputTokens)}`;
+}
+
+function renderStatsBars(rows) {
+  const container = $("stats-models");
+  container.innerHTML = "";
+  if (!rows.length) {
+    container.appendChild(statsEmptyText("当前区间暂无模型调用记录。"));
+    return;
+  }
+  const max = Math.max(...rows.map((row) => row.inputTokens + row.outputTokens), 1);
+  for (const row of rows) {
+    const total = row.inputTokens + row.outputTokens;
+    const wrap = document.createElement("div");
+    wrap.className = "bar-row";
+    wrap.innerHTML = `
+      <span class="bar-label"></span>
+      <div class="bar-track"><div class="bar-fill"></div></div>
+      <span class="bar-value"></span>
+      <span class="bar-sub"></span>`;
+    wrap.querySelector(".bar-label").textContent = row.model;
+    wrap.querySelector(".bar-fill").style.width = `${Math.round((total / max) * 100)}%`;
+    wrap.querySelector(".bar-value").textContent = fmtTokens(total);
+    wrap.querySelector(".bar-sub").textContent = `${row.calls} 次调用`;
+    wrap.title = `${row.model}\n输入 ${fmtTokens(row.inputTokens)} · 输出 ${fmtTokens(row.outputTokens)} · 缓存读取 ${fmtTokens(row.cacheReadTokens)}`;
+    container.appendChild(wrap);
+  }
+}
+
+function renderStatsSessions(rows) {
+  const container = $("stats-sessions");
+  container.innerHTML = "";
+  if (!rows.length) {
+    container.appendChild(statsEmptyText("当前区间暂无会话记录。"));
+    return;
+  }
+  for (const session of rows) {
+    const row = document.createElement("div");
+    row.className = "stats-session-row";
+    row.innerHTML = `<span class="ss-title"></span><span class="ss-meta"></span>`;
+    row.querySelector(".ss-title").textContent = session.title;
+    row.querySelector(".ss-meta").textContent = `${session.turns} 轮 · ${fmtTokens(session.tokens)} tokens`;
+    container.appendChild(row);
+  }
+}
+
+function renderStatsRange(range) {
+  if (!range) {
+    renderStatsError("没有可展示的统计区间");
+    return;
+  }
+  const totals = range.totals || {};
+  $("stats-selected-title").textContent = `${range.label}明细`;
+  $("stats-range-meta").textContent =
+    `${range.startDate} 至 ${range.endDate} · 按服务器本地自然日统计（含今天）`;
   const cells = [
-    ["轮次", String(t.turns ?? 0)],
-    ["输入 tokens", fmtTokens(t.inputTokens ?? 0)],
-    ["输出 tokens", fmtTokens(t.outputTokens ?? 0)],
-    ["缓存命中", fmtTokens(t.cacheReadTokens ?? 0)],
-    ["有记录会话", String(t.sessions ?? 0)],
-    ["子 Agent 委派", String(t.delegateCalls ?? 0)],
+    ["轮次", String(totals.turns ?? 0)],
+    ["输入 tokens", fmtTokens(totals.inputTokens ?? 0)],
+    ["输出 tokens", fmtTokens(totals.outputTokens ?? 0)],
+    ["缓存读取", fmtTokens(totals.cacheReadTokens ?? 0)],
+    ["有记录会话", String(totals.sessions ?? 0)],
+    ["子 Agent 委派", String(totals.delegateCalls ?? 0)],
   ];
+  const totalsEl = $("stats-totals");
+  totalsEl.innerHTML = "";
   for (const [label, value] of cells) {
     const cell = document.createElement("div");
     cell.className = "stats-cell";
     cell.innerHTML = `<div class="sc-value"></div><div class="sc-label"></div>`;
     cell.querySelector(".sc-value").textContent = value;
     cell.querySelector(".sc-label").textContent = label;
-    totals.appendChild(cell);
+    totalsEl.appendChild(cell);
   }
+  renderStatsChart(range);
+  renderStatsBars(range.byModel || []);
+  renderStatsSessions(range.topSessions || []);
+}
 
-  // 条形图：div 宽度百分比（零依赖），最大值为基准
-  const barRow = (labelText, valueText, ratio, sub) => `
-    <div class="bar-row">
-      <span class="bar-label"></span>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(ratio * 100)}%"></div></div>
-      <span class="bar-value"></span>${sub ? `<span class="bar-sub"></span>` : ""}
-    </div>`;
-
-  const renderBars = (containerId, rows) => {
-    const el = $(containerId);
-    el.innerHTML = "";
-    if (!rows.length) {
-      const empty = document.createElement("p");
-      empty.className = "memories-empty";
-      empty.textContent = "暂无数据（发起几轮对话后这里会出现统计）";
-      el.appendChild(empty);
-      return;
-    }
-    const max = Math.max(...rows.map((r) => r.metric), 1);
-    for (const row of rows) {
-      const wrap = document.createElement("div");
-      wrap.innerHTML = barRow("", "", row.metric / max, row.sub || "");
-      wrap.querySelector(".bar-label").textContent = row.label;
-      wrap.querySelector(".bar-value").textContent = row.value;
-      if (row.sub) wrap.querySelector(".bar-sub").textContent = row.sub;
-      el.appendChild(wrap.firstElementChild);
-    }
-  };
-
-  renderBars("stats-days", (data.byDay || []).map((d) => ({
-    label: d.date.slice(5), // MM-DD
-    metric: d.inputTokens + d.outputTokens,
-    value: fmtTokens(d.inputTokens + d.outputTokens),
-    sub: `${d.turns} 轮`,
-  })));
-  renderBars("stats-models", (data.byModel || []).map((m) => ({
-    label: m.model,
-    metric: m.inputTokens + m.outputTokens,
-    value: fmtTokens(m.inputTokens + m.outputTokens),
-    sub: `${m.turns} 次调用`,
-  })));
-
-  const sessions = $("stats-sessions");
-  sessions.innerHTML = "";
-  if (!(data.topSessions || []).length) {
-    const empty = document.createElement("p");
-    empty.className = "memories-empty";
-    empty.textContent = "暂无会话记录";
-    sessions.appendChild(empty);
+function renderStats(data) {
+  statsData = data;
+  const ranges = data?.ranges || [];
+  if (!ranges.length) {
+    renderStatsError("统计接口未返回时间区间");
     return;
   }
-  for (const s of data.topSessions) {
-    const row = document.createElement("div");
-    row.className = "stats-session-row";
-    row.innerHTML = `<span class="ss-title"></span><span class="ss-meta"></span>`;
-    row.querySelector(".ss-title").textContent = s.title;
-    row.querySelector(".ss-meta").textContent = `${s.turns} 轮 · ${fmtTokens(s.tokens)} tokens`;
-    sessions.appendChild(row);
-  }
+  if (!ranges.some((range) => range.id === activeStatsRange)) activeStatsRange = ranges[0].id;
+  renderStatsOverview(data);
+  renderStatsRange(statsRangeById(data, activeStatsRange));
+  $("stats-updated").textContent = Number.isFinite(data.generatedAt)
+    ? `更新于 ${new Date(data.generatedAt).toLocaleString()}`
+    : "已更新";
+}
+
+function renderStatsError(message) {
+  statsData = null;
+  $("stats-window-overview").innerHTML = "";
+  $("stats-selected-title").textContent = "使用统计";
+  $("stats-range-meta").textContent = "";
+  $("stats-updated").textContent = "";
+  $("stats-totals").innerHTML = "";
+  $("stats-models").innerHTML = "";
+  $("stats-sessions").innerHTML = "";
+  const chart = $("stats-chart");
+  chart.innerHTML = "";
+  chart.appendChild(statsEmptyText(`加载失败：${message}`));
 }
 
 function refreshStats() {
+  $("stats-updated").textContent = "正在加载…";
   api("/api/stats").then(renderStats).catch((err) => {
-    $("stats-totals").innerHTML = "";
-    const empty = document.createElement("p");
-    empty.className = "memories-empty";
-    empty.textContent = `加载失败：${err.message}`;
-    $("stats-days").innerHTML = "";
-    $("stats-days").appendChild(empty);
+    renderStatsError(err.message);
   });
 }
 
@@ -4070,6 +4225,7 @@ async function init() {
   document.querySelectorAll(".settings-nav-item").forEach((btn) => {
     btn.addEventListener("click", () => showSettingsView(btn.dataset.settingsView || "models"));
   });
+  on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", saveMemoryFromForm);
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话

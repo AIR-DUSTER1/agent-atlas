@@ -59,3 +59,19 @@ test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创�
   assert.match(app, /\(p\.id === selectedProviderId \? " active" : ""\)/);
   assert.doesNotMatch(app, /providerFormMode !== "create" && p\.id === selectedProviderId/);
 });
+
+test("使用统计展示近 7 天与近 30 天，并用原生 SVG 图表渲染", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const app = await readFile(new URL("app.js", root), "utf8");
+  assert.match(html, /id="stats-window-overview"/);
+  assert.match(html, /id="stats-chart"/);
+  assert.match(html, /id="stats-refresh"/);
+  assert.match(html, /id="stats-models"/);
+  assert.match(html, /id="stats-sessions"/);
+  assert.doesNotMatch(html, /id="stats-days"/, "旧的单区间按天列表应已移除");
+  assert.match(app, /activeStatsRange = "7d"/);
+  assert.match(app, /function renderStatsChart\(range\)/);
+  assert.match(app, /document\.createElementNS\(SVG_NS/);
+  assert.match(app, /stats-window-card/);
+  assert.match(app, /stats-chart-svg/);
+});
