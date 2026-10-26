@@ -54,7 +54,10 @@ src/
     actions/       #   审批、压缩等动作
     index.html / style.css
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
-desktop/main.cjs   # Electron 主进程（CJS！package.json 是 "type":"module"，桌面端必须 .cjs）
+desktop/           # Electron 桌面端源码（TypeScript）
+  main.ts          #   主进程：子进程托管 Web 服务 + 窗口（编成 ESM .js 运行）
+  preload.ts       #   渲染进程桥（sandbox 下只支持 CJS，构建时编成 preload.cjs）
+  build/           #   ★ 构建产物（npm run build:desktop 生成，gitignore，勿手改）
 docs/              # 公开文档（agent-wiki.md 等），只放用户可读内容
 .plans/            # 开发过程内部文档：架构计划 / 阶段清单 / 攻面分析 / 私有交接。
                    # gitignore 挡住、**永不提交**（本仓库已公开，攻面细节 = 给攻击者的地图）
@@ -152,8 +155,12 @@ session 级；持久化字段的**读取处要兼容字段缺失**（旧配置�
 npm run typecheck            # tsc --noEmit，零报错
 npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
 npm run check:size           # 单文件 ≤500 行门
-node --check desktop/main.cjs           # 桌面端语法门
+npm run build:desktop        # 桌面端构建门：编译 + 自检 main.js / preload.cjs 产物
 ```
+
+桌面端源码已是 TypeScript，`typecheck` 已含 `tsconfig.desktop.json`，因此不再需要
+`node --check` 手查语法；`build:desktop` 在编译之外还会确认两个产物真的生成
+（缺 `preload.cjs` 桌面端会白屏且 preload 失效 —— CI 同步做这一步）。
 
 涉及服务端逻辑 / 新接口时，用**最小手动验证**：启动服务（`$env:PORT=3456` 起临时端口）
 + curl/Invoke-RestMethod 打一遍成功与失败路径；外部依赖（RAG、网关）用「本地 mock
@@ -170,7 +177,7 @@ node --check desktop/main.cjs           # 桌面端语法门
 - **后台进程孤儿**：Shell 工具里 Start-Process / Start-Job 起的服务在命令结束会被杀，
   但 Electron/npx 链可能存活 → 下一轮测试端口被旧进程占用（EADDRINUSE 静默打到旧状态 brilliantly 表现为「数据翻倍」）。
   规则：每轮测试**换端口**，结束后按 `CommandLine` 匹配清理 node 孤儿。
-- Windows 上用 `spawn` 启动 `.cmd`（npx）必须 `shell: true`；杀进程树用 `taskkill /pid X /T /F`（desktop/main.cjs 已示范）。
+- Windows 上用 `spawn` 启动 `.cmd`（npx）必须 `shell: true`；杀进程树用 `taskkill /pid X /T /F`（desktop/main.ts 已示范）。
 - curl.exe 在 PS5.1 里的 JSON 引号极易坏，改用 `Invoke-RestMethod`。
 - Web 服务端口固定 3000、桌面端 3123，测试用 3456+，不抢用户日常进程。
 

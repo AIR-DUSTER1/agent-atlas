@@ -185,10 +185,11 @@ location /api/ {
 
 ## 7. 桌面端打包评估（未实施）
 
-现状：`desktop/main.cjs` 是**开发壳** —— Electron 启动 `npx tsx src/server/index.ts`
+现状：`desktop/main.ts` 是**开发壳** —— Electron 启动 `npx tsx src/server/index.ts`
 子进程（默认 3123 端口），退出时 Windows 同步等待 `taskkill /T /F` 完成，
 避免 npx→tsx→node 树残留。它没有安装包、签名、自动更新，也不经过 §4 的
-优雅退出（`/F` 直接杀）。
+优雅退出（`/F` 直接杀）。源码是 TypeScript，`npm run build:desktop` 编译到
+`desktop/build/`（主进程 ESM `.js` + preload `.cjs`）。
 
 要变成可分发的桌面产品，至少需要：
 

@@ -9,7 +9,7 @@
  *   3. 退出时结束整个子进程树（Windows 上 npx→node→tsx 树要 taskkill /T）。
  *
  * 构建：`npm run build:desktop` 把本文件与 preload 编译到 desktop/build/
- * （主进程 .mjs、preload 必须 .cjs —— sandbox 下 preload 只支持 CJS）。
+ * （主进程 .js（ESM）、preload 必须 .cjs —— sandbox 下 preload 只支持 CJS）。
  * 运行：`npm run desktop`（会先跑 predesktop 构建）。
  * 参数：DESKTOP_PORT 覆盖默认端口；DESKTOP_DEVTOOLS=1 打开 DevTools。
  */

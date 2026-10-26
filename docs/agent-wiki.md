@@ -60,7 +60,9 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 │   └── list-models.ts    # npm run models：查询网关支持的模型列表
 ├── Dockerfile / docker-compose.yml  # 单实例容器部署（/data 数据卷，§3.19）
 ├── desktop/
-│   └── main.cjs          # Electron 桌面端：子进程托管 Web 服务 + 窗口加载（§3.14）
+│   ├── main.ts           # Electron 主进程：子进程托管 Web 服务 + 窗口加载（§3.14）
+│   ├── preload.ts        # 渲染进程最小桥，构建时编成 preload.cjs
+│   └── build/            # 构建产物（npm run build:desktop 生成，gitignore）
 └── src/
     ├── config.ts         # 统一读取 .env 配置
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
@@ -615,9 +617,15 @@ Header: Authorization: Bearer <key>（可留空）
 - *实战坑*：`getRagPublic` 改成 async 后，路由内所有调用点都要 `await`，
   否则 `JSON.stringify(Promise)` 得到 `{}`（注册表一度「凭空消失/翻倍」）。
 
-### 3.14 `desktop/main.cjs` — Electron 桌面端
+### 3.14 `desktop/main.ts` — Electron 桌面端
 
 **策略**：桌面端 = 原生窗口 + 托管已有 Web 服务，前后端逻辑零改动。
+
+**源码与产物**：源码是 TypeScript（`main.ts` + `preload.ts`），`npm run build:desktop`
+编译到 `desktop/build/`（gitignore）。主进程编成 ESM 的 `main.js`（`package.json` 是
+`"type":"module"`）；preload 因 sandbox 只支持 CommonJS，单独用 `module: CommonJS`
+再编一轮并改名 `preload.cjs`。构建末尾自检两个产物都在，缺一个就失败退出 ——
+缺 `preload.cjs` 时桌面端白屏且 `window.desktop` 失效，而进程本身不报错。
 
 - 启动：以子进程拉起 `npx tsx src/server/index.ts`（独立端口 3123，
   与 `npm run web` 的 3000 互不打架；Windows 上 `.cmd` 必须 `shell:true`）；
@@ -1522,7 +1530,7 @@ console.log(result.messages.at(-1).content);
 | 前端 TS 化后页面白屏、控制台报 `Failed to load module script` | `src/server/public/` 是构建产物且已 gitignore —— 直接 `npm run web` 会读到空目录。`web`/`test`/`desktop` 都挂了 `pre*` 钩子自动构建，但**直接用 `npx tsx src/server/index.ts` 启动**会绕过它，必须先 `npm run build:client` |
 | 后端单测因 `src/client/**` 报类型错 | 测试改了 import 指向 TS 源码后，`tsconfig.json`（后端）也会把前端源码纳入检查。两套配置都要过：`tsc --noEmit`（含 tests）与 `tsc -p tsconfig.client.json --noEmit`（浏览器环境、`lib: DOM`）—— 后者才是前端真正的类型门 |
 | 拆 `app.js` 后结构断言测试全红 | 一批测试用正则匹配源码文本（思考卡必须 default collapsed 等）。拆分后应改读 `tests/helpers/client-source.ts` 的 `readClientSource()`，并在断言里写 TS 签名（`(view: string): void`），别继续匹配无类型参数列表 |
-| Electron `desktop/main.cjs` 转 TS 后 preload 失效 | sandbox:true 下 preload **只支持 CommonJS**，而 `package.json` 是 `"type":"module"`。构建必须分两步：主进程编 ESM（`.js`）+ preload 用 `module: CommonJS` 编完改名 `.cjs`（`scripts/build-desktop.ts` 已实现） |
+| 桌面端转 TypeScript 后 preload 失效 | sandbox:true 下 preload **只支持 CommonJS**，而 `package.json` 是 `"type":"module"`。构建必须分两步：主进程编 ESM（`.js`）+ preload 用 `module: CommonJS` 编完改名 `.cjs`（`scripts/build-desktop.ts` 已实现） |
 | `tsc` 报 `Option 'moduleResolution=node10' has been removed` | TypeScript 7 移除了 node10 解析模式。CJS 编译直接省略该项（`module: CommonJS` 自带默认），不要在 tsconfig 里显式写 |
 | 本地 typecheck 报「找不到模块 electron」 | electron 是 devDependency，`npm ci --ignore-scripts` 只跳过二进制；本地精简安装常缺类型。用 `desktop/electron-ambient.d.ts` 最小声明兜底（真实类型存在时自动优先） |
 | CI 上单测报 `ENOTEMPTY: directory not empty, rmdir '/tmp/agent-ckpt-…'`，本地却一直绿 | 检查点落盘是 **fire-and-forget**（写链自吞异常）。测试 `finally` 里直接 `rm` 临时目录时，在途的 `appendFile` 可能后于删除执行，把 ndjson 重新创建出来 → `rmdir` 撞 ENOTEMPTY（先删文件、后删空目录的两步语义）。Windows 上通常侥幸赢下这场竞速，Linux CI 上稳定输。对策：`finally` 里**先 `await saver.flush()`** 再 `rm`（每个在使用的 saver 实例都要等，不只是最后一个）|
