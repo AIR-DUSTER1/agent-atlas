@@ -53,3 +53,14 @@ test("前端恢复流复用原助手块，审批内容样式允许任意长串�
   assert.match(css, /\.approval-args\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(css, /\.approval-card\s*\{[^}]*overflow:\s*hidden/s);
 });
+
+test("审批完成后默认折叠为摘要行，仍可手动展开详情", async () => {
+  const root = new URL("../../src/server/public/", import.meta.url);
+  const app = await readFile(new URL("app.js", root), "utf8");
+  const css = await readFile(new URL("style.css", root), "utf8");
+  assert.match(app, /part\.collapsed = true/);
+  assert.match(app, /class="approval-summary"/);
+  assert.match(app, /class="approval-body"/);
+  assert.match(app, /part\.collapsed = !part\.collapsed/);
+  assert.match(css, /\.approval-card\.collapsed \.approval-body\s*\{\s*display:\s*none/s);
+});

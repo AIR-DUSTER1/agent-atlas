@@ -204,114 +204,144 @@
             <h2 id="models-title">⚙ 模型与供应商</h2>
             <p class="settings-sub">一个供应商 = 一套网关凭据（BASE_URL + Key + 协议），下面可以挂任意多个模型；启用任意「供应商 × 模型」组合即可切换聊天用的模型</p>
 
-            <div class="field-label">供应商列表</div>
-      <div id="provider-list"></div>
-      <button id="add-provider-btn" class="ghost-btn small add-provider">＋ 添加供应商</button>
+            <div class="provider-workspace">
+              <aside class="provider-picker" aria-label="供应商列表">
+                <div class="provider-picker-head">
+                  <div><strong>供应商</strong><span id="provider-count" class="key-state"></span></div>
+                  <button id="add-provider-btn" class="provider-add-btn" type="button" title="添加供应商">＋</button>
+                </div>
+                <div id="provider-list" class="provider-nav-list"></div>
+              </aside>
 
-      <div id="provider-form-wrap" class="hidden">
-        <div class="field-label edit-title">正在编辑：<em id="pf-mode" class="key-state"></em></div>
+              <section class="provider-panel" aria-label="供应商配置与模型">
+                <div id="provider-empty" class="provider-empty">
+                  <span class="provider-empty-icon">☰</span>
+                  <strong>先从左侧选择供应商</strong>
+                  <span>选中后会显示它保存的 Key 状态、网关地址和已配置模型。</span>
+                </div>
 
-        <label class="field">
-          <span class="field-label">名称</span>
-          <input id="pf-name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" />
-        </label>
+                <div id="provider-detail" class="hidden">
+                  <div class="provider-detail-head">
+                    <div class="provider-detail-title">
+                      <div class="provider-detail-name-row">
+                        <h3 id="provider-detail-name"></h3>
+                        <span id="provider-detail-active" class="provider-active-badge hidden">启用中</span>
+                      </div>
+                      <div id="provider-detail-url" class="provider-detail-url"></div>
+                      <div id="provider-detail-badges" class="provider-detail-badges"></div>
+                    </div>
+                    <div class="provider-detail-actions">
+                      <button id="provider-use-btn" type="button" class="ghost-btn small">启用</button>
+                      <button id="provider-edit-btn" type="button" class="ghost-btn small">编辑连接</button>
+                      <button id="provider-delete-btn" type="button" class="ghost-btn small danger-text">删除</button>
+                    </div>
+                  </div>
 
-        <label class="field">
-          <span class="field-label">网关地址 BASE_URL</span>
-          <input id="pf-base-url" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
-        </label>
+                  <div id="provider-form-wrap" class="provider-form hidden">
+                    <div class="field-label edit-title">正在编辑：<em id="pf-mode" class="key-state"></em></div>
 
-        <label class="field">
-          <span class="field-label">API Key <em id="pf-key-state" class="key-state"></em></span>
-          <div class="key-row">
-            <input id="pf-api-key" type="password" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" />
-            <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏">👁</button>
-          </div>
-        </label>
+                    <div class="provider-form-grid">
+                      <label class="field">
+                        <span class="field-label">名称</span>
+                        <input id="pf-name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" />
+                      </label>
 
-        <label class="field">
-          <span class="field-label">请求协议 <em class="key-state">中转站多协议路由时按此决定请求路径</em></span>
-          <select id="pf-protocol" class="pf-select">
-            <option value="openai">OpenAI Chat Completions（默认 · /chat/completions）</option>
-            <option value="openai-responses">OpenAI Responses API（/responses）</option>
-            <option value="anthropic">Anthropic Messages 原生（/v1/messages）</option>
-            <option value="gemini">Gemini 原生 generateContent（/v1beta）</option>
-          </select>
-        </label>
+                      <label class="field">
+                        <span class="field-label">网关地址 BASE_URL</span>
+                        <input id="pf-base-url" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
+                      </label>
+                    </div>
 
-        <!-- ---------- 模型列表：一个供应商可以添加多个模型 ---------- -->
-        <div class="model-section">
-          <div class="field-label model-head">
-            <span>模型列表</span>
-            <em id="pf-model-count" class="key-state"></em>
-          </div>
-          <div id="pf-model-list" class="model-list"></div>
+                    <label class="field">
+                      <span class="field-label">API Key <em id="pf-key-state" class="key-state"></em></span>
+                      <div class="key-row">
+                        <input id="pf-api-key" type="password" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" />
+                        <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏">👁</button>
+                      </div>
+                    </label>
 
-          <div class="key-row model-add-row">
-            <input id="pf-model-new" type="text" spellcheck="false" placeholder="输入模型名（例如 deepseek-v4-pro），或点右侧从网关列表选择" />
-            <button id="pf-fetch-models" type="button" class="ghost-btn small" title="从网关拉取可用模型列表">获取列表</button>
-            <button id="pf-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
-          </div>
-          <div id="gateway-models" class="gw-models"></div>
-        </div>
+                    <label class="field">
+                      <span class="field-label">请求协议 <em class="key-state">中转站多协议路由时按此决定请求路径</em></span>
+                      <select id="pf-protocol" class="pf-select">
+                        <option value="openai">OpenAI Chat Completions（默认 · /chat/completions）</option>
+                        <option value="openai-responses">OpenAI Responses API（/responses）</option>
+                        <option value="anthropic">Anthropic Messages 原生（/v1/messages）</option>
+                        <option value="gemini">Gemini 原生 generateContent（/v1beta）</option>
+                      </select>
+                    </label>
 
-        <!-- ---------- 单个模型编辑面板 ---------- -->
-        <div id="model-form-wrap" class="model-form hidden">
-          <div class="field-label edit-title">正在编辑模型：<em id="mf-mode" class="key-state"></em></div>
+                    <div class="settings-actions">
+                      <button id="pf-test" class="ghost-btn" type="button">测试连接 / 拉取模型</button>
+                      <div class="spacer"></div>
+                      <button id="pf-cancel-edit" class="ghost-btn" type="button">取消</button>
+                      <button id="pf-save" class="btn btn-approve" type="button">保存供应商</button>
+                    </div>
+                  </div>
 
-          <label class="field">
-            <span class="field-label">模型名 MODEL <em class="key-state">真正发给网关的 model 字段</em></span>
-            <input id="mf-name" type="text" spellcheck="false" placeholder="例如 deepseek-v4-pro" />
-          </label>
+                  <div class="model-section">
+                    <div class="field-label model-head">
+                      <span>已配置模型</span>
+                      <em id="pf-model-count" class="key-state"></em>
+                    </div>
+                    <div id="pf-model-list" class="model-list"></div>
 
-          <label class="field">
-            <span class="field-label">显示名 <em class="key-state">可选，留空则显示模型名</em></span>
-            <input id="mf-label" type="text" spellcheck="false" placeholder="例如 V4 Pro（强推理）" />
-          </label>
+                    <div class="key-row model-add-row">
+                      <input id="pf-model-new" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" />
+                      <button id="pf-fetch-models" type="button" class="ghost-btn small" title="从网关拉取可用模型列表">获取列表</button>
+                      <button id="pf-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
+                    </div>
+                    <div id="gateway-models" class="gw-models"></div>
+                  </div>
 
-          <label class="field">
-            <span class="field-label">能力与上下文</span>
-            <div class="cap-row">
-              <label class="cap-check" title="勾选后可附加图片（多模态模型才支持图片输入）">
-                <input id="mf-vision" type="checkbox" />
-                <span>多模态（支持图片输入）</span>
-              </label>
-              <input id="mf-ctx" class="cap-ctx" type="number" min="1024" step="1"
-                     placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
+                  <div id="model-form-wrap" class="model-form hidden">
+                    <div class="field-label edit-title">正在编辑模型：<em id="mf-mode" class="key-state"></em></div>
+
+                    <label class="field">
+                      <span class="field-label">模型名 MODEL <em class="key-state">真正发给网关的 model 字段</em></span>
+                      <input id="mf-name" type="text" spellcheck="false" placeholder="例如 deepseek-v4-pro" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">显示名 <em class="key-state">可选，留空则显示模型名</em></span>
+                      <input id="mf-label" type="text" spellcheck="false" placeholder="例如 V4 Pro（强推理）" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">能力与上下文</span>
+                      <div class="cap-row">
+                        <label class="cap-check" title="勾选后可附加图片（多模态模型才支持图片输入）">
+                          <input id="mf-vision" type="checkbox" />
+                          <span>多模态（支持图片输入）</span>
+                        </label>
+                        <input id="mf-ctx" class="cap-ctx" type="number" min="1024" step="1"
+                               placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
+                      </div>
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">思考等级划分方式 <em id="mf-dialect-hint" class="key-state"></em></span>
+                      <select id="mf-dialect" class="pf-select"></select>
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">思考等级 <em class="key-state">档位随「划分方式」变化 —— 每家供应商的划分并不一样</em></span>
+                      <select id="mf-level" class="pf-select"></select>
+                    </label>
+
+                    <textarea id="mf-custom" class="reason-custom hidden" rows="2" spellcheck="false"
+                              placeholder='自定义 JSON，例如 {"reasoning": {"effort": "high"}}'></textarea>
+                    <p id="mf-scheme" class="reason-scheme"></p>
+
+                    <div class="settings-actions">
+                      <button id="mf-activate" class="ghost-btn" type="button">设为启用模型</button>
+                      <div class="spacer"></div>
+                      <button id="mf-delete" class="ghost-btn" type="button">删除模型</button>
+                      <button id="mf-save" class="btn btn-approve" type="button">保存模型</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
-          </label>
-
-          <label class="field">
-            <span class="field-label">思考等级划分方式 <em id="mf-dialect-hint" class="key-state"></em></span>
-            <select id="mf-dialect" class="pf-select"></select>
-          </label>
-
-          <label class="field">
-            <span class="field-label">思考等级 <em class="key-state">档位随「划分方式」变化 —— 每家供应商的划分并不一样</em></span>
-            <select id="mf-level" class="pf-select"></select>
-          </label>
-
-          <textarea id="mf-custom" class="reason-custom hidden" rows="2" spellcheck="false"
-                    placeholder='自定义 JSON，例如 {"reasoning": {"effort": "high"}}'></textarea>
-          <p id="mf-scheme" class="reason-scheme"></p>
-
-          <div class="settings-actions">
-            <button id="mf-activate" class="ghost-btn">设为启用模型</button>
-            <div class="spacer"></div>
-            <button id="mf-delete" class="ghost-btn">删除模型</button>
-            <button id="mf-save" class="btn btn-approve">保存模型</button>
-          </div>
-        </div>
-
-        <!-- 供应商本身的保存按钮放在最后：先填网关、再管模型，最后一起保存 -->
-        <div class="settings-actions">
-          <button id="pf-test" class="ghost-btn">测试连接 / 拉取模型</button>
-          <div class="spacer"></div>
-          <button id="pf-cancel-edit" class="ghost-btn">取消编辑</button>
-          <button id="pf-save" class="btn btn-approve">保存供应商</button>
-        </div>
-      </div>
-
       <div id="settings-status" class="settings-status"></div>
 
       <!-- ---------- 备份与恢复（F9）：整机本地状态快照 ---------- -->

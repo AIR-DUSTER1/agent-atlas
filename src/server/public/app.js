@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-3";
+const APP_VERSION = "web-2026-10-26-4";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -1209,16 +1209,46 @@ function updateToolCard(part) {
 
 function renderApprovalCard(part, el) {
   const req = part.req;
+  const pending = part.status === "pending";
+  if (!pending && part.collapsed === undefined) part.collapsed = true;
+  const collapsed = Boolean(part.collapsed);
+  const approved = part.status === "approved" || part.status === "resolved";
+  const rejected = part.status === "rejected";
+  el.classList.toggle("done-approve", approved);
+  el.classList.toggle("done-reject", rejected);
+  el.classList.toggle("collapsed", collapsed);
   el.innerHTML = `
-    <div class="approval-title">🛂 需要人工审批（Human-in-the-loop）</div>
-    <div class="approval-desc"></div>
-    <div class="approval-args"></div>
-    <div class="approval-actions"></div>`;
+    <button type="button" class="approval-summary" aria-expanded="${!collapsed}">
+      <span class="approval-summary-icon">🛂</span>
+      <span class="approval-summary-copy"><strong></strong><small></small></span>
+      <span class="approval-verdict"></span>
+      <span class="approval-chevron">▸</span>
+    </button>
+    <div class="approval-body">
+      <div class="approval-desc"></div>
+      <div class="approval-args"></div>
+      <div class="approval-actions"></div>
+    </div>`;
+  el.querySelector(".approval-summary-copy strong").textContent = pending ? "需要人工审批" : "人工审批已完成";
+  el.querySelector(".approval-summary-copy small").textContent = req.toolName || "工具操作";
+  const verdict = el.querySelector(".approval-verdict");
+  verdict.textContent = pending
+    ? "待确认"
+    : part.status === "approved" ? "✅ 已批准"
+      : part.status === "rejected" ? "🚫 已拒绝"
+        : "此前已处理";
+  verdict.classList.toggle("ok", approved);
+  verdict.classList.toggle("err", rejected);
   el.querySelector(".approval-desc").textContent = `Agent 请求执行高风险工具「${req.toolName}」：${req.description}`;
   el.querySelector(".approval-args").textContent = JSON.stringify(req.args, null, 2);
-  const actions = el.querySelector(".approval-actions");
+  el.querySelector(".approval-summary").addEventListener("click", () => {
+    part.collapsed = !part.collapsed;
+    renderApprovalCard(part, el);
+    saveLocal();
+  });
 
-  if (part.status === "pending") {
+  const actions = el.querySelector(".approval-actions");
+  if (pending) {
     const ok = document.createElement("button");
     ok.className = "btn btn-approve";
     ok.textContent = "✓ 批准并执行";
@@ -1229,17 +1259,9 @@ function renderApprovalCard(part, el) {
     no.addEventListener("click", () => decideApproval(part, "rejected"));
     actions.append(ok, no);
   } else {
-    const resolved = part.status === "resolved";
-    el.classList.add(part.status === "approved" || resolved ? "done-approve" : "done-reject");
-    const v = document.createElement("div");
-    v.className = "approval-verdict";
-    v.textContent = resolved
-      ? "此前已处理"
-      : part.status === "approved" ? "✅ 你批准了本次操作" : "🚫 你拒绝了本次操作";
-    actions.appendChild(v);
+    actions.remove();
   }
 }
-
 /* ---------------------------------------------------------------------------
  * 流式事件挂载（增量）
  * ------------------------------------------------------------------------- */
@@ -1954,10 +1976,7 @@ function applyConfigState(cfg) {
   renderProviderMenu();
   renderComposerBar();
   updateContextBar();
-  if (isSettingsPageOpen()) {
-    renderProviderList();
-    if (!$("provider-form-wrap").classList.contains("hidden")) renderModelPanel();
-  }
+  if (isSettingsPageOpen()) renderProviderList();
 }
 
 /* ---------------------------------------------------------------------------
@@ -2606,66 +2625,126 @@ function refreshStats() {
   });
 }
 
-function renderProviderList() {
-  const list = $("provider-list");
-  list.innerHTML = "";
-  const providers = state.config?.providers || [];
-  for (const p of providers) {
-    const row = document.createElement("div");
-    row.className = "provider-row" + (p.active ? " active" : "")
-      + (settingsFocusProviderId === p.id ? " focused" : "");
-    row.innerHTML = `
-      <div class="p-info">
-        <div class="p-name"><span class="nm"></span><span class="p-badge ${p.hasKey ? "" : "nokey"}">${p.hasKey ? "✓ Key" : "无 Key"}</span>${p.protocol && p.protocol !== "openai" ? `<span class="p-badge proto">${PROTOCOL_LABEL[p.protocol] || p.protocol}</span>` : ""}${p.active ? '<span class="p-badge">启用中</span>' : ""}</div>
-        <div class="p-detail"></div>
-      </div>
-      <div class="p-actions">
-        <button class="p-use ${p.active ? "in-use" : ""}">${p.active ? "使用中" : "启用"}</button>
-        <button class="p-edit">编辑</button>
-        ${providers.length > 1 ? '<button class="p-del">删除</button>' : ""}
-      </div>`;
-    row.querySelector(".nm").textContent = p.name;
-    row.querySelector(".p-detail").textContent = `${p.baseURL} · ${(p.models || []).length} 个模型`;
-    if (!p.active) row.querySelector(".p-use").addEventListener("click", () => activateModel(p.id, null));
-    row.querySelector(".p-edit").addEventListener("click", () => openProviderForm(p.id));
-    const del = row.querySelector(".p-del");
-    if (del) del.addEventListener("click", () => removeProvider(p.id, p.name));
+function selectedProvider() {
+  return (state.config?.providers || []).find((provider) => provider.id === selectedProviderId) ?? null;
+}
 
-    // 模型 chips：点一下就把「该供应商的这个模型」设为启用
-    const chips = document.createElement("div");
-    chips.className = "p-models";
-    for (const m of p.models || []) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "p-model-chip" + (p.active && m.active ? " active" : "");
-      chip.title = `${m.name}\n思考等级：${m.reasoningLabel}（${m.reasoningDialect}）`;
-      chip.textContent = `${p.active && m.active ? "✓ " : ""}${m.displayName}${reasoningTag(m) ? ` · ${reasoningTag(m)}` : ""}`;
-      chip.addEventListener("click", async () => {
-        if (!(p.active && m.active)) await activateModel(p.id, m.id);
-        else openProviderForm(p.id, m.id);
-      });
-      chips.appendChild(chip);
-    }
-    if (!(p.models || []).length) {
-      const none = document.createElement("span");
-      none.className = "p-model-none";
-      none.textContent = "还没有模型，点「编辑」添加";
-      chips.appendChild(none);
-    }
-    row.querySelector(".p-info").appendChild(chips);
-    list.appendChild(row);
+/** 首次进入设置页优先选中“启用中”供应商；菜单定位优先。 */
+function ensureProviderSelection() {
+  const providers = state.config?.providers || [];
+  if (settingsFocusProviderId && providers.some((provider) => provider.id === settingsFocusProviderId)) {
+    selectedProviderId = settingsFocusProviderId;
+    settingsFocusProviderId = null;
   }
-  if (settingsFocusProviderId) {
-    const el = list.querySelector(".provider-row.focused");
-    if (el) el.scrollIntoView({ block: "nearest" });
+  if (!selectedProviderId || !providers.some((provider) => provider.id === selectedProviderId)) {
+    selectedProviderId = providers.find((provider) => provider.active)?.id ?? providers[0]?.id ?? null;
   }
 }
 
+function selectProvider(providerId) {
+  if (!providerId) return;
+  if (editingProviderId && editingProviderId !== providerId) {
+    providerFormMode = null;
+    editingProviderId = null;
+    pendingModels = [];
+    gatewayModels = [];
+    $("provider-form-wrap").classList.add("hidden");
+    closeModelForm();
+  }
+  selectedProviderId = providerId;
+  settingsFocusProviderId = null;
+  renderProviderList();
+  renderProviderDetail();
+}
+
+/** 左栏只放供应商导航；详情与模型全部收进右栏，降低首次配置认知负担。 */
+function renderProviderList() {
+  const list = $("provider-list");
+  if (!list) return;
+  ensureProviderSelection();
+  const providers = state.config?.providers || [];
+  const count = $("provider-count");
+  if (count) count.textContent = `${providers.length} 个`;
+  list.innerHTML = "";
+
+  for (const p of providers) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "provider-nav-item"
+      + (providerFormMode !== "create" && p.id === selectedProviderId ? " active" : "")
+      + (p.active ? " in-use" : "");
+    button.innerHTML = `
+      <span class="provider-nav-dot"></span>
+      <span class="provider-nav-copy">
+        <span class="provider-nav-name"></span>
+        <span class="provider-nav-url"></span>
+      </span>
+      <span class="provider-nav-count"></span>`;
+    button.querySelector(".provider-nav-name").textContent = p.name;
+    button.querySelector(".provider-nav-url").textContent = p.baseURL;
+    button.querySelector(".provider-nav-count").textContent = `${(p.models || []).length} 模型`;
+    button.title = `${p.name}\n${p.baseURL}`;
+    button.addEventListener("click", () => selectProvider(p.id));
+    list.appendChild(button);
+  }
+  renderProviderDetail();
+}
+
+function detailBadge(text, cls = "") {
+  const span = document.createElement("span");
+  span.className = "provider-detail-badge" + (cls ? " " + cls : "");
+  span.textContent = text;
+  return span;
+}
+
+/** 右栏：所选供应商概览 + 操作 + 模型列表；新增时同一区域变为创建向导。 */
+function renderProviderDetail() {
+  const detail = $("provider-detail");
+  const empty = $("provider-empty");
+  if (!detail || !empty) return;
+  const creating = providerFormMode === "create";
+  const p = creating ? null : selectedProvider();
+  if (!p && !creating) {
+    empty.classList.remove("hidden");
+    detail.classList.add("hidden");
+    return;
+  }
+
+  empty.classList.add("hidden");
+  detail.classList.remove("hidden");
+  const providers = state.config?.providers || [];
+  $("provider-detail-name").textContent = creating ? "新增供应商" : p.name;
+  $("provider-detail-url").textContent = creating
+    ? "先填写网关连接，再添加至少一个初始模型"
+    : p.baseURL;
+  const activeBadge = $("provider-detail-active");
+  activeBadge.classList.toggle("hidden", creating || !p.active);
+  const badges = $("provider-detail-badges");
+  badges.innerHTML = "";
+  if (!creating) {
+    badges.appendChild(detailBadge(p.hasKey ? "✓ Key 已保存" : "无 Key", p.hasKey ? "ok" : "warn"));
+    if (p.protocol !== "openai") badges.appendChild(detailBadge(PROTOCOL_LABEL[p.protocol] || p.protocol, "proto"));
+    badges.appendChild(detailBadge(`${(p.models || []).length} 个模型`));
+  }
+
+  const useBtn = $("provider-use-btn");
+  const editBtn = $("provider-edit-btn");
+  const delBtn = $("provider-delete-btn");
+  for (const btn of [useBtn, editBtn, delBtn]) btn.classList.toggle("hidden", creating);
+  if (!creating) {
+    useBtn.textContent = p.active ? "使用中" : "启用";
+    useBtn.disabled = Boolean(p.active);
+    delBtn.classList.toggle("hidden", providers.length <= 1);
+  }
+  renderModelPanel();
+}
 /* ----- 模型与供应商分区：编辑表单（供应商 + 模型列表 + 单个模型编辑） ----- */
-let editingProviderId = null; // null = 新增模式，否则为正在编辑的供应商 id
-let editingModelId = null;    // 正在「模型编辑面板」里编辑的模型 id
-let pendingModels = [];       // 新增供应商模式下待提交的模型（[{name, modality, contextWindow}]）
-let gatewayModels = [];       // 最近一次「获取列表」拿到的网关模型（[{id, contextWindow, supportsVision}]）
+let selectedProviderId = null;   // 左栏当前选中的供应商
+let providerFormMode = null;     // null / "edit" / "create"
+let editingProviderId = null;    // 供应商表单正在编辑的 id；create 模式为 null
+let editingModelId = null;       // 正在「模型编辑面板」里编辑的模型 id
+let pendingModels = [];          // 新增供应商模式下待提交的模型
+let gatewayModels = [];          // 最近一次「获取列表」拿到的网关模型
 
 function currentEditingProvider() {
   return editingProviderId ? (state.config?.providers || []).find((x) => x.id === editingProviderId) : null;
@@ -2677,7 +2756,9 @@ function currentEditingModel() {
 }
 
 function openProviderForm(providerId, focusModelId) {
+  providerFormMode = providerId ? "edit" : "create";
   editingProviderId = providerId || null;
+  selectedProviderId = providerId || null;
   editingModelId = null;
   const p = currentEditingProvider();
   $("pf-mode").textContent = p ? p.name : "新增供应商";
@@ -2691,35 +2772,42 @@ function openProviderForm(providerId, focusModelId) {
   $("pf-key-state").className = "key-state" + (p?.hasKey ? " ok" : "");
   $("pf-model-new").value = "";
   gatewayModels = [];
-  renderGatewayModels();
   if (!p) pendingModels = [];
-  renderModelPanel();
-  closeModelForm();
-  setSettingsStatus("", "");
   $("provider-form-wrap").classList.remove("hidden");
+  renderProviderList();
+  renderGatewayModels();
+  setSettingsStatus("", "");
+  document.querySelector(".provider-panel")?.scrollIntoView({ block: "nearest" });
   $("pf-name").focus();
   if (focusModelId && p) openModelForm(p.id, focusModelId);
 }
 
 function closeProviderForm() {
+  const wasCreating = providerFormMode === "create";
+  providerFormMode = null;
   editingProviderId = null;
   editingModelId = null;
   pendingModels = [];
   gatewayModels = [];
   $("provider-form-wrap").classList.add("hidden");
   closeModelForm();
+  if (wasCreating) {
+    const providers = state.config?.providers || [];
+    selectedProviderId = providers.find((provider) => provider.active)?.id ?? providers[0]?.id ?? null;
+  }
+  if (isSettingsPageOpen()) renderProviderList();
 }
 
 function closeModelForm() {
   editingModelId = null;
   $("model-form-wrap").classList.add("hidden");
+  if (providerFormMode !== "edit") editingProviderId = null;
 }
-
 /** 模型列表：编辑模式下每行一个模型（可设启用 / 编辑 / 删除），新增模式下是待提交清单 */
 function renderModelPanel() {
   const list = $("pf-model-list");
   list.innerHTML = "";
-  const p = currentEditingProvider();
+  const p = providerFormMode === "create" ? null : selectedProvider();
   $("pf-model-count").textContent = p
     ? `共 ${(p.models || []).length} 个 · 一个供应商可添加多个模型`
     : "保存供应商后再逐个添加模型（可先「获取列表」）";
@@ -2782,8 +2870,9 @@ function renderGatewayModels() {
   box.appendChild(label);
   const wrap = document.createElement("div");
   wrap.className = "gw-chips";
+  const targetProvider = providerFormMode === "create" ? null : selectedProvider();
   const existing = new Set(
-    (currentEditingProvider()?.models || []).map((m) => m.name).concat(pendingModels.map((m) => m.name))
+    (targetProvider?.models || []).map((m) => m.name).concat(pendingModels.map((m) => m.name))
   );
   for (const m of gatewayModels) {
     const chip = document.createElement("button");
@@ -2878,13 +2967,15 @@ function setSettingsStatus(text, kind) {
 
 /** 测试连接 / 拉取模型：新供应商用表单值；编辑已存供应商且 Key 留空 → 用已保存的 Key */
 async function fetchGatewayModelChips() {
-  const baseURL = $("pf-base-url").value.trim();
-  const apiKeyRaw = $("pf-api-key").value.trim();
+  const formOpen = providerFormMode !== null;
+  const p = formOpen ? currentEditingProvider() : selectedProvider();
+  const baseURL = formOpen ? $("pf-base-url").value.trim() : (p?.baseURL || "");
+  const apiKeyRaw = formOpen ? $("pf-api-key").value.trim() : "";
   if (!baseURL) { setSettingsStatus("✗ 请先填写 BASE_URL", "err"); return; }
   const body = { baseURL };
   if (apiKeyRaw) body.apiKey = apiKeyRaw;
-  else if (editingProviderId) body.providerId = editingProviderId;
-  body.protocol = $("pf-protocol").value;
+  else if (p?.id) body.providerId = p.id;
+  body.protocol = formOpen ? $("pf-protocol").value : (p?.protocol || "openai");
 
   setSettingsStatus("正在连接网关…", "");
   try {
@@ -2911,9 +3002,10 @@ async function fetchGatewayModelChips() {
 async function addModelByName(name, meta) {
   const modelName = (name || "").trim();
   if (!modelName) { setSettingsStatus("✗ 模型名不能为空", "err"); return; }
-  if (editingProviderId) {
+  const targetProviderId = providerFormMode === "create" ? null : (selectedProviderId || editingProviderId);
+  if (targetProviderId) {
     try {
-      const res = await api(`/api/config/providers/${editingProviderId}/models`, {
+      const res = await api(`/api/config/providers/${targetProviderId}/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2926,7 +3018,8 @@ async function addModelByName(name, meta) {
       $("pf-model-new").value = "";
       renderGatewayModels();
       setSettingsStatus(res.created ? `✓ 已添加模型「${modelName}」并设为该供应商的启用模型` : `✓ 「${modelName}」已存在，已更新并设为启用模型`, "ok");
-      openModelForm(editingProviderId, res.model.id);
+      selectedProviderId = targetProviderId;
+      openModelForm(targetProviderId, res.model.id);
     } catch (err) {
       setSettingsStatus(`✗ ${err.message}`, "err");
     }
@@ -2951,13 +3044,15 @@ async function saveProvider() {
   if (apiKeyRaw) body.apiKey = apiKeyRaw; // 留空 = 不修改已保存的 Key
 
   try {
+    let nextProviderId = editingProviderId || selectedProviderId;
+    let message = "";
     if (editingProviderId) {
       const res = await api(`/api/config/providers/${editingProviderId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      setSettingsStatus(res.activeChanged ? "✓ 已保存并应用到当前会话配置" : "✓ 已保存（该供应商未启用）", "ok");
+      message = res.activeChanged ? "✓ 已保存并应用到当前会话配置" : "✓ 已保存（该供应商未启用）";
     } else {
       if (!pendingModels.length) {
         setSettingsStatus("✗ 至少填一个模型名（可先点「获取列表」从网关选择）", "err");
@@ -2969,19 +3064,25 @@ async function saveProvider() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      editingProviderId = res.provider.id; // 保存后转为编辑态，便于继续加模型
-      pendingModels = [];
-      setSettingsStatus(`✓ 已添加供应商（${res.provider.models.length} 个模型）${res.activeChanged ? "并启用" : ""}`, "ok");
+      nextProviderId = res.provider.id;
+      message = `✓ 已添加供应商（${res.provider.models.length} 个模型）${res.activeChanged ? "并启用" : ""}`;
     }
+
     await applyConfigState(await api("/api/config"));
-    // 保存成功后返回工作台；模型上下文等参数下次点模型「编辑」仍可继续配置。
-    // 不调用 openProviderForm：它会重置表单并关闭模型编辑面板，造成“保存后还停在编辑态”。
-    closeSettingsPage();
+    providerFormMode = null;
+    editingProviderId = null;
+    editingModelId = null;
+    pendingModels = [];
+    gatewayModels = [];
+    selectedProviderId = nextProviderId;
+    $("provider-form-wrap").classList.add("hidden");
+    $("model-form-wrap").classList.add("hidden");
+    renderProviderList();
+    setSettingsStatus(message, "ok");
   } catch (err) {
     setSettingsStatus(`✗ ${err.message}`, "err");
   }
 }
-
 /** 保存「模型编辑面板」里的改动（含思考等级） */
 async function saveModel() {
   const p = currentEditingProvider();
@@ -3071,9 +3172,17 @@ async function setReasoningLevel(level) {
 async function removeProvider(id, name) {
   if (!(await uiConfirm(`确定删除供应商「${name}」？（它下面的模型会一起删除）`, { title: "删除供应商", okText: "删除", danger: true }))) return;
   try {
+    const wasEditing = editingProviderId === id;
     await api(`/api/config/providers/${id}`, { method: "DELETE" });
     await applyConfigState(await api("/api/config"));
-    if (editingProviderId === id) closeProviderForm();
+    if (wasEditing) {
+      providerFormMode = null;
+      editingProviderId = null;
+      $("provider-form-wrap").classList.add("hidden");
+      closeModelForm();
+    }
+    if (selectedProviderId === id) selectedProviderId = null;
+    renderProviderList();
   } catch (err) {
     uiAlert(`删除失败：${err.message}`, "删除供应商");
   }
@@ -3970,6 +4079,18 @@ async function init() {
     showProjectMenu(menu.classList.contains("hidden"));
   });
   on("add-provider-btn", "click", () => openProviderForm(null));
+  on("provider-use-btn", "click", () => {
+    const p = selectedProvider();
+    if (p && !p.active) activateModel(p.id, null);
+  });
+  on("provider-edit-btn", "click", () => {
+    const p = selectedProvider();
+    if (p) openProviderForm(p.id);
+  });
+  on("provider-delete-btn", "click", () => {
+    const p = selectedProvider();
+    if (p) removeProvider(p.id, p.name);
+  });
   on("backup-create-btn", "click", async () => {
     try {
       const res = await api("/api/backup", { method: "POST" });

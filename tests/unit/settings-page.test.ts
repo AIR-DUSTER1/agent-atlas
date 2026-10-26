@@ -30,3 +30,16 @@ test("前端通过独立页面函数切换分区并统一关闭", async () => {
   assert.match(app, /dataset\.settingsView/);
   assert.doesNotMatch(app, /settings-mask|memories-mask|stats-mask/);
 });
+test("模型与供应商采用左栏选择、右栏模型详情", async () => {
+  const root = new URL("../../src/server/public/", import.meta.url);
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const app = await readFile(new URL("app.js", root), "utf8");
+  assert.match(html, /class="provider-workspace"/);
+  assert.match(html, /id="provider-list"/);
+  assert.match(html, /id="provider-detail"/);
+  assert.match(html, /id="pf-model-list"/);
+  assert.match(app, /function selectProvider\(providerId\)/);
+  assert.match(app, /function renderProviderDetail\(\)/);
+  assert.match(app, /provider-nav-item/);
+  assert.doesNotMatch(app, /row\.querySelector\("\.p-use"\)/);
+});
