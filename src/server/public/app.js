@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-4";
+const APP_VERSION = "web-2026-10-26-5";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -2643,18 +2643,12 @@ function ensureProviderSelection() {
 
 function selectProvider(providerId) {
   if (!providerId) return;
-  if (editingProviderId && editingProviderId !== providerId) {
-    providerFormMode = null;
-    editingProviderId = null;
-    pendingModels = [];
-    gatewayModels = [];
-    $("provider-form-wrap").classList.add("hidden");
-    closeModelForm();
-  }
+  // 供应商连接配置在独立弹窗里；左栏始终只负责“当前查看哪个供应商”。
+  if (providerFormMode) closeProviderForm();
   selectedProviderId = providerId;
   settingsFocusProviderId = null;
+  closeModelForm();
   renderProviderList();
-  renderProviderDetail();
 }
 
 /** 左栏只放供应商导航；详情与模型全部收进右栏，降低首次配置认知负担。 */
@@ -2671,7 +2665,7 @@ function renderProviderList() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "provider-nav-item"
-      + (providerFormMode !== "create" && p.id === selectedProviderId ? " active" : "")
+      + (p.id === selectedProviderId ? " active" : "")
       + (p.active ? " in-use" : "");
     button.innerHTML = `
       <span class="provider-nav-dot"></span>
@@ -2697,14 +2691,13 @@ function detailBadge(text, cls = "") {
   return span;
 }
 
-/** 右栏：所选供应商概览 + 操作 + 模型列表；新增时同一区域变为创建向导。 */
+/** 右栏：所选供应商概览 + 操作 + 模型列表。新增/编辑连接走独立弹窗。 */
 function renderProviderDetail() {
   const detail = $("provider-detail");
   const empty = $("provider-empty");
   if (!detail || !empty) return;
-  const creating = providerFormMode === "create";
-  const p = creating ? null : selectedProvider();
-  if (!p && !creating) {
+  const p = selectedProvider();
+  if (!p) {
     empty.classList.remove("hidden");
     detail.classList.add("hidden");
     return;
@@ -2713,37 +2706,30 @@ function renderProviderDetail() {
   empty.classList.add("hidden");
   detail.classList.remove("hidden");
   const providers = state.config?.providers || [];
-  $("provider-detail-name").textContent = creating ? "新增供应商" : p.name;
-  $("provider-detail-url").textContent = creating
-    ? "先填写网关连接，再添加至少一个初始模型"
-    : p.baseURL;
-  const activeBadge = $("provider-detail-active");
-  activeBadge.classList.toggle("hidden", creating || !p.active);
+  $("provider-detail-name").textContent = p.name;
+  $("provider-detail-url").textContent = p.baseURL;
+  $("provider-detail-active").classList.toggle("hidden", !p.active);
   const badges = $("provider-detail-badges");
   badges.innerHTML = "";
-  if (!creating) {
-    badges.appendChild(detailBadge(p.hasKey ? "✓ Key 已保存" : "无 Key", p.hasKey ? "ok" : "warn"));
-    if (p.protocol !== "openai") badges.appendChild(detailBadge(PROTOCOL_LABEL[p.protocol] || p.protocol, "proto"));
-    badges.appendChild(detailBadge(`${(p.models || []).length} 个模型`));
-  }
+  badges.appendChild(detailBadge(p.hasKey ? "✓ Key 已保存" : "无 Key", p.hasKey ? "ok" : "warn"));
+  if (p.protocol !== "openai") badges.appendChild(detailBadge(PROTOCOL_LABEL[p.protocol] || p.protocol, "proto"));
+  badges.appendChild(detailBadge(`${(p.models || []).length} 个模型`));
 
   const useBtn = $("provider-use-btn");
   const editBtn = $("provider-edit-btn");
   const delBtn = $("provider-delete-btn");
-  for (const btn of [useBtn, editBtn, delBtn]) btn.classList.toggle("hidden", creating);
-  if (!creating) {
-    useBtn.textContent = p.active ? "使用中" : "启用";
-    useBtn.disabled = Boolean(p.active);
-    delBtn.classList.toggle("hidden", providers.length <= 1);
-  }
+  for (const btn of [useBtn, editBtn, delBtn]) btn.classList.remove("hidden");
+  useBtn.textContent = p.active ? "使用中" : "启用";
+  useBtn.disabled = Boolean(p.active);
+  delBtn.classList.toggle("hidden", providers.length <= 1);
   renderModelPanel();
 }
 /* ----- 模型与供应商分区：编辑表单（供应商 + 模型列表 + 单个模型编辑） ----- */
 let selectedProviderId = null;   // 左栏当前选中的供应商
-let providerFormMode = null;     // null / "edit" / "create"
-let editingProviderId = null;    // 供应商表单正在编辑的 id；create 模式为 null
+let providerFormMode = null;     // null / "edit" / "create"（控制供应商连接弹窗）
+let editingProviderId = null;    // 供应商弹窗正在编辑的 id；create 模式为 null
 let editingModelId = null;       // 正在「模型编辑面板」里编辑的模型 id
-let pendingModels = [];          // 新增供应商模式下待提交的模型
+let pendingModels = [];          // 新增供应商时待随创建请求一起提交的模型
 let gatewayModels = [];          // 最近一次「获取列表」拿到的网关模型
 
 function currentEditingProvider() {
@@ -2758,9 +2744,13 @@ function currentEditingModel() {
 function openProviderForm(providerId, focusModelId) {
   providerFormMode = providerId ? "edit" : "create";
   editingProviderId = providerId || null;
-  selectedProviderId = providerId || null;
+  if (providerId) selectedProviderId = providerId;
   editingModelId = null;
   const p = currentEditingProvider();
+  $("provider-modal-title").textContent = p ? "编辑供应商" : "添加供应商";
+  $("provider-modal-sub").textContent = p
+    ? "修改连接信息不会影响已配置模型；API Key 留空表示保持原值。"
+    : "填写连接信息并添加至少一个初始模型，保存后即可在左侧切换。";
   $("pf-mode").textContent = p ? p.name : "新增供应商";
   $("pf-mode").className = "key-state" + (p ? " ok" : "");
   $("pf-name").value = p?.name || "";
@@ -2770,31 +2760,33 @@ function openProviderForm(providerId, focusModelId) {
   $("pf-protocol").value = p?.protocol || "openai";
   $("pf-key-state").textContent = p ? (p.hasKey ? `已保存 ${p.keyMasked}，留空则不修改` : "未保存 Key") : "";
   $("pf-key-state").className = "key-state" + (p?.hasKey ? " ok" : "");
-  $("pf-model-new").value = "";
+  $("pf-new-model-name").value = "";
+  $("pf-initial-models").classList.toggle("hidden", Boolean(p));
+  $("pf-test").textContent = p ? "测试连接" : "测试连接 / 拉取模型";
   gatewayModels = [];
   if (!p) pendingModels = [];
-  $("provider-form-wrap").classList.remove("hidden");
+  $("provider-modal-mask").classList.remove("hidden");
+  closeModelForm();
   renderProviderList();
-  renderGatewayModels();
-  setSettingsStatus("", "");
-  document.querySelector(".provider-panel")?.scrollIntoView({ block: "nearest" });
-  $("pf-name").focus();
+  renderPendingModels();
+  renderGatewayModels("pending");
+  setProviderModalStatus("", "");
+  requestAnimationFrame(() => $("pf-name").focus());
   if (focusModelId && p) openModelForm(p.id, focusModelId);
 }
 
 function closeProviderForm() {
-  const wasCreating = providerFormMode === "create";
+  const mask = $("provider-modal-mask");
+  if (!mask) return;
+  mask.classList.add("hidden");
   providerFormMode = null;
   editingProviderId = null;
   editingModelId = null;
   pendingModels = [];
   gatewayModels = [];
-  $("provider-form-wrap").classList.add("hidden");
-  closeModelForm();
-  if (wasCreating) {
-    const providers = state.config?.providers || [];
-    selectedProviderId = providers.find((provider) => provider.active)?.id ?? providers[0]?.id ?? null;
-  }
+  $("pf-new-model-name").value = "";
+  $("pf-new-gateway-models").innerHTML = "";
+  setProviderModalStatus("", "");
   if (isSettingsPageOpen()) renderProviderList();
 }
 
@@ -2803,20 +2795,22 @@ function closeModelForm() {
   $("model-form-wrap").classList.add("hidden");
   if (providerFormMode !== "edit") editingProviderId = null;
 }
-/** 模型列表：编辑模式下每行一个模型（可设启用 / 编辑 / 删除），新增模式下是待提交清单 */
+/** 右栏模型列表：当前供应商的已有模型（启用 / 编辑 / 删除）。 */
 function renderModelPanel() {
   const list = $("pf-model-list");
+  if (!list) return;
   list.innerHTML = "";
-  const p = providerFormMode === "create" ? null : selectedProvider();
+  const p = selectedProvider();
   $("pf-model-count").textContent = p
     ? `共 ${(p.models || []).length} 个 · 一个供应商可添加多个模型`
-    : "保存供应商后再逐个添加模型（可先「获取列表」）";
-
-  const models = p ? (p.models || []) : pendingModels.map((m) => ({ ...m, id: `pending:${m.name}`, reasoningLevel: "default", reasoningLabel: "供应商默认", displayName: m.name, active: false }));
+    : "";
+  const models = p ? (p.models || []) : [];
   if (!models.length) {
     const empty = document.createElement("div");
     empty.className = "model-empty";
-    empty.textContent = p ? "还没有模型：在下面输入模型名，或点「获取列表」从网关挑选（可加多个）" : "在下面输入模型名，或点「获取列表」从网关挑选（可加多个）";
+    empty.textContent = p
+      ? "还没有模型：在下面输入模型名，或点「获取列表」从网关挑选（可加多个）"
+      : "先从左侧选择供应商";
     list.appendChild(empty);
     return;
   }
@@ -2842,26 +2836,50 @@ function renderModelPanel() {
       `${m.name} · 思考等级 ${m.reasoningLabel || "供应商默认"}`
       + (m.contextWindow ? ` · 窗口 ${fmtTokens(m.contextWindow)}（${contextSource}）` : "");
     const pick = row.querySelector(".m-pick");
-    if (p) {
-      pick.addEventListener("click", () => { if (!m.active) activateModel(p.id, m.id); });
-      row.querySelector(".m-edit").addEventListener("click", () => openModelForm(p.id, m.id));
-      row.querySelector(".m-del").addEventListener("click", () => removeModel(p.id, m.id, m.name));
-    } else {
-      pick.classList.add("ghost");
-      pick.addEventListener("click", () => { pendingModels = pendingModels.filter((x) => x.name !== m.name); renderModelPanel(); });
-      pick.textContent = "×";
-      pick.title = "从待添加清单里移除";
-      row.querySelector(".m-edit").textContent = "移除";
-      row.querySelector(".m-edit").addEventListener("click", () => { pendingModels = pendingModels.filter((x) => x.name !== m.name); renderModelPanel(); });
-      row.querySelector(".m-del").classList.add("hidden");
-    }
+    pick.addEventListener("click", () => { if (!m.active) activateModel(p.id, m.id); });
+    row.querySelector(".m-edit").addEventListener("click", () => openModelForm(p.id, m.id));
+    row.querySelector(".m-del").addEventListener("click", () => removeModel(p.id, m.id, m.name));
     list.appendChild(row);
   }
 }
 
-/** 从网关拉取的模型清单：全部平铺成可点即添加的 chips（不再用会被输入过滤的 datalist） */
-function renderGatewayModels() {
-  const box = $("gateway-models");
+/** 新增供应商弹窗里的待提交模型清单：只在内存中，保存供应商时一起提交。 */
+function renderPendingModels() {
+  const list = $("pf-pending-model-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!pendingModels.length) {
+    const empty = document.createElement("div");
+    empty.className = "model-empty";
+    empty.textContent = "还没有初始模型，请在下方输入模型名或从网关列表选择。";
+    list.appendChild(empty);
+    return;
+  }
+  for (const m of pendingModels) {
+    const row = document.createElement("div");
+    row.className = "pending-model-row";
+    row.innerHTML = `
+      <span class="pending-model-name"></span>
+      <span class="pending-model-meta"></span>
+      <button type="button" class="pending-model-remove">移除</button>`;
+    row.querySelector(".pending-model-name").textContent = m.name;
+    row.querySelector(".pending-model-meta").textContent = [
+      m.modality === "vision" ? "多模态" : "文本",
+      m.contextWindow ? `窗口 ${fmtTokens(m.contextWindow)}` : "",
+    ].filter(Boolean).join(" · ");
+    row.querySelector(".pending-model-remove").addEventListener("click", () => {
+      pendingModels = pendingModels.filter((item) => item.name !== m.name);
+      renderPendingModels();
+      renderGatewayModels("pending");
+    });
+    list.appendChild(row);
+  }
+}
+
+/** 从网关拉取的模型清单：detail=右栏已有供应商；pending=新增供应商弹窗。 */
+function renderGatewayModels(target = "detail") {
+  const box = $(target === "pending" ? "pf-new-gateway-models" : "gateway-models");
+  if (!box) return;
   box.innerHTML = "";
   if (!gatewayModels.length) return;
   const label = document.createElement("div");
@@ -2870,9 +2888,11 @@ function renderGatewayModels() {
   box.appendChild(label);
   const wrap = document.createElement("div");
   wrap.className = "gw-chips";
-  const targetProvider = providerFormMode === "create" ? null : selectedProvider();
+  const targetProvider = target === "pending" ? null : selectedProvider();
   const existing = new Set(
-    (targetProvider?.models || []).map((m) => m.name).concat(pendingModels.map((m) => m.name))
+    target === "pending"
+      ? pendingModels.map((m) => m.name)
+      : (targetProvider?.models || []).map((m) => m.name)
   );
   for (const m of gatewayModels) {
     const chip = document.createElement("button");
@@ -2883,7 +2903,10 @@ function renderGatewayModels() {
       + (m.supportsVision ? " · 🖼" : "")
       + (m.supportsReasoning ? " · ⚡" : "");
     chip.title = `${m.id}\n上下文：${m.contextWindow ?? "未知"}\n多模态：${m.supportsVision ? "是" : "未知"} · 支持推理：${m.supportsReasoning ? "是" : "未知"}`;
-    chip.addEventListener("click", () => addModelByName(m.id, m));
+    chip.addEventListener("click", () => {
+      if (target === "pending") addPendingModelByName(m.id, m);
+      else addModelByName(m.id, m);
+    });
     wrap.appendChild(chip);
   }
   box.appendChild(wrap);
@@ -2965,19 +2988,31 @@ function setSettingsStatus(text, kind) {
   el.className = "settings-status" + (kind ? " " + kind : "");
 }
 
-/** 测试连接 / 拉取模型：新供应商用表单值；编辑已存供应商且 Key 留空 → 用已保存的 Key */
-async function fetchGatewayModelChips() {
-  const formOpen = providerFormMode !== null;
+function setProviderModalStatus(text, kind) {
+  const el = $("provider-modal-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "settings-status" + (kind ? " " + kind : "");
+}
+
+function setGatewayStatus(target, text, kind) {
+  if (target === "pending") setProviderModalStatus(text, kind);
+  else setSettingsStatus(text, kind);
+}
+
+/** 测试连接 / 拉取模型：pending=供应商弹窗表单；detail=右栏当前供应商。 */
+async function fetchGatewayModelChips(target = "detail") {
+  const formOpen = target === "pending";
   const p = formOpen ? currentEditingProvider() : selectedProvider();
   const baseURL = formOpen ? $("pf-base-url").value.trim() : (p?.baseURL || "");
   const apiKeyRaw = formOpen ? $("pf-api-key").value.trim() : "";
-  if (!baseURL) { setSettingsStatus("✗ 请先填写 BASE_URL", "err"); return; }
+  if (!baseURL) { setGatewayStatus(target, "✗ 请先填写 BASE_URL", "err"); return; }
   const body = { baseURL };
   if (apiKeyRaw) body.apiKey = apiKeyRaw;
   else if (p?.id) body.providerId = p.id;
   body.protocol = formOpen ? $("pf-protocol").value : (p?.protocol || "openai");
 
-  setSettingsStatus("正在连接网关…", "");
+  setGatewayStatus(target, "正在连接网关…", "");
   try {
     const res = await api("/api/models", {
       method: "POST",
@@ -2986,59 +3021,70 @@ async function fetchGatewayModelChips() {
     });
     if (res.ok) {
       gatewayModels = res.models || [];
-      renderGatewayModels();
-      setSettingsStatus(`✓ 连接成功，网关共 ${gatewayModels.length} 个模型 —— 下面点一下即可添加（也可以直接手动输入模型名）`, "ok");
+      renderGatewayModels(target);
+      setGatewayStatus(target, `✓ 连接成功，网关共 ${gatewayModels.length} 个模型${formOpen ? " —— 点一下即可加入初始模型" : " —— 下面点一下即可添加"}`, "ok");
       // 拉取成功会把 context_length 写入服务端缓存 → 刷新配置以更新容量条分母
       if (res.contextWindow) api("/api/config").then(applyConfigState).catch(() => {});
     } else {
-      setSettingsStatus(`✗ ${res.error}`, "err");
+      setGatewayStatus(target, `✗ ${res.error}`, "err");
     }
   } catch (err) {
-    setSettingsStatus(`✗ ${err.message}`, "err");
+    setGatewayStatus(target, `✗ ${err.message}`, "err");
   }
 }
 
-/** 把某个模型名加进「当前供应商」（编辑模式）或待添加清单（新增模式） */
+/** 新增供应商弹窗：把模型加入待提交清单。 */
+function addPendingModelByName(name, meta) {
+  const modelName = (name || "").trim();
+  if (!modelName) { setProviderModalStatus("✗ 模型名不能为空", "err"); return; }
+  if (pendingModels.some((m) => m.name === modelName)) {
+    setProviderModalStatus("✗ 该模型已在初始模型清单里", "err");
+    return;
+  }
+  pendingModels.push({
+    name: modelName,
+    modality: meta?.supportsVision ? "vision" : "text",
+    contextWindow: meta?.contextWindow ?? null,
+  });
+  $("pf-new-model-name").value = "";
+  renderPendingModels();
+  renderGatewayModels("pending");
+  setProviderModalStatus(`✓ 已加入初始模型（保存供应商时一起提交，共 ${pendingModels.length} 个）`, "ok");
+}
+
+/** 把模型直接加到右栏当前供应商。 */
 async function addModelByName(name, meta) {
   const modelName = (name || "").trim();
   if (!modelName) { setSettingsStatus("✗ 模型名不能为空", "err"); return; }
-  const targetProviderId = providerFormMode === "create" ? null : (selectedProviderId || editingProviderId);
-  if (targetProviderId) {
-    try {
-      const res = await api(`/api/config/providers/${targetProviderId}/models`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: modelName,
-          modality: meta?.supportsVision ? "vision" : undefined,
-          contextWindow: meta?.contextWindow ?? undefined,
-        }),
-      });
-      await applyConfigState(await api("/api/config"));
-      $("pf-model-new").value = "";
-      renderGatewayModels();
-      setSettingsStatus(res.created ? `✓ 已添加模型「${modelName}」并设为该供应商的启用模型` : `✓ 「${modelName}」已存在，已更新并设为启用模型`, "ok");
-      selectedProviderId = targetProviderId;
-      openModelForm(targetProviderId, res.model.id);
-    } catch (err) {
-      setSettingsStatus(`✗ ${err.message}`, "err");
-    }
-    return;
+  const targetProviderId = selectedProviderId || editingProviderId;
+  if (!targetProviderId) { setSettingsStatus("✗ 请先从左侧选择供应商", "err"); return; }
+  try {
+    const res = await api(`/api/config/providers/${targetProviderId}/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: modelName,
+        modality: meta?.supportsVision ? "vision" : undefined,
+        contextWindow: meta?.contextWindow ?? undefined,
+      }),
+    });
+    await applyConfigState(await api("/api/config"));
+    $("pf-model-new").value = "";
+    renderGatewayModels("detail");
+    setSettingsStatus(res.created ? `✓ 已添加模型「${modelName}」并设为该供应商的启用模型` : `✓ 「${modelName}」已存在，已更新并设为启用模型`, "ok");
+    selectedProviderId = targetProviderId;
+    openModelForm(targetProviderId, res.model.id);
+  } catch (err) {
+    setSettingsStatus(`✗ ${err.message}`, "err");
   }
-  if (pendingModels.some((m) => m.name === modelName)) { setSettingsStatus("✗ 该模型已在待添加清单里", "err"); return; }
-  pendingModels.push({ name: modelName, modality: meta?.supportsVision ? "vision" : "text", contextWindow: meta?.contextWindow ?? null });
-  $("pf-model-new").value = "";
-  renderModelPanel();
-  renderGatewayModels();
-  setSettingsStatus(`✓ 已加入待添加清单（保存供应商时一起提交，共 ${pendingModels.length} 个）`, "ok");
 }
 
 async function saveProvider() {
   const name = $("pf-name").value.trim();
   const baseURL = $("pf-base-url").value.trim();
   const apiKeyRaw = $("pf-api-key").value.trim();
-  if (!name) { setSettingsStatus("✗ 名称不能为空", "err"); return; }
-  if (!baseURL) { setSettingsStatus("✗ BASE_URL 不能为空", "err"); return; }
+  if (!name) { setProviderModalStatus("✗ 名称不能为空", "err"); return; }
+  if (!baseURL) { setProviderModalStatus("✗ BASE_URL 不能为空", "err"); return; }
 
   const body = { name, baseURL, protocol: $("pf-protocol").value };
   if (apiKeyRaw) body.apiKey = apiKeyRaw; // 留空 = 不修改已保存的 Key
@@ -3055,7 +3101,7 @@ async function saveProvider() {
       message = res.activeChanged ? "✓ 已保存并应用到当前会话配置" : "✓ 已保存（该供应商未启用）";
     } else {
       if (!pendingModels.length) {
-        setSettingsStatus("✗ 至少填一个模型名（可先点「获取列表」从网关选择）", "err");
+        setProviderModalStatus("✗ 至少添加一个初始模型（可先点「获取列表」从网关选择）", "err");
         return;
       }
       body.models = pendingModels.map((m) => ({ name: m.name, modality: m.modality, contextWindow: m.contextWindow ?? undefined }));
@@ -3075,12 +3121,12 @@ async function saveProvider() {
     pendingModels = [];
     gatewayModels = [];
     selectedProviderId = nextProviderId;
-    $("provider-form-wrap").classList.add("hidden");
+    $("provider-modal-mask").classList.add("hidden");
     $("model-form-wrap").classList.add("hidden");
     renderProviderList();
     setSettingsStatus(message, "ok");
   } catch (err) {
-    setSettingsStatus(`✗ ${err.message}`, "err");
+    setProviderModalStatus(`✗ ${err.message}`, "err");
   }
 }
 /** 保存「模型编辑面板」里的改动（含思考等级） */
@@ -3175,12 +3221,7 @@ async function removeProvider(id, name) {
     const wasEditing = editingProviderId === id;
     await api(`/api/config/providers/${id}`, { method: "DELETE" });
     await applyConfigState(await api("/api/config"));
-    if (wasEditing) {
-      providerFormMode = null;
-      editingProviderId = null;
-      $("provider-form-wrap").classList.add("hidden");
-      closeModelForm();
-    }
+    if (wasEditing) closeProviderForm();
     if (selectedProviderId === id) selectedProviderId = null;
     renderProviderList();
   } catch (err) {
@@ -4100,16 +4141,25 @@ async function init() {
       uiAlert(`备份失败：${err.message}`, "备份");
     }
   });
+  on("provider-modal-close", "click", closeProviderForm);
+  on("provider-modal-mask", "click", (e) => {
+    if (e.target === $("provider-modal-mask")) closeProviderForm();
+  });
   on("pf-cancel-edit", "click", closeProviderForm);
   on("pf-key-toggle", "click", () => {
     const keyInput = $("pf-api-key");
     keyInput.type = keyInput.type === "password" ? "text" : "password";
   });
-  // 测试连接 / 获取列表 → 渲染成「点一下即添加」的网关模型清单
-  on("pf-fetch-models", "click", fetchGatewayModelChips);
-  on("pf-test", "click", fetchGatewayModelChips);
+  // 弹窗内测试连接 / 拉取模型 → 加入本次新增的初始模型
+  on("pf-test", "click", () => fetchGatewayModelChips("pending"));
+  on("pf-new-fetch-models", "click", () => fetchGatewayModelChips("pending"));
+  on("pf-new-model-add-btn", "click", () => addPendingModelByName($("pf-new-model-name").value, null));
+  on("pf-new-model-name", "keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addPendingModelByName($("pf-new-model-name").value, null); }
+  });
   on("pf-save", "click", saveProvider);
-  // 模型：手动添加（输入框回车 / ＋ 按钮）
+  // 右栏已存供应商：获取列表或手动添加模型
+  on("pf-fetch-models", "click", () => fetchGatewayModelChips("detail"));
   on("pf-model-add-btn", "click", () => addModelByName($("pf-model-new").value, null));
   if ($("pf-model-new")) {
     $("pf-model-new").addEventListener("keydown", (e) => {
@@ -4218,6 +4268,12 @@ async function init() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      // 供应商弹窗是第一层：只关它，不要把背后的设置页一起关掉。
+      if (providerFormMode) {
+        e.preventDefault();
+        closeProviderForm();
+        return;
+      }
       cancelActiveDialog(); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）
       closeComposerMenu();
       closeModal();

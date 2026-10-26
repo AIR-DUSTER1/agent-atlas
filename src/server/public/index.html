@@ -237,47 +237,6 @@
                     </div>
                   </div>
 
-                  <div id="provider-form-wrap" class="provider-form hidden">
-                    <div class="field-label edit-title">正在编辑：<em id="pf-mode" class="key-state"></em></div>
-
-                    <div class="provider-form-grid">
-                      <label class="field">
-                        <span class="field-label">名称</span>
-                        <input id="pf-name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" />
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">网关地址 BASE_URL</span>
-                        <input id="pf-base-url" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
-                      </label>
-                    </div>
-
-                    <label class="field">
-                      <span class="field-label">API Key <em id="pf-key-state" class="key-state"></em></span>
-                      <div class="key-row">
-                        <input id="pf-api-key" type="password" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" />
-                        <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏">👁</button>
-                      </div>
-                    </label>
-
-                    <label class="field">
-                      <span class="field-label">请求协议 <em class="key-state">中转站多协议路由时按此决定请求路径</em></span>
-                      <select id="pf-protocol" class="pf-select">
-                        <option value="openai">OpenAI Chat Completions（默认 · /chat/completions）</option>
-                        <option value="openai-responses">OpenAI Responses API（/responses）</option>
-                        <option value="anthropic">Anthropic Messages 原生（/v1/messages）</option>
-                        <option value="gemini">Gemini 原生 generateContent（/v1beta）</option>
-                      </select>
-                    </label>
-
-                    <div class="settings-actions">
-                      <button id="pf-test" class="ghost-btn" type="button">测试连接 / 拉取模型</button>
-                      <div class="spacer"></div>
-                      <button id="pf-cancel-edit" class="ghost-btn" type="button">取消</button>
-                      <button id="pf-save" class="btn btn-approve" type="button">保存供应商</button>
-                    </div>
-                  </div>
-
                   <div class="model-section">
                     <div class="field-label model-head">
                       <span>已配置模型</span>
@@ -415,6 +374,72 @@
       </div>
     </div>
   </section>
+
+  <!-- 供应商连接配置：独立弹窗，不占用右侧详情，也不会阻断左栏选中态 -->
+  <div id="provider-modal-mask" class="hidden">
+    <div id="provider-modal" role="dialog" aria-modal="true" aria-labelledby="provider-modal-title">
+      <div class="provider-modal-head">
+        <div>
+          <h2 id="provider-modal-title">添加供应商</h2>
+          <p id="provider-modal-sub">一套网关凭据可以挂多个模型。</p>
+        </div>
+        <button id="provider-modal-close" type="button" class="provider-modal-close" aria-label="关闭供应商弹窗">×</button>
+      </div>
+
+      <div id="provider-form-wrap" class="provider-form">
+        <div class="field-label edit-title">正在配置：<em id="pf-mode" class="key-state"></em></div>
+
+        <div class="provider-form-grid">
+          <label class="field">
+            <span class="field-label">名称</span>
+            <input id="pf-name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" />
+          </label>
+
+          <label class="field">
+            <span class="field-label">网关地址 BASE_URL</span>
+            <input id="pf-base-url" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field-label">API Key <em id="pf-key-state" class="key-state"></em></span>
+          <div class="key-row">
+            <input id="pf-api-key" type="password" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" />
+            <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏">👁</button>
+          </div>
+        </label>
+
+        <label class="field">
+          <span class="field-label">请求协议 <em class="key-state">中转站多协议路由时按此决定请求路径</em></span>
+          <select id="pf-protocol" class="pf-select">
+            <option value="openai">OpenAI Chat Completions（默认 · /chat/completions）</option>
+            <option value="openai-responses">OpenAI Responses API（/responses）</option>
+            <option value="anthropic">Anthropic Messages 原生（/v1/messages）</option>
+            <option value="gemini">Gemini 原生 generateContent（/v1beta）</option>
+          </select>
+        </label>
+
+        <div id="pf-initial-models" class="pf-initial-models hidden">
+          <div class="field-label">初始模型 <em class="key-state">新增供应商至少需要一个模型，保存后仍可继续添加</em></div>
+          <div id="pf-pending-model-list" class="pending-model-list"></div>
+          <div class="key-row model-add-row">
+            <input id="pf-new-model-name" type="text" spellcheck="false" placeholder="输入模型名，或从网关列表选择" />
+            <button id="pf-new-fetch-models" type="button" class="ghost-btn small">获取列表</button>
+            <button id="pf-new-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
+          </div>
+          <div id="pf-new-gateway-models" class="gw-models"></div>
+        </div>
+
+        <div class="settings-actions provider-modal-actions">
+          <button id="pf-test" class="ghost-btn" type="button">测试连接</button>
+          <div class="spacer"></div>
+          <button id="pf-cancel-edit" class="ghost-btn" type="button">取消</button>
+          <button id="pf-save" class="btn btn-approve" type="button">保存供应商</button>
+        </div>
+        <div id="provider-modal-status" class="settings-status" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ 文件选择器：项目 / 远程文件夹 / 本地上传 ============ -->
   <div id="fs-mask" class="hidden">

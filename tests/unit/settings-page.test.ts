@@ -43,3 +43,19 @@ test("模型与供应商采用左栏选择、右栏模型详情", async () => {
   assert.match(app, /provider-nav-item/);
   assert.doesNotMatch(app, /row\.querySelector\("\.p-use"\)/);
 });
+
+test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创建态覆盖", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const app = await readFile(new URL("app.js", root), "utf8");
+  const detailStart = html.indexOf('id="provider-detail"');
+  const detailEnd = html.indexOf('id="settings-status"', detailStart);
+  const detail = html.slice(detailStart, detailEnd);
+  assert.match(html, /id="provider-modal-mask"[\s\S]*role="dialog"/);
+  assert.match(html, /id="pf-initial-models"/);
+  assert.match(html, /id="provider-modal-close"/);
+  assert.doesNotMatch(detail, /id="provider-form-wrap"/, "连接表单不能继续占用右栏详情");
+  assert.match(app, /provider-modal-mask/);
+  assert.match(app, /function closeProviderForm\(\)/);
+  assert.match(app, /\(p\.id === selectedProviderId \? " active" : ""\)/);
+  assert.doesNotMatch(app, /providerFormMode !== "create" && p\.id === selectedProviderId/);
+});
