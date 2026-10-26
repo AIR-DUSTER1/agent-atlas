@@ -13,9 +13,12 @@ import {
 } from "./modules/format.js";
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
+import {
+  assistantBlockContaining, isContinuationRecord, lastAssistantBlock, mergeAdjacentAssistantBlocks,
+} from "./modules/chat-flow.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-1";
+const APP_VERSION = "web-2026-10-26-2";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -154,6 +157,10 @@ const GENERAL_EXAMPLES = [
 function loadLocal() {
   try {
     state.blocks = JSON.parse(localStorage.getItem(LS_TRANSCRIPTS) || "{}");
+    // 旧版本审批恢复会追加连续 assistant 块；加载时合并，避免历史缓存继续多头像。
+    for (const [sid, blocks] of Object.entries(state.blocks)) {
+      if (Array.isArray(blocks)) state.blocks[sid] = mergeAdjacentAssistantBlocks(blocks);
+    }
   } catch { state.blocks = {}; }
   try {
     state.usage = JSON.parse(localStorage.getItem(LS_USAGE) || "{}");
@@ -653,9 +660,18 @@ async function hydrateFromServer(s) {
     const arr = transcript(s.id);
     if (arr.length) return;                        // 竞态防护：等待期间本地已写入
     for (const rec of data.records || []) {
-      const userBlock = { t: "user", text: rec.user, ...(rec.files?.length ? { files: rec.files } : {}) };
-      const ablock = { t: "assistant", parts: [] };
-      arr.push(userBlock, ablock);
+      const continuation = isContinuationRecord(rec);
+      let ablock = continuation ? lastAssistantBlock(arr) : null;
+      if (!ablock) {
+        ablock = { t: "assistant", parts: [] };
+        if (continuation) {
+          // 旧数据缺少可合并的助手块时仍保持「无新用户气泡」，避免伪造一条审批消息。
+          arr.push(ablock);
+        } else {
+          const userBlock = { t: "user", text: rec.user, ...(rec.files?.length ? { files: rec.files } : {}) };
+          arr.push(userBlock, ablock);
+        }
+      }
       for (const ev of rec.events || []) handleEvent(ev, ablock);
       finalize(ablock);
     }
@@ -1312,7 +1328,7 @@ async function decideApproval(part, status) {
   if (s) s.pendingApproval = false;
   renderSessions();
   saveLocal();
-  await runResume({ decision: status === "approved" ? "approve" : "reject" });
+  await runResume({ decision: status === "approved" ? "approve" : "reject" }, assistantBlockContaining(transcript(state.currentId), part));
 }
 
 async function decideClarification(part, choice, label) {
@@ -1330,7 +1346,7 @@ async function decideClarification(part, choice, label) {
   if (s) s.pendingApproval = false;
   renderSessions();
   saveLocal();
-  await runResume({ choice: value });
+  await runResume({ choice: value }, assistantBlockContaining(transcript(state.currentId), part));
 }
 
 function addErrorBlock(ablock, message) {
@@ -1490,11 +1506,17 @@ async function send() {
   }, ablock);
 }
 
-async function runResume(payload) {
+async function runResume(payload, targetBlock = null) {
   if (!state.currentId || state.streaming) return;
-  const ablock = { t: "assistant", parts: [] };
-  transcript(state.currentId).push(ablock);
-  mountBlock(ablock);
+  let ablock = targetBlock;
+  if (ablock) {
+    // 审批 / 澄清恢复沿用原助手块：一个完整回合始终只有一个头像。
+    mountTyping(ablock);
+  } else {
+    ablock = { t: "assistant", parts: [] };
+    transcript(state.currentId).push(ablock);
+    mountBlock(ablock);
+  }
   await streamTurn(`/api/resume`, { sessionId: state.currentId, ...payload }, ablock);
 }
 

@@ -306,7 +306,7 @@ async function handleResumeInner(
   const recordUser = clarification
     ? `（需求澄清：${resumeValue.slice(0, 60)}）`
     : `（人工审批：${resumeValue === "approve" ? "批准" : "拒绝"} ${approval?.type === "approval" ? approval.toolName : "操作"}）`;
-  beginTurnRecord(session, recordUser);
+  beginTurnRecord(session, recordUser, undefined, true);
 
   if (!config.apiKey) {
     const approved = approval?.type === "approval" ? approval : undefined;

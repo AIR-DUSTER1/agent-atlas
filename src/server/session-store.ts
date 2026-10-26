@@ -72,6 +72,8 @@ export interface SessionRecord {
     turnId?: string;
     agentProfileId?: AgentProfileId | null;
     user: string;
+    /** 审批 / 澄清恢复记录：前端回放时并入上一助手块，不新起头像。 */
+    continuation?: boolean;
     files?: Array<{ name: string; source: string; image: boolean }>;
     events: unknown[];
     startedAt?: number;
@@ -168,7 +170,8 @@ export function journalTurn(
   durationMs: number,
   user: string,
   files: Array<{ name: string; source: string; image: boolean }> | undefined,
-  events: unknown[]
+  events: unknown[],
+  continuation?: boolean
 ): void {
   // 轮次身份同样由 kind 派生，避免 journal 中的伪造字段把执行域改到另一个 Agent。
   journalWrite({
@@ -181,6 +184,7 @@ export function journalTurn(
     finishedAt: startedAt + durationMs,
     durationMs,
     user,
+    ...(continuation ? { continuation: true } : {}),
     files,
     events,
   });
@@ -280,6 +284,7 @@ function applyEvent(ev: Record<string, unknown>): void {
       turnId: typeof ev.turnId === "string" ? ev.turnId : undefined,
       agentProfileId: profileIdForKind(base.kind),
       user: typeof ev.user === "string" ? ev.user : "",
+      continuation: ev.continuation === true,
       files: Array.isArray(ev.files) ? (ev.files as SessionRecord["turnHistory"][0]["files"]) : undefined,
       events: Array.isArray(ev.events) ? ev.events : [],
       startedAt: typeof ev.startedAt === "number" ? ev.startedAt : undefined,
@@ -323,7 +328,8 @@ async function compactJournal(): Promise<void> {
     for (const t of rec.turnHistory) {
       lines.push(JSON.stringify({
         ts: Date.now(), ev: "turn", id: rec.id, turnId: t.turnId,
-        user: t.user, files: t.files, events: t.events,
+        user: t.user, ...(t.continuation ? { continuation: true } : {}),
+        files: t.files, events: t.events,
         agentProfileId: t.agentProfileId ?? rec.agentProfileId,
         startedAt: t.startedAt, finishedAt: t.finishedAt, durationMs: t.durationMs,
       }));

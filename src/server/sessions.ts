@@ -58,6 +58,11 @@ export interface TurnRecord {
   agentProfileId: AgentProfileId | null;
   /** 用户消息文本（审批/澄清恢复轮为「（批准/拒绝 xx）」「（需求澄清：…）」标记） */
   user: string;
+  /**
+   * 审批 / 澄清恢复事件。UI 必须并入同一用户轮的助手块，
+   * 否则一次完整对话会出现多个头像和多套用量摘要。
+   */
+  continuation?: boolean;
   /** 随消息附加的文件元信息（与前端 user block 的 files 对应） */
   files?: Array<{ name: string; source: string; image: boolean }>;
   /** 该轮 SSE 推给前端的全部事件（含 usage/error/interrupt，不含 done） */
@@ -205,12 +210,14 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
 export function beginTurnRecord(
   session: Session,
   user: string,
-  files?: Array<{ name: string; source: string; image: boolean }>
+  files?: Array<{ name: string; source: string; image: boolean }>,
+  continuation = false
 ): TurnRecord {
   const record: TurnRecord = {
     turnId: randomUUID(),
     agentProfileId: session.agentProfileId,
     user,
+    ...(continuation ? { continuation: true } : {}),
     files,
     events: [],
     startedAt: Date.now(),
@@ -238,7 +245,8 @@ export function completeTurnRecord(session: Session, events: AgentEvent[]): void
     record.durationMs,
     record.user,
     record.files,
-    record.events
+    record.events,
+    record.continuation
   );
   void maybeCompactJournal(); // 后台探 journal 大小，超阈值自动 compact
 }
@@ -383,6 +391,7 @@ export async function restoreSessions(): Promise<number> {
         turnId: t.turnId ?? randomUUID(),
         agentProfileId: profileIdForKind(kind),
         user: t.user,
+        continuation: t.continuation === true,
         files: t.files,
         events: t.events as AgentEvent[],
         startedAt: t.startedAt ?? rec.createdAt,

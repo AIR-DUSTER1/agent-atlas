@@ -193,6 +193,13 @@ test("审批：interrupt 后保留 pending，批准能恢复并执行工具", as
   const afterResume = await json("/api/sessions");
   const cleared = afterResume.body.find((item: { id: string }) => item.id === sessionId);
   assert.equal(cleared?.pendingApproval, false);
+
+  const transcript = await json(`/api/sessions/${sessionId}/transcript`);
+  assert.equal(transcript.body.records[0]?.continuation ?? false, false);
+  assert.ok(
+    transcript.body.records.some((record: { continuation?: boolean }) => record.continuation === true),
+    "审批恢复轮需标记 continuation，前端才能并入同一头像"
+  );
 });
 
 test("文件搜索接口：最多 20 条，跳过依赖目录", async () => {
@@ -238,7 +245,7 @@ test("静态分发：index 引用 module 脚本，modules/*.js 可达且 MIME �
   const html = await index.text();
   assert.match(html, /<script type="module" src="\/app\.js"><\/script>/);
 
-  for (const file of ["/app.js", "/modules/format.js", "/modules/ui-dialog.js"]) {
+  for (const file of ["/app.js", "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js"]) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);
