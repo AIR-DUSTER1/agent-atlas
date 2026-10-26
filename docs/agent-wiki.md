@@ -498,7 +498,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零构建
   多轮记忆与 interrupt 状态因此得以延续；
 - **在线配置 `settings.ts`（多供应商）**：侧栏左下设置页（⚙）可添加任意多个供应商档案
   （名称 + BASE_URL + API Key + 模型）。「模型与供应商」使用主从布局：左栏选供应商，
-  右栏显示该供应商的模型、启停和编辑操作；顶栏 ▾ 仍保留快捷切换。
+  右栏显示该供应商的模型、启停和编辑操作；新增与编辑连接使用独立模态，关闭后可立即切换
+  供应商，不再用右侧详情的“创建态”覆盖选中态；顶栏 ▾ 仍保留快捷切换。
   配置分三层：`.env` < `.web-config.json`（保存的供应商列表 + activeId，gitignore）< 运行中内存。
   切换/修改启用中的供应商 → 配置版本号 +1，**已有会话在下次发消息时自动重建图**
   （Demo 2/3 的记忆随之重置）；Key 只回传掩码，编辑时留空 = 保持不变；
@@ -704,7 +705,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口与供应商主从布局（`settings-page.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口与 SVG 图表结构（`settings-page.test.ts` / `stats.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点过滤、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -958,20 +959,26 @@ memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论�
 
 ### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
 
-**问题**：每轮 usage 事件从第一天起就写进 journal，但从未被消费 —— 用户看不到
-「我花了多少 token」。
+**问题**：每轮 usage 事件从第一天起就写进 journal，但原页面只按“最后 30 个出现的日期”
+拼条，既没有明确的 7/30 天口径，也没有趋势图。
 
-**链路**：`GET /api/stats` → `buildStats(listSessions())` 纯函数聚合内存 turnHistory
-（journal 回放后同样在内存，重启不丢统计）→ 前端设置页「使用统计」分区渲染（汇总卡片 + div 宽度
-百分比条形图，零依赖）。
+**链路**：`GET /api/stats` → `buildStats(listSessions(), generatedAt?)` 纯函数聚合内存
+turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端设置页「使用统计」分区渲染。
+响应固定包含 `ranges: ["7d", "30d"]`，每个区间都有 `totals / byDay / byModel / topSessions`；
+服务端按本地自然日生成完整日桶（含今天），无数据日期补零，时间轴不会因空格而断裂。
 
-**协议改动（§5.3 流程）**：usage 事件加可选 `model` 字段 —— events.ts 变体 →
+**窗口与聚合语义**：7 天 = 今天及之前 6 个自然日；30 天 = 今天及之前 29 个自然日。
+`totals` 只统计窗口内轮次和 usage；`sessions` 是窗口内有轮次的去重会话数；同轮多条 usage
+（分析/回答/反思节点）全部累加；`byModel.calls` 按 usage 条数计，`byDay.cacheReadTokens`
+单列缓存读取量；`delegate_agent` 的 tool_call 计委派次数。
+
+**前端图表**：区间概览卡同时展示 7/30 天总量，点击切换明细；每日 Token 用浏览器原生
+`document.createElementNS(SVG_NS, ...)` 绘制输入/输出堆叠柱图，不新增前端依赖、不需要构建。
+模型分布和 Top 8 会话跟随当前区间；`stats-refresh` 可重新拉取。
+
+**协议改动（§5.3 流程）**：usage 事件的可选 `model` 字段由 events.ts 变体 →
 stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（固定「模拟模式」）
-→ 前端无需新 case（多余字段忽略）→ stats 聚合按 `model ?? "未知模型"` 分桶。
-
-**聚合语义**：totals/byDay 按轮累加全部 usage 事件的 input/output（同轮多条 usage
-= 分析/回答/反思多节点各自的上下文快照，全部计入）；byModel 的 turns 按 usage
-条数计（≈模型调用次数）；`delegate_agent` 的 tool_call 计委派次数。
+提供；stats 聚合按 `model ?? "未知模型"` 分桶。
 
 ### 3.28 会话归档（F3）：导出 / 搜索 / 批量清理
 
@@ -1462,6 +1469,7 @@ console.log(result.messages.at(-1).content);
 | `process.kill(pid, 0)` 判断进程是否存活总是 throw EPERM | Windows 不可靠（存在/不存在/无权限都可能是 EPERM）。存活判断改用**时间戳**（如 config-store 文件锁：超过 `LOCK_STALE_MS` 视为死进程遗留可接管） |
 | 坏 JSON 请求返回 500（而不是 400） | 路由里 `JSON.parse(await readBody(req))` 的 `SyntaxError` 直接冒到入口顶层 catch，被归为服务端故障。入口集中处理：`SyntaxError → 400「请求体不是合法的 JSON」`（5.6 测试发现并修复） |
 | 跑完自动化测试后侧栏多出陌生会话 | 测试进程用了真实 `.setting/sessions.ndjson` / `.web-config.json`。测试钩子 `SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（§3.18），生产默认路径不变 |
+| 深色主题下图表/强调色变黑 | CSS 变量自引用（`--accent-2-soft: var(--accent-2-soft)`）会让整个声明失效，SVG `fill` 回退黑色。对策：每个主题都定义终端颜色值，并分别验证深色/浅色的 `getComputedStyle(...).fill`，不能只看浅色截图 |
 | 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
 | 持久化文件写到 `src/.setting/` 而不是仓库根 `.setting/` | 「模块位置回退到仓库根」的层数因文件所在目录而异：`session-store.ts` 在 `src/server/` 回退两层，`checkpoint.ts` 在 `src/` 只回退**一层** —— 照抄多退了，服务照常工作但文件悄悄换了位置。默认路径一律以**本文件自身位置**起算并写明层数 |
 | 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |
