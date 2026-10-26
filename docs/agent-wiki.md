@@ -706,7 +706,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口与 SVG 图表结构（`settings-page.test.ts` / `stats.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用不自动合并（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用不自动合并（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -972,17 +972,21 @@ turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端
 服务端按本地自然日生成完整日桶（含今天），无数据日期补零，时间轴不会因空格而断裂。
 
 **窗口与聚合语义**：7 天 = 今天及之前 6 个自然日；30 天 = 今天及之前 29 个自然日。
-`totals` 只统计窗口内轮次和 usage；`sessions` 是窗口内有轮次的去重会话数；同轮多条 usage
-（分析/回答/反思节点）全部累加；`byModel.calls` 按 usage 条数计，`byDay.cacheReadTokens`
-单列缓存读取量；`delegate_agent` 的 tool_call 计委派次数。
+`totals` 只统计窗口内轮次和真实模型调用；`sessions` 是窗口内有轮次的去重会话数；
+`totals.modelCalls` 与 `byModel.calls` 都按实际 API 调用计，不再按 journal 里的 usage
+事件条数计。同一次流式调用会重复产出累计 usage 快照，新事件用稳定的 `usage.callId`
+归并并取各 token 字段最终值；旧 journal 没有 callId，则按连续 `model/input/output/cache`
+签名去重。`byDay.cacheReadTokens` 单列缓存读取量；`delegate_agent` 的 tool_call 计委派次数。
 
 **前端图表**：区间概览卡同时展示 7/30 天总量，点击切换明细；每日 Token 用浏览器原生
 `document.createElementNS(SVG_NS, ...)` 绘制输入/输出堆叠柱图，不新增前端依赖、不需要构建。
+`fmtTokens` 的阈值是：1,000,000 以上显示 `M`（保留一位小数），十万以上显示 `k`；
 模型分布和 Top 8 会话跟随当前区间；`stats-refresh` 可重新拉取。
 
-**协议改动（§5.3 流程）**：usage 事件的可选 `model` 字段由 events.ts 变体 →
-stream.ts 产出端（一次流取一次 `getActiveModelLabel()`）+ mock.ts（固定「模拟模式」）
-提供；stats 聚合按 `model ?? "未知模型"` 分桶。
+**协议改动（§5.3 流程）**：usage 事件带可选 `model` 与 `callId` —— `model` 由 stream.ts
+（一次流取一次 `getActiveModelLabel()`）+ mock.ts（固定「模拟模式」）提供；`callId` 在每次
+节点切换或工具返回后的新模型请求开始时生成。stats 按 `model ?? "未知模型"` 分桶，并优先按
+`callId` 归并同一调用的分片。
 
 ### 3.28 会话归档（F3）：导出 / 搜索 / 批量清理
 
