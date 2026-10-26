@@ -687,6 +687,47 @@ body {
 }
 .tool-body .result-pre { color: var(--green-soft); }
 
+/* --- tools 分组：同批超过两个工具时折叠；摘要保留工具名，避免“合了但看不出” --- */
+.tool-group {
+  min-width: 0; max-width: 100%;
+  margin: 8px 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.tool-group-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tool-group-summary::-webkit-details-marker { display: none; }
+.tool-group-summary:hover { background: var(--bg-hover); color: var(--text); }
+.tool-group-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-group-caret { flex: none; color: var(--text-3); font-size: 9px; transition: transform .15s; }
+.tool-group[open] .tool-group-caret { transform: rotate(90deg); }
+.tool-group-icon { flex: none; font-size: 13px; }
+.tool-group-title { flex: none; color: var(--accent-2-soft); font-weight: 600; }
+.tool-group-count { flex: none; color: var(--text-3); font-size: 10.5px; }
+.tool-group-names {
+  flex: 1; min-width: 0;
+  color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tool-group-status { flex: none; color: var(--green); font-size: 10.5px; }
+.tool-group-items {
+  display: grid; gap: 7px;
+  padding: 8px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-input);
+}
+.tool-group-items .tool-card { margin: 0; }
 /* --- 审批卡片（Human-in-the-loop） --- */
 .approval-card {
   min-width: 0; max-width: 100%;

@@ -81,13 +81,17 @@ test("思考过程使用默认折叠的 details，点击摘要可手动展开", 
   assert.match(css, /\.thinking-text\s*\{[^}]*white-space:\s*pre-wrap/s);
 });
 
-test("多次工具调用不再自动合并，每张工具卡按事件顺序内联展示", async () => {
+test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–2 个继续平铺", async () => {
   const root = new URL("../../src/server/public/", import.meta.url);
   const app = await readFile(new URL("app.js", root), "utf8");
   const css = await readFile(new URL("style.css", root), "utf8");
   assert.match(app, /function mountToolCard\(block, card\) \{\s*blockBodies\.get\(block\)\?\.appendChild\(card\);/s);
-  assert.match(app, /mountToolCard\(block, card\)/);
-  assert.doesNotMatch(app, /TOOL_DRAWER_MIN|ensureToolDrawer|refreshToolDrawer|tool-drawer/);
-  assert.doesNotMatch(app, /\$\{tools\.length\} 个工具调用/);
+  assert.match(app, /const TOOL_GROUP_MIN = 3/);
+  assert.match(app, /function groupToolCallsIfNeeded\(block, body, nodePart\)/);
+  assert.match(app, /tools\.length < TOOL_GROUP_MIN/);
+  assert.match(app, /tool-group-names/);
+  assert.doesNotMatch(app, /tool-drawer|ensureToolDrawer|refreshToolDrawer/);
+  assert.match(css, /\.tool-group-summary/);
+  assert.match(css, /\.tool-group\[open\]/);
   assert.doesNotMatch(css, /\.tool-drawer|\.drawer-head|\.drawer-items/);
 });

@@ -19,7 +19,7 @@ import {
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "./modules/plugin-registry.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-26-9";
+const APP_VERSION = "web-2026-10-26-10";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -1051,6 +1051,13 @@ function mountPart(block, part) {
   }
 
   if (part.p === "node") {
+    if (part.name === "tools") {
+      const grouped = groupToolCallsIfNeeded(block, body, part);
+      if (grouped) {
+        partEls.set(part, { el: grouped });
+        return;
+      }
+    }
     const chip = document.createElement("span");
     chip.className = "node-chip";
     chip.textContent = `${nodeIcon(part.name)} ${nodeLabel(part.name)}`;
@@ -1104,9 +1111,59 @@ function mountPart(block, part) {
   }
 }
 
-/** 每次工具调用固定内联一张卡片，保证调用名、参数预览与节点事件保持时间顺序。 */
+/** 每次工具调用先内联挂载；同批工具达到阈值后由 tools 节点统一分组。 */
 function mountToolCard(block, card) {
   blockBodies.get(block)?.appendChild(card);
+}
+
+const TOOL_GROUP_MIN = 3; // “超过两个”才收进 tools；1–2 个保持平铺
+
+/** 将 tools 节点前紧邻的工具卡折叠成一个可展开分组，摘要保留工具名与次数。 */
+function groupToolCallsIfNeeded(block, body, nodePart) {
+  const nodeIndex = block.parts.indexOf(nodePart);
+  if (nodeIndex < 0) return null;
+  let start = nodeIndex - 1;
+  while (start >= 0 && block.parts[start].p === "tool") start -= 1;
+  const tools = block.parts.slice(start + 1, nodeIndex);
+  if (tools.length < TOOL_GROUP_MIN) return null;
+  const firstCard = partEls.get(tools[0])?.el;
+  if (!firstCard || firstCard.parentElement !== body) return null;
+
+  const counts = new Map();
+  for (const tool of tools) {
+    const name = tool.name || "tool";
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const nameSummary = [...counts.entries()]
+    .map(([name, count]) => count > 1 ? `${name} ×${count}` : name)
+    .join(" · ");
+  const running = tools.filter((tool) => !tool.result).length;
+  const errors = tools.filter((tool) => tool.result?.isError).length;
+  const status = running ? `${running} 个运行中` : errors ? `${errors} 个失败` : "全部完成";
+
+  const details = document.createElement("details");
+  details.className = "tool-group";
+  details.innerHTML = `
+    <summary class="tool-group-summary">
+      <span class="tool-group-caret">▶</span>
+      <span class="tool-group-icon">🔧</span>
+      <span class="tool-group-title">tools</span>
+      <span class="tool-group-count"></span>
+      <span class="tool-group-names"></span>
+      <span class="tool-group-status"></span>
+    </summary>
+    <div class="tool-group-items"></div>`;
+  details.querySelector(".tool-group-count").textContent = `${tools.length} 次调用`;
+  details.querySelector(".tool-group-names").textContent = nameSummary;
+  details.querySelector(".tool-group-status").textContent = status;
+  details.title = `${tools.length} 次工具调用：${nameSummary}`;
+  const items = details.querySelector(".tool-group-items");
+  firstCard.parentElement.insertBefore(details, firstCard);
+  for (const tool of tools) {
+    const el = partEls.get(tool)?.el;
+    if (el) items.appendChild(el);
+  }
+  return details;
 }
 
 function renderClarificationCard(part, el) {
