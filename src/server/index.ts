@@ -376,7 +376,7 @@ server.listen(PORT, HOST, async () => {
       `\n  LangGraph Agent Web 已启动\n` +
       `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
       `  模式: ${mode}   模型: ${config.model}   网关: ${config.baseURL}\n` +
-      `  提示: 右上角 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`
+      `  提示: 侧栏左下 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`
     );
   }
   // 显式对外开放且未配置认证：日志里必须留痕，终端再给一次醒目提示

@@ -60,7 +60,7 @@ export function assertConfig(): void {
     console.error(
       "[config] 缺少 API_KEY。\n" +
         "  请复制 .env.example 为 .env 并填入你的 API Key，或设置环境变量 API_KEY。\n" +
-        "  （Web 界面也可以在设置页里在线填写：npm run web → 右上角 ⚙ 设置）"
+        "  （Web 界面也可以在设置页里在线填写：npm run web → 侧栏左下 ⚙ 设置）"
     );
     process.exit(1);
   }
