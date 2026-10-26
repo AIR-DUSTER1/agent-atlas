@@ -15,7 +15,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { AGENT_PROFILES, profileMetaForSession } from "./modules/agent-profile.js";
 
 /** 前端版本标记：改动 app.js 后递增，用于确认浏览器跑的是不是最新脚本 */
-const APP_VERSION = "web-2026-10-25-4";
+const APP_VERSION = "web-2026-10-26-1";
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
   "color:#fff;background:#5b8cff;padding:2px 8px;border-radius:4px"
@@ -37,6 +37,7 @@ const state = {
   usage: {},           // sessionId -> { contextTokens, lastInput, lastOutput, lastCache }
   streaming: null,     // { ctrl, sid, ablock }
   compacting: false,   // /压缩上下文 请求进行中（与 SSE streaming 互斥）
+  settingsView: "models", // 设置页当前分区：models / memories / stats
 };
 
 /** 流式期间每个 part 对应的 DOM 引用（内存 Map，不参与持久化） */
@@ -1930,7 +1931,7 @@ function applyConfigState(cfg) {
   renderProviderMenu();
   renderComposerBar();
   updateContextBar();
-  if (!$("settings-mask").classList.contains("hidden")) {
+  if (isSettingsPageOpen()) {
     renderProviderList();
     if (!$("provider-form-wrap").classList.contains("hidden")) renderModelPanel();
   }
@@ -2219,7 +2220,7 @@ function renderProviderMenu() {
     edit.className = "pm-g-edit";
     edit.textContent = "编辑";
     edit.title = "在设置里编辑这个供应商与它的模型";
-    edit.addEventListener("click", (e) => { e.stopPropagation(); showProviderMenu(false); openSettings(p.id); });
+    edit.addEventListener("click", (e) => { e.stopPropagation(); showProviderMenu(false); openSettings("models", p.id); });
     head.appendChild(edit);
     group.appendChild(head);
 
@@ -2263,16 +2264,63 @@ function renderProviderMenu() {
   menu.appendChild(manage);
 }
 
-/* ----- 设置弹窗：供应商列表 + 每个供应商的模型 ----- */
+/* ----- 独立设置页：模型与供应商 / 记忆 / 统计 ----- */
 let settingsFocusProviderId = null; // 从菜单「编辑」进来时高亮的供应商
 
-function openSettings(focusProviderId) {
+const SETTINGS_VIEWS = new Set(["models", "memories", "stats"]);
+
+function isSettingsPageOpen() {
+  return Boolean($("settings-page") && !$("settings-page").classList.contains("hidden"));
+}
+
+/** 切换设置页分区；数据只在对应分区被选中时懒加载。 */
+function showSettingsView(view) {
+  const next = SETTINGS_VIEWS.has(view) ? view : "models";
+  state.settingsView = next;
+  document.querySelectorAll(".settings-nav-item").forEach((btn) => {
+    const active = btn.dataset.settingsView === next;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll(".settings-view").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.settingsPanel !== next);
+  });
+  const content = document.querySelector(".settings-page-content");
+  if (content) content.scrollTop = 0;
+
+  if (next === "models") {
+    api("/api/config").then(applyConfigState).catch(() => {});
+    refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
+  } else if (next === "memories") {
+    refreshMemories().catch((err) => memStatus(`✗ ${err.message}`, "err"));
+  } else {
+    refreshStats();
+  }
+}
+
+/** 打开独立设置页；models 分区可带供应商 id 做定位高亮。 */
+function openSettings(view = "models", focusProviderId = null) {
   showProviderMenu(false);
-  settingsFocusProviderId = focusProviderId || null;
-  api("/api/config").then(applyConfigState).catch(() => {});
+  closeCmMenus();
+  closeComposerMenu();
+  setSidebarOpen(false);
+  const target = SETTINGS_VIEWS.has(view) ? view : "models";
+  settingsFocusProviderId = target === "models" ? focusProviderId || null : null;
   closeProviderForm();
-  $("settings-mask").classList.remove("hidden");
-  refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
+  $("settings-page").classList.remove("hidden");
+  document.body.classList.add("settings-open");
+  showSettingsView(target);
+  requestAnimationFrame(() => $("settings-back-btn")?.focus());
+}
+
+/** 返回工作台；表单状态在离开时清理，避免下次打开残留。 */
+function closeSettingsPage() {
+  const page = $("settings-page");
+  if (!page || page.classList.contains("hidden")) return;
+  page.classList.add("hidden");
+  document.body.classList.remove("settings-open");
+  closeProviderForm();
+  $("settings-btn")?.focus();
 }
 
 /* ----- 备份与恢复（F9） ----- */
@@ -2318,7 +2366,7 @@ async function refreshBackups() {
   }
 }
 
-/* ----- 记忆弹窗：跨会话长期记忆的查看 / 新增 / 删除 ----- */
+/* ----- 长期记忆分区：查看 / 新增 / 删除 ----- */
 function memStatus(text, cls) {
   const el = $("memories-status");
   el.textContent = text;
@@ -2389,12 +2437,7 @@ async function saveMemoryFromForm() {
   }
 }
 
-function openMemories() {
-  $("memories-mask").classList.remove("hidden");
-  refreshMemories().catch((err) => memStatus(`✗ ${err.message}`, "err"));
-}
-
-/* ----- 统计弹窗：token 用量 / 按天与模型分布 / 活跃会话 ----- */
+/* ----- 使用统计：token 用量 / 按天与模型分布 / 活跃会话 ----- */
 /* fmtTokens 已由 modules/format.js 导入复用 */
 
 function renderStats(data) {
@@ -2479,8 +2522,7 @@ function renderStats(data) {
   }
 }
 
-function openStats() {
-  $("stats-mask").classList.remove("hidden");
+function refreshStats() {
   api("/api/stats").then(renderStats).catch((err) => {
     $("stats-totals").innerHTML = "";
     const empty = document.createElement("p");
@@ -2546,7 +2588,7 @@ function renderProviderList() {
   }
 }
 
-/* ----- 设置弹窗：编辑表单（供应商 + 它的模型列表 + 单个模型编辑） ----- */
+/* ----- 模型与供应商分区：编辑表单（供应商 + 模型列表 + 单个模型编辑） ----- */
 let editingProviderId = null; // null = 新增模式，否则为正在编辑的供应商 id
 let editingModelId = null;    // 正在「模型编辑面板」里编辑的模型 id
 let pendingModels = [];       // 新增供应商模式下待提交的模型（[{name, modality, contextWindow}]）
@@ -2856,10 +2898,9 @@ async function saveProvider() {
       setSettingsStatus(`✓ 已添加供应商（${res.provider.models.length} 个模型）${res.activeChanged ? "并启用" : ""}`, "ok");
     }
     await applyConfigState(await api("/api/config"));
-    // 保存成功后关闭设置弹窗；模型上下文等参数下次点模型「编辑」仍可继续配置。
+    // 保存成功后返回工作台；模型上下文等参数下次点模型「编辑」仍可继续配置。
     // 不调用 openProviderForm：它会重置表单并关闭模型编辑面板，造成“保存后还停在编辑态”。
-    $("settings-mask").classList.add("hidden");
-    closeProviderForm();
+    closeSettingsPage();
   } catch (err) {
     setSettingsStatus(`✗ ${err.message}`, "err");
   }
@@ -2921,12 +2962,12 @@ async function activateModel(providerId, modelId) {
       body: JSON.stringify({ providerId, modelId }),
     });
     await applyConfigState(await api("/api/config"));
-    if (!$("settings-mask").classList.contains("hidden")) {
+    if (isSettingsPageOpen()) {
       setSettingsStatus(`✓ 已启用「${res.name} · ${res.model}」· 思考等级 ${res.reasoningLabel}${res.mock ? "（无 Key → 模拟模式）" : ""}`, "ok");
       renderModelPanel();
     }
   } catch (err) {
-    if (!$("settings-mask").classList.contains("hidden")) setSettingsStatus(`✗ ${err.message}`, "err");
+    if (isSettingsPageOpen()) setSettingsStatus(`✗ ${err.message}`, "err");
     else uiAlert(`切换失败：${err.message}`, "切换模型");
   }
 }
@@ -2941,7 +2982,7 @@ async function setReasoningLevel(level) {
     });
     await applyConfigState(await api("/api/config"));
     const label = state.config?.reasoning?.label || level;
-    if (!$("settings-mask").classList.contains("hidden")) {
+    if (isSettingsPageOpen()) {
       setSettingsStatus(`✓ 思考等级已切换为「${label}」`, "ok");
       const p = currentEditingProvider();
       if (p && editingModelId) openModelForm(p.id, editingModelId);
@@ -3802,21 +3843,14 @@ async function init() {
   on("cm-thinking", "click", (e) => { e.stopPropagation(); toggleCmMenu("cm-thinking", "cm-thinking-menu", renderThinkingMenu); });
   on("cm-perm", "click", (e) => { e.stopPropagation(); toggleCmMenu("cm-perm", "cm-perm-menu", renderPermMenu); });
 
-  // 供应商 / 模型：设置弹窗 + 顶栏切换器
-  const closeSettings = () => { $("settings-mask").classList.add("hidden"); closeProviderForm(); };
-  on("settings-btn", "click", openSettings);
-  on("side-model", "click", openSettings);
-
-  // 跨会话长期记忆弹窗
-  const closeMemories = () => { $("memories-mask").classList.add("hidden"); };
-  on("memories-btn", "click", openMemories);
+  // 独立设置页：左下入口 / 返回 / 分区导航
+  on("settings-btn", "click", () => openSettings("models"));
+  on("side-model", "click", () => openSettings("models"));
+  on("settings-back-btn", "click", closeSettingsPage);
+  document.querySelectorAll(".settings-nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => showSettingsView(btn.dataset.settingsView || "models"));
+  });
   on("mem-add-btn", "click", saveMemoryFromForm);
-  on("memories-mask", "click", (e) => { if (e.target === $("memories-mask")) closeMemories(); });
-
-  // 使用统计弹窗
-  const closeStats = () => { $("stats-mask").classList.add("hidden"); };
-  on("stats-btn", "click", openStats);
-  on("stats-mask", "click", (e) => { if (e.target === $("stats-mask")) closeStats(); });
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
   $("session-search").addEventListener("input", () => renderSessions());
@@ -3865,7 +3899,6 @@ async function init() {
     await loadProjects();
     showProjectMenu(menu.classList.contains("hidden"));
   });
-  on("settings-mask", "click", (e) => { if (e.target === $("settings-mask")) closeSettings(); });
   on("add-provider-btn", "click", () => openProviderForm(null));
   on("backup-create-btn", "click", async () => {
     try {
@@ -3999,9 +4032,7 @@ async function init() {
       cancelActiveDialog(); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）
       closeComposerMenu();
       closeModal();
-      closeSettings();
-      closeMemories();
-      closeStats();
+      closeSettingsPage();
       closeFsModal();
       closeKb();
       closeEstate();

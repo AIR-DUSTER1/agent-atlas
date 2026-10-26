@@ -249,6 +249,32 @@ body {
   font-family: var(--sans);
   text-align: left;
 }
+.side-settings-btn {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%;
+  margin-bottom: 5px; padding: 8px 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--sans);
+  text-align: left;
+  transition: all .15s;
+}
+.side-settings-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
+.side-settings-icon {
+  width: 28px; height: 28px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: rgba(91,140,255,.12);
+  color: var(--accent-soft);
+  font-size: 15px;
+}
+.side-settings-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; line-height: 1.25; }
+.side-settings-copy strong { font-size: 12.5px; font-weight: 600; color: inherit; }
+.side-settings-copy small { margin-top: 2px; font-size: 10.5px; color: var(--text-3); }
+.side-settings-arrow { flex: none; font-size: 17px; color: var(--text-3); }
 .side-model:hover { background: var(--bg-hover); color: var(--text); }
 .side-model .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
 .side-model.mock .dot { background: var(--amber); }
@@ -1047,7 +1073,7 @@ body {
 .ext-card.ext-incomplete { border-style: dashed; opacity: .85; }
 
 /* ============================== 弹窗 ============================== */
-#modal-mask, #settings-mask {
+#modal-mask {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.55);
   backdrop-filter: blur(3px);
@@ -1078,18 +1104,105 @@ body {
 .ghost-btn:hover { background: var(--bg-hover); color: var(--text); }
 .ghost-btn.small { margin-top: 0; padding: 7px 12px; white-space: nowrap; }
 
-/* ---------- 设置弹窗 ---------- */
-#settings-modal {
-  width: min(660px, 94vw);
-  max-height: 90vh;
+/* ---------- 独立设置页：左侧分区导航 + 右侧内容 ---------- */
+.settings-page {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings-page-head {
+  flex: none;
+  min-height: 64px;
+  display: flex; align-items: center; gap: 18px;
+  padding: 8px 24px;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border-soft);
+}
+.settings-back-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  transition: all .15s;
+}
+.settings-back-btn:hover { color: var(--text); border-color: var(--accent); background: var(--bg-hover); }
+.settings-back-btn .back-arrow { font-size: 17px; line-height: 1; }
+.settings-page-heading { min-width: 0; }
+.settings-page-heading h1 { margin: 0; font-size: 17px; line-height: 1.2; }
+.settings-page-heading p { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
+.settings-page-head-spacer { flex: 1; }
+.settings-page-body {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 258px minmax(0, 1fr);
+}
+.settings-nav {
+  min-height: 0;
+  padding: 18px 13px;
   overflow-y: auto;
+  background: var(--bg-side);
+  border-right: 1px solid var(--border-soft);
+}
+.settings-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  margin-bottom: 6px; padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--sans);
+  text-align: left;
+  transition: all .15s;
+}
+.settings-nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.settings-nav-item.active {
+  color: var(--text);
+  background: rgba(91,140,255,.12);
+  border-color: rgba(91,140,255,.22);
+}
+.settings-nav-item .sn-icon {
+  width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 15px;
+}
+.settings-nav-item.active .sn-icon { background: rgba(91,140,255,.16); }
+.settings-nav-item .sn-copy { display: flex; min-width: 0; flex-direction: column; }
+.settings-nav-item .sn-copy strong { font-size: 12.5px; font-weight: 600; }
+.settings-nav-item .sn-copy small { margin-top: 2px; font-size: 10.5px; color: var(--text-3); }
+.settings-page-content {
+  min-width: 0; min-height: 0;
+  overflow-y: auto;
+  padding: 28px clamp(20px, 4vw, 56px) 64px;
+}
+.settings-view {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  padding: 24px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 24px;
-  animation: slideIn .2s ease;
+  box-shadow: 0 18px 48px rgba(0,0,0,.16);
+  animation: slideIn .18s ease;
 }
-#settings-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.settings-view h2 { margin: 0 0 4px; font-size: 18px; }
+#settings-modal, #memories-modal, #stats-modal {
+  width: auto; max-height: none;
+  overflow: visible;
+  background: transparent;
+  border: 0; border-radius: 0;
+  padding: 0;
+  animation: none;
+}
 .settings-sub { margin: 0 0 18px; font-size: 12px; color: var(--text-3); }
 
 .field { display: block; margin-bottom: 14px; }
@@ -1141,18 +1254,8 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 }
 .settings-status.ok { color: var(--green); }
 
-/* ---------- 记忆弹窗（复用设置弹窗外观） ---------- */
-#memories-modal {
-  width: min(620px, 94vw);
-  max-height: 90vh;
-  overflow-y: auto;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
-  animation: slideIn .2s ease;
-}
-#memories-modal h2 { margin: 0 0 4px; font-size: 16px; }
+/* ---------- 记忆分区 ---------- */
+#memories-modal h2 { margin: 0 0 4px; font-size: 18px; }
 .memories-list { margin-bottom: 16px; max-height: 46vh; overflow-y: auto; }
 .memories-empty { color: var(--text-3); font-size: 13px; padding: 8px 2px; }
 .memory-item {
@@ -1172,18 +1275,8 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 }
 .memory-item .p-del:hover { color: var(--red); border-color: var(--red); }
 
-/* ---------- 统计弹窗 ---------- */
-#stats-modal {
-  width: min(620px, 94vw);
-  max-height: 90vh;
-  overflow-y: auto;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
-  animation: slideIn .2s ease;
-}
-#stats-modal h2 { margin: 0 0 4px; font-size: 16px; }
+/* ---------- 统计分区 ---------- */
+#stats-modal h2 { margin: 0 0 4px; font-size: 18px; }
 .stats-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
 .stats-cell {
   padding: 10px 12px; background: var(--bg-input);
@@ -1735,6 +1828,29 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   #mode-badge, #demo-badge { display: none; }
 }
 
+/* 设置页在手机 / 窄窗下切为顶部横向分区导航 */
+@media (max-width: 760px) {
+  .settings-page-head { min-height: 58px; padding: 8px 12px; gap: 10px; }
+  .settings-page-heading p { display: none; }
+  .settings-page-body { display: flex; flex-direction: column; }
+  .settings-nav {
+    flex: none;
+    display: flex; gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .settings-nav-item { width: auto; min-width: max-content; margin: 0; padding: 7px 9px; }
+  .settings-nav-item .sn-icon { width: 26px; height: 26px; }
+  .settings-nav-item .sn-copy small { display: none; }
+  .settings-page-content { padding: 14px 12px 32px; }
+  .settings-view { padding: 16px; border-radius: 14px; }
+  .stats-totals { grid-template-columns: repeat(2, 1fr); }
+  .bar-label { flex-basis: 70px; }
+  .bar-sub { display: none; }
+}
+
 
 /* ============================================================
    房产 Agent（estate）：数据源面板 + 工具专属卡（房源/地图/户型图）
@@ -1803,5 +1919,13 @@ body.in-desktop #topbar button,
 body.in-desktop #topbar input,
 body.in-desktop #topbar a,
 body.in-desktop #topbar .provider-menu {
+  -webkit-app-region: no-drag;
+}
+/* 设置页同样留出原生窗口控制键区域，只有按钮可点击 */
+body.in-desktop .settings-page-head {
+  -webkit-app-region: drag;
+  padding-right: 152px;
+}
+body.in-desktop .settings-page-head button {
   -webkit-app-region: no-drag;
 }

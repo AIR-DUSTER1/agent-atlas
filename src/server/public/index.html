@@ -52,11 +52,19 @@
       <nav id="session-list" aria-label="会话列表"></nav>
 
       <div class="side-footer">
-        <button id="side-model" class="side-model" title="点击修改供应商 / API Key / 模型">
+        <button id="settings-btn" class="side-settings-btn" title="打开设置页（模型 / 记忆 / 统计）">
+          <span class="side-settings-icon">⚙</span>
+          <span class="side-settings-copy">
+            <strong>设置</strong>
+            <small>模型 · 记忆 · 统计</small>
+          </span>
+          <span class="side-settings-arrow">›</span>
+        </button>
+        <button id="side-model" class="side-model" title="当前模型：点击打开模型设置">
           <span class="dot"></span>
           <span id="side-model-text">加载中…</span>
         </button>
-        <div id="side-foot-note" class="foot-note">点击上方模型名可修改配置</div>
+        <div id="side-foot-note" class="foot-note">当前模型 · 点击也可打开模型设置</div>
       </div>
     </aside>
 
@@ -80,12 +88,7 @@
             </button>
             <div id="provider-menu" class="provider-menu hidden"></div>
           </div>
-          <button id="memories-btn" class="settings-btn" title="跨会话长期记忆：查看 / 新增 / 删除 Agent 记住的事实与偏好">🧠</button>
-          <button id="stats-btn" class="settings-btn" title="使用统计：token 用量 / 按天与模型分布 / 活跃会话">📊</button>
           <button id="theme-btn" class="settings-btn" title="切换浅色主题">☀️</button>
-          <button id="settings-btn" class="settings-btn" title="供应商管理：添加 / 编辑 / 删除">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
           <span id="status-dot" class="status idle" title="空闲"></span>
         </div>
       </header>
@@ -171,13 +174,42 @@
     </div>
   </div>
 
-  <!-- ============ 设置弹窗：供应商列表 + 编辑表单 ============ -->
-  <div id="settings-mask" class="hidden">
-    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <h2 id="settings-title">⚙ 设置 —— 供应商与模型管理</h2>
-      <p class="settings-sub">一个供应商 = 一套网关凭据（BASE_URL + Key + 协议），下面可以挂任意多个模型；启用任意「供应商 × 模型」组合即可切换聊天用的模型</p>
+  <!-- ============ 设置页：模型与供应商 / 长期记忆 / 使用统计 ============ -->
+  <section id="settings-page" class="settings-page hidden" aria-labelledby="settings-title">
+    <header class="settings-page-head">
+      <button id="settings-back-btn" class="settings-back-btn" type="button" title="返回工作台（Esc）">
+        <span class="back-arrow">←</span><span>返回</span>
+      </button>
+      <div class="settings-page-heading">
+        <h1 id="settings-title">设置</h1>
+        <p>模型、长期记忆与使用统计集中管理</p>
+      </div>
+      <span class="settings-page-head-spacer"></span>
+    </header>
 
-      <div class="field-label">供应商列表</div>
+    <div class="settings-page-body">
+      <nav class="settings-nav" role="tablist" aria-label="设置分类">
+        <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
+          <span class="sn-icon">⚙</span>
+          <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
+          <span class="sn-icon">🧠</span>
+          <span class="sn-copy"><strong>长期记忆</strong><small>查看、新增与删除记忆</small></span>
+        </button>
+        <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
+          <span class="sn-icon">📊</span>
+          <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话排行</small></span>
+        </button>
+      </nav>
+
+      <div class="settings-page-content">
+        <section id="settings-view-models" class="settings-view" data-settings-panel="models" role="tabpanel">
+          <div id="settings-modal" role="region" aria-labelledby="models-title">
+            <h2 id="models-title">⚙ 模型与供应商</h2>
+            <p class="settings-sub">一个供应商 = 一套网关凭据（BASE_URL + Key + 协议），下面可以挂任意多个模型；启用任意「供应商 × 模型」组合即可切换聊天用的模型</p>
+
+            <div class="field-label">供应商列表</div>
       <div id="provider-list"></div>
       <button id="add-provider-btn" class="ghost-btn small add-provider">＋ 添加供应商</button>
 
@@ -302,13 +334,12 @@
         选「自定义 JSON」还能直接手写网关需要的字段。
         配置保存在本地 <code>.web-config.json</code>（已 gitignore），优先于 <code>.env</code>。
       </p>
-    </div>
-  </div>
+          </div>
+        </section>
 
-  <!-- ============ 记忆弹窗：跨会话长期记忆的查看 / 新增 / 删除 ============ -->
-  <div id="memories-mask" class="hidden">
-    <div id="memories-modal" role="dialog" aria-modal="true" aria-labelledby="memories-title">
-      <h2 id="memories-title">🧠 跨会话长期记忆</h2>
+        <section id="settings-view-memories" class="settings-view hidden" data-settings-panel="memories" role="tabpanel" aria-labelledby="memories-title">
+          <div id="memories-modal" role="region" aria-labelledby="memories-title">
+            <h2 id="memories-title">🧠 跨会话长期记忆</h2>
       <p class="settings-sub">Agent 在对话中「值得跨会话记住」的事实与偏好（用户说「以后都…」「记住…」时会自动调用 memory_save）。
         每轮对话自动注入最近 30 条，跨会话生效；这里可以查看、手动补充与删除。</p>
 
@@ -322,13 +353,12 @@
         <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
       </div>
       <div id="memories-status" class="settings-status"></div>
-    </div>
-  </div>
+          </div>
+        </section>
 
-  <!-- ============ 统计弹窗：token 用量 / 按天与模型分布 / 活跃会话 ============ -->
-  <div id="stats-mask" class="hidden">
-    <div id="stats-modal" role="dialog" aria-modal="true" aria-labelledby="stats-title">
-      <h2 id="stats-title">📊 使用统计</h2>
+        <section id="settings-view-stats" class="settings-view hidden" data-settings-panel="stats" role="tabpanel" aria-labelledby="stats-title">
+          <div id="stats-modal" role="region" aria-labelledby="stats-title">
+            <h2 id="stats-title">📊 使用统计</h2>
       <p class="settings-sub">聚合本服务全部会话的逐轮用量（journal 回放后同样计入）；inputTokens 是各次模型调用的上下文快照之和，含分析/反思节点。</p>
 
       <div id="stats-totals" class="stats-totals"></div>
@@ -341,8 +371,11 @@
 
       <div class="field-label">最活跃会话</div>
       <div id="stats-sessions" class="stats-sessions"></div>
+          </div>
+        </section>
+      </div>
     </div>
-  </div>
+  </section>
 
   <!-- ============ 文件选择器：项目 / 远程文件夹 / 本地上传 ============ -->
   <div id="fs-mask" class="hidden">
