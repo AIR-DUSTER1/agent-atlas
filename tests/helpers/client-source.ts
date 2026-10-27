@@ -63,7 +63,6 @@ export const CLIENT_SOURCES = [
   "views/settings.ts",
   "views/settings-backup.ts",
   "views/settings-memories.ts",
-  "views/settings-stats.ts",
   "views/model-store.ts",
   "views/model-panel.ts",
   "views/model-form.ts",

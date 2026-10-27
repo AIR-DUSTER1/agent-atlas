@@ -994,7 +994,7 @@ memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论�
 
 **链路**：`GET /api/stats` → `buildStats(listSessions(), generatedAt?)` 纯函数聚合内存
 turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端设置页「使用统计」分区渲染。
-响应固定包含 `ranges: ["7d", "30d"]`，每个区间都有 `totals / byDay / byModel / topSessions`；
+响应固定包含 `ranges: ["7d", "30d"]`，每个区间都有 `totals / byDay / byModel / byHour / toolCalls / health / topSessions`；
 服务端按本地自然日生成完整日桶（含今天），无数据日期补零，时间轴不会因空格而断裂。
 
 **窗口与聚合语义**：7 天 = 今天及之前 6 个自然日；30 天 = 今天及之前 29 个自然日。
@@ -1004,10 +1004,11 @@ turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端
 归并并取各 token 字段最终值；旧 journal 没有 callId，则按连续 `model/input/output/cache`
 签名去重。`byDay.cacheReadTokens` 单列缓存读取量；`delegate_agent` 的 tool_call 计委派次数。
 
-**前端图表**：区间概览卡同时展示 7/30 天总量，点击切换明细；每日 Token 用浏览器原生
-`document.createElementNS(SVG_NS, ...)` 绘制输入/输出堆叠柱图，不新增前端依赖、不需要构建。
-`fmtTokens` 的阈值是：1,000,000 以上显示 `M`（保留一位小数），十万以上显示 `k`；
-模型分布和 Top 8 会话跟随当前区间；`stats-refresh` 可重新拉取。
+**前端图表**：`views/stats/{index,kpi,charts,tables}.ts` 四模块分工；Chart.js 由
+`import("../../vendor/chart.js")` 动态加载，主设置页与核心会话不进入其启动闭包。六张图分别为
+每日 Token 混合图、模型占比、模型调用对比、24 小时活动、缓存命中率趋势、工具调用 Top；
+每张图有 ResizeObserver、PNG 导出和主题重建。图表库加载失败时用 `toolCalls / byHour / byDay`
+数据表降级。`stats-refresh` 使用 8 秒超时与请求序号，防止旧响应覆盖新选择。
 
 **协议改动（§5.3 流程）**：usage 事件带可选 `model` 与 `callId` —— `model` 由 stream.ts
 （一次流取一次 `getActiveModelLabel()`）+ mock.ts（固定「模拟模式」）提供；`callId` 在每次
@@ -1507,7 +1508,7 @@ console.log(result.messages.at(-1).content);
 | `process.kill(pid, 0)` 判断进程是否存活总是 throw EPERM | Windows 不可靠（存在/不存在/无权限都可能是 EPERM）。存活判断改用**时间戳**（如 config-store 文件锁：超过 `LOCK_STALE_MS` 视为死进程遗留可接管） |
 | 坏 JSON 请求返回 500（而不是 400） | 路由里 `JSON.parse(await readBody(req))` 的 `SyntaxError` 直接冒到入口顶层 catch，被归为服务端故障。入口集中处理：`SyntaxError → 400「请求体不是合法的 JSON」`（5.6 测试发现并修复） |
 | 跑完自动化测试后侧栏多出陌生会话 | 测试进程用了真实 `.setting/sessions.ndjson` / `.web-config.json`。测试钩子 `SESSIONS_FILE` / `WEB_CONFIG_FILE` 指向临时目录（§3.18），生产默认路径不变 |
-| 深色主题下图表/强调色变黑 | CSS 变量自引用（`--accent-2-soft: var(--accent-2-soft)`）会让整个声明失效，SVG `fill` 回退黑色。对策：每个主题都定义终端颜色值，并分别验证深色/浅色的 `getComputedStyle(...).fill`，不能只看浅色截图 |
+| 深色主题下图表/强调色变黑 | CSS 变量自引用会让声明失效，旧 SVG 的 fill 与 Chart.js 颜色都会回退黑色。对策：每个主题定义终端颜色值；`toggleTheme()` 派发 `themechange`，图表销毁后从 `getComputedStyle` 重读语义 token 再重建 |
 | 前端拆 `modules/` 后页面白屏、`/modules/*.js` 404 | `static.ts` 原来是「单层文件名」白名单（`^[\w.-]+$`），带 `/` 的子路径全被拒。拆 ESM 时同步放开**唯一字面量前缀** `modules/`，并把 `index.html` 的 `<script>` 改成 `type="module"`（否则 import 语法直接报错）；校验脚本要断言脚本 MIME 是 `text/javascript`，MIME 错了模块脚本会被浏览器拒绝执行 |
 | 持久化文件写到 `src/.setting/` 而不是仓库根 `.setting/` | 「模块位置回退到仓库根」的层数因文件所在目录而异：`session-store.ts` 在 `src/server/` 回退两层，`checkpoint.ts` 在 `src/` 只回退**一层** —— 照抄多退了，服务照常工作但文件悄悄换了位置。默认路径一律以**本文件自身位置**起算并写明层数 |
 | 前端全局函数搬进 module 后错误横幅失效 | `showFatalBanner` 连同 `window "error" / "unhandledrejection"` 监听一起被搬走时，监听器容易漏在旧文件里被删掉。搬迁检查单：函数体 + 初始化/绑定代码（事件监听、IIFE）必须整组移动 |

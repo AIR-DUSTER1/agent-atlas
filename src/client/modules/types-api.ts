@@ -267,8 +267,26 @@ export interface StatsModelRow {
   cacheReadTokens: number;
 }
 
+export interface StatsHourRow {
+  hour: number;
+  turns: number;
+  tokens: number;
+}
+
+export interface StatsToolRow {
+  name: string;
+  count: number;
+}
+
+export interface StatsHealth {
+  avgTurnMs: number;
+  cacheHitRate: number;
+  failedTurns: number;
+  interruptedTurns: number;
+}
+
 export interface StatsSessionRow {
-  id: string;
+  sessionId: string;
   title: string;
   turns: number;
   tokens: number;
@@ -282,6 +300,10 @@ export interface StatsRange {
   totals: StatsTotals;
   byDay: StatsDay[];
   byModel: StatsModelRow[];
+  byModelShare: StatsModelRow[];
+  byHour: StatsHourRow[];
+  toolCalls: StatsToolRow[];
+  health: StatsHealth;
   topSessions: StatsSessionRow[];
 }
 

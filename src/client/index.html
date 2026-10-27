@@ -502,7 +502,7 @@
                 <h2 id="stats-title"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i> 使用统计</h2>
                 <p class="settings-sub">同时统计近 7 天与近 30 天。数据来自会话 journal 的逐轮 usage，重启回放后仍可查看。</p>
               </div>
-              <button id="stats-refresh" type="button" class="ghost-btn small">刷新</button>
+              <button id="stats-refresh" type="button" class="ghost-btn small"><i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i> 刷新</button>
             </div>
 
             <div id="stats-window-overview" class="stats-window-overview" aria-label="统计时间区间"></div>
@@ -512,46 +512,12 @@
                 <h3 id="stats-selected-title">近 7 天明细</h3>
                 <p id="stats-range-meta" class="key-state"></p>
               </div>
-              <span id="stats-updated" class="key-state"></span>
+              <span id="stats-updated" class="key-state" aria-live="polite"></span>
             </div>
 
-            <div id="stats-totals" class="stats-totals"></div>
-
-            <section class="stats-card stats-chart-card" aria-labelledby="stats-chart-title">
-              <div class="stats-card-head">
-                <div>
-                  <h3 id="stats-chart-title">每日 Token 趋势</h3>
-                  <p id="stats-chart-caption" class="key-state"></p>
-                </div>
-                <div class="stats-chart-legend" aria-label="图表图例">
-                  <span class="stats-legend-input">输入 tokens</span>
-                  <span class="stats-legend-output">输出 tokens</span>
-                </div>
-              </div>
-              <div id="stats-chart" class="stats-chart" aria-live="polite"></div>
-            </section>
-
-            <div class="stats-grid">
-              <section class="stats-card" aria-labelledby="stats-models-title">
-                <div class="stats-card-head">
-                  <div>
-                    <h3 id="stats-models-title">按模型分布</h3>
-                    <p class="key-state">当前所选时间区间</p>
-                  </div>
-                </div>
-                <div id="stats-models" class="stats-bars"></div>
-              </section>
-
-              <section class="stats-card" aria-labelledby="stats-sessions-title">
-                <div class="stats-card-head">
-                  <div>
-                    <h3 id="stats-sessions-title">最活跃会话</h3>
-                    <p class="key-state">按轮次排序</p>
-                  </div>
-                </div>
-                <div id="stats-sessions" class="stats-sessions"></div>
-              </section>
-            </div>
+            <div id="stats-kpis" class="stats-kpis" aria-label="关键指标"></div>
+            <div id="stats-charts" class="stats-charts" aria-label="统计图表"></div>
+            <div id="stats-tables" class="stats-tables"></div>
           </div>
         </section>
       </div>

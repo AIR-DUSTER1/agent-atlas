@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { readClientSource } from "../helpers/client-source.js";
+import { readClientFiles, readClientSource } from "../helpers/client-source.js";
 
 const root = new URL("../../src/client/", import.meta.url);
 
@@ -61,20 +61,22 @@ test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创�
   assert.doesNotMatch(app, /providerFormMode !== "create" && p\.id === selectedProviderId/);
 });
 
-test("使用统计展示近 7 天与近 30 天，并用原生 SVG 图表渲染", async () => {
+test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
-    const app = await readClientSource();
+  const stats = await readClientFiles(["views/stats/index.ts", "views/stats/kpi.ts", "views/stats/charts.ts", "views/stats/tables.ts"]);
   assert.match(html, /id="stats-window-overview"/);
-  assert.match(html, /id="stats-chart"/);
+  assert.match(html, /id="stats-kpis"/);
+  assert.match(html, /id="stats-charts"/);
+  assert.match(html, /id="stats-tables"/);
   assert.match(html, /id="stats-refresh"/);
-  assert.match(html, /id="stats-models"/);
-  assert.match(html, /id="stats-sessions"/);
-  assert.doesNotMatch(html, /id="stats-days"/, "旧的单区间按天列表应已移除");
-  assert.match(app, /activeStatsRange = "7d"/);
-  assert.match(app, /function renderStatsChart\(range: StatsRange\): void/);
-  assert.match(app, /document\.createElementNS\(SVG_NS/);
-  assert.match(app, /stats-window-card/);
-  assert.match(app, /stats-chart-svg/);
-  assert.match(app, /totals\.modelCalls/);
-  assert.match(app, /次模型调用/);
+  assert.match(stats, /activeRangeId = "7d"/);
+  assert.match(stats, /await import\("\.\.\/\.\.\/vendor\/chart\.js"\)/);
+  assert.match(stats, /renderKpis/);
+  assert.match(stats, /renderTables/);
+  assert.match(stats, /ResizeObserver/);
+  assert.match(stats, /toBase64Image/);
+  assert.match(stats, /toolCalls/);
+  assert.match(stats, /byHour/);
+  assert.match(stats, /图表暂不可用/);
+  assert.match(stats, /8_000/);
 });

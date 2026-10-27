@@ -21,7 +21,8 @@ import { refreshMemories, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
-import { refreshStats } from "./settings-stats.js";
+import { refreshStats } from "./stats/index.js";
+import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig, EstateState, RagState } from "../modules/types.js";
 
 const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "mcp", "stats"]);
@@ -43,6 +44,7 @@ export function showSettingsView(view: string): void {
   document.querySelectorAll<HTMLElement>(".settings-view").forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.settingsPanel !== next);
   });
+  if (next !== "stats") destroyStatsCharts();
   const content = document.querySelector<HTMLElement>(".settings-page-content");
   if (content) content.scrollTop = 0;
 

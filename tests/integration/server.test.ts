@@ -279,6 +279,7 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
     "/render/parts.js", "/render/messages.js",
     "/stream/events.js", "/stream/turn.js",
     "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",
+    "/views/stats/index.js", "/views/stats/kpi.js", "/views/stats/charts.js", "/views/stats/tables.js",
     "/vendor/chart.js", "/vendor/chart-lib.js", "/vendor/icons-lib.js",
     "/vendor/marked-lib.js", "/vendor/dompurify-lib.js", "/vendor/highlight-lib.js",
   ]) {
@@ -359,6 +360,10 @@ test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async (
     );
     assert.ok(range.byModel.some((m: { model: string }) => m.model === "模拟模式"), "mock 用量应标注模拟模式");
     assert.equal(range.byDay.at(-1).date, range.endDate, "应补齐到区间结束日");
+    assert.equal(range.byHour.length, 24, "活动时段固定 24 桶");
+    assert.ok(Array.isArray(range.toolCalls));
+    assert.ok(range.byModelShare.length === range.byModel.length);
+    assert.ok(Number.isFinite(range.health.avgTurnMs) && Number.isFinite(range.health.cacheHitRate));
     assert.ok(range.topSessions.some((s: { sessionId: string }) => s.sessionId === sid));
   }
   assert.equal(week.byDay.length, 7);

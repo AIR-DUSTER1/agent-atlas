@@ -55,6 +55,7 @@ export function toggleTheme(): void {
   else delete document.documentElement.dataset.theme;
   try { localStorage.setItem(LS_THEME, next); } catch { /* 隐私模式等 */ }
   updateThemeBtn();
+  window.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
 }
 
 /* ---------------------------------------------------------------------------

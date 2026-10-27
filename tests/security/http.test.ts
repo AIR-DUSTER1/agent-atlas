@@ -132,6 +132,7 @@ test("静态分发拒绝目录穿越、未知扩展与 vendor 探测", async () 
     "/vendor/chart-lib.js.map",
     "/vendor/unknown.txt",
     "/styles/unknown.css",
+    "/views/unknown/index.js",
   ]) {
     const res = await fetch(srv.base + path);
     assert.notEqual(res.status, 200, path);

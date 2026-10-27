@@ -42,7 +42,7 @@ import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { closeSettingsPage, openSettings, showSettingsView } from "./views/settings.js";
 import { refreshBackups } from "./views/settings-backup.js";
-import { refreshStats } from "./views/settings-stats.js";
+import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
 import { saveSkillFromForm } from "./views/settings-skills.js";

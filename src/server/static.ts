@@ -3,7 +3,7 @@
  * static.ts — 前端静态文件分发（白名单式防目录穿越）
  * ============================================================
  * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与一层已登记子目录
- * （core/ composer/ render/ stream/ views/ actions/ modules/ ui/ vendor/ styles/）。
+ * （core/ composer/ render/ stream/ views/ actions/ modules/ ui/ vendor/ styles/）；额外仅放行 views/stats/。
  * 在路径正则之外再做 realpath 边界和 lstat 普通文件校验，拒绝符号链接、
  * 未知扩展与目录列表；全部 no-store，页面和脚本始终取最新构建。
  */
@@ -37,15 +37,20 @@ function isInside(root: string, target: string): boolean {
 export async function serveStatic(pathname: string, res: ServerResponse): Promise<boolean> {
   const raw = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   // 单层文件，或「允许的子目录/单层文件」两种形态
+  // 单层文件、一层已登记目录，或唯一登记的 views/stats 第二层目录
   const single = raw.match(/^(\w[\w.-]*)$/);
   const nested = raw.match(/^([a-z]+)\/(\w[\w.-]*)$/);
-  if (!single && !nested) return false;
+  const nestedStats = raw.match(/^views\/(stats)\/(\w[\w.-]*)$/);
+  if (!single && !nested && !nestedStats) return false;
 
   let rel: string;
-  if (nested) {
+  if (nestedStats) {
+    const [, subdir, file] = nestedStats;
+    rel = join("views", subdir ?? "", file ?? "");
+  } else if (nested) {
     const [, dir, file] = nested;
-    if (!ALLOWED_DIRS.has(dir)) return false; // 未知子目录直接 404
-    rel = join(dir, file);
+    if (!ALLOWED_DIRS.has(dir)) return false;
+    rel = join(dir, file ?? "");
   } else {
     rel = single?.[1] ?? "";
   }

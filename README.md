@@ -135,12 +135,12 @@ Agent 会把值得跨会话记住的事存进长期记忆，新会话自动带�
 ### 用量统计（📊）
 
 侧栏左下 ⚙ 设置 →「使用统计」：同时计算 **近 7 天** 与 **近 30 天** 两个自然日窗口。
-页面先用两张区间卡展示轮次 / token 总量，点任一区间可查看该窗口的输入 / 输出 / 缓存 token、
-有记录会话与子 Agent 委派；每日 Token 趋势使用零依赖 SVG 堆叠柱图，按天展示输入与输出，
-无数据日期也会补齐为 0，模型分布与最活跃会话 Top 8 同样跟随所选区间。数据来自每轮记录的
-usage 事件，重启并从 journal 回放后历史仍在。Token 数会自动切到紧凑单位：`17,726,000`
-显示为 `17.7M`，十万以上显示 `k`。模型调用次数按真实 API 调用统计，不会把流式过程中重复
-写入的累计 usage 快照算成多次调用；旧 journal 则按连续快照签名兼容去重。
+页面先用两张区间卡展示轮次 / token 总量，点任一区间可查看输入 / 输出 / 缓存 token、
+平均轮次耗时、失败与中断次数、子 Agent 委派；下方用 Chart.js 展示每日 Token 趋势、
+模型占比、模型调用对比、24 小时活动分布、缓存命中率和工具调用 Top，另保留可排序的
+Top 会话与工具明细表。每张图都能导出 PNG；图表库加载失败时自动降级为数据表，
+无数据日期会补齐为 0，Token 数自动切到 k / M 紧凑单位。
+模型调用次数按真实 API 调用统计，流式累计 usage 快照不会被重复计数。
 
 接口为 `GET /api/stats`。下面的响应示例为便于阅读省略了部分零值日期；实际 `byDay` 分别固定返回 7 / 30 个自然日桶：
 
@@ -169,6 +169,14 @@ usage 事件，重启并从 journal 回放后历史仍在。Token 数会自动�
       "byModel": [
         { "model": "模拟模式", "calls": 2, "inputTokens": 804, "outputTokens": 858, "cacheReadTokens": 0 }
       ],
+      "byModelShare": [
+        { "model": "模拟模式", "calls": 2, "inputTokens": 804, "outputTokens": 858, "cacheReadTokens": 0 }
+      ],
+      "byHour": [
+        { "hour": 10, "turns": 2, "tokens": 1662 }
+      ],
+      "toolCalls": [],
+      "health": { "avgTurnMs": 1200, "cacheHitRate": 0, "failedTurns": 0, "interruptedTurns": 0 },
       "topSessions": [
         { "sessionId": "session-id", "title": "示例会话", "turns": 2, "tokens": 1662 }
       ]
@@ -194,6 +202,14 @@ usage 事件，重启并从 journal 回放后历史仍在。Token 数会自动�
       "byModel": [
         { "model": "模拟模式", "calls": 2, "inputTokens": 804, "outputTokens": 858, "cacheReadTokens": 0 }
       ],
+      "byModelShare": [
+        { "model": "模拟模式", "calls": 2, "inputTokens": 804, "outputTokens": 858, "cacheReadTokens": 0 }
+      ],
+      "byHour": [
+        { "hour": 10, "turns": 2, "tokens": 1662 }
+      ],
+      "toolCalls": [],
+      "health": { "avgTurnMs": 1200, "cacheHitRate": 0, "failedTurns": 0, "interruptedTurns": 0 },
       "topSessions": [
         { "sessionId": "session-id", "title": "示例会话", "turns": 2, "tokens": 1662 }
       ]
