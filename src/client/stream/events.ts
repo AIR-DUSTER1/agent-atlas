@@ -15,8 +15,8 @@ import { scrollBottom } from "../core/dom.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
 import {
-  appendReasoning, mountPart, scheduleTextRender, setPendingApproval,
-  updateToolCard,
+  appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
+  updateThinkingPart, updateToolCard,
 } from "../render/parts.js";
 import { TOOL_ICONS } from "../modules/format.js";
 import type {
@@ -27,6 +27,14 @@ import type {
 /* ---------------------------------------------------------------------------
  * 增量事件处理
  * ------------------------------------------------------------------------- */
+function sealStreamingParts(ablock: AssistantBlock, kinds: Array<"text" | "thinking"> = ["text", "thinking"]): void {
+  for (const part of ablock.parts) {
+    if (!kinds.includes(part.p as "text" | "thinking") || !("streaming" in part) || !part.streaming) continue;
+    part.streaming = false;
+    if (part.p === "text") renderTextPart(part);
+    else if (part.p === "thinking") updateThinkingPart(part);
+  }
+}
 export function appendToken(ablock: AssistantBlock, text: string): void {
   const parts = ablock.parts;
   let last = parts[parts.length - 1];
@@ -46,6 +54,7 @@ export function appendToken(ablock: AssistantBlock, text: string): void {
 export function upsertToolCall(
   ablock: AssistantBlock, ev: { id: string; name?: string; argsFragment?: string }
 ): void {
+  sealStreamingParts(ablock);
   let part = [...ablock.parts].reverse().find(
     (p): p is ToolPart => p.p === "tool" && p.id === ev.id
   );
@@ -89,6 +98,7 @@ export function fillToolResult(
 }
 
 export function addNodeChip(ablock: AssistantBlock, name: string): void {
+  sealStreamingParts(ablock);
   // 同一节点的思考卡已经承担了步骤标题，不再重复生成静态 chip。
   const thinking = [...ablock.parts].reverse().find(
     (part) => part.p === "thinking" && part.node === name && !part.nodeSeen
@@ -106,6 +116,7 @@ export function addNodeChip(ablock: AssistantBlock, name: string): void {
 }
 
 export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload): void {
+  sealStreamingParts(ablock);
   if (payload.type === "clarification") {
     const part: AssistantPart = { p: "clarification", req: payload, status: "pending" };
     ablock.parts.push(part);
@@ -129,38 +140,46 @@ export function addErrorBlock(message: string): void {
 /* ---------------------------------------------------------------------------
  * 主分派
  * ------------------------------------------------------------------------- */
+export function applyUsage(
+  ev: Extract<AgentEvent, { type: "usage" }>,
+  ablock?: AssistantBlock,
+  sid: string | null = state.currentId,
+): void {
+  // 内部 review/analyze 调用只计入统计成本，不能覆盖主循环的上下文占用与缓存口径。
+  if (ev.internal || !sid) return;
+  const u = state.usage[sid] || (state.usage[sid] = { lastInput: 0, lastOutput: 0, lastCache: 0 });
+  const context = ev.inputTokens + ev.outputTokens;
+  // 一轮内可能多次调用主 Agent（工具后继续）；容量条取本轮峰值，避免工具调用间隙回跳。
+  if (!u.contextTokens || context >= u.contextTokens) {
+    u.lastInput = ev.inputTokens;
+    u.lastOutput = ev.outputTokens;
+    u.lastCache = ev.cacheReadTokens || 0;
+    u.contextTokens = context;
+    if (ablock) ablock._usage = { lastInput: ev.inputTokens, lastOutput: ev.outputTokens, lastCache: u.lastCache };
+  }
+  if (ablock) updateTurnCaption(ablock);
+  if (sid === state.currentId) updateContextBar();
+  saveLocal();
+}
 export function handleEvent(ev: AgentEvent, ablock: AssistantBlock): void {
   switch (ev.type) {
-    case "token": appendToken(ablock, ev.text); break;
-    case "reasoning": appendReasoning(ablock, ev); break;
+    case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text); break;
+    case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev); break;
     case "tool_call": upsertToolCall(ablock, ev); break;
-    case "tool_result": fillToolResult(ablock, ev); break;
+    case "tool_result": sealStreamingParts(ablock); fillToolResult(ablock, ev); break;
     case "node": addNodeChip(ablock, ev.name); break;
     case "ai_message": {
+      sealStreamingParts(ablock);
       const last = ablock.parts[ablock.parts.length - 1];
       if (!last || last.p !== "text" || last.text !== ev.content) {
-        const part: AssistantPart = { p: "text", text: ev.content, streaming: true };
+        const part: AssistantPart = { p: "text", text: ev.content, streaming: false };
         ablock.parts.push(part);
         mountPart(ablock, part);
       }
       break;
     }
     case "interrupt": addInterrupt(ablock, ev.payload); break;
-    case "usage": {
-      // 上下文容量 ≈ 最近一次模型调用的 输入 + 输出；缓存占比 = cache_read / 输入
-      const sid = state.currentId;
-      if (!sid) break;
-      const u = state.usage[sid] || (state.usage[sid] = { lastInput: 0, lastOutput: 0, lastCache: 0 });
-      u.lastInput = ev.inputTokens;
-      u.lastOutput = ev.outputTokens;
-      u.lastCache = ev.cacheReadTokens || 0;
-      u.contextTokens = ev.inputTokens + ev.outputTokens;
-      ablock._usage = { lastInput: ev.inputTokens, lastOutput: ev.outputTokens, lastCache: u.lastCache };
-      updateTurnCaption(ablock);
-      updateContextBar();
-      saveLocal();
-      break;
-    }
+    case "usage": applyUsage(ev, ablock); break;
     case "shutdown": {
       // 服务端优雅退出的最后一帧：常驻顶部提示；刷新时若服务已恢复则自然消失
       let banner = document.getElementById("shutdown-banner");

@@ -16,7 +16,7 @@ import { uiAlert } from "../ui/dialog.js";
 import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
 import { renderAll } from "../render/messages.js";
-import { handleEvent } from "../stream/events.js";
+import { applyUsage, handleEvent } from "../stream/events.js";
 import { finalize } from "../stream/turn.js";
 import { markInterruptsResolved, markLatestInterruptPending, renderSessions } from "./sessions.js";
 import { closeComposerMenu } from "../composer/menu.js";
@@ -177,8 +177,7 @@ export function selectSession(sid: string): void {
 /** 历史会话回放：localStorage 里没有这个会话的对话记录时（换浏览器 / 清过缓存），
  *  从服务端拉取每轮「用户消息 + 事件流」，用与实时流完全相同的 handleEvent 重放渲染。 */
 export async function hydrateFromServer(s: Session | undefined): Promise<void> {
-  if (!s || s.stale) return;                       // 服务重启后的残留会话：服务端也没有记录
-  if (transcript(s.id).length) return;             // 本地已有 → 不拉
+  if (!s || s.stale) return;
   try {
     const data = await api<{
       records?: Array<{
@@ -188,45 +187,52 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
       }>;
       pendingApproval?: boolean;
     }>(`/api/sessions/${s.id}/transcript`);
+    if (state.currentId !== s.id) return;
+
     const arr = transcript(s.id);
-    if (arr.length) return;                        // 竞态防护：等待期间本地已写入
-    for (const rec of data.records || []) {
-      const continuation = isContinuationRecord(rec);
-      let ablock = continuation ? lastAssistantBlock(arr) : null;
-      if (!ablock) {
-        ablock = { t: "assistant", parts: [] };
-        if (continuation) {
-          // 旧数据缺少可合并的助手块时仍保持「无新用户气泡」，避免伪造一条审批消息。
-          arr.push(ablock);
-        } else {
-          const userBlock: ChatBlock = {
-            t: "user",
-            text: rec.user || "",
-            ...(rec.files?.length ? { files: rec.files } : {}),
-          };
-          arr.push(userBlock, ablock);
+    const hadLocal = arr.length > 0;
+    if (!hadLocal) {
+      for (const rec of data.records || []) {
+        const continuation = isContinuationRecord(rec);
+        let ablock = continuation ? lastAssistantBlock(arr) : null;
+        if (!ablock) {
+          ablock = { t: "assistant", parts: [] };
+          if (continuation) {
+            arr.push(ablock);
+          } else {
+            arr.push({
+              t: "user",
+              text: rec.user || "",
+              ...(rec.files?.length ? { files: rec.files } : {}),
+            } satisfies ChatBlock, ablock);
+          }
+        }
+        for (const ev of rec.events || []) handleEvent(ev as never, ablock);
+        finalize(ablock);
+      }
+    } else {
+      // 本地已有正文时不再重复重建 DOM，但仍从 journal 恢复本轮 usage；
+      // 这样换浏览器/清缓存/切会话后容量条不会随机消失或回退。
+      delete state.usage[s.id];
+      for (const rec of data.records || []) {
+        if (!isContinuationRecord(rec)) delete state.usage[s.id];
+        for (const ev of rec.events || []) {
+          if ((ev as { type?: string }).type === "usage") applyUsage(ev as never, undefined, s.id);
         }
       }
-      for (const ev of rec.events || []) handleEvent(ev as never, ablock);
-      finalize(ablock);
     }
-    // 回放中的 interrupt 是历史事件；先统一标成「已处理」，服务端仍有 pending
-    // 时只把最后一张卡恢复为可操作，避免旧卡片在刷新后误点（尤其是多轮审批/澄清）。
+
     if (typeof data.pendingApproval === "boolean") {
       markInterruptsResolved(s.id);
       if (data.pendingApproval) markLatestInterruptPending(s.id);
+      s.pendingApproval = data.pendingApproval;
+      renderSessions();
     }
     saveLocal();
     if (state.currentId === s.id) {
-      renderAll();
+      if (!hadLocal) renderAll();
       updateContextBar();
       chatScroll.scrollTop = chatScroll.scrollHeight;
-    }
-    // 回放中的 interrupt 事件会把会话标成「待审批」——以服务端的真实状态纠正
-    // （审批早已处理过时，重放的那次 interrupt 只是历史记录）
-    if (typeof data.pendingApproval === "boolean") {
-      s.pendingApproval = data.pendingApproval;
-      renderSessions();
     }
   } catch { /* 服务端也没有记录（会话从未对话过 / 服务重启过）→ 保持现状 */ }
 }

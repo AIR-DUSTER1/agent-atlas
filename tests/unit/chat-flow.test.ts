@@ -73,7 +73,7 @@ test("审批完成后默认折叠为摘要行，仍可手动展开详情", async
 test("思考过程使用默认折叠的 details，点击摘要可手动展开", async () => {
   const app = await readClientSource();
   const css = await readClientCss();
-  assert.match(app, /case "reasoning": appendReasoning\(ablock, ev\)/);
+  assert.match(app, /case "reasoning": sealStreamingParts\(ablock, \["text"\]\); appendReasoning\(ablock, ev\)/);
   assert.match(app, /export function appendReasoning\(ablock: AssistantBlock, ev: \{ text\?: string; node\?: string \}\): void/);
   assert.match(app, /document\.createElement\("details"\)/);
   assert.match(app, /h\("summary", \{ class: "thinking-summary" \}/);
@@ -109,4 +109,31 @@ test("会话项右侧操作按钮共享横向操作区，导出与删除不会�
   assert.match(css, /\.session-item \.s-title\s*\{[^}]*padding-right:\s*56px/s);
   assert.match(css, /@media \(hover: none\), \(pointer: coarse\)/);
   assert.doesNotMatch(css, /\.s-del\s*\{[^}]*position:\s*absolute/s, "按钮本体不能各自绝对定位");
+});
+
+test("工具/节点边界立即封口流式内容，ai_message 兜底不再留下光标", async () => {
+  const app = await readClientSource();
+  assert.match(app, /function sealStreamingParts\(/);
+  assert.match(app, /export function upsertToolCall\([\s\S]*?sealStreamingParts\(ablock\)/);
+  assert.match(app, /export function addNodeChip\([\s\S]*?sealStreamingParts\(ablock\)/);
+  assert.match(app, /export function addInterrupt\([\s\S]*?sealStreamingParts\(ablock\)/);
+  assert.match(app, /p: "text", text: ev\.content, streaming: false/);
+});
+
+test("上下文用量忽略 review 等内部调用，并按每轮峰值恢复容量与缓存", async () => {
+  const app = await readClientSource();
+  assert.match(app, /if \(ev\.internal \|\| !sid\) return/);
+  assert.match(app, /context >= u\.contextTokens/);
+  assert.match(app, /const hadLocal = arr\.length > 0/);
+  assert.match(app, /applyUsage\(ev as never, undefined, s\.id\)/);
+  assert.match(app, /delete state\.usage\[state\.currentId\]/);
+});
+
+test("导出会话使用带认证的 Blob 下载，不打开 Electron 空白新窗口", async () => {
+  const app = await readClientSource();
+  assert.match(app, /async function exportSession\(session: Session\)/);
+  assert.match(app, /authFetch\(`\/api\/sessions\/\$\{session\.id\}\/export`\)/);
+  assert.match(app, /URL\.createObjectURL\(blob\)/);
+  assert.match(app, /anchor\.download = exportFileName\(session\)/);
+  assert.doesNotMatch(app, /window\.open\(`\/api\/sessions\/\$\{session\.id\}\/export`/);
 });

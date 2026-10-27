@@ -10,11 +10,13 @@
  */
 
 import { $ } from "../core/dom.js";
-import { api } from "../core/api.js";
+import { api, authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
 import { profileMetaForSession } from "../modules/agent-profile.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
+import { uiAlert } from "../ui/dialog.js";
+import { toast } from "../ui/toast.js";
 import { selectSession, showWelcomeState } from "./navigation.js";
 import type { ProjectEntry, Session } from "../modules/types.js";
 
@@ -117,6 +119,30 @@ export function renderSessions(): void {
   }
 }
 
+function exportFileName(session: Session): string {
+  const safe = (session.title || "会话").replace(/[\\/:*?"<>|\r\n]+/g, "-").trim().slice(0, 80) || "会话";
+  return `${safe}.md`;
+}
+
+/** 导出走 Blob 下载，避免 window.open 在 Electron 里打开空白新窗口。 */
+async function exportSession(session: Session): Promise<void> {
+  const res = await authFetch(`/api/sessions/${session.id}/export`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error || `导出失败（HTTP ${res.status}）`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = exportFileName(session);
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2_000);
+  toast("会话已导出为 Markdown", "success");
+}
 function renderSessionItem(session: Session): HTMLElement {
   const meta = h("div", { class: "s-meta" },
     h("span", { class: "s-demo" }, sessionTagText(session)),
@@ -131,7 +157,7 @@ function renderSessionItem(session: Session): HTMLElement {
     "aria-label": "导出当前会话为 Markdown",
     onclick: (event: MouseEvent) => {
       event.stopPropagation();
-      window.open(`/api/sessions/${session.id}/export`, "_blank");
+      void exportSession(session).catch((err) => uiAlert(`导出失败：${(err as Error).message}`, "导出会话"));
     },
   }, icon("Download", { size: 13 }));
 

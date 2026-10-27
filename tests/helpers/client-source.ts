@@ -49,6 +49,7 @@ export const CLIENT_SOURCES = [
   // 流与动作
   "stream/events.ts",
   "stream/turn.ts",
+  "observability/client-errors.ts",
   "actions/approvals.ts",
   "actions/compact.ts",
   // 视图层

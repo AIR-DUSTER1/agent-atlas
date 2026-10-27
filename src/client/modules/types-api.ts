@@ -54,6 +54,8 @@ export type AgentEvent =
       cacheReadTokens: number;
       model?: string;
       callId?: string;
+      node?: string;
+      internal?: boolean;
     }
   | { type: "interrupt"; payload: InterruptPayload }
   | { type: "shutdown"; message: string }

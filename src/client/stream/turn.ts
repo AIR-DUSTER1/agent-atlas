@@ -54,6 +54,10 @@ export async function send(): Promise<void> {
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
+  // 新一轮上下文用量必须从空开始，否则上一轮峰值会污染本轮容量条。
+  delete state.usage[state.currentId];
+  document.getElementById("context-bar")?.classList.add("hidden");
+
   const pending = state.pendingFiles;
   const fileRefs = fileRefsOf(pending);
   const filesMeta = filesMetaOf(pending);
