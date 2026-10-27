@@ -35,14 +35,7 @@
   .settings-page-head { min-height: 58px; padding: 8px 12px; gap: 10px; }
   .settings-page-heading p { display: none; }
   .settings-page-body { display: flex; flex-direction: column; }
-  .settings-nav {
-    flex: none;
-    display: flex; gap: 6px;
-    padding: 8px 10px;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--border-soft);
-  }
+  .settings-page-body { gap: 8px; }
   .settings-nav-item { width: auto; min-width: max-content; margin: 0; padding: 7px 9px; }
   .settings-nav-item .sn-icon { width: 26px; height: 26px; }
   .settings-nav-item .sn-copy small { display: none; }

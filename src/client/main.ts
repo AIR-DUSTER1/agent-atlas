@@ -40,7 +40,7 @@ import {
 import { currentlySelectedProvider, renderProviderList } from "./views/model-panel.js";
 import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
-import { closeSettingsPage, openSettings, showSettingsView } from "./views/settings.js";
+import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
@@ -188,9 +188,7 @@ async function init(): Promise<void> {
   on("settings-btn", "click", () => openSettings("models"));
   on("side-model", "click", () => openSettings("models"));
   on("settings-back-btn", "click", closeSettingsPage);
-  document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((btn) => {
-    btn.addEventListener("click", () => showSettingsView(btn.dataset.settingsView || "models"));
-  });
+  bindSettingsNavigation();
   on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
   on("cmd-add-btn", "click", () => { void saveCommandFromForm(); });

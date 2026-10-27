@@ -686,3 +686,65 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
 }
 .stats-donut-center strong { color: var(--content-1); font-family: var(--mono); font-size: var(--font-xl); }
 .stats-donut-center span { color: var(--content-3); font-size: var(--font-xs); }
+
+/* ---------- 设置导航分组与搜索 ---------- */
+.settings-nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 14px 12px;
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 2px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 0 8px;
+  background: var(--surface-input);
+  color: var(--content-3);
+}
+.settings-search:focus-within { border-color: var(--accent); }
+.settings-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 7px 0;
+  background: transparent;
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-sm);
+  outline: none;
+}
+.settings-search kbd {
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--content-3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.settings-nav-scroll { min-height: 0; overflow-y: auto; }
+.settings-nav-group { margin-bottom: 13px; }
+.settings-nav-group-title {
+  padding: 0 9px 5px;
+  color: var(--content-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.settings-nav-item.search-hit {
+  border-color: var(--accent);
+  background: var(--info-bg);
+}
+.settings-nav-group.hidden { display: none; }
+@media (max-width: 760px) {
+  .settings-nav { display: flex; gap: 8px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .settings-search { width: min(220px, 100%); margin: 0; flex: none; }
+  .settings-nav-scroll { display: flex; min-width: 0; flex: 1; gap: 6px; overflow-x: auto; overflow-y: hidden; }
+  .settings-nav-group { display: contents; }
+  .settings-nav-group-title { display: none; }
+  .settings-nav-item { width: auto; min-width: max-content; margin: 0; padding: 7px 9px; }
+}
+.key-row .ui-field-error { flex-basis: 100%; color: var(--danger); font-size: var(--font-xs); }

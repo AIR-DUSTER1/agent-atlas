@@ -29,5 +29,6 @@ test("RAG 与找房数据源集中到设置页插件分区", async () => {
   assert.doesNotMatch(html, /id="kb-btn"|id="estate-btn"/);
   assert.match(app, /function renderPluginCards\(\)/);
   assert.match(app, /pluginTransportMeta\(plugin\.transport\)/);
-  assert.match(app, /if \(plugin\.id === "rag"\) void import\("\.\/rag\.js"\)\.then\(\(m\) => m\.openKb\(\)\)/);
+  assert.match(app, /if \(plugin\.id === "rag"\) void import\("\.\/rag\.js"\)\.then\(\(mod\) => mod\.openKb\(\)\)/);
+  assert.match(app, /else if \(plugin\.id === "estate"\) void import\("\.\/estate\.js"\)\.then\(\(mod\) => mod\.openEstate\(\)\)/);
 });

@@ -13,6 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { uiConfirm } from "../ui/dialog.js";
+import { clearFieldError, setFieldError } from "../ui/field.js";
 import { loadUserCommands, type UserCommandItem } from "../composer/menu.js";
 
 let cmdStatusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -102,8 +103,11 @@ export async function refreshCommands(): Promise<UserCommandItem[]> {
 export async function saveCommandFromForm(): Promise<void> {
   const name = inputValue("cmd-name").trim();
   const template = inputValue("cmd-template");
-  if (!name) { cmdStatus("命令名不能为空", "err"); return; }
-  if (!template.trim()) { cmdStatus("提示词模板不能为空", "err"); return; }
+  clearFieldError("cmd-name");
+  clearFieldError("cmd-template");
+  if (!name) setFieldError("cmd-name", "命令名不能为空");
+  if (!template.trim()) setFieldError("cmd-template", "提示词模板不能为空");
+  if (!name || !template.trim()) { cmdStatus("请先修正表单中的必填项", "err"); return; }
   try {
     const res = await api<{ command: UserCommandItem; created?: boolean; commands?: UserCommandItem[] }>(
       "/api/commands",

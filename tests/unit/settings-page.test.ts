@@ -6,6 +6,19 @@ import { readClientFiles, readClientSource } from "../helpers/client-source.js";
 
 const root = new URL("../../src/client/", import.meta.url);
 
+test("设置导航按工作台/扩展/数据分组，并支持搜索过滤与 / 聚焦", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const settings = await readClientFiles(["views/settings.ts", "main.ts"]);
+  assert.match(html, /id="settings-search"/);
+  assert.match(html, /data-settings-group="workbench"/);
+  assert.match(html, /data-settings-group="extensions"/);
+  assert.match(html, /data-settings-group="data"/);
+  assert.match(settings, /export function bindSettingsNavigation\(/);
+  assert.match(settings, /button\.classList\.toggle\("hidden", !match\)/);
+  assert.match(settings, /event\.key === "Escape" && input\.value/);
+  assert.match(settings, /event\.key !== "\/"/);
+  assert.match(settings, /bindSettingsNavigation\(\);/);
+});
 test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   const topbar = html.slice(html.indexOf('<header id="topbar">'), html.indexOf("</header>"));
@@ -79,4 +92,17 @@ test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", as
   assert.match(stats, /byHour/);
   assert.match(stats, /图表暂不可用/);
   assert.match(stats, /8_000/);
+});
+test("设置表单密钥只显示掩码，必填错误就地呈现", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const forms = await readClientFiles([
+    "views/settings-memories.ts", "views/settings-commands.ts", "ui/field.ts",
+  ]);
+  assert.match(html, /id="pf-api-key" type="password"/);
+  assert.match(html, /id="kb-key" type="password"/);
+  assert.match(html, /id="estate-key" type="password"/);
+  assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);
+  assert.match(forms, /setFieldError\("mem-key"/);
+  assert.match(forms, /setFieldError\("cmd-name"/);
+  assert.match(forms, /aria-invalid/);
 });

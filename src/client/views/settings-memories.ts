@@ -11,6 +11,8 @@
 
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { uiConfirm } from "../ui/dialog.js";
+import { clearFieldError, setFieldError } from "../ui/field.js";
 import type { MemoryEntry } from "../modules/types.js";
 
 let memStatusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -57,6 +59,7 @@ function renderMemoriesList(memories: MemoryEntry[]): void {
     const metaEl = row.querySelector(".m-meta");
     if (metaEl) metaEl.textContent = `${m.source === "agent" ? "Agent 保存" : "手动添加"} · ${when}`;
     row.querySelector(".p-del")?.addEventListener("click", async () => {
+      if (!(await uiConfirm(`删除记忆「${m.key}」？删除后无法恢复。`, { title: "删除记忆", okText: "删除", danger: true }))) return;
       try {
         await api(`/api/memories/${encodeURIComponent(m.id)}`, { method: "DELETE" });
         await refreshMemories();
@@ -80,7 +83,11 @@ export async function saveMemoryFromForm(): Promise<void> {
   const contentEl = $("mem-content") as HTMLTextAreaElement | null;
   const key = (keyEl?.value || "").trim();
   const content = (contentEl?.value || "").trim();
-  if (!key || !content) { memStatus("主题与内容都要填", "err"); return; }
+  clearFieldError("mem-key");
+  clearFieldError("mem-content");
+  if (!key) setFieldError("mem-key", "请填写记忆主题");
+  if (!content) setFieldError("mem-content", "请填写记忆内容");
+  if (!key || !content) { memStatus("请先修正表单中的必填项", "err"); return; }
   try {
     await api("/api/memories", {
       method: "POST",

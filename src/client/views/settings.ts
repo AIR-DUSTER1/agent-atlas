@@ -16,6 +16,7 @@ import { BUILTIN_PLUGINS, pluginTransportMeta } from "../modules/plugin-registry
 import { applyConfigState } from "./composer-bar.js";
 import { closeCmMenus } from "./navigation.js";
 import { closeComposerMenu } from "../composer/menu.js";
+import { h } from "../ui/h.js";
 import { refreshBackups } from "./settings-backup.js";
 import { refreshMemories, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
@@ -73,6 +74,53 @@ async function loadPluginStates(): Promise<void> {
   renderPluginCards();
 }
 
+/** 过滤左侧设置项；搜索只匹配导航标题/说明，不触碰表单数据。 */
+function filterSettingsNav(query: string): void {
+  const term = query.trim().toLowerCase();
+  const buttons = [...document.querySelectorAll<HTMLElement>(".settings-nav-item")];
+  for (const button of buttons) {
+    const match = !term || (button.textContent ?? "").toLowerCase().includes(term);
+    button.classList.toggle("hidden", !match);
+    button.classList.toggle("search-hit", Boolean(term && match));
+  }
+  for (const group of document.querySelectorAll<HTMLElement>(".settings-nav-group")) {
+    const visible = [...group.querySelectorAll<HTMLElement>(".settings-nav-item")].some((button) => !button.classList.contains("hidden"));
+    group.classList.toggle("hidden", !visible);
+  }
+}
+
+/** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
+export function bindSettingsNavigation(): void {
+  document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
+    button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
+  });
+  const input = $("settings-search") as HTMLInputElement | null;
+  if (!input) return;
+  input.addEventListener("input", () => filterSettingsNav(input.value));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && input.value) {
+      input.value = "";
+      filterSettingsNav("");
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (event.key === "Enter") {
+      const first = document.querySelector<HTMLElement>(".settings-nav-item:not(.hidden)");
+      if (first?.dataset.settingsView) {
+        showSettingsView(first.dataset.settingsView);
+        first.focus();
+      }
+      event.preventDefault();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || !isSettingsPageOpen()) return;
+    const target = event.target as HTMLElement | null;
+    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+    event.preventDefault();
+    input.focus();
+    input.select();
+  });
+}
 /** 打开独立设置页；models 分区可带供应商 id 做定位高亮。 */
 export function openSettings(view = "models", focusProviderId: string | null = null): void {
   void import("./model-menu.js").then((m) => m.showProviderMenu(false));
@@ -82,6 +130,9 @@ export function openSettings(view = "models", focusProviderId: string | null = n
   const target = SETTINGS_VIEWS.has(view) ? view : "models";
   void import("./model-store.js").then((m) => m.setSettingsFocus(target === "models" ? focusProviderId : null));
   void import("./model-form.js").then((m) => m.closeProviderForm());
+  const search = $("settings-search") as HTMLInputElement | null;
+  if (search) search.value = "";
+  filterSettingsNav("");
   $("settings-page")?.classList.remove("hidden");
   document.body.classList.add("settings-open");
   showSettingsView(target);
@@ -102,7 +153,7 @@ export function closeSettingsPage(): void {
 export function renderPluginCards(): void {
   const list = $("plugin-list");
   if (!list) return;
-  list.innerHTML = "";
+  list.replaceChildren();
   for (const plugin of BUILTIN_PLUGINS) {
     const transport = pluginTransportMeta(plugin.transport);
     const ready = plugin.id === "rag"
@@ -111,45 +162,31 @@ export function renderPluginCards(): void {
     const status = plugin.id === "rag"
       ? (ready ? "已配置" : "未配置")
       : (ready ? `已安装${state.estate?.version ? ` ${state.estate.version}` : ""}` : "未安装");
-    const card = document.createElement("article");
-    card.className = "plugin-card";
-    card.dataset.transport = transport.id;
-    card.innerHTML = `
-      <div class="plugin-main">
-        <div class="plugin-icon"></div>
-        <div class="plugin-copy">
-          <div class="plugin-title-row"><h3></h3><span class="plugin-kind"></span></div>
-          <p class="plugin-desc"></p>
-          <div class="plugin-runtime-row"><span class="plugin-runtime"></span><span class="plugin-status"></span></div>
-        </div>
-      </div>
-      <button type="button" class="plugin-manage btn btn-approve"></button>`;
-    const iconEl = card.querySelector(".plugin-icon");
-    if (iconEl) iconEl.textContent = plugin.icon;
-    const h3 = card.querySelector("h3");
-    if (h3) h3.textContent = plugin.name;
-    const kind = card.querySelector(".plugin-kind");
-    if (kind) {
-      kind.textContent = transport.label;
-      kind.classList.add(`kind-${transport.id}`);
-    }
-    const desc = card.querySelector(".plugin-desc");
-    if (desc) desc.textContent = plugin.description;
-    const runtime = card.querySelector(".plugin-runtime");
-    if (runtime) runtime.textContent = plugin.runtime;
-    const statusEl = card.querySelector(".plugin-status");
-    if (statusEl) {
-      statusEl.textContent = status;
-      statusEl.classList.toggle("ready", ready);
-    }
-    const button = card.querySelector<HTMLButtonElement>(".plugin-manage");
-    if (button) {
-      button.textContent = plugin.manageLabel;
-      button.addEventListener("click", () => {
-        if (plugin.id === "rag") void import("./rag.js").then((m) => m.openKb());
-        else if (plugin.id === "estate") void import("./estate.js").then((m) => m.openEstate());
-      });
-    }
+    const manage = h("button", {
+      type: "button",
+      class: "plugin-manage btn btn-approve",
+      onclick: () => {
+        if (plugin.id === "rag") void import("./rag.js").then((mod) => mod.openKb());
+        else if (plugin.id === "estate") void import("./estate.js").then((mod) => mod.openEstate());
+      },
+    }, plugin.manageLabel);
+    const card = h("article", { class: "plugin-card", dataset: { transport: transport.id } },
+      h("div", { class: "plugin-main" },
+        h("div", { class: "plugin-icon", "aria-hidden": "true" }, plugin.icon),
+        h("div", { class: "plugin-copy" },
+          h("div", { class: "plugin-title-row" },
+            h("h3", null, plugin.name),
+            h("span", { class: `plugin-kind kind-${transport.id}` }, transport.label),
+          ),
+          h("p", { class: "plugin-desc" }, plugin.description),
+          h("div", { class: "plugin-runtime-row" },
+            h("span", { class: "plugin-runtime" }, plugin.runtime),
+            h("span", { class: "plugin-status" + (ready ? " ready" : "") }, status),
+          ),
+        ),
+      ),
+      manage,
+    );
     list.appendChild(card);
   }
 }

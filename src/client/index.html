@@ -225,37 +225,52 @@
     </header>
 
     <div class="settings-page-body">
-      <nav class="settings-nav" role="tablist" aria-label="设置分类">
-        <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
-          <span class="sn-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
-          <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与接入类型</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
-          <span class="sn-icon"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>长期记忆</strong><small>查看、新增与删除记忆</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="commands" role="tab" aria-selected="false" aria-controls="settings-view-commands">
-          <span class="sn-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>自定义命令</strong><small>斜杠菜单里的提示词模板</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="skills" role="tab" aria-selected="false" aria-controls="settings-view-skills">
-          <span class="sn-icon"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>技能库</strong><small>按关键词自动加载的领域指南</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="mcp" role="tab" aria-selected="false" aria-controls="settings-view-mcp">
-          <span class="sn-icon"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>MCP 服务器</strong><small>接入外部工具（默认需审批）</small></span>
-        </button>
-        <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
-          <span class="sn-icon"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i></span>
-          <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话排行</small></span>
-        </button>
+      <nav class="settings-nav" aria-label="设置分类">
+        <label class="settings-search">
+          <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+          <input id="settings-search" type="search" placeholder="搜索设置项" autocomplete="off" spellcheck="false" />
+          <kbd>/</kbd>
+        </label>
+        <div class="settings-nav-scroll" role="tablist" aria-label="设置分区">
+          <div class="settings-nav-group" data-settings-group="workbench">
+            <div class="settings-nav-group-title">工作台</div>
+            <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与接入类型</small></span>
+            </button>
+          </div>
+          <div class="settings-nav-group" data-settings-group="extensions">
+            <div class="settings-nav-group-title">扩展</div>
+            <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>长期记忆</strong><small>查看、新增与删除记忆</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="commands" role="tab" aria-selected="false" aria-controls="settings-view-commands">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>自定义命令</strong><small>斜杠菜单里的提示词模板</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="skills" role="tab" aria-selected="false" aria-controls="settings-view-skills">
+              <span class="sn-icon"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>技能库</strong><small>按关键词自动加载的领域指南</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="mcp" role="tab" aria-selected="false" aria-controls="settings-view-mcp">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>MCP 服务器</strong><small>接入外部工具（默认需审批）</small></span>
+            </button>
+          </div>
+          <div class="settings-nav-group" data-settings-group="data">
+            <div class="settings-nav-group-title">数据</div>
+            <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
+              <span class="sn-icon"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话运行</small></span>
+            </button>
+          </div>
+        </div>
       </nav>
-
       <div class="settings-page-content">
         <section id="settings-view-models" class="settings-view" data-settings-panel="models" role="tabpanel">
           <div id="settings-modal" role="region" aria-labelledby="models-title">

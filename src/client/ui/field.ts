@@ -35,3 +35,30 @@ export function field(options: FieldOptions): HTMLDivElement {
     }, options.error ?? ""),
   );
 }
+
+/** 在静态表单的 .field 容器内显示就地错误，并维护 aria-describedby/invalid。 */
+export function setFieldError(controlId: string, message: string): void {
+  const control = document.getElementById(controlId);
+  if (!control) return;
+  let field = control.closest<HTMLElement>(".field, .ui-field");
+  if (!field) field = control.parentElement;
+  if (!field) return;
+  let error = field.querySelector<HTMLElement>(`[data-field-error-for="${controlId}"]`);
+  if (!error) {
+    error = h("p", { class: "ui-field-error", role: "alert", "aria-live": "polite", dataset: { fieldErrorFor: controlId } });
+    field.appendChild(error);
+  }
+  const errorId = `${controlId}-field-error`;
+  error.id = errorId;
+  error.textContent = message;
+  error.hidden = !message;
+  control.setAttribute("aria-invalid", message ? "true" : "false");
+  const describedBy = (control.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((id) => id && id !== errorId);
+  if (message) describedBy.push(errorId);
+  if (describedBy.length) control.setAttribute("aria-describedby", describedBy.join(" "));
+  else control.removeAttribute("aria-describedby");
+}
+
+export function clearFieldError(controlId: string): void {
+  setFieldError(controlId, "");
+}
