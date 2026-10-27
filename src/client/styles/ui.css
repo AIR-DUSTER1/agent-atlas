@@ -1,0 +1,97 @@
+/* ============================================================
+   ui.css — 无业务 UI 原语样式
+   ============================================================ */
+.ui-icon {
+  display: inline-flex;
+  width: var(--icon-size, 16px);
+  height: var(--icon-size, 16px);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  line-height: 0;
+}
+.ui-icon > svg { display: block; }
+.ui-icon[data-icon-error="1"]::before { content: "•"; opacity: .55; }
+
+.ui-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  background: var(--surface-1);
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast), opacity var(--motion-fast);
+}
+.ui-button:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); }
+.ui-button:disabled { cursor: not-allowed; opacity: .55; }
+.ui-button-primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+.ui-button-primary:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-soft); }
+.ui-button-danger { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+.ui-button-ghost { border-color: transparent; background: transparent; }
+.ui-button-icon { width: 34px; padding: 0; }
+.ui-button-sm { min-height: 28px; padding-inline: var(--space-2); font-size: var(--font-xs); }
+.ui-button-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ui-spin .7s linear infinite;
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+.ui-input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  background: var(--surface-input);
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-md);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+.ui-input:hover { border-color: var(--border-strong); }
+.ui-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--info-bg); outline: none; }
+.ui-textarea { min-height: 92px; resize: vertical; line-height: 1.6; }
+
+.ui-field { display: flex; flex-direction: column; gap: var(--space-1); }
+.ui-field-label { color: var(--content-1); font-size: var(--font-sm); font-weight: 600; }
+.ui-field-hint { margin: 0; color: var(--content-3); font-size: var(--font-xs); line-height: 1.6; }
+.ui-field-error { margin: 0; color: var(--danger); font-size: var(--font-xs); line-height: 1.6; }
+.ui-field.has-error .ui-input { border-color: var(--danger); }
+
+.ui-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+.ui-card-body { padding: var(--space-4); }
+.ui-card-title { margin: 0; padding: var(--space-4) var(--space-4) 0; color: var(--content-1); font-size: var(--font-lg); }
+.ui-card-interactive { transition: border-color var(--motion-fast), transform var(--motion-fast); }
+.ui-card-interactive:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.ui-card-danger { border-color: var(--danger); background: var(--danger-bg); }
+
+.ui-empty {
+  display: flex;
+  min-height: 140px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  text-align: center;
+}
+.ui-empty-icon { color: var(--content-3); }
+.ui-empty-title { color: var(--content-1); font-size: var(--font-lg); }
+.ui-empty-description { max-width: 48ch; margin: 0; color: var(--content-2); font-size: var(--font-sm); line-height: 1.65; }

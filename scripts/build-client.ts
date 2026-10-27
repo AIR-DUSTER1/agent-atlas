@@ -20,6 +20,7 @@ const OUT = join(ROOT, "src", "server", "public");
 
 /** 需要原样拷到产物目录的静态资源（TS 编译器不处理非 .ts 文件） */
 const STATIC_ASSETS = ["index.html", "style.css"];
+const STYLE_ASSETS = ["tokens.css", "ui.css"];
 
 async function main(): Promise<void> {
   // 每次从空产物目录构建，防止已删除模块继续被静态服务
@@ -41,6 +42,11 @@ async function main(): Promise<void> {
     if (e.stderr) process.stderr.write(e.stderr);
     console.error("✗ 前端 TypeScript 编译失败");
     process.exit(1);
+  }
+
+  await mkdir(join(OUT, "styles"), { recursive: true });
+  for (const name of STYLE_ASSETS) {
+    await copyFile(join(SRC, "styles", name), join(OUT, "styles", name));
   }
 
   for (const name of STATIC_ASSETS) {

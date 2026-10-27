@@ -259,6 +259,12 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   assert.match(html, /<script type="importmap">/);
   assert.match(html, /"chart\.js": "\/vendor\/chart-lib\.js"/);
 
+  for (const file of ["/styles/tokens.css", "/styles/ui.css"]) {
+    const res = await fetch(srv.base + file);
+    assert.equal(res.status, 200, file);
+    assert.match(res.headers.get("content-type") ?? "", /text\/css/, file);
+  }
+
   // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
   for (const file of [
     "/main.js",

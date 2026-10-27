@@ -459,7 +459,7 @@ src/
   agent/           # 全部 LangGraph 图：workflow 编排 / profile / 5 个示例
   cli.ts           # CLI 入口（demo:1~5）
   server/          # Web 服务：index 路由分发 + routes/ 各域 + public/（前端构建产物）
-  client/          # 前端源码（TypeScript）：main + core/modules/render/stream/views/actions
+  client/          # 前端源码（TypeScript）：main + core/modules/ui/render/stream/views/actions/vendor/styles
 desktop/           # Electron 桌面端（main.ts / preload.ts → build/）
 tests/             # unit / integration / security 三档（node:test）
 docs/              # 学习与部署文档

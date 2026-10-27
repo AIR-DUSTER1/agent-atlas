@@ -1702,3 +1702,18 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 
 **踩坑**：npm 包名若直接映射到与 wrapper 同名的 `/vendor/chart.js`，tsc 产物与 esbuild
 产物会争抢同一路径，甚至形成模块自引用。必须固定为 wrapper 与 `*-lib.js` 双层命名。
+
+### 3.35 `src/client/ui/*` + `styles/tokens.css` — 安全 UI 原语与设计 token
+
+**目标**：让新 UI 默认安全、可访问、可组合，而不是继续复制字符串模板。
+
+| 模块 | 职责 |
+|---|---|
+| `ui/h.ts` | 只用 `textContent` / 子节点生成 DOM；拒绝 `innerHTML` 与字符串事件 |
+| `ui/safe-url.ts` | 统一校验 href / src / xlink:href，挡掉 `javascript:` 与危险 data URL |
+| `ui/icon.ts` | 图标先渲染占位，再异步加载 Lucide；加载失败不阻断主界面 |
+| `ui/button.ts` / `input.ts` / `field.ts` | 统一变体、loading、label、错误说明与可访问关系 |
+| `ui/card.ts` / `empty.ts` | 统一卡片与“为什么空 + 下一步”的空态结构 |
+| `styles/tokens.css` | primitive / semantic token、4px 间距、字号、圆角、阴影、焦点环、reduced-motion |
+
+约束：`ui/*` 不得 import `core/state`、`core/api` 或任何业务 view；业务模块负责把数据与事件注入原语。

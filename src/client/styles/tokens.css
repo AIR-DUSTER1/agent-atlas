@@ -1,0 +1,77 @@
+/* ============================================================
+   tokens.css — 设计系统原语与语义 token
+   ------------------------------------------------------------
+   业务 CSS 只消费 semantic 层；主题切换只需覆盖 semantic 映射。
+   旧变量暂时作为桥接，P1c 完成后再逐步替换组件魔法值。
+   ============================================================ */
+:root {
+  /* 间距：4px 网格 */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* 字号阶梯 */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-lg: 15px;
+  --font-xl: 20px;
+  --font-2xl: 28px;
+
+  /* 圆角与阴影 */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.2);
+  --shadow-2: 0 12px 34px rgba(0,0,0,.28);
+
+  /* 语义 surface / content / border */
+  --surface-0: var(--bg);
+  --surface-1: var(--bg-elev);
+  --surface-2: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-input: var(--bg-input);
+  --content-1: var(--text);
+  --content-2: var(--text-2);
+  --content-3: var(--text-3);
+  --content-inverse: var(--text-strong);
+  --border-subtle: var(--border-soft);
+  --border-default: var(--border);
+  --border-strong: var(--border-strong);
+  --border-focus: var(--accent);
+
+  /* 状态色 */
+  --success: var(--green);
+  --success-bg: rgba(63,185,111,.13);
+  --warning: var(--amber);
+  --warning-bg: rgba(226,161,60,.13);
+  --danger: var(--red);
+  --danger-bg: rgba(229,96,79,.13);
+  --info: var(--accent);
+  --info-bg: rgba(91,140,255,.13);
+
+  /* 动效 */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-fast: 0ms; --motion-base: 0ms; }
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}

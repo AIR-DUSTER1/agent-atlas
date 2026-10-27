@@ -40,6 +40,8 @@ jobs:
           test -f src/server/public/main.js
           test -f src/server/public/index.html
           test -f src/server/public/style.css
+          test -f src/server/public/styles/tokens.css
+          test -f src/server/public/styles/ui.css
           test -f src/server/public/vendor/chart.js
           test -f src/server/public/vendor/chart-lib.js
           test -f src/server/public/vendor/icons-lib.js

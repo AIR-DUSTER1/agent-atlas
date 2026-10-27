@@ -20,6 +20,15 @@ export const CLIENT_SOURCES = [
   "core/state.ts",
   "core/dom.ts",
   "core/api.ts",
+  // 无业务 UI 原语
+  "ui/safe-url.ts",
+  "ui/h.ts",
+  "ui/icon.ts",
+  "ui/button.ts",
+  "ui/input.ts",
+  "ui/field.ts",
+  "ui/card.ts",
+  "ui/empty.ts",
   // 协议与纯函数模块
   "modules/format.ts",
   "modules/ui-dialog.ts",
