@@ -14,6 +14,7 @@ import {
 } from "../security/session.js";
 import { authFailureLimiter, clientIp, type RateLimitDecision } from "../security/rate-limit.js";
 import { writeAudit } from "../audit.js";
+import { migrateStoredSecrets } from "../config-store.js";
 import { log } from "../logging.js";
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -88,6 +89,11 @@ export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse)
   authFailureLimiter.clear(clientIp(req));
   const { token: sessionToken, payload } = issueSession();
   setSessionCookie(res, sessionToken);
+  await migrateStoredSecrets().catch((err) => {
+    log("warn", "config_secret_migration_failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  });
   writeAudit("auth_login_succeeded", { ip: ipTag(clientIp(req)) });
   writeJson(res, 200, {
     ok: true,

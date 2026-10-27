@@ -35,7 +35,6 @@
  * 安全：API Key 永远不回传明文 —— 列表接口只返回掩码（maskKey），
  * 前端编辑时留空 Key 表示「保持不变」。
  */
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { config, isProtocol, type Protocol } from "../config.js";
 import {
@@ -47,7 +46,7 @@ import {
   type ReasoningDialectId,
   type ReasoningSetting,
 } from "../reasoning.js";
-import { SETTINGS_FILE, mergeConfig } from "./config-store.js";
+import { mergeConfig, readConfig } from "./config-store.js";
 import { maskKey, modelInfoCache, type GatewayModelInfo } from "./settings-cache.js";
 
 // ---------------------------------------------------------------------------
@@ -264,14 +263,9 @@ function normalizeProvider(raw: Record<string, unknown>): Provider {
 }
 
 export async function loadSettings(): Promise<void> {
-  let saved: Record<string, unknown> | null = null;
-  try {
-    const parsed = JSON.parse(await readFile(SETTINGS_FILE, "utf8"));
-    saved = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    saved = null; // 文件不存在 = 没有 Web 端配置
-  }
-
+  // 必须经 config-store 读取：它会解密磁盘上的 API Key 密文并保持单一读写权威。
+  const parsed = await readConfig();
+  const saved: Record<string, unknown> | null = Object.keys(parsed).length ? parsed : null;
   if (saved && Array.isArray(saved.providers) && saved.providers.length) {
     // ── 供应商数组（v1 单模型 / v2 多模型都会在这里被规范成 v2）──
     providers = (saved.providers as Array<Record<string, unknown>>)

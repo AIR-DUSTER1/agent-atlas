@@ -24,6 +24,8 @@ import { open, readFile, rename, writeFile, unlink, stat, copyFile, appendFile }
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./logging.js";
+import { SecretDecryptionError, hasDataKey, hasPlaintextSecrets, sealSensitiveConfig, unsealSensitiveConfig } from "./security/config-crypto.js";
+import { secureFilePermissions } from "./security/file-permissions.js";
 
 // 测试钩子：e2e 用临时配置文件（tests/helpers 注入 WEB_CONFIG_FILE），
 // 避免测试读写开发者真实的 .web-config.json（含真实供应商 Key）。
@@ -34,39 +36,60 @@ const BAK_FILE = SETTINGS_FILE + ".bak";
 const TMP_FILE = SETTINGS_FILE + ".tmp";
 const LOCK_FILE = SETTINGS_FILE + ".lock";
 /** 当前配置 schema 版本：读取处一律兼容字段缺失，旧文件打开时注入 */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 /** lock 文件时间戳超过该时长视为孤儿锁（进程 crash 没释放），直接接管 */
 const LOCK_STALE_MS = 15_000;
 /** 抢不到锁时的轮询间隔 */
 const LOCK_RETRY_MS = 25;
 
-/** 读当前配置；损坏时自动尝试 .bak 抢救（回写主文件后返回备份内容） */
+function decodeConfig(raw: string): unknown {
+  return unsealSensitiveConfig(JSON.parse(raw));
+}
+
+function encodeConfigForDisk(config: Record<string, unknown>): string {
+  if (hasPlaintextSecrets(config) && !hasDataKey()) {
+    if (process.env.PRODUCTION === "1") {
+      throw new Error("生产模式缺少合法 DATA_KEY，拒绝以明文保存敏感配置");
+    }
+    log("warn", "config_secrets_plaintext", { reason: "DATA_KEY 未配置，仅开发模式允许" });
+  }
+  return JSON.stringify(sealSensitiveConfig(config), null, 2);
+}
+
+/** 读当前配置；语法损坏时从 .bak 抢救，密钥错误时 fail-closed 不覆盖原文件。 */
 export async function readConfig(): Promise<Record<string, unknown>> {
   const raw = await readFile(SETTINGS_FILE, "utf8").catch(() => null);
   if (raw !== null) {
     try {
-      return normalize(JSON.parse(raw));
-    } catch {
+      return normalize(decodeConfig(raw));
+    } catch (err) {
+      if (err instanceof SecretDecryptionError) {
+        log("error", "config_secret_decrypt_failed", { action: "startup_fail_closed" });
+        throw err;
+      }
       log("warn", "config_corrupt", { action: "restore_from_bak" });
     }
   }
-  // 主文件缺失或损坏：尝试 .bak
+  // 主文件缺失或语法损坏：尝试 .bak（同样必须能解密）
   try {
     const bakRaw = await readFile(BAK_FILE, "utf8");
-    const parsed = JSON.parse(bakRaw);
+    const parsed = decodeConfig(bakRaw);
     if (parsed && typeof parsed === "object") {
       // 把抢救出来的内容原子回写为主文件（下次读直接命中）
-      await atomicWrite(SETTINGS_FILE, JSON.stringify(parsed, null, 2));
+      await atomicWrite(SETTINGS_FILE, encodeConfigForDisk(parsed as Record<string, unknown>));
       log("warn", "config_restored", { source: "bak" });
       return normalize(parsed);
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof SecretDecryptionError) {
+      log("error", "config_secret_decrypt_failed", { action: "backup_fail_closed" });
+      throw err;
+    }
     // .bak 也没有 / 也坏：返回空配置，让各模块按缺省播种（与「删除文件回退 .env」一致）
     if (raw !== null) log("error", "config_restore_failed", { action: "fallback_empty" });
   }
   return {};
 }
-
 function normalize(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const config = value as Record<string, unknown>;
@@ -87,10 +110,10 @@ export async function mergeConfig(patch: Record<string, unknown>): Promise<void>
     const config = await readConfig();
     Object.assign(config, patch);
     config.schemaVersion = SCHEMA_VERSION;
-    const body = JSON.stringify(config, null, 2);
+    const body = encodeConfigForDisk(config);
     await withConfigLock(async () => {
       // 滚动备份：写前保留上一份完整版本
-      await copyFile(SETTINGS_FILE, BAK_FILE).catch(() => {
+      await copyFile(SETTINGS_FILE, BAK_FILE).then(() => secureFilePermissions(BAK_FILE)).catch(() => {
         /* 首次写入还没有主文件，无备份可滚动 */
       });
       await atomicWrite(SETTINGS_FILE, body);
@@ -118,6 +141,7 @@ async function atomicWrite(target: string, body: string): Promise<void> {
       throw err;
     });
   }
+  await secureFilePermissions(target);
 }
 
 /**
@@ -171,5 +195,31 @@ export async function configMtime(): Promise<number | null> {
     return s.mtimeMs;
   } catch {
     return null;
+  }
+}
+
+/** 首次成功认证后调用：把旧明文配置透明迁移成密文；无 DATA_KEY 时保持只读兼容。 */
+export async function migrateStoredSecrets(): Promise<boolean> {
+  if (!hasDataKey()) return false;
+  const raw = await readFile(SETTINGS_FILE, "utf8").catch(() => null);
+  if (raw === null) return false;
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return false; }
+  if (!hasPlaintextSecrets(parsed)) return false;
+  await mergeConfig({});
+  log("info", "config_secrets_migrated", { schemaVersion: SCHEMA_VERSION });
+  return true;
+}
+
+/** 备份清单用：判断当前配置是否仍含明文凭据。 */
+export async function configSecretsState(): Promise<"encrypted" | "plaintext-risk" | "none"> {
+  const raw = await readFile(SETTINGS_FILE, "utf8").catch(() => null);
+  if (raw === null) return "none";
+  try {
+    const parsed = JSON.parse(raw);
+    if (hasPlaintextSecrets(parsed)) return "plaintext-risk";
+    return "encrypted";
+  } catch {
+    return "plaintext-risk";
   }
 }
