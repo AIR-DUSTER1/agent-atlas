@@ -1520,7 +1520,11 @@ console.log(result.messages.at(-1).content);
 | `/readyz` 在只读 rootfs 下一直 503 | 探针会 `mkdir -p` + `W_OK` 检查配置/journal 目录。K8s `readOnlyRootFilesystem` 时必须把 `/data` 挂成可写卷，否则不是误报而是真实不可用 |
 | 测试跑完后 `.setting/audit.ndjson` 多出 `auth_rejected` | Phase 4 给认证失败加了审计；测试若只隔离 journal/配置，事件会写进开发者真实审计文件。`tests/helpers/server.ts` 必须同时注入 `AUDIT_FILE` 指向临时目录 |
 | 按 Esc 关弹窗报 `uiDialogFinish is not defined` | `ui/dialog.ts` 拆分后，全局 keydown 仍调用模块私有函数。模块只导出公开入口，入口改调 `cancelActiveDialog()`；静态测试同时断言 app 不得引用 `uiDialogFinish` |
-| 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
+| 工具执行后闪烁蓝光标不消失 | 文本 part 在工具/节点边界仍保留 `streaming=true`；`ai_message` 兜底也误标为流式。现在 tool/node/interrupt/reasoning 边界统一封口并重渲染，完整消息直接 `streaming=false` |
+| 上下文条突然从 27k 降到 1.9k、缓存率消失 | review / analyze / 自主风险审查的独立小模型调用覆盖了主 Agent usage。usage 事件新增 `node/internal`，前端忽略内部调用，并按每个用户回合的主 Agent 峰值恢复容量与缓存 |
+| 读取历史会话时容量条有时消失 | 本地已有 transcript 时旧逻辑直接跳过服务端回放，也不恢复 usage。现在始终拉 transcript 补 usage；正文已有则只重放 usage，不重建 DOM |
+| Electron 导出会话出现白框 | `window.open('/api/.../export')` 被同源窗口处理器允许后变成一个下载导航窗口。改为 `authFetch` 获取 Blob、`a.download` 下载，不创建新窗口 |
+| 自主审批重复循环 / 页面出现原始风险 JSON | tools 节点里风险审查模型的正文混入 messages 流；且相同工具参数使用不同 call id 会重复评估。现在 tools 节点正文过滤、同类风险 JSON 兜底过滤，重复工具调用复用本轮结果，单轮最多 12 次工具调用 || 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
 | MCP 测试跑完全部用例却不退出（CI 超时） | 子进程被杀后 Node 侧 `ChildProcess` 仍持有 stdio 的 Socket 句柄。① close 回调必须只删「自己那条」连接（重连竞态下按 id 无条件删会抹掉新连接）；② 等 `close` 事件真正到达；③ `destroy()` stdout/stderr/stdin 三流并 `unref()`。单文件跑正常、全量跑才挂 —— 因为 `node --test` 多文件同进程 |
