@@ -48,11 +48,13 @@ import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
 import { handleHealthz, handleReadyz } from "./health.js";
 import { lifecycle } from "./lifecycle.js";
-import { flushAudit, writeAudit } from "./audit.js";
-import { flushJournal } from "./session-store.js";
-import { flushCheckpointLog } from "../checkpoint.js";
-import { loadMemories } from "../memory-store.js";
+import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
+import { flushJournal, journalPath } from "./session-store.js";
+import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
+import { loadMemories, memoriesFilePath } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
+import { SETTINGS_FILE } from "./config-store.js";
+import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
@@ -104,9 +106,32 @@ async function refreshMcpTools(): Promise<void> {
   }
 }
 
+/** 生产门禁失败：只输出结构化日志，写回 stdout 后以 1 退出。 */
+async function stopForReadiness(err: unknown): Promise<never> {
+  log("error", "production_readiness_failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
+  process.exit(1);
+}
+
+try {
+  assertProductionEnvironment();
+} catch (err) {
+  await stopForReadiness(err);
+}
+
 // 启动时先叠加 Web 设置页保存的覆盖配置（.web-config.json → 覆盖 .env），
 // 加载项目文件夹列表，并后台拉一次启用中供应商的模型元信息（上下文窗口长度）
 await loadSettings();
+try {
+  await assertProductionRuntimeReady({
+    apiKey: config.apiKey,
+    dataFiles: [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoriesFilePath(), auditFilePath()],
+  });
+} catch (err) {
+  await stopForReadiness(err);
+}
 await loadProjects();
 await loadExternalAgents();
 await loadRag();
@@ -122,7 +147,7 @@ const restoredSessions = await restoreSessions();
 if (restoredSessions > 0) {
   log("info", "sessions_restored", { count: restoredSessions });
   // 人类可读提示只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
-  if (process.stdout.isTTY) {
+  if (process.stdout.isTTY && !isProductionMode()) {
     console.log(`  ↪ 已从 journal 恢复 ${restoredSessions} 个会话（对话历史可回放；带审批挂起的会话将提示重新发起）`);
   }
 }
@@ -405,7 +430,7 @@ if (process.platform === "win32") process.on("SIGBREAK", () => handleSignal("SIG
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   log("error", "server_listen_failed", { code: err.code, message: err.message, host: HOST, port: PORT });
-  if (process.stderr.isTTY) {
+  if (process.stderr.isTTY && !isProductionMode()) {
     console.error(
       err.code === "EADDRINUSE"
         ? `\n  端口 ${PORT} 已被占用：请设置 PORT=其它端口，或先停掉占用进程。\n`
@@ -426,7 +451,7 @@ server.listen(PORT, HOST, async () => {
     model: config.model,
   });
   // 人类可读横幅只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
-  if (process.stdout.isTTY) {
+  if (process.stdout.isTTY && !isProductionMode()) {
     console.log(
       `\n  LangGraph Agent Web 已启动\n` +
       `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
