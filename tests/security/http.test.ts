@@ -138,3 +138,74 @@ test("静态分发拒绝目录穿越、未知扩展与 vendor 探测", async () 
     assert.notEqual(res.status, 200, path);
   }
 });
+
+test("会话登录 → Cookie 访问 → 续期 → 注销后旧 Cookie 失效", async () => {
+  const login = await fetch(authSrv.base + "/api/auth/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: "test-secret" }),
+  });
+  assert.equal(login.status, 200);
+  const setCookie = login.headers.get("set-cookie") ?? "";
+  assert.match(setCookie, /lg_agent_session=/);
+  assert.match(setCookie, /HttpOnly/i);
+  assert.match(setCookie, /SameSite=Strict/i);
+  const cookie = setCookie.split(";")[0];
+
+  const status = await fetch(authSrv.base + "/api/auth/session", { headers: { Cookie: cookie } });
+  assert.equal(status.status, 200);
+  assert.equal((await status.json() as { authenticated?: boolean }).authenticated, true);
+
+  const sessions = await fetch(authSrv.base + "/api/sessions", { headers: { Cookie: cookie } });
+  assert.equal(sessions.status, 200);
+
+  const renew = await fetch(authSrv.base + "/api/auth/session/renew", {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(renew.status, 200);
+  const renewedCookie = (renew.headers.get("set-cookie") ?? "").split(";")[0];
+  assert.match(renewedCookie, /lg_agent_session=/);
+
+  const logout = await fetch(authSrv.base + "/api/auth/logout", {
+    method: "POST",
+    headers: { Cookie: renewedCookie, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(logout.status, 200);
+  assert.match(logout.headers.get("set-cookie") ?? "", /Max-Age=0/);
+
+  const replay = await fetch(authSrv.base + "/api/sessions", { headers: { Cookie: renewedCookie } });
+  assert.equal(replay.status, 401, "注销后的 token 不能重放");
+});
+
+test("登录失败达到阈值返回 429，正确密钥也不能绕过冷却", async () => {
+  const limited = await startServer({ AUTH_TOKEN: "rate-limit-secret" });
+  try {
+    for (let i = 0; i < 4; i += 1) {
+      const res = await fetch(limited.base + "/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: "wrong" }),
+      });
+      assert.equal(res.status, 401, `第 ${i + 1} 次失败仍应可重试`);
+    }
+    const fifth = await fetch(limited.base + "/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "wrong" }),
+    });
+    assert.equal(fifth.status, 429);
+    assert.ok(Number(fifth.headers.get("retry-after")) > 0);
+
+    const correctDuringCooldown = await fetch(limited.base + "/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "rate-limit-secret" }),
+    });
+    assert.equal(correctDuringCooldown.status, 429);
+  } finally {
+    await limited.stop();
+  }
+});

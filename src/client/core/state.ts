@@ -15,7 +15,7 @@ import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-10-27-22";
+export const APP_VERSION = "web-2026-10-27-23";
 
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
@@ -27,7 +27,7 @@ export const LS_SESSIONS = "lg-agent-sessions-meta";
 export const LS_USAGE = "lg-agent-usage";
 export const LS_PROJECT_VIEW = "lg-agent-project-view";
 export const LS_THEME = "lg-agent-theme";
-export const LS_AUTH_TOKEN = "lg-agent-auth-token";
+
 
 export const state: AppState = {
   config: null,        // { mock, model, baseURL, contextWindow, providers, demos }

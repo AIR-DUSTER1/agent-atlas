@@ -54,11 +54,11 @@ async function waitReady(base: string, proc: ChildProcess, output: () => string)
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) break;
     try {
-      // 开认证时 /api/sessions 回 401 也算「已就绪」。
+      // 就绪探测走免认证 liveness，不制造认证失败（否则会污染登录限流桶）。
       // 用 agent:false 的一次性请求探测：避免 undici 把 keep-alive 连接留在池里，
       // 首个测试请求复用后撞上 server.keepAliveTimeout（5s）造成假慢。
-      const status = await probeStatus(`${base}/api/sessions`);
-      if (status === 200 || status === 401) return;
+      const status = await probeStatus(`${base}/healthz`);
+      if (status === 200) return;
     } catch { /* 服务还没监听 */ }
     await new Promise((r) => setTimeout(r, 250));
   }

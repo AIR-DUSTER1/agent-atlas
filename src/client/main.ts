@@ -11,7 +11,7 @@
  */
 
 import { $, chatScroll, inputEl, sendBtn, setSidebarOpen, stopBtn, toggleTheme, updateThemeBtn, desktopBridge } from "./core/dom.js";
-import { api } from "./core/api.js";
+import { api, authFetch } from "./core/api.js";
 import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/state.js";
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./ui/dialog.js";
 import { renderAll } from "./render/messages.js";
@@ -102,9 +102,9 @@ async function init(): Promise<void> {
   // 能力自检：前端具备但服务端缺失的接口 → 说明服务进程是旧代码启动的，提示重启。
   // （静态文件每次请求都读磁盘，浏览器能拿到新脚本；但路由是进程启动时固化的）
   try {
-    const probe = await fetch("/api/fs/list", {
+    const probe = await authFetch("/api/fs/list", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(getAuthTokenSafe() ? { Authorization: "Bearer " + getAuthTokenSafe() } : {}) },
+      headers: { "Content-Type": "application/json" },
       body: "{}",
     });
     if (probe.status === 404) {
@@ -491,10 +491,6 @@ async function init(): Promise<void> {
   else showWelcomeState();
 
 
-}
-
-function getAuthTokenSafe(): string {
-  try { return localStorage.getItem("lg-agent-auth-token") || ""; } catch { return ""; }
 }
 
 /** 供应商连接弹窗是否打开（Esc 分层关闭用） */

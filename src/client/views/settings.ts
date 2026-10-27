@@ -10,13 +10,14 @@
  */
 
 import { $, setSidebarOpen } from "../core/dom.js";
-import { api } from "../core/api.js";
+import { api, logoutSession } from "../core/api.js";
 import { state } from "../core/state.js";
 import { BUILTIN_PLUGINS, pluginTransportMeta } from "../modules/plugin-registry.js";
 import { applyConfigState } from "./composer-bar.js";
 import { closeCmMenus } from "./navigation.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { h } from "../ui/h.js";
+import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
 import { refreshMemories, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
@@ -94,6 +95,27 @@ export function bindSettingsNavigation(): void {
   document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
     button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
   });
+  const logout = $("settings-logout-btn");
+  logout?.addEventListener("click", () => {
+    void (async () => {
+      const confirmed = await uiConfirm("退出后需要重新输入访问令牌，确定退出？", { title: "退出登录", okText: "退出", danger: true });
+      if (!confirmed) return;
+      await logoutSession();
+      window.location.reload();
+    })().catch((err) => {
+      logout.textContent = "退出失败";
+      logout.title = (err as Error).message;
+    });
+  });
+  void fetch("/api/auth/session", { credentials: "same-origin" })
+    .then(async (res) => {
+      if (!res.ok) return null;
+      return await res.json() as { authenticated?: boolean; authRequired?: boolean };
+    })
+    .then((status) => {
+      logout?.classList.toggle("hidden", !(status?.authenticated && status.authRequired));
+    })
+    .catch(() => {});
   const input = $("settings-search") as HTMLInputElement | null;
   if (!input) return;
   input.addEventListener("input", () => filterSettingsNav(input.value));

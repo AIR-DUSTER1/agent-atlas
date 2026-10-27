@@ -42,7 +42,7 @@ import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
 import { loadEstate } from "./estate.js";
-import { isAuthEnabled, verifyBearer } from "./auth.js";
+import { isAuthEnabled, verifyRequestAuth } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
@@ -55,6 +55,8 @@ import { loadMemories, memoriesFilePath } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
+import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
+import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
@@ -191,20 +193,34 @@ const server = createServer(async (req, res) => {
     }
     tracked = true;
 
-    // Phase 1 认证：AUTH_TOKEN 开启后，除静态页与探针外的全部 /api/* 都要 Bearer。
-    // 静态页豁免 = 让浏览器能加载出 UI 并弹 token 输入框（401 引导流程）
+    // 所有 API 的写请求先做同源检查；登录页也必须只允许从本站发起。
     if (pathname.startsWith("/api/")) {
-      if (!verifyBearer(req)) {
-        // 认证失败留审计痕迹（只记方法/路径，不带 token 内容）
-        writeAudit("auth_rejected", { requestId, method: req.method, path: pathname });
-        respondUnauthorized(req, res);
-        return;
-      }
-      // Phase 1 同源/CSRF 防护：mutating 必须同源（跨站表单/text/plain POST 直接拒）
       const originReject = checkSameOrigin(req);
       if (originReject) { respondForbidden(req, res, originReject); return; }
     }
 
+    // 认证端点自身不能要求已登录 Cookie；静态页匿名可加载后由前端发起登录。
+    if (pathname === "/api/auth/session" && req.method === "GET") { await handleAuthStatus(req, res); return; }
+    if (pathname === "/api/auth/session" && req.method === "POST") { await handleAuthLogin(req, res); return; }
+    if (pathname === "/api/auth/session/renew" && req.method === "POST") { await handleAuthRenew(req, res); return; }
+    if (pathname === "/api/auth/logout" && req.method === "POST") { await handleAuthLogout(req, res); return; }
+
+    // 除认证端点、静态页与探针外，全部 /api/* 都需要有效会话 Cookie。
+    if (pathname.startsWith("/api/") && !verifyRequestAuth(req)) {
+      const ip = clientIp(req);
+      const decision = authFailureLimiter.recordFailure(ip);
+      writeAudit("auth_rejected", { requestId, method: req.method, path: pathname });
+      if (!decision.allowed) {
+        res.writeHead(429, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Retry-After": String(decision.retryAfterSeconds),
+        });
+        res.end(JSON.stringify({ error: `认证失败次数过多，请在 ${decision.retryAfterSeconds} 秒后重试` }));
+      } else {
+        respondUnauthorized(req, res);
+      }
+      return;
+    }
     // Phase 0 止血：非 loopback 绑定且未启用认证 → 所有写请求全部拒绝。
     // 用「方法级」而非接口枚举：新增路由默认落在防线内侧，不会因漏单位置绕过。
     // GET（只读信息）不受限：config/sessions 等只含掩码/元信息，无副作用。

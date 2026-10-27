@@ -33,7 +33,17 @@
 .settings-page-heading { min-width: 0; }
 .settings-page-heading h1 { margin: 0; font-size: 17px; line-height: 1.2; }
 .settings-page-heading p { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
-.settings-page-head-spacer { flex: 1; }
+.settings-logout-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.settings-logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .settings-page-body {
   flex: 1; min-height: 0;
   display: grid;
