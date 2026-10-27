@@ -11,7 +11,7 @@
  */
 
 import {
-  fmtArgs, nodeIcon, nodeLabel, renderMarkdown, TOOL_ICONS,
+  ensureMarkdownRenderer, fmtArgs, nodeIcon, nodeLabel, renderMarkdown, TOOL_ICONS,
 } from "../modules/format.js";
 import {
   blockBodies, partEls, saveLocal, state, textTimers, thinkingTimers,
@@ -22,6 +22,7 @@ import { renderToolEnhancers } from "./tool-enhancers.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
+import { enhanceCodeBlocks } from "./code-enhance.js";
 import type {
   AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
   NodePart, TextPart, ThinkingPart, ToolPart,
@@ -170,12 +171,24 @@ export function updateToolCard(part: ToolPart): void {
 /* ---------------------------------------------------------------------------
  * 正文文本
  * ------------------------------------------------------------------------- */
+const enhancedTextParts = new WeakSet<TextPart>();
+
+function paintText(part: TextPart, el: HTMLElement): void {
+  el.innerHTML = renderMarkdown(part.text);
+  if (part.streaming) el.appendChild(h("span", { class: "cursor", "aria-hidden": "true" }));
+  else void enhanceCodeBlocks(el);
+}
+
 export function renderTextPart(part: TextPart): void {
   const refs = partEls.get(part);
   if (!refs) return;
-  refs.el.innerHTML = renderMarkdown(part.text) + (part.streaming ? '<span class="cursor"></span>' : "");
+  paintText(part, refs.el);
+  if (enhancedTextParts.has(part)) return;
+  enhancedTextParts.add(part);
+  void ensureMarkdownRenderer().then((ready) => {
+    if (ready && partEls.get(part)?.el === refs.el) paintText(part, refs.el);
+  });
 }
-
 export function scheduleTextRender(part: TextPart): void {
   if (textTimers.has(part)) return;
   textTimers.set(part, setTimeout(() => {

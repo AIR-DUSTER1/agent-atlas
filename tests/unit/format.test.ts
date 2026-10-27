@@ -40,7 +40,7 @@ test("renderMarkdown：标题/列表/表格/围栏代码", () => {
     /<table><thead><tr><th>a<\/th><th>b<\/th><\/tr><\/thead>/,
   );
   const code = renderMarkdown("```ts\nconst a = 1 < 2;\n```");
-  assert.match(code, /<pre><code>const a = 1 &lt; 2;<\/code><\/pre>/);
+  assert.match(code, /<pre><code class="language-ts">const a = 1 &lt; 2;<\/code><\/pre>/);
 });
 
 test("renderMarkdown：HTML 注入被转义（不生成 script 标签）", () => {
@@ -51,12 +51,14 @@ test("renderMarkdown：HTML 注入被转义（不生成 script 标签）", () =>
 
 test("renderMarkdown：流式中途未闭合的围栏也能渲染成代码块", () => {
   const html = renderMarkdown("```js\nlet x = 1");
-  assert.match(html, /<pre><code>let x = 1<\/code><\/pre>/);
+  assert.match(html, /<pre><code class="language-js">let x = 1<\/code><\/pre>/);
 });
 
-test("safeHref：只放行 https，javascript:/http:/data: 一律 null", () => {
-  assert.equal(safeHref("https://example.com"), "https://example.com");
-  assert.equal(safeHref("http://example.com"), null);
+test("safeHref：放行 http(s)/mailto/相对地址，危险协议一律 null", () => {
+  assert.equal(safeHref("https://example.com"), "https://example.com/");
+  assert.equal(safeHref("http://example.com"), "http://example.com/");
+  assert.equal(safeHref("/api/stats"), "/api/stats");
+  assert.equal(safeHref("mailto:user@example.com"), "mailto:user@example.com");
   assert.equal(safeHref("javascript:alert(1)"), null);
   assert.equal(safeHref("data:text/html,x"), null);
   assert.equal(safeHref(undefined), null);

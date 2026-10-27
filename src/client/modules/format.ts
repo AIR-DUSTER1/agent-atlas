@@ -8,6 +8,7 @@
    ============================================================ */
 
 import type { ToolPart } from "./types.js";
+import { safeHref as safeUrlHref, safeImageSrc as safeUrlImage } from "../ui/safe-url.js";
 
 export const NODE_ICONS: Record<string, string> = {
   analyze: "🧭", clarify: "❓", review: "🔎",
@@ -46,7 +47,7 @@ export function renderInline(text: string): string {
   return h;
 }
 
-export function renderMarkdown(src: string): string {
+function renderMarkdownFallback(src: string): string {
   const fences: Array<{ lang: string; code: string }> = [];
   // 1. 提取围栏代码块（含未闭合的流式半截）
   src = src.replace(/```(\w*)[ \t]*\n?([\s\S]*?)(?:```|$)/g, (_m, lang: string, code: string) => {
@@ -134,11 +135,68 @@ export function renderMarkdown(src: string): string {
   // 3. 还原代码块
   html = html.replace(/\u0000F(\d+)\u0000/g, (_m, n: string) => {
     const f = fences[Number(n)];
-    return `<pre><code>${escapeHtml(f.code)}</code></pre>`;
+    return `<pre><code${f.lang ? ` class="language-${escapeHtml(f.lang)}"` : ""}>${escapeHtml(f.code)}</code></pre>`;
   });
   return html;
 }
 
+type MarkdownRenderer = (source: string) => string;
+let enhancedMarkdownRenderer: MarkdownRenderer | null = null;
+let markdownLoadPromise: Promise<boolean> | null = null;
+
+const MARKDOWN_TAGS = [
+  "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+  "hr", "img", "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th",
+  "thead", "tr", "ul",
+];
+const MARKDOWN_ATTRS = ["href", "src", "alt", "title", "class", "lang", "target", "rel"];
+
+/** 动态加载 marked + DOMPurify；失败时继续使用内置安全 fallback，不阻断消息流。 */
+export function ensureMarkdownRenderer(): Promise<boolean> {
+  markdownLoadPromise ??= import("../vendor/markdown.js")
+    .then(({ marked, DOMPurify }) => {
+      marked.setOptions({ gfm: true, breaks: true });
+      DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
+        if (node.tagName === "A") {
+          const safe = safeUrlHref(node.getAttribute("href"));
+          if (!safe) node.removeAttribute("href");
+          else node.setAttribute("href", safe);
+          if (/^https?:/i.test(safe ?? "")) {
+            node.setAttribute("target", "_blank");
+            node.setAttribute("rel", "noopener noreferrer");
+          } else {
+            node.removeAttribute("target");
+            node.removeAttribute("rel");
+          }
+        }
+        if (node.tagName === "IMG") {
+          const safe = safeUrlImage(node.getAttribute("src"));
+          if (!safe || !/^(https:|data:image\/)/i.test(safe)) node.removeAttribute("src");
+          else node.setAttribute("src", safe);
+        }
+      });
+      enhancedMarkdownRenderer = (source: string): string => {
+        const raw = marked.parse(source, { async: false }) as string;
+        return DOMPurify.sanitize(raw, {
+          ALLOWED_TAGS: MARKDOWN_TAGS,
+          ALLOWED_ATTR: MARKDOWN_ATTRS,
+          FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form"],
+          ALLOW_DATA_ATTR: false,
+        });
+      };
+      return true;
+    })
+    .catch(() => {
+      markdownLoadPromise = null;
+      return false;
+    });
+  return markdownLoadPromise;
+}
+
+/** 增强渲染器就绪后使用 marked + DOMPurify；未就绪时保持同步 fallback。 */
+export function renderMarkdown(src: string): string {
+  return enhancedMarkdownRenderer ? enhancedMarkdownRenderer(src) : renderMarkdownFallback(src);
+}
 export function fmtArgs(part: Pick<ToolPart, "argsText">): string {
   try { return JSON.stringify(JSON.parse(part.argsText), null, 2); } catch { return part.argsText || "…"; }
 }
@@ -164,12 +222,11 @@ export function reasoningTag(model: { reasoningLevel?: string; reasoningLabel?: 
 
 /** 房源图片来源白名单：只放行 https 与 data:image（拒绝 http:// / 相对路径等） */
 export function safeImageSrc(url: unknown): string {
-  if (typeof url === "string" && (/^https:\/\//i.test(url) || /^data:image\//i.test(url))) return url;
-  return "";
+  const safe = safeUrlImage(typeof url === "string" ? url : "");
+  return safe && /^(https:|data:image\/)/i.test(safe) ? safe : "";
 }
 
-/** 链接 href 白名单：只放行 https（javascript: / data: 一律拒绝） */
+/** 链接 href 白名单：https / http / mailto 与同源相对路径；危险协议一律拒绝。 */
 export function safeHref(url: unknown): string | null {
-  if (typeof url === "string" && /^https:\/\//i.test(url)) return url;
-  return null;
+  return typeof url === "string" ? safeUrlHref(url) : null;
 }

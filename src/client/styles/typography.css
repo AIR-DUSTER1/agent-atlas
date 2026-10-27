@@ -49,3 +49,51 @@
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+
+/* 代码块工具栏：语言标签 + 复制，不改变代码内容 */
+.md .code-block {
+  margin: 8px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-input);
+}
+.md .code-block-head {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 8px 0 11px;
+  background: var(--surface-1);
+}
+.md .code-language {
+  color: var(--content-3);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: lowercase;
+}
+.md .code-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--content-3);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.md .code-copy-btn:hover { background: var(--surface-hover); color: var(--content-1); }
+.md .code-block pre { margin: 0; border: 0; border-radius: 0; }
+
+/* highlight.js 语义色只从主题 token 派生 */
+.hljs-comment, .hljs-quote { color: var(--content-3); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--accent-2-soft); }
+.hljs-string, .hljs-attr, .hljs-template-tag { color: var(--green-soft); }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--amber-soft); }
+.hljs-title, .hljs-section, .hljs-name { color: var(--accent-soft); }
+.hljs-built_in, .hljs-type { color: var(--red-soft); }
+.hljs-meta, .hljs-variable { color: var(--content-2); }

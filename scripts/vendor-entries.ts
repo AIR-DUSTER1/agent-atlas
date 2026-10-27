@@ -61,7 +61,7 @@ export const VENDOR_ENTRIES: VendorEntry[] = [
     name: "dompurify",
     outputFile: "dompurify-lib.js",
     license: "MPL-2.0 OR Apache-2.0",
-    source: `export { default as DOMPurify } from "dompurify";`,
+    source: `export { default } from "dompurify";`,
   },
   {
     name: "highlight.js",

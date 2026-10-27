@@ -1765,3 +1765,16 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 - API Key、RAG Key、找房凭证全部使用 password 控件与显式显示/隐藏按钮；错误和日志不读取输入明文。
 - 删除模型、供应商、MCP、技能、命令、记忆等不可恢复动作均经过 `uiConfirm` 二次确认；
   恢复备份前额外说明自动快照与重启要求。
+
+### 3.39 Markdown 净化与代码高亮（P5）
+
+**链路**：流式文本先使用同步安全 fallback，立即显示；同时动态加载
+`vendor/markdown.ts`（marked + DOMPurify）。加载完成后仅重绘仍指向原 DOM 的文本部件，避免切会话后旧异步结果写错位置。
+
+- DOMPurify 采用显式标签 / 属性 allowlist，禁 `script/style/iframe/object/embed/form`；
+- `afterSanitizeAttributes` 统一校验链接和图片：`javascript:` / `data:text/html` / `http` 图片被删除，
+  https 外链补 `target=_blank` 与 `rel="noopener noreferrer"`；
+- marked 或 DOMPurify 加载失败时继续使用内置转义 fallback，消息不消失；
+- 流式光标改为独立 DOM 节点，Markdown 受控 HTML 边界不再拼接 cursor HTML；
+- 代码块在流式结束后动态加载 highlight.js，单块添加语言标签与复制按钮；高亮失败仍保留原始代码；
+- 长消息仍沿用流式节流，超长代码/内容不会被可选依赖拖垮。

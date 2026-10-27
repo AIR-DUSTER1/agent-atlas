@@ -44,6 +44,7 @@ export const CLIENT_SOURCES = [
   // 渲染层
   "render/parts.ts",
   "render/messages.ts",
+  "render/code-enhance.ts",
   "render/tool-enhancers.ts",
   // 流与动作
   "stream/events.ts",
