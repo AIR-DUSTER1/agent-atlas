@@ -20,7 +20,7 @@ import { lifecycle } from "./lifecycle.js";
 const READY_CHECK_TIMEOUT_MS = 1_500;
 
 const pkg = createRequire(import.meta.url)("../../package.json") as { version?: string };
-const VERSION = pkg.version ?? "0.0.0";
+export const RUNTIME_VERSION = pkg.version ?? "0.0.0";
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
@@ -58,23 +58,36 @@ async function isDirWritable(dir: string): Promise<boolean> {
 export async function handleHealthz(res: ServerResponse): Promise<void> {
   writeJson(res, 200, {
     ok: true,
-    version: VERSION,
+    version: RUNTIME_VERSION,
     uptimeSeconds: uptimeSeconds(),
   });
 }
 
-export async function handleReadyz(res: ServerResponse): Promise<void> {
+export interface ReadinessSnapshot {
+  ok: boolean;
+  version: string;
+  uptimeSeconds: number;
+  shuttingDown: boolean;
+  checks: { configStore: boolean; sessionStore: boolean };
+}
+
+/** 探针与诊断接口共用同一份就绪判断，避免两套语义漂移。 */
+export async function readinessSnapshot(): Promise<ReadinessSnapshot> {
   const shuttingDown = lifecycle.isShuttingDown();
   const checks = {
     configStore: await isDirWritable(dirname(SETTINGS_FILE)),
     sessionStore: await isDirWritable(dirname(journalPath())),
   };
-  const ok = !shuttingDown && checks.configStore && checks.sessionStore;
-  writeJson(res, ok ? 200 : 503, {
-    ok,
-    version: VERSION,
+  return {
+    ok: !shuttingDown && checks.configStore && checks.sessionStore,
+    version: RUNTIME_VERSION,
     uptimeSeconds: uptimeSeconds(),
     shuttingDown,
     checks,
-  });
+  };
+}
+
+export async function handleReadyz(res: ServerResponse): Promise<void> {
+  const snapshot = await readinessSnapshot();
+  writeJson(res, snapshot.ok ? 200 : 503, snapshot);
 }

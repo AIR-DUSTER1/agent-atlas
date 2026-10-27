@@ -131,3 +131,11 @@ test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
   assert.equal(new Set(outputs).size, outputs.length);
   for (const wrapper of VENDOR_WRAPPER_FILES) assert.ok(!outputs.includes(wrapper));
 });
+
+test("客户端错误上报只发送摘要、版本与视图，不发送 stack/密钥/对话", async () => {
+  const source = await readFile(join(CLIENT, "observability", "client-errors.ts"), "utf8");
+  assert.doesNotMatch(source, /\.stack\b|Authorization|AUTH_TOKEN|localStorage|prompt/i);
+  assert.match(source, /message:\s*summary/);
+  assert.match(source, /version:\s*APP_VERSION/);
+  assert.match(source, /view:\s*currentView\(\)/);
+});

@@ -56,6 +56,8 @@ import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
+import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics } from "./observability/metrics.js";
+import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/observability.js";
 import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
@@ -198,6 +200,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     tracked = true;
+    incGauge("agent_http_inflight_requests");
 
     // 所有 API 的写请求先做同源检查；登录页也必须只允许从本站发起。
     if (pathname.startsWith("/api/")) {
@@ -210,6 +213,22 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/auth/session" && req.method === "POST") { await handleAuthLogin(req, res); return; }
     if (pathname === "/api/auth/session/renew" && req.method === "POST") { await handleAuthRenew(req, res); return; }
     if (pathname === "/api/auth/logout" && req.method === "POST") { await handleAuthLogout(req, res); return; }
+
+    // Prometheus 指标不是 /api/*，但同样需要会话认证；静态页匿名无法读取。
+    if (pathname === "/metrics") {
+      if (!verifyRequestAuth(req)) {
+        const decision = authFailureLimiter.recordFailure(clientIp(req));
+        if (!decision.allowed) {
+          res.writeHead(429, { "Content-Type": "application/json; charset=utf-8", "Retry-After": String(decision.retryAfterSeconds) });
+          res.end(JSON.stringify({ error: `认证失败次数过多，请在 ${decision.retryAfterSeconds} 秒后重试` }));
+        } else {
+          respondUnauthorized(req, res);
+        }
+        return;
+      }
+      handleMetrics(res);
+      return;
+    }
 
     // 除认证端点、静态页与探针外，全部 /api/* 都需要有效会话 Cookie。
     if (pathname.startsWith("/api/") && !verifyRequestAuth(req)) {
@@ -352,6 +371,10 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // 运维诊断（受认证保护；不返回路径、提示词或密钥）
+    if (pathname === "/api/diagnostics" && req.method === "GET") { await handleDiagnostics(res); return; }
+    if (pathname === "/api/client-errors" && req.method === "POST") { await handleClientError(req, res, requestId); return; }
+
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
     if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res); return; }
 
@@ -397,14 +420,27 @@ const server = createServer(async (req, res) => {
   } finally {
     // 在 handler 完全退出后记账（而不是 res 的 close）：SSE 被 shutdown abort 时，
     // close 可能早于 streamToClient 的 finally 落 journal，会让优雅退出提前 flush。
+    const durationMs = Date.now() - startedAt;
+    const status = res.statusCode;
+    incCounter("agent_http_requests_total", {
+      method: req.method ?? "UNKNOWN",
+      status,
+      path: metricPath(pathname),
+    });
+    observeHistogram("agent_http_request_duration_milliseconds", durationMs, {
+      method: req.method ?? "UNKNOWN",
+      status,
+      path: metricPath(pathname),
+    });
     if (tracked) {
       lifecycle.endRequest();
+      incGauge("agent_http_inflight_requests", {}, -1);
       log(pathname.startsWith("/api/") ? "info" : "debug", "http_request", {
         requestId,
         method: req.method,
         path: pathname,
-        status: res.statusCode,
-        durationMs: Date.now() - startedAt,
+        status,
+        durationMs,
         sessionId: sessionIdForLog,
       });
     }
@@ -462,6 +498,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
+startProcessMetrics();
 server.listen(PORT, HOST, async () => {
   const mode = config.apiKey ? "真实模型" : "模拟模式（未配置 API_KEY）";
   const displayHost = HOST === "0.0.0.0" || HOST === "::" ? "localhost" : HOST;

@@ -16,6 +16,7 @@ import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/st
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./ui/dialog.js";
 import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
+import { installClientErrorReporting } from "./observability/client-errors.js";
 import { icon, initIconHydration } from "./ui/icon.js";
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
@@ -500,6 +501,7 @@ function isProviderFormOpen(): boolean {
 }
 
 // 入口兜底：init 抛错时在页面上直接可见（否则所有按钮都静默失效）
+installClientErrorReporting();
 init().catch((err) => {
   console.error("[init] 初始化失败：", err);
   showFatalBanner("初始化失败：" + (err && (err as Error).stack ? (err as Error).stack : String(err)));

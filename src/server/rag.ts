@@ -33,6 +33,8 @@ import { readConfig, mergeConfig } from "./config-store.js";
 import { assertAuthorized, PROJECT_ROOT, SKIPPED_DIRS } from "./files.js";
 import { maskKey } from "./settings.js";
 import { log } from "./logging.js";
+import { recordDependency } from "./observability/dependency-status.js";
+import { incCounter } from "./observability/metrics.js";
 
 // ---------------------------------------------------------------------------
 // 配置
@@ -146,7 +148,11 @@ export async function testRagConnection(opts?: { baseURL?: string; apiKey?: stri
       headers: key ? { Authorization: `Bearer ${key}` } : {},
       signal: AbortSignal.timeout(10_000),
     });
+    recordDependency("rag", "ok", "RAG 服务可达");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "success" });
   } catch (e) {
+    recordDependency("rag", "down", "RAG 连接失败");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "error" });
     throw new Error(`连接失败：${e instanceof Error ? e.message : String(e)}`);
   }
   let body = "";

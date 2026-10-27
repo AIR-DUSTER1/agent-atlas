@@ -19,7 +19,7 @@ import { journalPath, flushJournal, JOURNAL_SCHEMA_VERSION } from "./session-sto
 import { checkpointFilePath, flushCheckpointLog, CHECKPOINT_SCHEMA_VERSION } from "../checkpoint.js";
 import { memoriesFilePath } from "../memory-store.js";
 import { CONFIG_SCHEMA_VERSION, SETTINGS_FILE, configSecretsState } from "./config-store.js";
-import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
+import { auditArchivePaths, auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { log } from "./logging.js";
 import { secureFilePermissions } from "./security/file-permissions.js";
 
@@ -28,13 +28,19 @@ export function backupRoot(): string {
   return process.env.BACKUP_DIR || DEFAULT_BACKUP_DIR;
 }
 
-function backupTargets(): Array<{ key: string; path: string; schemaVersion: number | null }> {
+async function backupTargets(): Promise<Array<{ key: string; path: string; schemaVersion: number | null }>> {
+  const archives = (await auditArchivePaths()).map((entry) => ({
+    key: `audit.archive.${entry.name}`,
+    path: entry.path,
+    schemaVersion: null,
+  }));
   return [
     { key: "sessions.ndjson", path: journalPath(), schemaVersion: JOURNAL_SCHEMA_VERSION },
     { key: "checkpoints.ndjson", path: checkpointFilePath(), schemaVersion: CHECKPOINT_SCHEMA_VERSION },
     { key: "memories.json", path: memoriesFilePath(), schemaVersion: null },
     { key: "web-config.json", path: SETTINGS_FILE, schemaVersion: CONFIG_SCHEMA_VERSION },
     { key: "audit.ndjson", path: auditFilePath(), schemaVersion: null },
+    ...archives,
   ];
 }
 
@@ -234,7 +240,7 @@ export async function createBackup(): Promise<BackupInfo> {
 
   const fileEntries: BackupFileEntry[] = [];
   const schemaVersions: Record<string, number | null> = {};
-  for (const target of backupTargets()) {
+  for (const target of await backupTargets()) {
     const st = await stat(target.path).catch(() => null);
     if (!st?.isFile()) {
       schemaVersions[target.key] = target.schemaVersion;
@@ -308,7 +314,7 @@ export async function restoreBackup(name: string): Promise<{ restored: string[];
   const snapshot = await createBackup();
   const snapshotDir = join(backupRoot(), snapshot.name);
   const sourceDir = join(backupRoot(), name);
-  const targets = new Map(backupTargets().map((t) => [t.key, t.path]));
+  const targets = new Map((await backupTargets()).map((t) => [t.key, t.path]));
 
   const selected: Array<{ key: string; source: string; dest: string; tmp: string }> = [];
   for (const file of manifest.files) {

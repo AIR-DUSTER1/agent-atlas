@@ -30,6 +30,8 @@ import { z } from "zod";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { killProcessTree } from "./subprocess.js";
 import { log } from "./logging.js";
+import { recordDependency } from "./observability/dependency-status.js";
+import { incCounter } from "./observability/metrics.js";
 import { writeAudit } from "./audit.js";
 
 /** 单次 JSON-RPC 请求超时（initialize 可能慢，工具调用给足时间） */
@@ -452,14 +454,22 @@ export async function callMcpTool(
     request(conn, "tools/call", { name: toolName, arguments: args });
   try {
     const conn = await ensureConnection(server);
-    return toResult(await attempt(conn));
+    const result = toResult(await attempt(conn));
+    recordDependency(`mcp:${server.id}`, result.isError ? "degraded" : "ok", result.isError ? "MCP 返回工具错误" : "MCP 调用正常");
+    incCounter("agent_external_dependency_calls_total", { dependency: "mcp", status: result.isError ? "tool_error" : "success" });
+    return result;
   } catch (err) {
     try {
       await disconnect(server.id);
       const fresh = await ensureConnection(server);
-      return toResult(await attempt(fresh));
+      const result = toResult(await attempt(fresh));
+      recordDependency(`mcp:${server.id}`, result.isError ? "degraded" : "ok", "MCP 重连后调用完成");
+      incCounter("agent_external_dependency_calls_total", { dependency: "mcp", status: "retry_success" });
+      return result;
     } catch (retryErr) {
       const message = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      recordDependency(`mcp:${server.id}`, "down", "MCP 重连后仍失败");
+      incCounter("agent_external_dependency_calls_total", { dependency: "mcp", status: "error" });
       log("warn", "mcp_tool_call_failed", { server: server.id, tool: toolName, message });
       return { text: `MCP 工具调用失败（已重连重试）：${message}`, isError: true };
     }

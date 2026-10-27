@@ -421,3 +421,32 @@ test("批量清理：按创建时间删旧会话，坏参数 400", async () => {
   const list = await json("/api/sessions");
   assert.ok(list.body.some((s: { id: string }) => s.id === sid), "清理后新会话仍在列表");
 });
+
+test("运维指标与诊断接口：受认证边界保护的结构化快照", async () => {
+  const metrics = await fetch(srv.base + "/metrics");
+  assert.equal(metrics.status, 200);
+  assert.match(metrics.headers.get("content-type") ?? "", /text\/plain/);
+  const text = await metrics.text();
+  assert.match(text, /agent_http_requests_total/);
+  assert.match(text, /agent_process_resident_memory_bytes/);
+
+  const diagnostics = await json("/api/diagnostics");
+  assert.equal(diagnostics.status, 200);
+  assert.equal(typeof diagnostics.body.status, "string");
+  assert.ok(diagnostics.body.schemaVersions);
+  assert.ok(diagnostics.body.data.journal);
+  assert.ok(diagnostics.body.data.checkpoint);
+  assert.ok(Array.isArray(diagnostics.body.dependencies.mcp));
+  const serialized = JSON.stringify(diagnostics.body);
+  assert.doesNotMatch(serialized, /apiKey|AUTH_TOKEN|DATA_KEY|SESSION_SECRET/);
+  assert.doesNotMatch(serialized, /C:\\Users\\|D:\\code\\/i);
+});
+test("客户端错误上报只接收摘要并返回 204", async () => {
+  const res = await fetch(srv.base + "/api/client-errors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "TypeError: boom", version: "web-test", view: "settings", stack: "should-be-ignored" }),
+  });
+  assert.equal(res.status, 204);
+  assert.equal(await res.text(), "");
+});

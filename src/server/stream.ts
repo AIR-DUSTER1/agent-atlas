@@ -26,6 +26,8 @@ import type { AgentEvent, InterruptPayload } from "./events.js";
 import type { PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
 import { getActiveModelLabel } from "./settings.js";
+import { config } from "../config.js";
+import { incCounter } from "./observability/metrics.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
 const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review"]);
@@ -301,6 +303,30 @@ export async function* runGraphEvents(
     usageSignature = "";
   };
 
+  const usageMetricState = new Map<string, { input: number; output: number; cache: number }>();
+  const observeUsageMetrics = (
+    key: string,
+    usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
+    model: string | undefined
+  ) => {
+    const metricKey = key || "usage";
+    const modelLabel = model || config.model || "unknown";
+    const previous = usageMetricState.get(metricKey);
+    if (!previous) incCounter("agent_model_calls_total", { model: modelLabel, provider: config.protocol });
+    const before = previous ?? { input: 0, output: 0, cache: 0 };
+    const inputDelta = Math.max(0, usage.inputTokens - before.input);
+    const outputDelta = Math.max(0, usage.outputTokens - before.output);
+    const cacheDelta = Math.max(0, usage.cacheReadTokens - before.cache);
+    if (inputDelta) incCounter("agent_model_tokens_total", { model: modelLabel, type: "input" }, inputDelta);
+    if (outputDelta) incCounter("agent_model_tokens_total", { model: modelLabel, type: "output" }, outputDelta);
+    if (cacheDelta) incCounter("agent_model_tokens_total", { model: modelLabel, type: "cache_read" }, cacheDelta);
+    usageMetricState.set(metricKey, {
+      input: Math.max(before.input, usage.inputTokens),
+      output: Math.max(before.output, usage.outputTokens),
+      cache: Math.max(before.cache, usage.cacheReadTokens),
+    });
+  };
+
   for await (const tagged of stream) {
     if (options.signal?.aborted) return;
     if (!Array.isArray(tagged)) continue;
@@ -322,6 +348,7 @@ export async function* runGraphEvents(
           const signature = `${usageAccum.inputTokens}/${usageAccum.outputTokens}/${usageAccum.cacheReadTokens}`;
           if (signature !== usageSignature) {
             usageSignature = signature;
+            observeUsageMetrics(usageCallId ?? usageNode ?? "usage", usageAccum, usageModel);
             yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
           }
         }
@@ -353,6 +380,7 @@ export async function* runGraphEvents(
           const frag = typeof tc.args === "string" ? tc.args : tc.args ? JSON.stringify(tc.args) : "";
           if (name && !announcedTools.has(id)) {
             announcedTools.add(id);
+            incCounter("agent_tool_calls_total", { tool: name, status: "requested", agentProfileId: options.agentProfileId ?? "none" });
             log("debug", "agent_tool_started", {
               agentProfileId: options.agentProfileId,
               turnId: options.turnId,
@@ -374,6 +402,7 @@ export async function* runGraphEvents(
         const resultId = msg.tool_call_id ?? "";
         if (!loggedToolResults.has(resultId)) {
           loggedToolResults.add(resultId);
+          incCounter("agent_tool_results_total", { tool: msg.name ?? "unknown", status: msg.status ?? "success", agentProfileId: options.agentProfileId ?? "none" });
           log("debug", "agent_tool_finished", {
             agentProfileId: options.agentProfileId,
             turnId: options.turnId,
@@ -385,6 +414,7 @@ export async function* runGraphEvents(
         const riskUsageKey = riskUsage?.callId || msg.id || resultId;
         if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
           emittedRiskUsageIds.add(riskUsageKey);
+          observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
           yield { type: "usage", ...riskUsage, model: usageModel };
         }
         yield {
@@ -409,6 +439,7 @@ export async function* runGraphEvents(
           for (const item of list) {
             const value = asInterruptPayload(item?.value);
             if (value) {
+              incCounter("agent_approvals_total", { tool: value.type === "approval" ? value.toolName : "clarification", agentProfileId: options.agentProfileId ?? "none", outcome: "requested" });
               yield { type: "interrupt", payload: value };
             }
           }
@@ -435,7 +466,8 @@ export async function* runGraphEvents(
             const riskUsageKey = riskUsage?.callId || msg.id || msg.tool_call_id || "risk-usage";
             if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
               emittedRiskUsageIds.add(riskUsageKey);
-              yield { type: "usage", ...riskUsage, model: usageModel };
+              observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
+          yield { type: "usage", ...riskUsage, model: usageModel };
             }
             yield {
               type: "tool_result",
@@ -454,7 +486,8 @@ export async function* runGraphEvents(
               const signature = `${usageAccum.inputTokens}/${usageAccum.outputTokens}/${usageAccum.cacheReadTokens}`;
               if (signature !== usageSignature) {
                 usageSignature = signature;
-                yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
+                observeUsageMetrics(usageCallId ?? usageNode ?? "usage", usageAccum, usageModel);
+            yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
               }
             }
             // 非流式兜底同样保留思考过程；同一消息已流式产出思考时不重复。

@@ -83,6 +83,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
       MEMORIES_FILE: join(dir, "memories.json"), // 隔离真实长期记忆（启动 loadMemories / 记忆 API 都碰它）
       WEB_CONFIG_FILE: configPath, // 隔离真实 .web-config.json（其中可能有供应商 Key）
       AUDIT_FILE: join(dir, "audit.ndjson"), // 隔离真实审计日志（认证失败等事件）
+      BACKUP_DIR: join(dir, "backups"), // 诊断接口会校验备份，必须隔离真实目录
       LOG_LEVEL: "error",          // 集成测试不刷请求日志；启动失败仍有 console 输出
       ...extraEnv,
     },

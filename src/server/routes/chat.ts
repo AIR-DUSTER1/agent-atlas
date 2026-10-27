@@ -21,6 +21,8 @@ import { lifecycle } from "../lifecycle.js";
 import { writeAudit } from "../audit.js";
 import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
+import { getActiveModelLabel } from "../settings.js";
+import { incCounter, incGauge } from "../observability/metrics.js";
 
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -63,8 +65,11 @@ async function streamToClient(
     turnId: turn?.turnId ?? "",
     agentProfileId: session.agentProfileId,
     kind: session.kind,
+    provider: config.protocol,
+    model: getActiveModelLabel() || "mock",
   });
 
+  incGauge("agent_sse_active_streams", { kind: session.kind });
   const collected: AgentEvent[] = [];
   let sawInterrupt = false;
   try {
@@ -82,12 +87,25 @@ async function streamToClient(
     }
   } catch (err) {
     if (!controller.signal.aborted) {
+      incCounter("agent_model_errors_total", { model: getActiveModelLabel() || "mock", reason: "stream" });
       const message = err instanceof Error ? err.message : String(err);
       collected.push({ type: "error", message });
       writeEvent(res, { type: "error", message });
     }
   } finally {
     unregisterSse();
+    incGauge("agent_sse_active_streams", { kind: session.kind }, -1);
+    const turnStatus = controller.signal.aborted
+      ? "aborted"
+      : collected.some((event) => event.type === "error")
+        ? "error"
+        : sawInterrupt ? "waiting" : "completed";
+    incCounter("agent_sse_streams_total", {
+      kind: session.kind,
+      agentProfileId: session.agentProfileId ?? "none",
+      status: turnStatus,
+    });
+    if (clientGone) incCounter("agent_sse_disconnects_total", { kind: session.kind });
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过
     onDone?.(collected);
     log("info", "agent_turn_finished", {
@@ -95,11 +113,9 @@ async function streamToClient(
       turnId: turn?.turnId ?? "",
       agentProfileId: session.agentProfileId,
       kind: session.kind,
-      status: controller.signal.aborted
-        ? "aborted"
-        : collected.some((event) => event.type === "error")
-          ? "error"
-          : sawInterrupt ? "waiting" : "completed",
+      provider: config.protocol,
+      model: getActiveModelLabel() || "mock",
+      status: turnStatus,
       events: collected.length,
       durationMs: Math.max(0, Date.now() - turnStartedAt),
     });
@@ -300,6 +316,14 @@ async function handleResumeInner(
       agentProfileId: session.agentProfileId,
       toolName: approval.type === "approval" ? approval.toolName : "clarification",
       decision: clarification ? "answered" : resumeValue,
+    });
+  }
+
+  if (approval?.type === "approval") {
+    incCounter("agent_approvals_total", {
+      tool: approval.toolName,
+      agentProfileId: session.agentProfileId ?? "none",
+      outcome: resumeValue === "approve" ? "approved" : "rejected",
     });
   }
 

@@ -209,3 +209,7 @@ test("登录失败达到阈值返回 429，正确密钥也不能绕过冷却", a
     await limited.stop();
   }
 });
+test("认证开启时 /metrics 与 /api/diagnostics 不可匿名读取", async () => {
+  assert.equal((await fetch(authSrv.base + "/metrics")).status, 401);
+  assert.equal((await fetch(authSrv.base + "/api/diagnostics")).status, 401);
+});
