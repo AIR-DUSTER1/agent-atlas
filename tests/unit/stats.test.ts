@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildStats, type StatsRangeResult } from "../../src/server/routes/stats.js";
+import { buildStats, countToolCalls, type StatsRangeResult } from "../../src/server/routes/stats.js";
 import type { Session, TurnRecord } from "../../src/server/sessions.js";
 
 /** 最小可聚合 Session（buildStats 只读 id/title/turnHistory） */
@@ -15,13 +15,14 @@ function fakeSession(id: string, title: string, records: TurnRecord[]): Session 
   return { id, title, turnHistory: records } as unknown as Session;
 }
 
-function turn(startedAt: number, events: unknown[]): TurnRecord {
+function turn(startedAt: number, events: unknown[], durationMs?: number): TurnRecord {
   return {
     turnId: `t-${startedAt}-${Math.random().toString(36).slice(2, 6)}`,
     agentProfileId: "general",
     user: "问题",
     events: events as never,
     startedAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
 }
 
@@ -55,6 +56,11 @@ test("空数据返回近 7/30 天零值形状，并补齐每天桶", () => {
     assert.equal(item.totals.sessions, 0);
     assert.equal(item.totals.modelCalls, 0);
     assert.deepEqual(item.byModel, []);
+    assert.deepEqual(item.byModelShare, []);
+    assert.equal(item.byHour.length, 24);
+    assert.ok(item.byHour.every((hour) => hour.turns === 0 && hour.tokens === 0));
+    assert.deepEqual(item.toolCalls, []);
+    assert.deepEqual(item.health, { avgTurnMs: 0, cacheHitRate: 0, failedTurns: 0, interruptedTurns: 0 });
     assert.deepEqual(item.topSessions, []);
   }
 });
@@ -162,4 +168,42 @@ test("流式重复 usage 快照只算一次调用；callId 分片按最终字段
   assert.equal(week.byModel.find((item) => item.model === "模型B")?.calls, 2);
   assert.equal(week.byDay.find((day) => day.date === "2026-10-24")?.inputTokens, 6141);
   assert.equal(week.topSessions[0]?.tokens, 7249);
+});
+test("工具调用按 id 去重，health / byHour / toolCalls 口径稳定", () => {
+  const session = fakeSession("health", "健康度", [
+    turn(T0, [
+      usage(100, 20, "模型A", 10),
+      { type: "tool_call", id: "tc1", argsFragment: "" },
+      { type: "tool_call", id: "tc1", name: "terminal", argsFragment: "{\"command\"" },
+      { type: "tool_call", id: "tc1", name: "terminal", argsFragment: ":\"pwd\"}" },
+      { type: "tool_call", id: "tc2", name: "get_weather", argsFragment: "" },
+      { type: "interrupt", payload: { type: "approval" } },
+      { type: "error", message: "模拟失败" },
+    ], 2500),
+    turn(T0 + 1000, [usage(300, 80, "模型B", 30)], 500),
+  ]);
+  const week = range(buildStats([session], NOW), "7d");
+  assert.deepEqual(week.toolCalls, [
+    { name: "get_weather", count: 1 },
+    { name: "terminal", count: 1 },
+  ]);
+  assert.equal(week.health.avgTurnMs, 1500);
+  assert.equal(week.health.cacheHitRate, 0.1);
+  assert.equal(week.health.failedTurns, 1);
+  assert.equal(week.health.interruptedTurns, 1);
+  const ten = week.byHour.find((bucket) => bucket.hour === 10);
+  assert.equal(ten?.turns, 2);
+  assert.equal(ten?.tokens, 500);
+  assert.deepEqual(week.byModelShare, week.byModel);
+});
+
+test("countToolCalls 对同一 id 的流式参数分片只计一次", () => {
+  const counts = countToolCalls([
+    { type: "tool_call", id: "a", argsFragment: "" },
+    { type: "tool_call", id: "a", name: "terminal", argsFragment: "{}" },
+    { type: "tool_call", id: "a", name: "terminal", argsFragment: "{}" },
+    { type: "tool_call", id: "b", name: "retrieve_docs", argsFragment: "" },
+    { type: "tool_result", id: "a", content: "ok" },
+  ]);
+  assert.deepEqual(Object.fromEntries(counts), { terminal: 1, retrieve_docs: 1 });
 });

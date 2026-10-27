@@ -5,6 +5,9 @@
  *   totals       区间内轮次 / 输入输出与缓存 token / 有记录会话 / 委派次数
  *   byDay        自然日补齐的每日桶（无数据也返回 0，图表时间轴不断裂）
  *   byModel      区间内按模型聚合的调用次数与 token
+ *   byHour       服务器本地 24 小时活动桶
+ *   toolCalls    工具调用 Top N（流式分片按 call id 去重）
+ *   health       平均轮次耗时、缓存命中率、失败/中断轮次
  *   topSessions  区间内最活跃的会话
  * 时间窗口按服务器本地自然日计算，包含今天；journal 回放后的 turnHistory 同样计入。
  */
@@ -15,6 +18,8 @@ const RANGE_WINDOWS = [
   { id: "30d", label: "近 30 天", days: 30 },
 ] as const;
 const TOP_SESSIONS = 8;     // 每个区间最多返回的活跃会话数
+const TOP_TOOLS = 8;        // 每个区间最多返回的工具种类
+const HOURS_PER_DAY = 24;   // 活动时段固定桶
 const DELEGATE_TOOL = "delegate_agent";
 const UNKNOWN_MODEL = "未知模型";
 
@@ -62,6 +67,23 @@ export interface StatsModelBucket {
   cacheReadTokens: number;
 }
 
+export interface StatsHourBucket {
+  hour: number;
+  turns: number;
+  tokens: number;
+}
+
+export interface StatsToolBucket {
+  name: string;
+  count: number;
+}
+
+export interface StatsHealth {
+  avgTurnMs: number;
+  cacheHitRate: number;
+  failedTurns: number;
+  interruptedTurns: number;
+}
 export interface StatsRangeResult {
   id: StatsRangeId;
   label: string;
@@ -71,6 +93,10 @@ export interface StatsRangeResult {
   totals: StatsTotals;
   byDay: StatsDayBucket[];
   byModel: StatsModelBucket[];
+  byModelShare: StatsModelBucket[];
+  byHour: StatsHourBucket[];
+  toolCalls: StatsToolBucket[];
+  health: StatsHealth;
   topSessions: Array<{ sessionId: string; title: string; turns: number; tokens: number }>;
 }
 
@@ -147,6 +173,39 @@ function dayKey(ts: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function emptyHour(hour: number): StatsHourBucket {
+  return { hour, turns: 0, tokens: 0 };
+}
+
+/** 同一 tool_call id 的流式参数分片只计一次；首个分片没带 name 时等后续补齐。 */
+export function countToolCalls(events: unknown[]): Map<string, number> {
+  const calls = new Map<string, number>();
+  const byCallId = new Map<string, string>();
+  for (const ev of events) {
+    if (typeof ev !== "object" || ev === null) continue;
+    if ((ev as { type?: unknown }).type !== "tool_call") continue;
+    const id = (ev as { id?: unknown }).id;
+    const rawName = (ev as { name?: unknown }).name;
+    const name = typeof rawName === "string" && rawName.trim() ? rawName.trim() : "";
+    if (typeof id === "string" && id) {
+      const known = byCallId.get(id);
+      if (known === undefined) {
+        byCallId.set(id, name);
+        if (name) calls.set(name, (calls.get(name) ?? 0) + 1);
+      } else if (!known && name) {
+        byCallId.set(id, name);
+        calls.set(name, (calls.get(name) ?? 0) + 1);
+      }
+    } else if (name) {
+      calls.set(name, (calls.get(name) ?? 0) + 1);
+    }
+  }
+  return calls;
+}
+
+function hasEventType(events: unknown[], type: "error" | "interrupt"): boolean {
+  return events.some((ev) => typeof ev === "object" && ev !== null && (ev as { type?: unknown }).type === type);
+}
 function emptyDay(date: string): StatsDayBucket {
   return { date, turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
 }
@@ -163,6 +222,12 @@ function buildRange(
   const dateKeys = Array.from({ length: definition.days }, (_, index) => dayKey(addLocalDays(startAt, index)));
   const dayMap = new Map(dateKeys.map((date) => [date, emptyDay(date)]));
   const modelMap = new Map<string, StatsModelBucket>();
+  const hourBuckets = Array.from({ length: HOURS_PER_DAY }, (_, hour) => emptyHour(hour));
+  const toolMap = new Map<string, number>();
+  let durationTotalMs = 0;
+  let durationCount = 0;
+  let failedTurns = 0;
+  let interruptedTurns = 0;
   const sessionRows: StatsRangeResult["topSessions"] = [];
   const totals: StatsTotals = {
     turns: 0,
@@ -185,6 +250,18 @@ function buildRange(
       day.turns += 1;
       totals.turns += 1;
       sessionTurns += 1;
+      const hour = new Date(record.startedAt).getHours();
+      const hourBucket = hourBuckets[hour];
+      if (hourBucket) hourBucket.turns += 1;
+      if (typeof record.durationMs === "number" && Number.isFinite(record.durationMs)) {
+        durationTotalMs += Math.max(0, record.durationMs);
+        durationCount += 1;
+      }
+      if (hasEventType(record.events, "error")) failedTurns += 1;
+      if (hasEventType(record.events, "interrupt")) interruptedTurns += 1;
+      for (const [name, count] of countToolCalls(record.events)) {
+        toolMap.set(name, (toolMap.get(name) ?? 0) + count);
+      }
 
       for (const call of extractUsageCalls(record.events)) {
         const model = call.model || UNKNOWN_MODEL;
@@ -195,6 +272,7 @@ function buildRange(
         totals.outputTokens += call.outputTokens;
         totals.cacheReadTokens += call.cacheReadTokens;
         totals.modelCalls += 1;
+        if (hourBucket) hourBucket.tokens += call.inputTokens + call.outputTokens;
         sessionTokens += call.inputTokens + call.outputTokens;
         const bucket = modelMap.get(model) ?? {
           model,
@@ -233,6 +311,11 @@ function buildRange(
   const byModel = [...modelMap.values()].sort((a, b) =>
     (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens) || b.calls - a.calls
   );
+  const toolCalls = [...toolMap.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+    .slice(0, TOP_TOOLS);
+  const cacheHitRate = totals.inputTokens > 0 ? totals.cacheReadTokens / totals.inputTokens : 0;
   const topSessions = sessionRows
     .sort((a, b) => b.turns - a.turns || b.tokens - a.tokens)
     .slice(0, TOP_SESSIONS);
@@ -246,6 +329,15 @@ function buildRange(
     totals,
     byDay: [...dayMap.values()],
     byModel,
+    byModelShare: byModel,
+    byHour: hourBuckets,
+    toolCalls,
+    health: {
+      avgTurnMs: durationCount ? Math.round(durationTotalMs / durationCount) : 0,
+      cacheHitRate,
+      failedTurns,
+      interruptedTurns,
+    },
     topSessions,
   };
 }
