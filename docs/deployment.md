@@ -181,7 +181,7 @@ location /api/ {
 建议在代理层开启 TLS 与 access log（Nginx 默认 `access_log` 即可，注意不要记录
 `Authorization` 头）；应用内的 Bearer 认证保持不变（`Authorization` 头默认透传）。
 如果只对外提供部分能力，可在代理层只放行 `/api/`、`/healthz`、`/readyz` 与
-静态资源（`/`、`/app.js`、`/modules/`、`/style.css`）；不要把 `/api/*` 缓存到 CDN。
+静态资源（`/`、`/main.js`、`/modules/`、`/styles/`、`/vendor/`）；不要把 `/api/*` 缓存到 CDN。
 
 ## 7. 桌面端打包评估（未实施）
 

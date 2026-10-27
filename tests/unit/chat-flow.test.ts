@@ -5,10 +5,9 @@
  * 审批卡里的长 URL / 命令必须能换行，不能撑破消息容器。
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import type { AssistantPart, ChatBlock } from "../../src/client/modules/types.js";
 import { test } from "node:test";
-import { readClientSource } from "../helpers/client-source.js";
+import { readClientCss, readClientSource } from "../helpers/client-source.js";
 import {
   assistantBlockContaining,
   isContinuationRecord,
@@ -50,9 +49,8 @@ test("审批 part 能定位所属助手块，用户消息分隔的块不会被�
 });
 
 test("前端恢复流复用原助手块，审批内容样式允许任意长串换行", async () => {
-  const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
-  const css = await readFile(new URL("style.css", root), "utf8");
+  const app = await readClientSource();
+  const css = await readClientCss();
   assert.match(app, /export async function runResume\(/);
   assert.match(app, /mountTyping\(ablock\)/);
   assert.match(app, /isContinuationRecord\(rec\)/);
@@ -63,9 +61,8 @@ test("前端恢复流复用原助手块，审批内容样式允许任意长串�
 });
 
 test("审批完成后默认折叠为摘要行，仍可手动展开详情", async () => {
-  const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
-  const css = await readFile(new URL("style.css", root), "utf8");
+  const app = await readClientSource();
+  const css = await readClientCss();
   assert.match(app, /part\.collapsed = true/);
   assert.match(app, /class="approval-summary"/);
   assert.match(app, /class="approval-body"/);
@@ -74,9 +71,8 @@ test("审批完成后默认折叠为摘要行，仍可手动展开详情", async
 });
 
 test("思考过程使用默认折叠的 details，点击摘要可手动展开", async () => {
-  const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
-  const css = await readFile(new URL("style.css", root), "utf8");
+  const app = await readClientSource();
+  const css = await readClientCss();
   assert.match(app, /case "reasoning": appendReasoning\(ablock, ev\)/);
   assert.match(app, /export function appendReasoning\(ablock: AssistantBlock, ev: \{ text\?: string; node\?: string \}\): void/);
   assert.match(app, /document\.createElement\("details"\)/);
@@ -90,9 +86,8 @@ test("思考过程使用默认折叠的 details，点击摘要可手动展开", 
 });
 
 test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–2 个继续平铺", async () => {
-  const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
-  const css = await readFile(new URL("style.css", root), "utf8");
+  const app = await readClientSource();
+  const css = await readClientCss();
   assert.match(app, /export function mountToolCard\(block: AssistantBlock, card: HTMLElement\): void \{\s*blockBodies\.get\(block\)\?\.appendChild\(card\);/s);
   assert.match(app, /const TOOL_GROUP_MIN = 3/);
   assert.match(app, /export function groupToolCallsIfNeeded\(/);
@@ -105,11 +100,11 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
-  const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
-  const css = await readFile(new URL("style.css", root), "utf8");
-  assert.match(app, /const actions = document\.createElement\("div"\);\s*actions\.className = "s-actions";/);
-  assert.match(app, /actions\.appendChild\(exportBtn\);\s*[\s\S]*actions\.appendChild\(del\);\s*item\.appendChild\(actions\);/);
+  const app = await readClientSource();
+  const css = await readClientCss();
+  assert.match(app, /const exportButton = h\("button",/);
+  assert.match(app, /const deleteButton = h\("button",/);
+  assert.match(app, /h\("div", \{ class: "s-actions" \}, exportButton, deleteButton\)/);
   assert.match(css, /\.s-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*2px/s);
   assert.match(css, /\.session-item \.s-title\s*\{[^}]*padding-right:\s*56px/s);
   assert.match(css, /@media \(hover: none\), \(pointer: coarse\)/);

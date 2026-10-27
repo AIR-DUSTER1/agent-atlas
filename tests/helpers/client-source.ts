@@ -100,3 +100,15 @@ export async function readClientFiles(names: string[]): Promise<string> {
   );
   return parts.join("\n");
 }
+/** 读取 src/client/styles/*.css，按 index 中的加载顺序拼接（供结构断言）。 */
+export async function readClientCss(): Promise<string> {
+  const root = new URL("../../src/client/", import.meta.url);
+  const names = [
+    "tokens.css", "reset.css", "layout.css", "typography.css", "chat.css", "composer.css",
+    "modals.css", "settings.css", "plugins.css", "responsive.css", "desktop.css", "ui.css",
+  ];
+  const parts = await Promise.all(names.map(async (name) =>
+    `\n/* ==== src/client/styles/${name} ==== */\n${await readFile(new URL(`styles/${name}`, root), "utf8")}`
+  ));
+  return parts.join("\n");
+}

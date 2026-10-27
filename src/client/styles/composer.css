@@ -1,0 +1,308 @@
+/* ============================================================
+   composer.css — 输入区、附件与上下文条
+   ============================================================ */
+/* ============================== 输入区 ============================== */
+#composer { padding: 10px 24px 14px; background: linear-gradient(transparent, var(--bg) 40%); }
+
+/* ---------- 输入框上方：模型 / 思考等级 快捷切换 ---------- */
+#composer-bar {
+  max-width: var(--content-w); margin: 0 auto 6px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.cm-group { position: relative; }
+.cm-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 340px;
+  padding: 4px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.cm-chip:hover { border-color: var(--accent); color: var(--text); background: rgba(91,140,255,.08); }
+.cm-chip.on { border-color: rgba(91,140,255,.55); color: var(--text); background: rgba(91,140,255,.1); }
+.cm-chip .cm-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-chip .cm-arr { font-size: 9px; color: var(--text-3); flex: none; }
+.cm-spacer { flex: 1; }
+.cm-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0;
+  width: min(430px, 92vw);
+  max-height: 56vh; overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0,0,0,.4);
+  padding: 6px;
+  z-index: 80;
+  animation: slideIn .15s ease;
+}
+.cm-sec {
+  padding: 6px 10px 4px;
+  font-size: 10.5px; color: var(--text-3);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.cm-sec .cm-sub { flex: none; }
+.cm-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; text-align: left;
+  padding: 7px 10px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-2);
+  font-size: 12.5px; font-family: var(--sans);
+  cursor: pointer;
+}
+.cm-item:hover { background: var(--bg-hover); color: var(--text); }
+.cm-item.active { color: var(--text); background: rgba(91,140,255,.12); }
+.cm-item:disabled { opacity: .5; cursor: wait; }
+.cm-item .ck { width: 14px; flex: none; color: var(--green); font-size: 11px; }
+.cm-item .cm-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-item .cm-sub { margin-left: auto; font-size: 10.5px; color: var(--text-3); flex: none; }
+.cm-desc { padding: 2px 10px 8px; font-size: 10.5px; color: var(--text-3); line-height: 1.6; }
+.cm-divider { border-top: 1px solid var(--border-soft); margin: 5px 8px; }
+
+/* ---------- 上下文容量条 + 缓存占比 ---------- */
+.context-bar {
+  max-width: var(--content-w);
+  margin: 0 auto 8px;
+  padding: 0 2px;
+}
+.ctx-track {
+  height: 4px;
+  background: var(--track);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ctx-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width .5s ease;
+}
+.ctx-fill.warn { background: linear-gradient(90deg, var(--amber), #e2b53c); }
+.ctx-fill.danger { background: linear-gradient(90deg, var(--red), #ff8a5c); }
+.ctx-meta {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 4px;
+  font-size: 11px; color: var(--text-3);
+  font-family: var(--mono);
+}
+.ctx-cache { color: var(--green); }
+
+/* 每回合用量小字（显示在助手回合末尾） */
+.usage-caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  opacity: .85;
+}
+
+/* ---------- 附件 chips + 📎 按钮 ---------- */
+.attach-chips {
+  max-width: var(--content-w);
+  margin: 0 auto 8px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 320px;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.attach-chip .c-name { font-family: var(--mono); font-size: 11.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attach-chip .c-src { font-size: 10px; color: var(--accent-soft); background: rgba(91,140,255,.1); padding: 1px 5px; border-radius: 4px; flex: none; }
+.attach-chip .c-del {
+  border: 0; background: transparent; color: var(--text-3);
+  cursor: pointer; font-size: 12px; padding: 0 2px;
+}
+.attach-chip .c-del:hover { color: var(--red); }
+.attach-btn {
+  width: 32px; height: 32px; flex: none;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 0; border-radius: 9px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all .15s;
+}
+.attach-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+/* 用户消息里的附件 chips */
+.bubble .f-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.bubble .f-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-family: var(--mono);
+  background: var(--chip-bg);
+  border: 1px solid var(--chip-border);
+  border-radius: 6px;
+  padding: 2px 7px;
+  max-width: 260px;
+}
+.bubble .f-chip .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble .f-chip .fsrc { font-size: 9.5px; color: var(--accent-soft-2); }
+
+#input-box {
+  position: relative;
+  max-width: var(--content-w); margin: 0 auto;
+  display: flex; align-items: flex-end; gap: 6px;
+  background: linear-gradient(180deg, var(--composer-a), var(--composer-b));
+  border: 1px solid var(--composer-border);
+  border-radius: 18px;
+  padding: 8px 8px;
+  box-shadow: 0 4px 18px rgba(0,0,0,.22);
+  transition: border-color .15s, box-shadow .15s;
+}
+#input-box:focus-within {
+  border-color: rgba(91,140,255,.55);
+  box-shadow: 0 0 0 3px rgba(91,140,255,.14), 0 6px 24px rgba(0,0,0,.28);
+}
+#input {
+  flex: 1;
+  background: transparent; border: 0; outline: none;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14.5px;
+  line-height: 1.55;
+  resize: none;
+  max-height: 160px;
+  padding: 7px 0;
+  /* 高度由 autoGrow 跟随内容；隐藏滚动条（撑满 160px 上限后仍可滚轮滚动） */
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+#input::-webkit-scrollbar { display: none; width: 0; height: 0; }
+#input::placeholder { color: var(--text-3); }
+#input:disabled { opacity: .55; }
+/* 发送 / 停止：圆形图标按钮，尺寸与输入框底部对齐 */
+.icon-btn {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  cursor: pointer;
+  transition: background .2s, color .2s, box-shadow .2s, filter .15s, transform .1s;
+}
+/* 发送：空输入 = 弱化灰态；有内容（.is-ready）= 点亮主色渐变 + 光晕 */
+#send-btn {
+  background: var(--bg-hover);
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+#send-btn.is-ready {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(91,140,255,.38);
+}
+#send-btn.is-ready:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 3px 16px rgba(139,92,246,.45);
+}
+#send-btn.is-ready:active { transform: scale(.9); }
+#send-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+#send-btn:disabled:hover { filter: none; }
+/* 停止：流式生成期间替换发送位，悬停泛红提示「中断」 */
+#stop-btn {
+  background: var(--bg-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+#stop-btn:hover {
+  background: rgba(229,96,79,.16);
+  color: var(--red-soft);
+  border-color: rgba(229,96,79,.5);
+}
+#stop-btn:active { transform: scale(.9); }
+#input-box .attach-btn { margin-bottom: 3px; }
+
+/* 输入框上方的 / 命令与 @ 文件菜单：锚定 #input-box，避免被输入区裁切 */
+.composer-menu {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px);
+  max-height: min(340px, 50vh); overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0,0,0,.4);
+  padding: 6px;
+  z-index: 90;
+  animation: slideIn .15s ease;
+}
+.composer-menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px 4px;
+  font-size: 10.5px; color: var(--text-3);
+}
+.composer-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 8px 10px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-2);
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.composer-item:hover,
+.composer-item.active { background: rgba(91,140,255,.12); color: var(--text); }
+.composer-item .ci-icon { width: 22px; flex: none; text-align: center; font-size: 15px; }
+.composer-item .ci-main { flex: 1; min-width: 0; }
+.composer-item .ci-title {
+  display: block;
+  font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-item .ci-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-item .ci-meta {
+  flex: none;
+  font-size: 10px; color: var(--text-3); font-family: var(--mono);
+}
+.composer-menu-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px; color: var(--text-3);
+}
+
+/* 附件里的图片缩略 chip */
+.attach-chip.has-thumb { padding: 4px 8px 4px 4px; }
+.attach-chip img.thumb {
+  width: 34px; height: 34px; flex: none;
+  object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.composer-hint {
+  max-width: var(--content-w); margin: 8px auto 0;
+  text-align: center;
+  font-size: 11.5px; color: var(--text-3);
+}
+
+/* ---------- 外部 Agent（新建对话弹窗内的接入区块） ---------- */
+.ext-head { margin-top: 18px; }
+#external-cards { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+#external-cards .demo-card { text-align: left; width: 100%; }
+.ext-empty {
+  font-size: 12px; color: var(--text-3); line-height: 1.6;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px; padding: 12px 14px;
+}
+.ext-card .d-head { position: relative; }
+.ext-card .ext-del {
+  position: absolute; right: 0; top: 0;
+  border: 0; background: transparent; color: var(--text-3);
+  cursor: pointer; font-size: 12px; padding: 2px 5px; border-radius: 5px;
+}
+.ext-card .ext-del:hover { color: var(--red); background: rgba(229,96,79,.12); }
+.ext-card.ext-incomplete { border-style: dashed; opacity: .85; }
+

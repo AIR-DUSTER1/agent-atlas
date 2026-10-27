@@ -39,7 +39,11 @@ jobs:
           npm run build:desktop
           test -f src/server/public/main.js
           test -f src/server/public/index.html
-          test -f src/server/public/style.css
+          test -f src/server/public/styles/reset.css
+          test -f src/server/public/styles/layout.css
+          test -f src/server/public/styles/chat.css
+          test -f src/server/public/styles/settings.css
+          test -f src/server/public/styles/responsive.css
           test -f src/server/public/styles/tokens.css
           test -f src/server/public/styles/ui.css
           test -f src/server/public/vendor/chart.js

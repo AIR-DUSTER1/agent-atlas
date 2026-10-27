@@ -204,3 +204,21 @@
 @media (max-width: 640px) {
   .ui-toast-region { right: 12px; bottom: 12px; }
 }
+
+/* 静态 HTML / 业务容器的图标尺寸适配 */
+.logo-mark .ui-icon { --icon-size: 20px; }
+.welcome-logo .ui-icon { --icon-size: 30px; }
+.side-settings-icon .ui-icon,
+.sn-icon .ui-icon,
+.cm-ic .ui-icon,
+.provider-empty-icon .ui-icon { --icon-size: 16px; }
+.chevron-down.ui-icon { --icon-size: 10px; margin-left: auto; color: var(--content-3); }
+.settings-back-btn .ui-icon { --icon-size: 17px; }
+.settings-view h2 .ui-icon,
+.modal-card h2 .ui-icon { --icon-size: 17px; margin-right: 5px; vertical-align: -2px; }
+button > .ui-icon { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ui-button, .ui-card-interactive, .ui-toast { transition: none; animation: none; }
+}
+.cm-arr.ui-icon { --icon-size: 10px; margin-left: 2px; }
+.settings-note .ui-icon { vertical-align: -2px; margin-right: 3px; }

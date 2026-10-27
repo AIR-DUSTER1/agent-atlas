@@ -13,6 +13,8 @@ import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
 import { profileMetaForSession } from "../modules/agent-profile.js";
+import { h } from "../ui/h.js";
+import { icon } from "../ui/icon.js";
 import { selectSession, showWelcomeState } from "./navigation.js";
 import type { ProjectEntry, Session } from "../modules/types.js";
 
@@ -53,114 +55,99 @@ export function sessionMatchesSearch(s: Session, term: string): boolean {
 export function renderSessions(): void {
   const list = $("session-list");
   if (!list) return;
-  list.innerHTML = "";
+  list.replaceChildren();
   const term = ($("session-search") as HTMLInputElement | null)?.value?.trim() ?? "";
 
-  // 按项目过滤 + 分组（保持 projects 定义顺序；无匹配项目的会话归入「其他」）
   const filtered = state.sessions.filter(
-    (s) => (state.projectView === "all" || s.projectId === state.projectView) && sessionMatchesSearch(s, term)
+    (session) => (state.projectView === "all" || session.projectId === state.projectView) && sessionMatchesSearch(session, term),
   );
   const groups: Array<{ project: ProjectEntry | null; sessions: Session[] }> = [];
   const byId = new Map<string, { project: ProjectEntry | null; sessions: Session[] }>();
-  for (const p of state.projects) {
-    const g = { project: p as ProjectEntry | null, sessions: [] as Session[] };
-    groups.push(g);
-    byId.set(p.id, g);
+  for (const project of state.projects) {
+    const group = { project: project as ProjectEntry | null, sessions: [] as Session[] };
+    groups.push(group);
+    byId.set(project.id, group);
   }
   const other = { project: null as ProjectEntry | null, sessions: [] as Session[] };
-  for (const s of filtered) {
-    (byId.get(s.projectId) || other).sessions.push(s);
-  }
+  for (const session of filtered) (byId.get(session.projectId) || other).sessions.push(session);
   if (other.sessions.length) groups.push(other);
 
-  for (const g of groups) {
-    if (!g.sessions.length) continue;
-    const head = document.createElement("div");
-    head.className = "proj-group-head" + (g.project?.type === "cloud" ? " cloud" : "");
-    head.innerHTML = `<span class="g-icon">${g.project ? (g.project.type === "cloud" ? "☁️" : "📁") : "📁"}</span><span class="g-name"></span><span class="p-type-tag">${g.project ? (g.project.type === "cloud" ? "云端" : "本地") : "已移除"}</span>`;
-    const nameEl = head.querySelector(".g-name");
-    if (nameEl) nameEl.textContent = g.project?.name ?? "未归属";
+  for (const group of groups) {
+    if (!group.sessions.length) continue;
+    const head = h("div", { class: "proj-group-head" + (group.project?.type === "cloud" ? " cloud" : "") },
+      h("span", { class: "g-icon" }, icon(group.project?.type === "cloud" ? "Globe" : "Folder", { size: 14 })),
+      h("span", { class: "g-name" }, group.project?.name ?? "未归属"),
+      h("span", { class: "p-type-tag" }, group.project ? (group.project.type === "cloud" ? "云端" : "本地") : "已移除"),
+    );
     list.appendChild(head);
-    for (const s of g.sessions) list.appendChild(renderSessionItem(s));
+    for (const session of group.sessions) list.appendChild(renderSessionItem(session));
   }
   if (!list.children.length) {
-    const empty = document.createElement("div");
-    empty.className = "fs-empty";
-    empty.textContent = term
+    list.appendChild(h("div", { class: "fs-empty" }, term
       ? "没有命中搜索的会话"
-      : state.projectView === "all" ? "还没有会话，点上方「＋ 新建对话」" : "该项目下还没有会话";
-    list.appendChild(empty);
+      : state.projectView === "all" ? "还没有会话，点上方「＋ 新建对话」" : "该项目下还没有会话"));
   }
 }
 
-function renderSessionItem(s: Session): HTMLElement {
-  const item = document.createElement("div");
-  item.className = "session-item" + (s.id === state.currentId ? " active" : "") + (s.stale ? " stale" : "");
-  item.title = s.stale ? "服务已重启，该会话仅可查看历史记录" : "";
+function renderSessionItem(session: Session): HTMLElement {
+  const meta = h("div", { class: "s-meta" },
+    h("span", { class: "s-demo" }, sessionTagText(session)),
+    h("span", null, new Date(session.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
+    session.pendingApproval ? h("span", { class: "s-pending" }, icon("Clock", { size: 12 }), "待审批") : null,
+  );
 
-  const title = document.createElement("div");
-  title.className = "s-title";
-  title.textContent = s.title;
-  item.appendChild(title);
+  const exportButton = h("button", {
+    type: "button",
+    class: "s-action s-export",
+    title: "导出为 Markdown",
+    "aria-label": "导出当前会话为 Markdown",
+    onclick: (event: MouseEvent) => {
+      event.stopPropagation();
+      window.open(`/api/sessions/${session.id}/export`, "_blank");
+    },
+  }, icon("Download", { size: 13 }));
 
-  const meta = document.createElement("div");
-  meta.className = "s-meta";
-  const tag = document.createElement("span");
-  tag.className = "s-demo";
-  tag.textContent = sessionTagText(s);
-  meta.appendChild(tag);
-  const time = document.createElement("span");
-  time.textContent = new Date(s.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  meta.appendChild(time);
-  if (s.pendingApproval) {
-    const pend = document.createElement("span");
-    pend.textContent = "⏸ 待审批";
-    pend.style.color = "var(--amber)";
-    meta.appendChild(pend);
-  }
-  item.appendChild(meta);
+  const deleteButton = h("button", {
+    type: "button",
+    class: "s-action s-del",
+    title: "删除会话",
+    "aria-label": "删除当前会话",
+    onclick: async (event: MouseEvent) => {
+      event.stopPropagation();
+      if (!session.stale) {
+        try { await api(`/api/sessions/${session.id}`, { method: "DELETE" }); } catch { /* 本地仍可清理 */ }
+      }
+      state.sessions = state.sessions.filter((item) => item.id !== session.id);
+      delete state.blocks[session.id];
+      saveLocal();
+      if (state.currentId === session.id) {
+        state.currentId = null;
+        renderSessions();
+        showWelcomeState();
+      } else {
+        renderSessions();
+      }
+    },
+  }, icon("X", { size: 13 }));
 
-  const actions = document.createElement("div");
-  actions.className = "s-actions";
-
-  const exportBtn = document.createElement("button");
-  exportBtn.className = "s-action s-export";
-  exportBtn.textContent = "⬇";
-  exportBtn.title = "导出为 Markdown";
-  exportBtn.setAttribute("aria-label", "导出当前会话为 Markdown");
-  exportBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    // 附件下载走浏览器原生（新开同源 URL 触发 Content-Disposition，不打断当前页）
-    window.open(`/api/sessions/${s.id}/export`, "_blank");
-  });
-  actions.appendChild(exportBtn);
-
-  const del = document.createElement("button");
-  del.className = "s-action s-del";
-  del.textContent = "✕";
-  del.title = "删除会话";
-  del.setAttribute("aria-label", "删除当前会话");
-  del.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    if (!s.stale) { try { await api(`/api/sessions/${s.id}`, { method: "DELETE" }); } catch { /* 忽略 */ } }
-    state.sessions = state.sessions.filter((x) => x.id !== s.id);
-    delete state.blocks[s.id];
-    saveLocal();
-    if (state.currentId === s.id) {
-      state.currentId = null;
-      renderSessions();
-      showWelcomeState();
-    } else {
-      renderSessions();
-    }
-  });
-  actions.appendChild(del);
-  item.appendChild(actions);
-
-  item.addEventListener("click", () => selectSession(s.id));
-  return item;
+  return h("div", {
+    class: "session-item" + (session.id === state.currentId ? " active" : "") + (session.stale ? " stale" : ""),
+    title: session.stale ? "服务已重启，该会话仅可查看历史记录" : "",
+    role: "button",
+    tabindex: "0",
+    onclick: () => selectSession(session.id),
+    onkeydown: (event: KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectSession(session.id);
+      }
+    },
+  },
+  h("div", { class: "s-title" }, session.title),
+  meta,
+  h("div", { class: "s-actions" }, exportButton, deleteButton),
+  );
 }
-
 /** 重拉服务端会话列表（批量清理后用）：保留 stale 条目与本地标题覆盖 */
 export async function loadSessionList(): Promise<void> {
   const serverSessions = await api<Session[]>("/api/sessions");

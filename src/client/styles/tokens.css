@@ -2,8 +2,109 @@
    tokens.css — 设计系统原语与语义 token
    ------------------------------------------------------------
    业务 CSS 只消费 semantic 层；主题切换只需覆盖 semantic 映射。
-   旧变量暂时作为桥接，P1c 完成后再逐步替换组件魔法值。
+   旧变量作为桥接保留；新组件只消费 semantic token，存量魔法值随所属模块重构逐步收敛。
    ============================================================ */
+/* ------------------------------------------------------------
+   旧变量桥接：保留现有组件兼容，新代码只消费 semantic token
+   ------------------------------------------------------------ */
+:root {
+  --bg: #1b1c1f;            /* 主区背景 */
+  --bg-side: #141518;       /* 侧栏背景 */
+  --bg-elev: #232428;       /* 卡片/浮层 */
+  --bg-hover: #2a2b31;      /* 悬停 */
+  --border: #2e2f35;
+  --border-soft: #26272c;
+  /* 内容列宽：页面宽度的 3/5，随分辨率流动；窄屏由媒体接管 */
+  --content-w: clamp(640px, 60vw, 1400px);
+  --text: #e6e6ea;
+  --text-2: #9b9ba4;
+  --text-3: #6e6e78;
+  --accent: #5b8cff;
+  --accent-2: #8b5cf6;
+  --green: #3fb96f;
+  --red: #e5604f;
+  --amber: #e2a13c;
+  --mono: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --sans: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* ---- 主题语义色（深色为默认；浅色见 html[data-theme="light"]） ---- */
+  --border-strong: #43454e;      /* 虚线框 / spinner 底圈 */
+  --text-strong: #ffffff;        /* 加粗正文 / 按钮反白 */
+  --accent-soft: #8fa8ff;        /* 链接 / mono 强调 */
+  --accent-soft-2: #b8c7ff;      /* 更浅强调：工具名 / 文件夹名 / f-chip */
+  --accent-2-soft: #b7a4ff;
+  --green-soft: #b5e0c5;
+  --red-soft: #f0a79d;
+  --amber-soft: #d8cba8;
+  --bg-input: #151619;           /* 输入框 / 代码块底色 */
+  --code-text: #cdd6f4;
+  --composer-a: #26272d;         /* 输入区渐变 */
+  --composer-b: #202126;
+  --composer-border: #35363d;
+  --track: #33343b;              /* 进度条槽 / 空闲状态点 */
+  --scrollbar: #3a3b42;
+  --scrollbar-hover: #4a4b53;
+  --panel-tint: rgba(0,0,0,.25); /* 审批参数面板底 */
+  --chip-bg: rgba(0,0,0,.22);    /* 用户气泡里的附件 chip */
+  --chip-border: rgba(255,255,255,.12);
+  --topbar-bg: rgba(27,28,31,.85);
+  --tag-bg: rgba(255,255,255,.08);
+  color-scheme: dark;
+}
+
+/* ---------- 浅色主题 ---------- */
+/* import map 不支持时显示明确升级提示，避免增强功能静默失效 */
+#browser-compat {
+  display: none;
+  position: fixed;
+  z-index: 10000;
+  inset: 12px 12px auto;
+  padding: 10px 14px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0,0,0,.28);
+  font-size: 13px;
+  line-height: 1.6;
+}
+html[data-importmap-unsupported="true"] #browser-compat { display: block; }
+html[data-theme="light"] {
+  --bg: #f7f8fa;
+  --bg-side: #eef0f4;
+  --bg-elev: #ffffff;
+  --bg-hover: #e8eaef;
+  --border: #d9dce3;
+  --border-soft: #e4e6ec;
+  --border-strong: #c3c7d1;
+  --text: #242830;
+  --text-2: #575e6c;
+  --text-3: #8f96a6;
+  --text-strong: #14171c;
+  --accent-soft: #3c5fd9;
+  --accent-soft-2: #4a63dd;
+  --accent-2-soft: #7a4ce0;
+  --green: #1d9e5e;
+  --red: #d64a3a;
+  --amber: #b07a17;
+  --green-soft: #187a48;
+  --red-soft: #c0402f;
+  --amber-soft: #8f6a12;
+  --bg-input: #ffffff;
+  --code-text: #38404e;
+  --composer-a: #ffffff;
+  --composer-b: #f3f4f8;
+  --composer-border: #d3d7df;
+  --track: #e3e5eb;
+  --scrollbar: #c9ccd5;
+  --scrollbar-hover: #b7bbc7;
+  --panel-tint: rgba(20,30,60,.05);
+  --chip-bg: rgba(0,0,0,.06);
+  --chip-border: rgba(0,0,0,.14);
+  --topbar-bg: rgba(247,248,250,.85);
+  --tag-bg: rgba(0,0,0,.06);
+  color-scheme: light;
+}
+
 :root {
   /* 间距：4px 网格 */
   --space-0: 0;

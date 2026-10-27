@@ -1,0 +1,78 @@
+/* ============================================================
+   responsive.css — 窄屏抽屉、设置横栏与图表响应式
+   ============================================================ */
+/* 抽屉式侧栏（窄屏）：默认隐藏，通过顶栏 ☰ 按钮开关 */
+#sidebar-toggle { display: none; }
+#sidebar-scrim {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 45;
+}
+
+/* 窄屏适配 */
+/* 中窄屏（笔记本小窗 / 半屏）：3/5 比例会过窄，放宽占比并降低上限 */
+@media (max-width: 1180px) {
+  :root { --content-w: min(86vw, 940px); }
+}
+@media (max-width: 860px) {
+  #sidebar { position: fixed; z-index: 50; transform: translateX(-100%); transition: transform .2s; }
+  #sidebar.open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.5); }
+  #sidebar-toggle { display: grid; }
+  .demo-cards { grid-template-columns: 1fr; }
+  :root { --content-w: calc(100vw - 32px); }
+  #messages, .welcome { padding-left: 16px; padding-right: 16px; }
+  #composer { padding-left: 16px; padding-right: 16px; }
+  .msg-user .bubble { max-width: 88%; }
+  /* 顶栏空间紧张：图标按钮收紧、供应商名截短、冗余徽标隐藏
+     （模拟模式信息供应商按钮里已有；会话类型手机端让位给标题） */
+  #topbar { padding: 0 12px; gap: 8px; }
+  #provider-btn-text { max-width: 96px; }
+  #mode-badge, #demo-badge { display: none; }
+}
+
+/* 设置页在手机 / 窄窗下切为顶部横向分区导航 */
+@media (max-width: 760px) {
+  .settings-page-head { min-height: 58px; padding: 8px 12px; gap: 10px; }
+  .settings-page-heading p { display: none; }
+  .settings-page-body { display: flex; flex-direction: column; }
+  .settings-nav {
+    flex: none;
+    display: flex; gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .settings-nav-item { width: auto; min-width: max-content; margin: 0; padding: 7px 9px; }
+  .settings-nav-item .sn-icon { width: 26px; height: 26px; }
+  .settings-nav-item .sn-copy small { display: none; }
+  .settings-page-content { padding: 14px 12px 32px; }
+  .settings-view { padding: 16px; border-radius: 14px; }
+  .provider-workspace { grid-template-columns: 1fr; }
+  .provider-picker { padding: 9px; }
+  .provider-nav-list { max-height: 220px; }
+  .provider-detail-head { flex-direction: column; }
+  .provider-detail-actions { width: 100%; }
+  .provider-detail-actions .ghost-btn { flex: 1; }
+  .provider-form-grid { grid-template-columns: 1fr; }
+  #provider-modal-mask { padding: 10px; }
+  #provider-modal { max-height: 94vh; padding: 16px; }
+  .provider-modal-head { margin-bottom: 14px; }
+  .pending-model-row { align-items: flex-start; flex-wrap: wrap; }
+  .pending-model-meta { width: 100%; }
+  .provider-modal-actions { flex-wrap: wrap; }
+  .provider-modal-actions .spacer { display: none; }
+  .provider-modal-actions .ghost-btn, .provider-modal-actions .btn { flex: 1; }
+  .plugin-card { align-items: flex-start; flex-direction: column; }
+  .plugin-manage { width: 100%; }
+  .stats-page-head { align-items: center; }
+  .stats-page-head .settings-sub { display: none; }
+  .stats-window-overview { grid-template-columns: 1fr; }
+  .stats-totals { grid-template-columns: repeat(2, 1fr); }
+  .stats-selected-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .stats-grid { grid-template-columns: 1fr; }
+  .stats-card-head { flex-direction: column; gap: 7px; }
+  .bar-label { flex-basis: 70px; }
+  .bar-sub { display: none; }
+  .stats-chart-svg { min-width: 560px; }
+}

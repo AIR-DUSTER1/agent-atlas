@@ -19,8 +19,11 @@ const SRC = join(ROOT, "src", "client");
 const OUT = join(ROOT, "src", "server", "public");
 
 /** 需要原样拷到产物目录的静态资源（TS 编译器不处理非 .ts 文件） */
-const STATIC_ASSETS = ["index.html", "style.css"];
-const STYLE_ASSETS = ["tokens.css", "ui.css"];
+const STATIC_ASSETS = ["index.html"];
+const STYLE_ASSETS = [
+  "tokens.css", "reset.css", "layout.css", "typography.css", "chat.css", "composer.css",
+  "modals.css", "settings.css", "plugins.css", "responsive.css", "desktop.css", "ui.css",
+];
 
 async function main(): Promise<void> {
   // 每次从空产物目录构建，防止已删除模块继续被静态服务

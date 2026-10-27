@@ -16,6 +16,7 @@ import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/st
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./ui/dialog.js";
 import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
+import { icon, initIconHydration } from "./ui/icon.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
@@ -50,6 +51,16 @@ import { createSession, finalize, send, stopStreaming, closeModalImpl, openModal
 import { compactContext } from "./actions/compact.js";
 import type { AppConfig, Session } from "./modules/types.js";
 
+/** 密码框显示/隐藏：同时更新图标与 aria-label，避免无文字按钮状态不可读。 */
+function toggleSecretInput(buttonId: string, inputId: string): void {
+  const input = $(inputId) as HTMLInputElement | null;
+  const button = $(buttonId);
+  if (!input || !button) return;
+  const reveal = input.type === "password";
+  input.type = reveal ? "text" : "password";
+  button.replaceChildren(icon(reveal ? "EyeOff" : "Eye", { size: 15 }));
+  button.setAttribute("aria-label", reveal ? "隐藏密钥" : "显示密钥");
+}
 /* ---------------------------------------------------------------------------
  * 接线：视图层互相需要的回调统一在这里注入
  * ------------------------------------------------------------------------- */
@@ -65,6 +76,7 @@ bindCompactAction(compactContext);
  * ------------------------------------------------------------------------- */
 async function init(): Promise<void> {
   loadLocal();
+  initIconHydration();
   // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
   if (desktopBridge()?.isElectron) document.body.classList.add("in-desktop");
 
@@ -272,10 +284,7 @@ async function init(): Promise<void> {
     if (e.target === $("provider-modal-mask")) closeProviderForm();
   });
   on("pf-cancel-edit", "click", closeProviderForm);
-  on("pf-key-toggle", "click", () => {
-    const keyInput = $("pf-api-key") as HTMLInputElement | null;
-    if (keyInput) keyInput.type = keyInput.type === "password" ? "text" : "password";
-  });
+  on("pf-key-toggle", "click", () => toggleSecretInput("pf-key-toggle", "pf-api-key"));
   // 弹窗内测试连接 / 拉取模型 → 加入本次新增的初始模型
   on("pf-test", "click", () => { void fetchGatewayModelChips("pending"); });
   on("pf-new-fetch-models", "click", () => { void fetchGatewayModelChips("pending"); });
@@ -381,10 +390,7 @@ async function init(): Promise<void> {
   on("kb-mask", "click", (e) => { if (e.target === $("kb-mask")) closeKb(); });
   on("kb-save", "click", () => { void saveKbConfig(); });
   on("kb-test", "click", () => { void testKb(); });
-  on("kb-key-toggle", "click", () => {
-    const keyInput = $("kb-key") as HTMLInputElement | null;
-    if (keyInput) keyInput.type = keyInput.type === "password" ? "text" : "password";
-  });
+  on("kb-key-toggle", "click", () => toggleSecretInput("kb-key-toggle", "kb-key"));
   on("kb-ingest", "click", () => { void ingestKbFolder(); });
   on("kb-paste", "click", () => { void pasteKbText(); });
   on("kb-search-btn", "click", () => { void searchKbTest(); });
@@ -406,10 +412,7 @@ async function init(): Promise<void> {
   });
   on("estate-install", "click", () => { void installBeikeCli(); });
   on("estate-key-save", "click", () => { void saveEstateKey(); });
-  on("estate-key-toggle", "click", () => {
-    const keyInput = $("estate-key") as HTMLInputElement | null;
-    if (keyInput) keyInput.type = keyInput.type === "password" ? "text" : "password";
-  });
+  on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
 
   on("send-btn", "click", () => { void send(); });
   on("stop-btn", "click", stopStreaming);

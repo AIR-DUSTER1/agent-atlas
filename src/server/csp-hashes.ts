@@ -5,6 +5,6 @@
  * SHA-256。构建脚本会重新计算并比对，改了 index 却忘记更新会直接失败。
  */
 export const CSP_SCRIPT_HASHES = [
-  "sha256-JR4Vny0ibHX7XPO8MIoV5nhxZhBH4Q0dFHvqxWsOA3E=",
-  "sha256-gnqdmSOCSrtJ4hdknqja2NvcazzF0OYoKvZ6YJHz4j4=",
+  "sha256-vrTsMQtNx9YuIZ7M/3gfSzKRXcdkCF3IOsl3LqnPSZY=",
+  "sha256-vM3J1Xxvejy8wiOb/nzTqjPQXBwXdVwDZuJxJBgcE8k=",
 ] as const;

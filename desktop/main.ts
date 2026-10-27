@@ -27,7 +27,7 @@ const URL_BASE = `http://127.0.0.1:${PORT}`;
 const READY_TIMEOUT_MS = 90_000;
 
 // 隐藏系统标题栏后，Windows 原生窗口控制键（最小化/最大化/关闭）由 titleBarOverlay
-// 绘制，颜色必须与应用深浅主题一致 —— 常量与 style.css 的 --topbar-bg / --text-2 对齐
+// 绘制，颜色必须与应用深浅主题一致 —— 常量与 styles/tokens.css 的 --topbar-bg / --text-2 对齐
 const OVERLAY_HEIGHT = 52; // 与 #topbar 高度一致，控制键垂直居中
 const OVERLAY_DARK = { color: "#1b1c1f", symbolColor: "#b9b9c0" } as const;
 const OVERLAY_LIGHT = { color: "#f7f8fa", symbolColor: "#575e6c" } as const;

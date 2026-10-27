@@ -59,6 +59,11 @@ function installObserver(): void {
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
+/** 安装全局新增节点监听，并水合页面里静态写好的 data-icon 占位。 */
+export function initIconHydration(root: ParentNode = document): void {
+  installObserver();
+  void hydrateIcons(root);
+}
 /** 创建图标占位；实际 SVG 在空闲时异步水合。 */
 export function icon(name: IconName, options: IconOptions = {}): HTMLSpanElement {
   const host = h("span", {

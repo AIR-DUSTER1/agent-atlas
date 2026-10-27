@@ -1,6 +1,7 @@
 /**
  * scripts/csp-integrity.ts — 校验 index.html 内联脚本与 CSP hash 同步
  * ============================================================
+ * 浏览器按 HTML 解析后的 LF 文本计算 hash；源文件 CRLF 必须先归一化。
  * 浏览器不执行未获 hash 授权的 inline script；一旦 index 改动而 CSP 常量没变，
  * 页面会白屏。把校验前移到构建阶段，比线上靠肉眼排错可靠。
  */
@@ -14,7 +15,7 @@ export function computeInlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = INLINE_SCRIPT.exec(html))) {
-    const body = match[1] ?? "";
+    const body = (match[1] ?? "").replace(/\r\n?/g, "\n");
     hashes.push(`sha256-${createHash("sha256").update(body, "utf8").digest("base64")}`);
   }
   return hashes;

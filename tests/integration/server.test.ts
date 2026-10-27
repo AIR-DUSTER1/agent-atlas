@@ -259,7 +259,11 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   assert.match(html, /<script type="importmap">/);
   assert.match(html, /"chart\.js": "\/vendor\/chart-lib\.js"/);
 
-  for (const file of ["/styles/tokens.css", "/styles/ui.css"]) {
+  for (const file of [
+    "/styles/tokens.css", "/styles/reset.css", "/styles/layout.css", "/styles/typography.css",
+    "/styles/chat.css", "/styles/composer.css", "/styles/modals.css", "/styles/settings.css",
+    "/styles/plugins.css", "/styles/responsive.css", "/styles/desktop.css", "/styles/ui.css",
+  ]) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/css/, file);
@@ -268,7 +272,7 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
   for (const file of [
     "/main.js",
-    "/modules/format.js", "/ui/dialog.js", "/modules/chat-flow.js",
+    "/modules/format.js", "/modules/chat-flow.js",
     "/modules/plugin-registry.js", "/modules/types.js",
     "/core/state.js", "/core/dom.js", "/core/api.js",
     "/ui/dialog.js", "/ui/menu.js", "/ui/toast.js",

@@ -1,0 +1,249 @@
+/* ============================================================
+   plugins.css — 插件目录、RAG 与房产 Agent 专属样式
+   ============================================================ */
+/* ---------- 插件目录 ---------- */
+.plugin-transport-guide {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: -4px 0 18px;
+}
+.plugin-transport-guide span {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-3);
+  font-size: 11px;
+}
+.plugin-transport-guide b { color: var(--text-2); }
+.plugin-list { display: grid; gap: 12px; }
+.plugin-card {
+  display: flex; align-items: center; gap: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-input);
+}
+.plugin-main { display: flex; align-items: flex-start; gap: 13px; flex: 1; min-width: 0; }
+.plugin-icon {
+  width: 42px; height: 42px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font-size: 20px;
+}
+.plugin-copy { min-width: 0; }
+.plugin-title-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.plugin-title-row h3 { margin: 0; font-size: 14.5px; color: var(--text); }
+.plugin-kind {
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.plugin-kind.kind-http { color: var(--accent-soft); background: rgba(91,140,255,.1); border-color: rgba(91,140,255,.28); }
+.plugin-kind.kind-cli { color: var(--amber-soft); background: rgba(226,161,60,.1); border-color: rgba(226,161,60,.28); }
+.plugin-kind.kind-mcp { color: var(--accent-2-soft); background: rgba(139,92,246,.1); border-color: rgba(139,92,246,.28); }
+.plugin-desc {
+  margin: 6px 0 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.plugin-runtime-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.plugin-runtime { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+.plugin-status {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(226,161,60,.12);
+  color: var(--amber);
+  font-size: 10.5px;
+}
+.plugin-status.ready { background: rgba(63,185,111,.13); color: var(--green); }
+.plugin-manage { flex: none; margin: 0; }
+
+.field { display: block; margin-bottom: 14px; }
+.field-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-2);
+  margin-bottom: 6px;
+}
+.key-state { font-style: normal; font-size: 11px; color: var(--text-3); }
+.key-state.ok { color: var(--green); }
+.field input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--mono);
+  outline: none;
+  transition: border-color .15s;
+}
+.field input:focus { border-color: var(--accent); }
+.key-row { display: flex; gap: 8px; align-items: stretch; }
+.key-row input { flex: 1; }
+/* 请求协议下拉（供应商表单） */
+.pf-select {
+  width: 100%;
+  padding: 9px 12px;
+  background: #151619;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--sans);
+  outline: none;
+  transition: border-color .15s;
+  cursor: pointer;
+}
+.pf-select:focus { border-color: var(--accent); }
+html[data-theme="light"] .pf-select { background: var(--bg-input); }
+.p-badge.proto { color: #ffd591; background: rgba(226,161,60,.14); }
+
+.settings-status {
+  min-height: 20px;
+  font-size: 12.5px;
+  margin: 2px 0 4px;
+  line-height: 1.5;
+}
+.settings-status.ok { color: var(--green); }
+
+
+/* ---------- 知识库配置面板（外部 RAG） ---------- */
+#kb-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  z-index: 120;
+}
+#kb-modal {
+  width: min(640px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  animation: slideIn .2s ease;
+}
+#kb-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.kb-row2 { display: flex; gap: 12px; }
+.kb-row2 .field { flex: 1; min-width: 0; }
+.kb-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.kb-actions .settings-status { margin: 0; flex: 1; min-width: 0; }
+.kb-toolbar { margin-bottom: 10px; }
+.kb-docs-list { min-height: 110px; max-height: 200px; flex: none; }
+#kb-modal .kb-footer-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+#kb-modal .kb-footer-actions .spacer { flex: 1; }
+#kb-modal .kb-footer-actions .ghost-btn { margin-top: 0; }
+.kb-search-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.kb-search-row input {
+  flex: 1; min-width: 0;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text); font-size: 12.5px; font-family: var(--mono);
+  outline: none; transition: border-color .15s;
+}
+.kb-search-row input:focus { border-color: var(--accent); }
+
+/* 检索命中列表（面板 + 聊天工具卡片共用样式） */
+.kb-hits { display: flex; flex-direction: column; gap: 6px; }
+.rag-hit {
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--bg-input);
+  padding: 8px 10px;
+}
+.rag-hit-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text);
+  margin-bottom: 4px;
+}
+.rag-hit-name {
+  flex: 1; min-width: 0;
+  font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rag-hit-score {
+  flex: none; font-family: var(--mono); font-size: 10.5px;
+  color: var(--green);
+}
+.rag-hit-src {
+  flex: none; font-size: 10.5px; color: var(--text-3);
+  font-family: var(--mono);
+  max-width: 40%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rag-hit-text {
+  font-size: 11.5px; line-height: 1.6; color: var(--text-2);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 130px; overflow-y: auto;
+}
+/* 工具卡片内的命中区块（retrieve_docs 专属渲染） */
+.rag-hits-wrap { padding: 6px 10px 10px 14px; }
+.rag-hits-title { font-size: 11px; color: var(--text-3); margin-bottom: 6px; }
+.tool-card .rag-hit { margin-bottom: 6px; }
+
+
+/* ============================================================
+   房产 Agent（estate）：数据源面板 + 工具专属卡（房源/地图/户型图）
+   ============================================================ */
+#estate-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  animation: slideIn .2s ease;
+}
+#estate-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.estate-status {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; line-height: 1.5;
+}
+.estate-status.ok { border-color: rgba(63,185,111,.4); color: var(--green); }
+.estate-status.err { border-color: rgba(229,96,79,.4); color: var(--red); }
+
+/* 工具卡内的房产专属渲染容器 */
+.estate-extra { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.estate-extra-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+
+/* 房源行 */
+.estate-house { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.estate-house-thumb { flex: none; width: 74px; height: 56px; object-fit: cover; border-radius: 6px; background: rgba(127,127,127,.15); }
+.estate-house-main { flex: 1; min-width: 0; }
+.estate-house-title { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.estate-house-meta { font-size: 12px; color: var(--text-2); margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.estate-house-price { color: #e5604f; font-weight: 700; }
+.estate-house-links { margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 地图卡 */
+.estate-map-embed { width: 100%; min-height: 260px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: rgba(127,127,127,.08); }
+.estate-map-embed iframe { width: 100%; height: 260px; border: 0; display: block; }
+.estate-point { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 12.5px; }
+.estate-point-name { font-weight: 600; color: var(--text); }
+.estate-point-addr { color: var(--text-2); font-size: 11.5px; margin-top: 2px; word-break: break-all; }
+.estate-point-links { margin-left: auto; display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.estate-link { font-size: 11px; text-decoration: none; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); }
+.estate-link:hover { border-color: var(--accent); color: var(--text); }
+.estate-missed { font-size: 12px; color: #d29922; }
+
+/* 户型图图片网格 */
+.estate-material-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.estate-material-grid img { width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+.estate-material-link { font-size: 11.5px; color: var(--text-2); }
+
+/* 一键安装引导卡（CLI 未装时出现在工具卡里） */
+.estate-setup { border: 1px solid rgba(229,96,79,.35); border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; }
+.estate-setup a { color: var(--accent); }
+

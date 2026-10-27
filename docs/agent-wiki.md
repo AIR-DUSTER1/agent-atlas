@@ -1718,3 +1718,24 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 | `ui/dialog.ts` / `ui/menu.ts` / `ui/toast.ts` | 队列与焦点陷阱、统一定位/点外关闭/方向键、可暂停且显式关闭的轻提示 |
 
 约束：`ui/*` 不得 import `core/state`、`core/api` 或任何业务 view；业务模块负责把数据与事件注入原语。
+
+### 3.36 `src/client/styles/*.css` — 无打包器的分层样式与图标水合
+
+**问题**：单文件 2,370 行样式难以定位；emoji 图标在不同操作系统字体、尺寸、颜色不一致。
+
+**设计**：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| token | `tokens.css` | primitive / semantic、主题、间距、字号、圆角、阴影、焦点环 |
+| base | `reset.css` / `typography.css` | 文档基线、滚动条、Markdown 排版 |
+| layout | `layout.css` / `responsive.css` / `desktop.css` | 侧栏、主区、窄屏与 Electron 拖拽区 |
+| surface | `chat.css` / `composer.css` / `settings.css` / `modals.css` / `plugins.css` | 各自业务表面 |
+| primitive | `ui.css` | 无业务 UI 原语、Toast、菜单、对话框 |
+
+**图标**：静态 HTML 只输出 `<i class="ui-icon" data-icon="Settings">`；`ui/icon.ts` 在空闲时异步
+加载 Lucide 白名单并生成 SVG。加载失败只显示占位，不阻塞核心会话。
+
+**踩坑（实测）**：CSP 的 inline script SHA-256 不能直接哈希源文件里的 CRLF。浏览器会先把
+HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n? -> \n` 后计算，否则会出现
+“hash 常量看起来正确、Chrome 却拒绝 import map、所有图标加载失败”。

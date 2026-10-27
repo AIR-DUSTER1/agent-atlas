@@ -21,6 +21,7 @@ TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、�
 | 前端依赖 | `src/client/` 可引入 npm 库（图表 / 图标 / 语法高亮 / Markdown 等），但须在 §2.1 登记版本、许可证与产物体积；**禁止引入 UI 框架**（React/Vue/Svelte）与需要打包器的构建链（Vite/Webpack/Tailwind CLI） |
 | 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
 | 单一职责 | 文件按职责拆分，不设行数硬指标：一个文件只做一件事、能被一句话说清即可；超过 ~500 行时先问「是不是混了两件事」 |
+| 样式分层 | 禁止恢复单文件 `style.css`；CSS 按 token / reset / layout / surface / responsive / ui 职责拆分，业务文件不覆盖主题原始色 |
 | HTTP 后端零框架 | 不引入 Express/Fastify 等；路由照 §4 模式写顺序 `if` 分支 |
 | 直跑 TS | `tsx` 直跑，不做编译产物；新增脚本能被 `tsx` 直接执行 |
 
@@ -75,7 +76,7 @@ src/
     composer/      #   输入框 / 命令与 @ 文件菜单
     views/         #   各业务视图（会话/项目/设置/RAG/房产…）
     actions/       #   审批、压缩等动作
-    index.html / style.css
+    index.html / styles/*.css
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
 desktop/           # Electron 桌面端源码（TypeScript）
   main.ts          #   主进程：子进程托管 Web 服务 + 窗口（编成 ESM .js 运行）
@@ -178,7 +179,7 @@ session 级；持久化字段的**读取处要兼容字段缺失**（旧配置�
 
 ```bash
 npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
-npm run build:client         # 前端构建门：编译 + 自检 main.js / index.html / style.css 产物
+npm run build:client         # 前端构建门：编译 + 自检 main.js / index.html / styles / vendor 产物
 npm run build:desktop        # 桌面端构建门：编译 + 自检 main.js / preload.cjs 产物
 npm test                     # 单测 / 集成 / 安全三档（mock 模式，不耗真实配额）
 ```

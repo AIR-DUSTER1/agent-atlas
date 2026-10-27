@@ -1,0 +1,26 @@
+/* ============================================================
+   desktop.css — Electron 拖拽区与窗口控制键让位
+   ============================================================ */
+/* ============================================================
+   桌面端（Electron 隐藏标题栏）：顶栏即窗口拖拽区，右上角给
+   原生窗口控制键让位（浏览器环境没有 body.in-desktop，零影响）
+   ============================================================ */
+body.in-desktop #topbar {
+  -webkit-app-region: drag;
+  padding-right: 152px; /* 三枚原生控制键（~46px each）+ 余量 */
+}
+body.in-desktop #topbar button,
+body.in-desktop #topbar input,
+body.in-desktop #topbar a,
+body.in-desktop #topbar .provider-menu {
+  -webkit-app-region: no-drag;
+}
+/* 设置页同样留出原生窗口控制键区域，只有按钮可点击 */
+body.in-desktop .settings-page-head {
+  -webkit-app-region: drag;
+  padding-right: 152px;
+}
+body.in-desktop .settings-page-head button {
+  -webkit-app-region: no-drag;
+}
+

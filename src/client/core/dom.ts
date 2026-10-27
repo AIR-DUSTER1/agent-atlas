@@ -12,6 +12,7 @@
 
 import { LS_THEME, state } from "./state.js";
 import type { DesktopBridge } from "../modules/types.js";
+import { icon } from "../ui/icon.js";
 
 export const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -40,7 +41,8 @@ export function updateThemeBtn(): void {
   const btn = $("theme-btn");
   if (!btn) return;
   const light = currentTheme() === "light";
-  btn.textContent = light ? "🌙" : "☀️";
+  btn.replaceChildren(icon(light ? "Moon" : "Sun", { size: 16 }));
+  btn.setAttribute("aria-label", light ? "切换到深色主题" : "切换到浅色主题");
   btn.title = light ? "切换到深色主题" : "切换到浅色主题";
   // Electron 桌面端：窗口控制键（右上角原生三按钮）颜色跟随应用主题；
   // 浏览器环境没有 window.desktop，静默跳过
