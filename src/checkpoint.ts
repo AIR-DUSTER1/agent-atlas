@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { MemorySaver, type Checkpoint, type CheckpointMetadata } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { log } from "./server/logging.js";
+import { ensureNdjsonSchemaHeader, inspectNdjson, latestNdjsonHealth, type NdjsonHealthReport } from "./server/persistence/ndjson-health.js";
 
 /** 触发 compact 的文件大小上限（字节）；每线程只留最近 KEEP_PER_THREAD 个检查点 */
 const CHECKPOINT_MAX_BYTES = 24_000_000;
@@ -39,6 +40,8 @@ const CHECKPOINT_MAX_BYTES = 24_000_000;
 const KEEP_PER_THREAD = 10;
 /** 每追加多少行探一次文件大小（避免每行 stat） */
 const COMPACT_CHECK_EVERY = 64;
+/** checkpoint 行格式版本：未来版本拒绝回放。 */
+export const CHECKPOINT_SCHEMA_VERSION = 1;
 
 // 测试钩子：CHECKPOINT_FILE 指向临时文件（模式照抄 session-store 的 SESSIONS_FILE），
 // 避免测试把检查点写进开发者真实的 .setting/ 目录。
@@ -74,8 +77,9 @@ type WriteLine = {
 };
 
 type DeleteLine = { type: "delete"; thread: string };
+type SchemaLine = { type: "schema"; schemaVersion: number; ts?: number };
 
-type PersistLine = CkptLine | WriteLine | DeleteLine;
+type PersistLine = CkptLine | WriteLine | DeleteLine | SchemaLine;
 
 function toB64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
@@ -105,36 +109,45 @@ export class PersistentSaver extends MemorySaver {
     );
   }
 
-  /** 启动时回放磁盘日志（幂等）。坏行跳过并告警，不影响其余行。 */
+  /** 启动时回放磁盘日志（幂等）。先隔离坏行并校验版本，再进入父类内存路径。 */
   async loadFromDisk(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
     await this.dirReady;
-    const raw = await readFile(this.filePath, "utf8").catch(() => "");
-    if (!raw) return;
-    let badLines = 0;
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
+    const { report, lines } = await inspectNdjson(this.filePath, {
+      currentVersion: CHECKPOINT_SCHEMA_VERSION,
+      markerKey: "type",
+      repair: true,
+    });
+    await ensureNdjsonSchemaHeader(this.filePath, report, "type", CHECKPOINT_SCHEMA_VERSION);
+    if (report.quarantined > 0) {
+      log("warn", "checkpoint_corrupt_lines_quarantined", {
+        file: `${this.filePath}.corrupt`,
+        lines: report.quarantined,
+      });
+    }
+    let semanticBadLines = 0;
+    for (const line of lines) {
       let record: unknown;
       try {
         record = JSON.parse(line);
       } catch {
-        badLines += 1; // 硬杀留下的半行等损坏 → 丢弃该行（与 journal 同策略）
+        semanticBadLines += 1;
         continue;
       }
       try {
         await this.replayLine(record as PersistLine);
       } catch {
-        badLines += 1;
+        semanticBadLines += 1;
       }
     }
-    if (badLines > 0) {
-      log("warn", "checkpoint_load_corrupt_lines", { file: this.filePath, lines: badLines });
+    if (semanticBadLines > 0) {
+      log("warn", "checkpoint_load_corrupt_lines", { file: this.filePath, lines: semanticBadLines });
     }
   }
-
   /** 回放单行：走父类同一条内存路径（super.*，不再落盘），保证语义与运行时一致 */
   private async replayLine(record: PersistLine): Promise<void> {
+    if (record.type === "schema") return;
     if (record.type === "ckpt") {
       const checkpoint = (await this.serde.loadsTyped(record.ckptType, fromB64(record.ckpt))) as Checkpoint;
       const metadata = (await this.serde.loadsTyped(record.metaType, fromB64(record.meta))) as CheckpointMetadata;
@@ -295,6 +308,7 @@ export class PersistentSaver extends MemorySaver {
     const lastOp = new Map<string, "alive" | "deleted">();
     const order: Array<{ thread: string; ns: string; id: string }> = [];
     for (const row of rows) {
+      if (row.type === "schema") continue;
       if (row.type === "delete") lastOp.set(row.thread, "deleted");
       else {
         lastOp.set(row.thread, "alive");
@@ -325,7 +339,8 @@ export class PersistentSaver extends MemorySaver {
       return false; // delete 行：效果已由「整线程丢弃」体现
     });
     const tmp = `${this.filePath}.tmp`;
-    await writeFile(tmp, kept.length ? kept.map((r) => JSON.stringify(r)).join("\n") + "\n" : "", "utf8");
+    const withSchema = [{ type: "schema", schemaVersion: CHECKPOINT_SCHEMA_VERSION, ts: Date.now() }, ...kept];
+    await writeFile(tmp, withSchema.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
     await rename(tmp, this.filePath);
     log("info", "checkpoint_compacted", {
       file: this.filePath,
@@ -370,4 +385,9 @@ export function checkpointFilePath(): string {
 /** 测试专用：丢弃单例以便下一个用例换 CHECKPOINT_FILE 重建 */
 export function resetCheckpointSaver(): void {
   saverSingleton = null;
+}
+
+/** 最近一次 checkpoint 回放的健康报告（诊断用）。 */
+export function checkpointHealthReport(): NdjsonHealthReport | null {
+  return latestNdjsonHealth(checkpointFilePath());
 }

@@ -56,6 +56,7 @@ import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
+import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -109,8 +110,8 @@ async function refreshMcpTools(): Promise<void> {
 }
 
 /** 生产门禁失败：只输出结构化日志，写回 stdout 后以 1 退出。 */
-async function stopForReadiness(err: unknown): Promise<never> {
-  log("error", "production_readiness_failed", {
+async function stopForStartup(err: unknown): Promise<never> {
+  log("error", "startup_check_failed", {
     message: err instanceof Error ? err.message : String(err),
   });
   await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
@@ -120,32 +121,37 @@ async function stopForReadiness(err: unknown): Promise<never> {
 try {
   assertProductionEnvironment();
 } catch (err) {
-  await stopForReadiness(err);
+  await stopForStartup(err);
 }
 
-// 启动时先叠加 Web 设置页保存的覆盖配置（.web-config.json → 覆盖 .env），
-// 加载项目文件夹列表，并后台拉一次启用中供应商的模型元信息（上下文窗口长度）
-await loadSettings();
+// 启动顺序：版本迁移 → 设置/扩展加载 → 生产门禁 → journal 回放。
 try {
+  await runPersistenceMigrations();
+  await loadSettings();
   await assertProductionRuntimeReady({
     apiKey: config.apiKey,
     dataFiles: [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoriesFilePath(), auditFilePath()],
   });
+  await loadProjects();
+  await loadExternalAgents();
+  await loadRag();
+  await loadEstate();
+  // F1：跨会话长期记忆（agent 层 memoryNote 每轮读内存索引，这里启动时预热落盘数据）
+  await loadMemories();
+  // MCP：启动时连接已配置的 server 并把工具注入 general profile。
+  // 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
+  await refreshMcpTools();
 } catch (err) {
-  await stopForReadiness(err);
+  await stopForStartup(err);
 }
-await loadProjects();
-await loadExternalAgents();
-await loadRag();
-await loadEstate();
-// F1：跨会话长期记忆（agent 层 memoryNote 每轮读内存索引，这里启动时预热落盘数据）
-await loadMemories();
-// MCP：启动时连接已配置的 server 并把工具注入 general profile。
-// 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
-await refreshMcpTools();
 
 // T2-2：journal 回放 —— 重启后恢复会话壳 / 轮次历史 / pending 审批标记
-const restoredSessions = await restoreSessions();
+let restoredSessions = 0;
+try {
+  restoredSessions = await restoreSessions();
+} catch (err) {
+  await stopForStartup(err);
+}
 if (restoredSessions > 0) {
   log("info", "sessions_restored", { count: restoredSessions });
   // 人类可读提示只在终端输出；容器/管道场景保持 stdout 纯 NDJSON

@@ -25,7 +25,8 @@
  * 坑（T2-3）：审批/澄清状态机的一次性 —— approval→decided 只允许一次转移，
  * 回放时 resolved 状态以 joined decided行 为准，之后重复 approve 不再执行。
  */
-import { readFile, writeFile, rename, appendFile, stat } from "node:fs/promises";
+import { writeFile, rename, appendFile, stat } from "node:fs/promises";
+import { ensureNdjsonSchemaHeader, inspectNdjson, latestNdjsonHealth, type NdjsonHealthReport } from "./persistence/ndjson-health.js";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
@@ -44,6 +45,8 @@ let JOURNAL_FILE = resolveJournalFile();
 const JOURNAL_MAX_BYTES = 2_000_000;
 /** 回放/快照 时保留的会话数上限（超出按 createdAt 丢最旧） */
 const SESSIONS_MAX = 300;
+/** journal 行格式版本：未来版本必须拒绝启动，不能由旧程序继续写。 */
+export const JOURNAL_SCHEMA_VERSION = 1;
 
 export interface ApprovalSnapshot {
   toolName: string;
@@ -201,24 +204,23 @@ export function resetJournalStore(): void {
   JOURNAL_FILE = resolveJournalFile();
 }
 
-/** 启动时有一次调用；把 journal 变成内存 state */
+/** 启动时有一次调用；先做坏行隔离/版本检查，再把 journal 变成内存 state。 */
 export async function replaySessions(): Promise<void> {
-  let raw = "";
-  try {
-    raw = await readFile(JOURNAL_FILE, "utf8");
-    loaded = true;
-  } catch {
-    loaded = true; // 文件不存在 = 全新启动
-    return;
+  const { report, lines } = await inspectNdjson(JOURNAL_FILE, {
+    currentVersion: JOURNAL_SCHEMA_VERSION,
+    markerKey: "ev",
+    repair: true,
+  });
+  await ensureNdjsonSchemaHeader(JOURNAL_FILE, report, "ev", JOURNAL_SCHEMA_VERSION);
+  loaded = true;
+  if (report.quarantined > 0) {
+    log("warn", "journal_corrupt_lines_quarantined", { count: report.quarantined, file: `${JOURNAL_FILE}.corrupt` });
   }
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+  for (const trimmed of lines) {
     let ev: Record<string, unknown>;
     try {
       ev = JSON.parse(trimmed) as Record<string, unknown>;
     } catch {
-      // 单行损坏：跳过并告警（NDJSON 语义允许）
       log("warn", "journal_bad_line", { action: "skipped" });
       continue;
     }
@@ -226,7 +228,6 @@ export async function replaySessions(): Promise<void> {
   }
   enforceCap();
 }
-
 function applyEvent(ev: Record<string, unknown>): void {
   const evName = ev.ev;
   if (evName === "session") {
@@ -319,7 +320,7 @@ export function journalSnapshot(): SessionRecord[] {
 /** compact：快照重写 journal（rotating 老文件为 .1） */
 async function compactJournal(): Promise<void> {
   const snapshot = journalSnapshot();
-  const lines: string[] = [];
+  const lines: string[] = [JSON.stringify({ ts: Date.now(), ev: "schema", schemaVersion: JOURNAL_SCHEMA_VERSION })];
   for (const rec of snapshot) {
     lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
     if (rec.pendingApproval && rec.pendingApproval.status === "pending") {
@@ -356,3 +357,8 @@ export async function maybeCompactJournal(): Promise<void> {
 export function journalPath(): string { return JOURNAL_FILE; }
 
 export function journalLoaded(): boolean { return loaded; }
+
+/** 最近一次启动回放的 journal 健康报告（诊断页只读，不再二次扫盘）。 */
+export function journalHealthReport(): NdjsonHealthReport | null {
+  return latestNdjsonHealth(JOURNAL_FILE);
+}

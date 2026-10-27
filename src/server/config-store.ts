@@ -36,7 +36,8 @@ const BAK_FILE = SETTINGS_FILE + ".bak";
 const TMP_FILE = SETTINGS_FILE + ".tmp";
 const LOCK_FILE = SETTINGS_FILE + ".lock";
 /** 当前配置 schema 版本：读取处一律兼容字段缺失，旧文件打开时注入 */
-const SCHEMA_VERSION = 3;
+export const CONFIG_SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = CONFIG_SCHEMA_VERSION;
 /** lock 文件时间戳超过该时长视为孤儿锁（进程 crash 没释放），直接接管 */
 const LOCK_STALE_MS = 15_000;
 /** 抢不到锁时的轮询间隔 */
