@@ -13,7 +13,7 @@
 import { $, chatScroll, inputEl, sendBtn, setSidebarOpen, stopBtn, toggleTheme, updateThemeBtn, desktopBridge } from "./core/dom.js";
 import { api } from "./core/api.js";
 import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/state.js";
-import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
+import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./ui/dialog.js";
 import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";

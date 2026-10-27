@@ -68,7 +68,7 @@ src/
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
     ui/            #   无业务 DOM 原语（h/button/input/dialog/menu/toast…）
     styles/        #   tokens 与按职责拆分的 CSS
-    modules/       #   纯函数与协议类型（format / ui-dialog / types…）
+    modules/       #   纯函数与协议类型（format / chat-flow / types…）
     vendor/        #   第三方库唯一隔离层；业务只能 import wrapper，不能直接 import npm 前端库
     render/        #   渲染层（parts 部件 / messages 块）
     stream/        #   SSE 消费与一轮对话生命周期

@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert, uiConfirm } from "../modules/ui-dialog.js";
+import { uiAlert, uiConfirm } from "../ui/dialog.js";
 import type { ExternalAgent, SessionKind } from "../modules/types.js";
 
 /** 新建会话（由 turn 层注入，避免 external → stream 的环） */
@@ -108,7 +108,7 @@ export function renderExternalCards(): void {
 
 /** 接入流程：Git 地址 → clone + 自动发现 → 必要时补启动命令 */
 export async function addExternalFlow(): Promise<void> {
-  const { uiPrompt } = await import("../modules/ui-dialog.js");
+  const { uiPrompt } = await import("../ui/dialog.js");
   const url = await uiPrompt(
     "输入第三方 Agent 的 Git 仓库地址：\n服务端会 clone 到本地并自动识别启动方式（agent.json > package.json > 常见入口）",
     { title: "接入外部 Agent", placeholder: "https://github.com/user/agent-repo" }
@@ -146,7 +146,7 @@ export async function addExternalFlow(): Promise<void> {
 
 /** 为「待补全」的外部 Agent 询问并保存启动命令（如 node cli.js） */
 async function completeExternalAgent(agent: ExternalAgent): Promise<void> {
-  const { uiPrompt } = await import("../modules/ui-dialog.js");
+  const { uiPrompt } = await import("../ui/dialog.js");
   const cmdLine = await uiPrompt(
     `为「${agent.name}」输入启动命令（在仓库目录内执行）：\n用户消息会替换 args 里的 {{prompt}} 占位符；没有占位符时通过 stdin 传入`,
     { title: "补全启动命令", placeholder: "例如 node cli.js --prompt {{prompt}}" }

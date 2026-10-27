@@ -14,7 +14,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert, uiConfirm } from "../modules/ui-dialog.js";
+import { uiAlert, uiConfirm } from "../ui/dialog.js";
 import { applyConfigState } from "./composer-bar.js";
 import { isSettingsPageOpen } from "./settings.js";
 import { closeProviderForm } from "./model-form.js";

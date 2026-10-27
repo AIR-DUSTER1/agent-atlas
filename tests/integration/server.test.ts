@@ -268,9 +268,10 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
   for (const file of [
     "/main.js",
-    "/modules/format.js", "/modules/ui-dialog.js", "/modules/chat-flow.js",
+    "/modules/format.js", "/ui/dialog.js", "/modules/chat-flow.js",
     "/modules/plugin-registry.js", "/modules/types.js",
     "/core/state.js", "/core/dom.js", "/core/api.js",
+    "/ui/dialog.js", "/ui/menu.js", "/ui/toast.js",
     "/render/parts.js", "/render/messages.js",
     "/stream/events.js", "/stream/turn.js",
     "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",

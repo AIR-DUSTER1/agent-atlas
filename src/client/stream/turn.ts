@@ -13,7 +13,7 @@
 import { $, autoGrowImpl, chatScroll, inputEl, sendBtn, stopBtn } from "../core/dom.js";
 import { authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { mountBlock } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { renderAttachChips } from "../views/attachments.js";

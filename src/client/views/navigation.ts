@@ -12,7 +12,7 @@
 import { $, chatScroll, inputEl, messagesEl, sendBtn, setSidebarOpen, welcomeEl } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
 import { renderAll } from "../render/messages.js";

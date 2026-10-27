@@ -3,7 +3,7 @@
  * static.ts — 前端静态文件分发（白名单式防目录穿越）
  * ============================================================
  * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与一层已登记子目录
- * （core/ composer/ render/ stream/ views/ actions/ modules/ vendor/ styles/）。
+ * （core/ composer/ render/ stream/ views/ actions/ modules/ ui/ vendor/ styles/）。
  * 在路径正则之外再做 realpath 边界和 lstat 普通文件校验，拒绝符号链接、
  * 未知扩展与目录列表；全部 no-store，页面和脚本始终取最新构建。
  */
@@ -25,7 +25,7 @@ const MIME: Record<string, string> = {
 
 /** 允许的一层子目录（字面量白名单；不含用户可控段） */
 const ALLOWED_DIRS = new Set([
-  "modules", "core", "composer", "render", "stream", "views", "actions", "vendor", "styles",
+  "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles",
 ]);
 
 /** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */

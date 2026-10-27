@@ -190,17 +190,6 @@ export interface DesktopBridge {
 }
 
 /** 页面内对话框（ui-dialog.ts）的选项 */
-export interface HudDialogOptions {
-  mode: "alert" | "confirm" | "prompt";
-  message: string;
-  title?: string;
-  defaultValue?: string;
-  placeholder?: string;
-  okText?: string;
-  cancelText?: string;
-  danger?: boolean;
-  /** 输入框按密码显示（访问令牌等） */
-  password?: boolean;
-}
+
 
 export type { PermissionModeId, Session, ProjectEntry, MemoryEntry };

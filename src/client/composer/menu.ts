@@ -14,6 +14,8 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { fmtSize } from "../modules/format.js";
 import { addPendingFile } from "../views/attachments.js";
+import { h } from "../ui/h.js";
+import { openFloatingMenu, type MenuController } from "../ui/menu.js";
 import type { ComposerItem, ComposerTrigger } from "../modules/types.js";
 
 export const FILE_MENTION_LIMIT = 20;
@@ -45,6 +47,8 @@ export interface UserCommandItem {
 }
 
 let userCommands: UserCommandItem[] = [];
+
+let composerMenuController: MenuController | null = null;
 
 /** 拉取用户命令（失败静默：命令不可用不该阻塞对话） */
 export async function loadUserCommands(): Promise<UserCommandItem[]> {
@@ -123,11 +127,11 @@ export function closeComposerMenu(): void {
   clearTimeout(composerMenu.searchTimer);
   composerMenu.ctrl?.abort();
   composerMenu.ctrl = null;
+  composerMenuController?.close(false);
+  composerMenuController = null;
+  inputEl.setAttribute("aria-expanded", "false");
   const menu = $("composer-menu");
-  if (menu) {
-    menu.classList.add("hidden");
-    menu.innerHTML = "";
-  }
+  if (menu) menu.replaceChildren();
 }
 
 function currentComposerTrigger(): ComposerTrigger | null {
@@ -200,71 +204,65 @@ export function renderComposerMenu(): void {
     return;
   }
 
-  menu.classList.remove("hidden");
-  menu.innerHTML = `<div class="composer-menu-head"><span></span><span></span></div>`;
-  const head = menu.querySelector(".composer-menu-head");
-  if (head && head.firstElementChild) {
-    head.firstElementChild.textContent = composerMenu.kind === "slash"
-      ? "命令"
-      : `文件（最多 ${FILE_MENTION_LIMIT} 个）`;
-  }
-  if (head && head.lastElementChild && !composerMenu.loading && !composerMenu.error) {
-    head.lastElementChild.textContent = composerMenu.items.length ? `${composerMenu.items.length} 个结果` : "";
-  }
+  const head = h("div", { class: "composer-menu-head" },
+    h("span", null, composerMenu.kind === "slash" ? "命令" : `文件（最多 ${FILE_MENTION_LIMIT} 个）`),
+    h("span", null, !composerMenu.loading && !composerMenu.error && composerMenu.items.length
+      ? `${composerMenu.items.length} 个结果`
+      : ""),
+  );
+  menu.replaceChildren(head);
+  menu.setAttribute("role", "listbox");
 
   if (composerMenu.loading) {
-    const empty = document.createElement("div");
-    empty.className = "composer-menu-empty";
-    empty.textContent = "搜索文件中…";
-    menu.appendChild(empty);
-    return;
-  }
-  if (composerMenu.error) {
-    const empty = document.createElement("div");
-    empty.className = "composer-menu-empty";
-    empty.textContent = `搜索失败：${composerMenu.error}`;
-    menu.appendChild(empty);
-    return;
-  }
-  if (!composerMenu.items.length) {
-    const empty = document.createElement("div");
-    empty.className = "composer-menu-empty";
-    empty.textContent = composerMenu.kind === "slash" ? "没有匹配的命令" : "没有找到文件";
-    menu.appendChild(empty);
-    return;
+    menu.appendChild(h("div", { class: "composer-menu-empty" }, "搜索文件中…"));
+  } else if (composerMenu.error) {
+    menu.appendChild(h("div", { class: "composer-menu-empty" }, `搜索失败：${composerMenu.error}`));
+  } else if (!composerMenu.items.length) {
+    menu.appendChild(h("div", { class: "composer-menu-empty" },
+      composerMenu.kind === "slash" ? "没有匹配的命令" : "没有找到文件"));
+  } else {
+    composerMenu.items.forEach((item, index) => {
+      const button = h("button", {
+        type: "button",
+        class: "composer-item" + (index === composerMenu.active ? " active" : ""),
+        role: "option",
+        "aria-selected": index === composerMenu.active ? "true" : "false",
+        onmousedown: (event: MouseEvent) => {
+          event.preventDefault();
+          selectComposerItem(index);
+        },
+      },
+      h("span", { class: "ci-icon" }, item.type === "command" ? item.icon : "📄"),
+      h("span", { class: "ci-main" },
+        h("span", { class: "ci-title" }, item.type === "command" ? item.label : item.file.name),
+        h("span", { class: "ci-desc" }, item.type === "command"
+          ? item.desc
+          : `${item.file.rootName || ""} / ${item.file.rel || ""}`),
+      ),
+      h("span", { class: "ci-meta" }, item.type === "command" ? "Enter" : fmtSize(item.file.size)),
+      );
+      menu.appendChild(button);
+    });
   }
 
-  composerMenu.items.forEach((item, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "composer-item" + (index === composerMenu.active ? " active" : "");
-    button.setAttribute("role", "option");
-    button.setAttribute("aria-selected", index === composerMenu.active ? "true" : "false");
-    button.innerHTML = `<span class="ci-icon"></span><span class="ci-main"><span class="ci-title"></span><span class="ci-desc"></span></span><span class="ci-meta"></span>`;
-    const icon = button.querySelector(".ci-icon");
-    const title = button.querySelector(".ci-title");
-    const desc = button.querySelector(".ci-desc");
-    const meta = button.querySelector(".ci-meta");
-    if (item.type === "command") {
-      if (icon) icon.textContent = item.icon;
-      if (title) title.textContent = item.label;
-      if (desc) desc.textContent = item.desc;
-      if (meta) meta.textContent = "Enter";
-    } else {
-      if (icon) icon.textContent = "📄";
-      if (title) title.textContent = item.file.name;
-      if (desc) desc.textContent = `${item.file.rootName || ""} / ${item.file.rel || ""}`;
-      if (meta) meta.textContent = fmtSize(item.file.size);
-    }
-    button.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      selectComposerItem(index);
+  if (!composerMenuController) {
+    composerMenuController = openFloatingMenu({
+      anchor: inputEl,
+      menu,
+      align: "start",
+      focusFirst: false,
+      matchAnchorWidth: true,
+      onClose: () => {
+        composerMenuController = null;
+        inputEl.setAttribute("aria-expanded", "false");
+      },
     });
-    menu.appendChild(button);
-  });
+  } else {
+    composerMenuController.reposition();
+  }
+  inputEl.setAttribute("aria-expanded", "true");
   menu.querySelector(".composer-item.active")?.scrollIntoView({ block: "nearest" });
 }
-
 async function searchComposerFiles(query: string): Promise<void> {
   const seq = ++composerMenu.searchSeq;
   composerMenu.ctrl?.abort();

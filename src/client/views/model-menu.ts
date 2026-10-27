@@ -1,148 +1,129 @@
 /**
+ * views/model-menu.ts — 顶栏模型菜单
  * ============================================================
- * views/model-menu.ts — 顶栏 ▾ 菜单：所有供应商的所有模型 + 思考档位
- * ============================================================
- * 职责：顶栏模型下拉的渲染（供应商分组 × 组内全部模型）与开启关闭。
- * 设计立场：
- *  - 同一个网关往往提供多个模型，菜单必须把「供应商 × 模型」全部平铺，
- *    否则换模型只能靠新建供应商 —— 这是本菜单存在的核心理由；
- *  - 只给「当前正在用的那个」打勾，避免多个 ✓ 让人误解；
- *  - 菜单顶部顺带给出当前模型的思考等级档位（省一次进设置页）。
+ * 供应商 × 模型使用统一的浮动菜单原语：点外关闭、Esc、方向键与焦点恢复
+ * 都由 ui/menu.ts 负责；本文件只组装业务内容，不再维护第二套定位逻辑。
  */
-
 import { $ } from "../core/dom.js";
+import { h } from "../ui/h.js";
+import { openFloatingMenu, type MenuController } from "../ui/menu.js";
 import { PROTOCOL_LABEL } from "./composer-bar.js";
 import { activateModel, setReasoningLevel } from "./model-actions.js";
 import type { AppConfig } from "../modules/types.js";
 
+let controller: MenuController | null = null;
+
 export function showProviderMenu(show: boolean): void {
-  $("provider-menu")?.classList.toggle("hidden", !show);
+  const menu = $("provider-menu");
+  const anchor = $("provider-btn");
+  if (!menu || !anchor) return;
+  if (!show) {
+    menu.classList.add("hidden");
+    controller?.close(false);
+    controller = null;
+    anchor.setAttribute("aria-expanded", "false");
+    return;
+  }
+  menu.classList.remove("hidden");
+  anchor.setAttribute("aria-expanded", "true");
+  controller = openFloatingMenu({
+    anchor,
+    menu,
+    align: "start",
+    onClose: () => {
+      controller = null;
+      menu.classList.add("hidden");
+      anchor.setAttribute("aria-expanded", "false");
+    },
+  });
 }
 
 export function renderProviderMenu(cfg: AppConfig | null): void {
   const menu = $("provider-menu");
   if (!menu) return;
-  menu.innerHTML = "";
-  const all = cfg?.providers || [];
-  const activeProvider = all.find((p) => p.active);
-  const activeModel = (activeProvider?.models || []).find((m) => m.active);
+  menu.replaceChildren();
+  menu.setAttribute("role", "menu");
+  const providers = cfg?.providers ?? [];
+  const activeProvider = providers.find((provider) => provider.active);
+  const activeModel = activeProvider?.models.find((model) => model.active);
+  const reasoning = cfg?.reasoning;
 
-  // ① 当前模型的思考等级：档位 chips（档位随供应商方言变化）
-  const r = cfg?.reasoning;
-  if (r && activeModel) {
-    const box = document.createElement("div");
-    box.className = "pm-reason-box";
-
-    const head = document.createElement("div");
-    head.className = "pm-reason-head";
-    const title = document.createElement("span");
-    title.textContent = `⚡ ${activeModel.displayName} · 思考等级`;
-    const now = document.createElement("em");
-    now.className = "pm-reason-now";
-    now.textContent = r.label || "";
-    now.title = r.scheme || "";
-    head.append(title, now);
-    box.appendChild(head);
-
-    const chips = document.createElement("div");
-    chips.className = "pm-chips";
-    for (const lv of r.levels || []) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "pm-chip" + (lv.id === r.level ? " active" : "");
-      chip.textContent = lv.label;
-      chip.title = lv.desc;
-      chip.addEventListener("click", (e) => { e.stopPropagation(); void setReasoningLevel(lv.id); });
-      chips.appendChild(chip);
+  if (reasoning && activeModel) {
+    const chips = h("div", { class: "pm-chips" });
+    for (const level of reasoning.levels ?? []) {
+      chips.appendChild(h("button", {
+        type: "button",
+        class: "pm-chip" + (level.id === reasoning.level ? " active" : ""),
+        title: level.desc,
+        onclick: (event: MouseEvent) => {
+          event.stopPropagation();
+          void setReasoningLevel(level.id);
+        },
+      }, level.label));
     }
-    box.appendChild(chips);
-
-    const scheme = document.createElement("div");
-    scheme.className = "pm-scheme";
-    scheme.textContent = (r.auto ? `自动识别为「${r.dialectLabel}」（${r.vendor}）· ` : "") + (r.scheme || "");
-    box.appendChild(scheme);
-    if (r.error) {
-      const err = document.createElement("div");
-      err.className = "pm-scheme err";
-      err.textContent = `⚠ ${r.error}`;
-      box.appendChild(err);
-    }
-    menu.appendChild(box);
+    menu.appendChild(h("div", { class: "pm-reason-box" },
+      h("div", { class: "pm-reason-head" },
+        h("span", null, `⚡ ${activeModel.displayName} · 思考等级`),
+        h("em", { class: "pm-reason-now", title: reasoning.scheme ?? "" }, reasoning.label || ""),
+      ),
+      chips,
+      h("div", { class: "pm-scheme" },
+        (reasoning.auto ? `自动识别为「${reasoning.dialectLabel}」（${reasoning.vendor}）· ` : "") + (reasoning.scheme || ""),
+      ),
+      reasoning.error ? h("div", { class: "pm-scheme err" }, `⚠ ${reasoning.error}`) : null,
+    ));
   }
 
-  // ② 供应商分组 → 组内每个模型一行
-  for (const p of all) {
-    const group = document.createElement("div");
-    group.className = "pm-group";
-
-    const head = document.createElement("div");
-    head.className = "pm-group-head";
-    const gname = document.createElement("span");
-    gname.className = "pm-g-name";
-    gname.textContent = p.name;
-    gname.title = p.baseURL;
-    head.appendChild(gname);
-    if (p.protocol && p.protocol !== "openai") {
-      const proto = document.createElement("span");
-      proto.className = "pm-g-badge";
-      proto.textContent = PROTOCOL_LABEL[p.protocol] || p.protocol;
-      head.appendChild(proto);
+  for (const provider of providers) {
+    const head = h("div", { class: "pm-group-head" },
+      h("span", { class: "pm-g-name", title: provider.baseURL }, provider.name),
+      provider.protocol && provider.protocol !== "openai"
+        ? h("span", { class: "pm-g-badge" }, PROTOCOL_LABEL[provider.protocol] || provider.protocol)
+        : null,
+      h("button", {
+        type: "button",
+        class: "pm-g-edit",
+        title: "在设置里编辑这个供应商与它的模型",
+        onclick: (event: MouseEvent) => {
+          event.stopPropagation();
+          showProviderMenu(false);
+          void import("./settings.js").then((mod) => mod.openSettings("models", provider.id));
+        },
+      }, "编辑"),
+    );
+    const group = h("div", { class: "pm-group" }, head);
+    if (!provider.models?.length) {
+      group.appendChild(h("div", { class: "pm-empty" }, "还没有模型 —— 点「编辑」添加"));
     }
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "pm-g-edit";
-    edit.textContent = "编辑";
-    edit.title = "在设置里编辑这个供应商与它的模型";
-    edit.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showProviderMenu(false);
-      void import("./settings.js").then((m) => m.openSettings("models", p.id));
-    });
-    head.appendChild(edit);
-    group.appendChild(head);
-
-    if (!p.models || !p.models.length) {
-      const empty = document.createElement("div");
-      empty.className = "pm-empty";
-      empty.textContent = "还没有模型 —— 点「编辑」添加";
-      group.appendChild(empty);
-    }
-
-    for (const m of p.models || []) {
-      const current = Boolean(p.active) && Boolean(m.active);
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "pm-item" + (current ? " active" : "");
-      row.title = `${m.name} · ${p.baseURL}\n思考等级：${m.reasoningLabel}（${m.reasoningDialect || ""}）`;
-      row.innerHTML = `<span class="pm-check">${current ? "✓" : ""}</span>`
-        + `<span class="pm-name"></span>`
-        + `<span class="pm-model"></span>`;
-      const nameEl = row.querySelector(".pm-name");
-      if (nameEl) nameEl.textContent = `${m.modality === "vision" ? "🖼 " : ""}${m.displayName}`;
-      const tag = m.reasoningLevel && m.reasoningLevel !== "default" ? m.reasoningLabel : "";
-      const right = row.querySelector(".pm-model");
-      if (right) {
-        right.textContent = tag || (m.displayName === m.name ? "" : m.name);
-        if (tag) right.classList.add("hot");
-      }
-      row.addEventListener("click", async () => {
-        showProviderMenu(false);
-        if (!current) await activateModel(p.id, m.id);
-      });
-      group.appendChild(row);
+    for (const model of provider.models ?? []) {
+      const current = Boolean(provider.active) && Boolean(model.active);
+      const tag = model.reasoningLevel && model.reasoningLevel !== "default" ? model.reasoningLabel : "";
+      group.appendChild(h("button", {
+        type: "button",
+        role: "menuitem",
+        class: "pm-item" + (current ? " active" : ""),
+        title: `${model.name} · ${provider.baseURL}\n思考等级：${model.reasoningLabel}（${model.reasoningDialect || ""}）`,
+        onclick: async () => {
+          showProviderMenu(false);
+          if (!current) await activateModel(provider.id, model.id);
+        },
+      },
+      h("span", { class: "pm-check" }, current ? "✓" : ""),
+      h("span", { class: "pm-name" }, `${model.modality === "vision" ? "🖼 " : ""}${model.displayName}`),
+      h("span", { class: "pm-model" + (tag ? " hot" : "") }, tag || (model.displayName === model.name ? "" : model.name)),
+      ));
     }
     menu.appendChild(group);
   }
 
-  const divider = document.createElement("div");
-  divider.className = "pm-divider";
-  menu.appendChild(divider);
-  const manage = document.createElement("button");
-  manage.className = "pm-item pm-manage";
-  manage.textContent = "⚙ 管理供应商与模型（添加 / 编辑 / 删除）";
-  manage.addEventListener("click", () => {
-    showProviderMenu(false);
-    void import("./settings.js").then((m) => m.openSettings());
-  });
-  menu.appendChild(manage);
+  menu.appendChild(h("div", { class: "pm-divider" }));
+  menu.appendChild(h("button", {
+    type: "button",
+    role: "menuitem",
+    class: "pm-item pm-manage",
+    onclick: () => {
+      showProviderMenu(false);
+      void import("./settings.js").then((mod) => mod.openSettings());
+    },
+  }, "⚙ 管理供应商与模型（添加 / 编辑 / 删除）"));
 }

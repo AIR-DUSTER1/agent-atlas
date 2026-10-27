@@ -10,7 +10,7 @@
 
 import { $ } from "../core/dom.js";
 import { state } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { AGENT_PROFILES } from "../modules/agent-profile.js";
 import type { SessionKind } from "../modules/types.js";
 

@@ -11,7 +11,8 @@
 
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
-import { uiAlert, uiConfirm } from "../modules/ui-dialog.js";
+import { uiAlert, uiConfirm } from "../ui/dialog.js";
+import { toast } from "../ui/toast.js";
 import type { BackupEntry } from "../modules/types.js";
 
 export async function refreshBackups(): Promise<void> {
@@ -61,7 +62,7 @@ export async function refreshBackups(): Promise<void> {
 export async function createBackup(): Promise<void> {
   try {
     const res = await api<{ hint?: string; name: string }>("/api/backup", { method: "POST" });
-    uiAlert(res.hint || `备份已创建：${res.name}`, "备份完成");
+    toast(res.hint || `备份已创建：${res.name}`, "success");
     await refreshBackups();
   } catch (err) {
     uiAlert(`备份失败：${(err as Error).message}`, "备份");

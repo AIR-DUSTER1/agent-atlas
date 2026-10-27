@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert, uiPrompt } from "../modules/ui-dialog.js";
+import { uiAlert, uiPrompt } from "../ui/dialog.js";
 import { fmtSize } from "../modules/format.js";
 import type { FsEntry, FsListResult, PendingFile } from "../modules/types.js";
 

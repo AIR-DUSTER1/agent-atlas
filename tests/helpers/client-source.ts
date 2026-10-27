@@ -29,9 +29,11 @@ export const CLIENT_SOURCES = [
   "ui/field.ts",
   "ui/card.ts",
   "ui/empty.ts",
+  "ui/dialog.ts",
+  "ui/menu.ts",
+  "ui/toast.ts",
   // 协议与纯函数模块
   "modules/format.ts",
-  "modules/ui-dialog.ts",
   "modules/chat-flow.ts",
   "modules/agent-profile.ts",
   "modules/plugin-registry.ts",

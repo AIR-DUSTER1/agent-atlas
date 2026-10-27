@@ -12,7 +12,7 @@
 import { $, setSidebarOpen } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveLocal, state } from "../core/state.js";
-import { uiAlert, uiConfirm, uiPrompt } from "../modules/ui-dialog.js";
+import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
 import type { ProjectEntry } from "../modules/types.js";
 
 export function projectById(id: string | null): ProjectEntry | undefined {

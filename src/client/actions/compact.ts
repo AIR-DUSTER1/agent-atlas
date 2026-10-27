@@ -13,7 +13,7 @@
 import { $, autoGrowImpl, inputEl, sendBtn } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { mountBlock, renderNoticeBlock } from "../render/messages.js";
 import { scrollBottom } from "../core/dom.js";
 import { setStatus } from "../stream/turn.js";

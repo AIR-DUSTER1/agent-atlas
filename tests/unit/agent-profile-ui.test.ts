@@ -32,9 +32,9 @@ test("agentProfileId 优先，旧 kind 可兼容，未知身份不默认成通�
 
 test("全局 Esc 使用 ui-dialog 导出函数，不引用模块私有实现", async () => {
   const main = await readClientFiles(["main.ts"]);
-  const dialog = await readFile(new URL("../../src/client/modules/ui-dialog.ts", import.meta.url), "utf8");
+  const dialog = await readFile(new URL("../../src/client/ui/dialog.ts", import.meta.url), "utf8");
   // 前端已 TypeScript 化：Esc 兜底走具名导入（模块路径带 .js 后缀，浏览器原生 ESM）
-  assert.match(main, /import \{[^}]*cancelActiveDialog[^}]*\} from "\.\/modules\/ui-dialog\.js"/);
+  assert.match(main, /import \{[^}]*cancelActiveDialog[^}]*\} from "\.\/ui\/dialog\.js"/);
   assert.match(main, /cancelActiveDialog\(\);/);
   // 消费方不得直接调模块私有实现（uiDialogFinish 不导出）
   assert.doesNotMatch(main, /uiDialogFinish\(/);

@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
 import { renderPluginCards } from "./settings.js";
 import type { EstateState, ToolPart } from "../modules/types.js";

@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert } from "../modules/ui-dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { fmtTokens } from "../modules/format.js";
 import { activateModel } from "./model-actions.js";
 import { closeCmMenus } from "./navigation.js";

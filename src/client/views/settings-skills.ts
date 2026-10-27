@@ -12,7 +12,7 @@
 
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
-import { uiConfirm } from "../modules/ui-dialog.js";
+import { uiConfirm } from "../ui/dialog.js";
 
 export interface SkillItem {
   id: string;

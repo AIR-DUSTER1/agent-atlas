@@ -10,7 +10,7 @@
  */
 
 import { LS_AUTH_TOKEN } from "./state.js";
-import { uiPrompt } from "../modules/ui-dialog.js";
+import { uiPrompt } from "../ui/dialog.js";
 
 export function getAuthToken(): string {
   try { return localStorage.getItem(LS_AUTH_TOKEN) || ""; } catch { return ""; }
