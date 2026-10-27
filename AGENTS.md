@@ -22,6 +22,8 @@ TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、�
 | 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
 | 单一职责 | 文件按职责拆分，不设行数硬指标：一个文件只做一件事、能被一句话说清即可；超过 ~500 行时先问「是不是混了两件事」 |
 | 样式分层 | 禁止恢复单文件 `style.css`；CSS 按 token / reset / layout / surface / responsive / ui 职责拆分，业务文件不覆盖主题原始色 |
+| 可访问性 | 图标按钮必须有 `aria-label`/`title`；表单控件必须有 label 或 `aria-label`；正文与弱化文字对比度 ≥ 4.5:1；流式区使用 live region |
+| 可选前端能力 | 图表 / Markdown / 高亮必须动态加载并具备降级路径，不得进入 `main.ts` 启动闭包 |
 | HTTP 后端零框架 | 不引入 Express/Fastify 等；路由照 §4 模式写顺序 `if` 分支 |
 | 直跑 TS | `tsx` 直跑，不做编译产物；新增脚本能被 `tsx` 直接执行 |
 

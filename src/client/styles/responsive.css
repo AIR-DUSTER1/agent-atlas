@@ -69,3 +69,51 @@
   .bar-sub { display: none; }
   .stats-chart-svg { min-width: 560px; }
 }
+
+/* P6：390px 与窄窗最终收敛（覆盖前面按功能拆分的响应式规则） */
+@media (max-width: 760px) {
+  .settings-nav { display: flex; flex-direction: column; gap: 7px; }
+  .settings-search { width: 100%; flex: none; }
+  .settings-nav-scroll {
+    display: flex;
+    width: 100%;
+    height: 42px;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 4px;
+  }
+  .settings-nav-group { display: contents; }
+  .settings-nav-group-title { display: none; }
+  .settings-nav-item {
+    display: inline-flex;
+    width: auto;
+    min-width: max-content;
+    min-height: 34px;
+    margin: 0;
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+  .settings-nav-item .sn-icon { width: 25px; height: 25px; }
+  .settings-nav-item .sn-icon .ui-icon { --icon-size: 14px; }
+  .settings-nav-item .sn-copy { flex-direction: row; align-items: center; }
+  .settings-nav-item .sn-copy strong { font-size: 11.5px; }
+  .settings-nav-item .sn-copy small { display: none; }
+  .model-add-row { flex-wrap: wrap; }
+  .model-add-row input { flex: 1 0 100%; }
+  .model-add-row button { flex: 1; }
+}
+@media (max-width: 640px) {
+  .topbar-right .provider-switch,
+  .topbar-right #status-dot { display: none; }
+  .topbar-breadcrumb > span:first-child {
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-breadcrumb #session-title { max-width: 150px; }
+  #composer-hint { display: none; }
+}

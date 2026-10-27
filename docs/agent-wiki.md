@@ -1778,3 +1778,31 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 - 流式光标改为独立 DOM 节点，Markdown 受控 HTML 边界不再拼接 cursor HTML；
 - 代码块在流式结束后动态加载 highlight.js，单块添加语言标签与复制按钮；高亮失败仍保留原始代码；
 - 长消息仍沿用流式节流，超长代码/内容不会被可选依赖拖垮。
+
+### 3.40 可访问性、性能与发布验收（P6）
+
+**可访问性**
+
+| 检查 | 结果 |
+|---|---|
+| 静态按钮可访问名称 | 无遗漏（图标按钮均有 `aria-label` / `title`） |
+| 表单控件可访问名称 | 无遗漏；关键必填项使用 `aria-invalid` + `aria-describedby` |
+| 消息与状态 | 消息流 `role=log` + `aria-live=polite`；连接状态点 `role=status` |
+| 键盘 | 设置搜索 `/` 聚焦、Enter 选择、Esc 清空；弹层 Tab 焦点陷阱与关闭后焦点恢复 |
+| 动效 | `prefers-reduced-motion`；Toast/卡片/弹窗动画可关闭 |
+| 对比度 | 正文与弱化文字均达到 WCAG AA 4.5:1；浅色弱化文字 `#6b7280`、深色 `#8a8a94` |
+
+**性能基线（本机开发环境，headless Chrome）**
+
+- `DOMContentLoaded` 多次采样约 0.19–0.49s；本地服务、无外网模型请求；
+- 首屏原生 ESM 保持按目录加载，未把 Chart.js / highlight.js 放进入口启动闭包；
+- vendor gzip 体积：Chart.js 69KB、Lucide 4KB、marked 14KB、DOMPurify 12KB、highlight.js 22KB；
+- 图表与 Markdown 都是可选动态能力，缺失时分别降级为数据表和基础安全渲染。
+
+**响应式**
+
+- 390px / 768px 页面 `scrollWidth` 与视口一致，无横向页面溢出；
+- 390px 设置页导航改为可横向滚动的紧凑 tab，模型添加行自动换行；
+- 窄屏隐藏顶部重复的模型供应商切换和状态点，保留输入区模型 chip。
+
+**自动化与视觉证据**：最终 `npm test` 221 / 221；`docs/screenshots/main-empty.png`、`docs/screenshots/stats-dark.png`。

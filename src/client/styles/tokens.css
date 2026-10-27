@@ -18,7 +18,7 @@
   --content-w: clamp(640px, 60vw, 1400px);
   --text: #e6e6ea;
   --text-2: #9b9ba4;
-  --text-3: #6e6e78;
+  --text-3: #8a8a94;
   --accent: #5b8cff;
   --accent-2: #8b5cf6;
   --green: #3fb96f;
@@ -78,7 +78,7 @@ html[data-theme="light"] {
   --border-strong: #c3c7d1;
   --text: #242830;
   --text-2: #575e6c;
-  --text-3: #8f96a6;
+  --text-3: #6b7280;
   --text-strong: #14171c;
   --accent-soft: #3c5fd9;
   --accent-soft-2: #4a63dd;

@@ -117,7 +117,7 @@
             <div id="provider-menu" class="provider-menu hidden"></div>
           </div>
           <button id="theme-btn" class="settings-btn" title="切换浅色主题" aria-label="切换浅色主题"><i class="ui-icon" data-icon="Sun" aria-hidden="true"></i></button>
-          <span id="status-dot" class="status idle" title="空闲"></span>
+          <span id="status-dot" class="status idle" title="空闲" role="status" aria-live="polite"></span>
         </div>
       </header>
 
@@ -142,7 +142,7 @@
             <button type="button" data-empty-prompt="读取我提供的网页或文件，提炼结论并列出证据。">读网页 / 文件</button>
             <button type="button" data-empty-prompt="统计最近的模型调用和工具使用情况，指出异常和可优化项。">查看用量</button>
           </div>
-        </section>        <div id="messages"></div>
+        </section>        <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="对话消息"></div>
       </div>
 
       <footer id="composer">
@@ -182,7 +182,7 @@
           <button id="attach-btn" class="attach-btn" title="附加文件：项目文件 / 远程文件夹 / 本地上传">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </button>
-          <textarea id="input" rows="1" placeholder="给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）" aria-autocomplete="list" aria-controls="composer-menu" aria-expanded="false" disabled></textarea>
+          <textarea id="input" aria-label="给 Agent 发送消息" rows="1" placeholder="给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）" aria-autocomplete="list" aria-controls="composer-menu" aria-expanded="false" disabled></textarea>
           <div id="composer-menu" class="composer-menu hidden" role="listbox" aria-label="输入辅助"></div>
           <button id="send-btn" class="icon-btn" title="发送" disabled>
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -318,7 +318,7 @@
                     <div id="pf-model-list" class="model-list"></div>
 
                     <div class="key-row model-add-row">
-                      <input id="pf-model-new" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" />
+                      <input id="pf-model-new" aria-label="输入模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" />
                       <button id="pf-fetch-models" type="button" class="ghost-btn small" title="从网关拉取可用模型列表">获取列表</button>
                       <button id="pf-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
                     </div>
@@ -360,7 +360,7 @@
                       <select id="mf-level" class="pf-select"></select>
                     </label>
 
-                    <textarea id="mf-custom" class="reason-custom hidden" rows="2" spellcheck="false"
+                    <textarea id="mf-custom" aria-label="自定义 JSON 请求参数" class="reason-custom hidden" rows="2" spellcheck="false"
                               placeholder='自定义 JSON，例如 {"reasoning": {"effort": "high"}}'></textarea>
                     <p id="mf-scheme" class="reason-scheme"></p>
 
@@ -419,8 +419,8 @@
 
       <div class="field-label">手动添加 / 更新（同主题再保存 = 覆盖更新）</div>
       <div class="key-row">
-        <input id="mem-key" type="text" spellcheck="false" placeholder="主题，如：回答风格（50 字内）" />
-        <input id="mem-content" type="text" spellcheck="false" placeholder="内容，如：结论先行，少用列表（500 字内）" />
+        <input id="mem-key" aria-label="记忆主题" type="text" spellcheck="false" placeholder="主题，如：回答风格（50 字内）" />
+        <input id="mem-content" aria-label="记忆内容" type="text" spellcheck="false" placeholder="内容，如：结论先行，少用列表（500 字内）" />
         <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
       </div>
       <div id="memories-status" class="settings-status"></div>
@@ -438,13 +438,13 @@
 
             <div class="field-label">新增 / 更新（同名覆盖）</div>
             <div class="key-row">
-              <input id="cmd-name" type="text" spellcheck="false" placeholder="命令名，如 review（字母数字下划线短横线）" />
-              <input id="cmd-title" type="text" spellcheck="false" placeholder="菜单显示名（留空 = 用命令名）" />
+              <input id="cmd-name" aria-label="命令名" type="text" spellcheck="false" placeholder="命令名，如 review（字母数字下划线短横线）" />
+              <input id="cmd-title" aria-label="命令标题" type="text" spellcheck="false" placeholder="菜单显示名（留空 = 用命令名）" />
             </div>
             <div class="key-row">
-              <input id="cmd-desc" type="text" spellcheck="false" placeholder="一句话说明，如：审查本次改动" />
+              <input id="cmd-desc" aria-label="命令说明" type="text" spellcheck="false" placeholder="一句话说明，如：审查本次改动" />
             </div>
-            <textarea id="cmd-template" class="cmd-template" spellcheck="false"
+            <textarea id="cmd-template" aria-label="提示词模板" class="cmd-template" spellcheck="false"
               placeholder="提示词模板，例如：请审查以下改动并指出风险：&#10;{{selection}}"></textarea>
             <div class="key-row">
               <button id="cmd-add-btn" type="button" class="ghost-btn small">＋ 保存命令</button>
@@ -465,14 +465,14 @@
 
             <div class="field-label">新增 / 更新（同标识覆盖）</div>
             <div class="key-row">
-              <input id="skill-id" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
-              <input id="skill-name" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+              <input id="skill-id" aria-label="技能标识" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
+              <input id="skill-name" aria-label="技能名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
             </div>
             <div class="key-row">
-              <input id="skill-desc" type="text" spellcheck="false" placeholder="一句话说明" />
-              <input id="skill-triggers" type="text" spellcheck="false" placeholder="触发关键词，逗号分隔，如：提交信息, commit" />
+              <input id="skill-desc" aria-label="技能说明" type="text" spellcheck="false" placeholder="一句话说明" />
+              <input id="skill-triggers" aria-label="技能触发词" type="text" spellcheck="false" placeholder="触发关键词，逗号分隔，如：提交信息, commit" />
             </div>
-            <textarea id="skill-body" class="cmd-template" spellcheck="false"
+            <textarea id="skill-body" aria-label="技能正文" class="cmd-template" spellcheck="false"
               placeholder="技能正文（markdown）。例如：&#10;# 写提交信息&#10;- 一行中文短句，不加前缀&#10;- 说明原因时用「：」而不是括号"></textarea>
             <div class="key-row">
               <button id="skill-add-btn" type="button" class="ghost-btn small">＋ 保存技能</button>
@@ -493,12 +493,12 @@
 
             <div class="field-label">新增 / 更新（同 id 覆盖）</div>
             <div class="key-row">
-              <input id="mcp-id" type="text" spellcheck="false" placeholder="标识，如 filesystem（字母数字下划线短横线）" />
-              <input id="mcp-name" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+              <input id="mcp-id" aria-label="MCP 服务器标识" type="text" spellcheck="false" placeholder="标识，如 filesystem（字母数字下划线短横线）" />
+              <input id="mcp-name" aria-label="MCP 服务器名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
             </div>
             <div class="key-row">
-              <input id="mcp-command" type="text" spellcheck="false" placeholder="启动命令，如 npx" />
-              <input id="mcp-args" type="text" spellcheck="false" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem C:\data" />
+              <input id="mcp-command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="启动命令，如 npx" />
+              <input id="mcp-args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem C:\data" />
             </div>
             <div class="key-row">
               <label class="mcp-check"><input id="mcp-approval" type="checkbox" checked /> 调用需审批（推荐保持开启）</label>
@@ -587,7 +587,7 @@
           <div class="field-label">初始模型 <em class="key-state">新增供应商至少需要一个模型，保存后仍可继续添加</em></div>
           <div id="pf-pending-model-list" class="pending-model-list"></div>
           <div class="key-row model-add-row">
-            <input id="pf-new-model-name" type="text" spellcheck="false" placeholder="输入模型名，或从网关列表选择" />
+            <input id="pf-new-model-name" aria-label="新模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或从网关列表选择" />
             <button id="pf-new-fetch-models" type="button" class="ghost-btn small">获取列表</button>
             <button id="pf-new-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
           </div>
@@ -618,7 +618,7 @@
         <button id="fs-remote" class="ghost-btn small"><i class="ui-icon" data-icon="Globe" aria-hidden="true"></i> 打开远程文件夹</button>
         <button id="fs-upload-btn" class="ghost-btn small" type="button"><i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传本地文件</button>
         <button id="fs-upload-help" class="ghost-btn small" type="button" title="上传没反应？">?</button>
-        <input id="fs-upload-input" type="file" multiple
+        <input id="fs-upload-input" aria-label="选择要上传的文件" type="file" multiple
                style="position:absolute;width:1px;height:1px;opacity:0.01;pointer-events:none;" />
         <span class="fs-hint">云端部署可上传本机文件；也可以把文件直接<b>拖拽</b>到本窗口上传（部分自动化启动的浏览器会屏蔽系统选择框）</span>
       </div>
@@ -676,7 +676,7 @@
 
       <div class="field-label ext-head"><i class="ui-icon" data-icon="Search" aria-hidden="true"></i> 检索测试</div>
       <div class="kb-search-row">
-        <input id="kb-query" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" />
+        <input id="kb-query" aria-label="知识库检索问题" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" />
         <button id="kb-search-btn" class="btn btn-approve">检索</button>
       </div>
       <div id="kb-hits" class="kb-hits"></div>
@@ -736,7 +736,7 @@
       <h3 id="ui-dialog-title">提示</h3>
       <div id="ui-dialog-msg"></div>
       <div id="ui-dialog-input-row" class="hidden">
-        <input id="ui-dialog-input" type="text" spellcheck="false" autocomplete="off" />
+        <input id="ui-dialog-input" aria-label="对话框输入内容" type="text" spellcheck="false" autocomplete="off" />
       </div>
       <div id="ui-dialog-actions">
         <button id="ui-dialog-cancel" class="ghost-btn" type="button">取消</button>

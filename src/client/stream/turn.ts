@@ -41,9 +41,12 @@ function filesMetaOf(files: PendingFile[]): Array<{ name: string; source: string
 
 export function setStatus(mode: "idle" | "busy"): void {
   const el = $("status-dot");
-  if (el) el.className = "status " + mode;
+  if (!el) return;
+  el.className = "status " + mode;
+  const label = mode === "busy" ? "正在生成回复" : "空闲";
+  el.title = label;
+  el.setAttribute("aria-label", label);
 }
-
 export async function send(): Promise<void> {
   const text = inputEl.value.trim();
   if (!text || !state.currentId || state.streaming || state.compacting) return;

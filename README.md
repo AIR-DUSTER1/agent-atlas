@@ -6,6 +6,10 @@
 定位是「学习项目形态，可正常当产品用」—— 代码是带详细中文注释的 LangGraph 教材，
 同时也是日常真能拿来干活的 Agent 工作台。
 
+![空会话工作台](docs/screenshots/main-empty.png)
+
+![使用统计与图表](docs/screenshots/stats-dark.png)
+
 ## 快速开始
 
 ```bash
