@@ -208,7 +208,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         model: config.model,
         apiKey,
         ...(thinkingEnabled ? {} : { temperature }),
-        maxRetries: 2,
+        maxRetries: 0,
         maxTokens,
         ...(thinking ? { thinking: thinking as { type: "enabled"; budget_tokens: number } | { type: "disabled" } } : {}),
         ...(outputConfig?.effort ? { outputConfig: { effort: outputConfig.effort as "low" | "medium" | "high" | "xhigh" | "max" } } : {}),
@@ -223,7 +223,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         model: config.model,
         apiKey,
         temperature,
-        maxRetries: 2,
+        maxRetries: 0,
         ...(thinkingConfig ? { thinkingConfig } : {}),
         ...(config.baseURL ? { baseUrl: config.baseURL } : {}),
       }) as unknown as ChatModelLike;
@@ -234,7 +234,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         model: config.model,
         apiKey,
         temperature,
-        maxRetries: 2,
+        maxRetries: 0,
         useResponsesApi: true,
         // Responses API 的思考强度字段叫 reasoning.effort（不是 reasoning_effort）
         ...(params && Object.keys(params).length
@@ -253,7 +253,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         model: config.model,
         apiKey: config.apiKey,
         temperature,
-        maxRetries: 2,
+        maxRetries: 0,
         // 归一化参数原样进请求体：reasoning_effort / thinking / enable_thinking …
         // （ChatOpenAI 会把 modelKwargs 展开进 /chat/completions 的 payload）
         ...(params && Object.keys(params).length ? { modelKwargs: params } : {}),

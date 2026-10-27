@@ -26,7 +26,7 @@
  * 边界：demo 图（示例 2/3）保持自建 MemorySaver 的教学形态，不经过本层；
  * 子 Agent（subagent.ts）一次性执行也不落盘，避免委派刷屏日志文件。
  */
-import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MemorySaver, type Checkpoint, type CheckpointMetadata } from "@langchain/langgraph";
@@ -89,6 +89,30 @@ function fromB64(text: string): Uint8Array {
   return new Uint8Array(Buffer.from(text, "base64"));
 }
 
+async function replaceCheckpointFile(tmp: string, target: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await rename(tmp, target);
+      return;
+    } catch (err) {
+      lastError = err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EPERM" && code !== "EACCES" && code !== "ENOENT") throw err;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  }
+  // Windows 杀软/索引器短暂占用目标文件：先把原文件移到旁路，替换后再删。
+  const old = `${target}.compact-old`;
+  await rename(target, old).catch(() => {});
+  try {
+    await rename(tmp, target);
+  } catch (err) {
+    await rename(old, target).catch(() => {});
+    throw err instanceof Error ? err : new Error(String(lastError));
+  }
+  await unlink(old).catch(() => {});
+}
 export class PersistentSaver extends MemorySaver {
   private readonly filePath: string;
   /** 当前实例的日志路径（备份枚举用；类外只读） */
@@ -341,7 +365,7 @@ export class PersistentSaver extends MemorySaver {
     const tmp = `${this.filePath}.tmp`;
     const withSchema = [{ type: "schema", schemaVersion: CHECKPOINT_SCHEMA_VERSION, ts: Date.now() }, ...kept];
     await writeFile(tmp, withSchema.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
-    await rename(tmp, this.filePath);
+    await replaceCheckpointFile(tmp, this.filePath);
     log("info", "checkpoint_compacted", {
       file: this.filePath,
       linesBefore: rows.length,

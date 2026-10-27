@@ -32,6 +32,8 @@ import { killProcessTree } from "./subprocess.js";
 import { log } from "./logging.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { incCounter } from "./observability/metrics.js";
+import { CircuitBreaker } from "./runtime/circuit-breaker.js";
+import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { writeAudit } from "./audit.js";
 
 /** 单次 JSON-RPC 请求超时（initialize 可能慢，工具调用给足时间） */
@@ -445,7 +447,7 @@ export async function testMcpServer(id: string): Promise<McpServerStatus> {
  * 调用远端工具并按文本返回。断线自动重连重试一次 ——
  * MCP server 被外部杀掉是常见情况，静默失败会让模型以为工具不存在。
  */
-export async function callMcpTool(
+async function callMcpToolUnsafe(
   server: McpServerConfig,
   toolName: string,
   args: Record<string, unknown>
@@ -476,6 +478,30 @@ export async function callMcpTool(
   }
 }
 
+const mcpGauge = new ResourceGauge("mcp", 4, 20, 5_000);
+const mcpBreakers = new Map<string, CircuitBreaker>();
+
+function mcpBreaker(id: string): CircuitBreaker {
+  let breaker = mcpBreakers.get(id);
+  if (!breaker) {
+    breaker = new CircuitBreaker(`mcp:${id}`, 3, 30_000);
+    mcpBreakers.set(id, breaker);
+  }
+  return breaker;
+}
+
+export async function callMcpTool(
+  server: McpServerConfig,
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<{ text: string; isError: boolean }> {
+  return mcpBreaker(server.id).run(() => mcpGauge.run(() => callMcpToolUnsafe(server, toolName, args)));
+}
+
+export function mcpRuntimeSnapshots(): Array<{ circuit: ReturnType<CircuitBreaker["snapshot"]>; gauge: ReturnType<ResourceGauge["snapshot"]> }> {
+  const gauge = mcpGauge.snapshot();
+  return [...mcpBreakers.values()].map((breaker) => ({ circuit: breaker.snapshot(), gauge }));
+}
 /** tools/call 结果 → 模型可读文本 */
 function toResult(result: unknown): { text: string; isError: boolean } {
   const r = result as {

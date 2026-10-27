@@ -130,3 +130,55 @@ test("只读权限下 deny 的调用也走批处理，且返回模型可读的�
   assert.equal(messages[0].status, "error");
   assert.match(String(messages[0].content), /只读/);
 });
+
+test("重复相同工具调用复用本轮结果，不再次执行", async () => {
+  let runs = 0;
+  const echo = tool(
+    async ({ tag }) => { runs += 1; return `echo:${tag}`; },
+    { name: "echo_tool", description: "重复调用测试", schema: z.object({ tag: z.string() }) }
+  );
+  const node = createApprovalToolsNode({ tools: [echo], approvalDescriptions: {}, profileId: "general" });
+  const first = await node(makeState([{ id: "dup-1", name: "echo_tool", args: { tag: "same" } }]) as never);
+  const firstResult = first.messages[0] as ToolMessage;
+  const second = await node({
+    messages: [
+      new HumanMessage("重复调用测试"),
+      new AIMessage({ content: "", tool_calls: [{ id: "dup-1", name: "echo_tool", args: { tag: "same" }, type: "tool_call" }] }),
+      firstResult,
+      new AIMessage({ content: "", tool_calls: [{ id: "dup-2", name: "echo_tool", args: { tag: "same" }, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 1, "相同参数的工具只能执行一次");
+  assert.match(String((second.messages[0] as ToolMessage).content), /复用本轮上一次/);
+});
+
+test("自主审批重复调用命中去重，不再重复调用风险评估模型", async () => {
+  let executions = 0;
+  let assessments = 0;
+  const writeish = tool(
+    async ({ path }) => { executions += 1; return `wrote:${path}`; },
+    { name: "writeish", description: "自主审批测试", schema: z.object({ path: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [writeish],
+    approvalDescriptions: { writeish: () => "可能修改文件" },
+    profileId: "general",
+    riskAssessor: async () => {
+      assessments += 1;
+      return { highRisk: false, reason: "仅项目内文件" };
+    },
+  });
+  const state1 = makeState([{ id: "risk-1", name: "writeish", args: { path: "a.txt" } }]);
+  const first = await node(state1 as never, { configurable: { permission_mode: "autonomous", thread_id: "t-risk" } });
+  const second = await node({
+    messages: [
+      new HumanMessage("自主审批测试"),
+      new AIMessage({ content: "", tool_calls: [{ id: "risk-1", name: "writeish", args: { path: "a.txt" }, type: "tool_call" }] }),
+      first.messages[0],
+      new AIMessage({ content: "", tool_calls: [{ id: "risk-2", name: "writeish", args: { path: "a.txt" }, type: "tool_call" }] }),
+    ],
+  } as never, { configurable: { permission_mode: "autonomous", thread_id: "t-risk" } });
+  assert.equal(executions, 1);
+  assert.equal(assessments, 1, "相同意图与参数的重复调用不应重复风险评估");
+  assert.match(String((second.messages[0] as ToolMessage).content), /复用本轮上一次/);
+});

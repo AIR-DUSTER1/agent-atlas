@@ -30,8 +30,24 @@ import { config } from "../config.js";
 import { incCounter } from "./observability/metrics.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
-const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review"]);
+const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools"]);
 
+function nodeSegments(node: string | undefined): string[] {
+  return (node ?? "").split(/[/:]/).filter(Boolean);
+}
+
+function isInternalNodeName(node: string | undefined): boolean {
+  return nodeSegments(node).some((segment) => INTERNAL_LLM_NODES.has(segment));
+}
+
+function isToolNodeName(node: string | undefined): boolean {
+  return nodeSegments(node).some((segment) => segment === "tools");
+}
+
+function looksLikeRiskJson(text: string): boolean {
+  const compact = text.replace(/\s+/g, "").toLowerCase();
+  return compact.startsWith("{") && compact.includes("highrisk") && compact.includes("reason");
+}
 function asInterruptPayload(value: unknown): InterruptPayload | null {
   if (!value || typeof value !== "object") return null;
   const type = (value as { type?: unknown }).type;
@@ -338,7 +354,7 @@ export async function* runGraphEvents(
     if (mode === "messages" && Array.isArray(payload)) {
       const [msg, meta] = payload as [unknown, Record<string, unknown>];
       const node = nodeLabel(meta);
-      const internalNode = Boolean(node && INTERNAL_LLM_NODES.has(node));
+      const internalNode = isInternalNodeName(node);
 
       if (msg instanceof AIMessageChunk) {
         // -- token 用量（分片累积合并；Anthropic 系 input/output 分散在多个 chunk）--
@@ -349,7 +365,7 @@ export async function* runGraphEvents(
           if (signature !== usageSignature) {
             usageSignature = signature;
             observeUsageMetrics(usageCallId ?? usageNode ?? "usage", usageAccum, usageModel);
-            yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
+            yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId, node, internal: internalNode };
           }
         }
         // -- 原生思考内容：内部 JSON 节点的正文要过滤，但思考过程仍允许用户查看 --
@@ -361,7 +377,7 @@ export async function* runGraphEvents(
         if (internalNode) continue;
         // -- 文本 token --
         const text = contentText(msg.content);
-        if (text) {
+        if (text && !looksLikeRiskJson(text)) {
           streamedSinceBoundary = true;
           if (msg.id) streamedIds.add(msg.id);
           yield { type: "token", text, node };
@@ -395,7 +411,7 @@ export async function* runGraphEvents(
       }
 
       if (msg instanceof ToolMessage) {
-        if (internalNode) continue;
+        if (internalNode && !isToolNodeName(node)) continue;
         // 整条工具结果（id 与 tool_call 配对）
         if (msg.id) streamedIds.add(msg.id);
         streamedSinceBoundary = false;
@@ -415,7 +431,7 @@ export async function* runGraphEvents(
         if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
           emittedRiskUsageIds.add(riskUsageKey);
           observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
-          yield { type: "usage", ...riskUsage, model: usageModel };
+          yield { type: "usage", ...riskUsage, model: usageModel, node: "tools", internal: true };
         }
         yield {
           type: "tool_result",
@@ -453,13 +469,13 @@ export async function* runGraphEvents(
           });
           yield { type: "node", name: nodeKey };
         }
-        const internalNode = INTERNAL_LLM_NODES.has(nodeKey);
+        const internalNode = isInternalNodeName(nodeKey);
         // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息。
         // 内部 JSON 节点仍会进入循环，以便提取 usage 与原生思考内容，但正文不外泄。
         for (const [, msg] of walkUpdateMessages(nodeKey, update)) {
           if (msg instanceof HumanMessage) continue;
           if (msg instanceof ToolMessage) {
-            if (internalNode) continue;
+            if (internalNode && !isToolNodeName(nodeKey)) continue;
             if (msg.id) streamedIds.add(msg.id);
             streamedSinceBoundary = false;
             const riskUsage = extractRiskUsage(msg);
@@ -467,7 +483,7 @@ export async function* runGraphEvents(
             if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
               emittedRiskUsageIds.add(riskUsageKey);
               observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
-          yield { type: "usage", ...riskUsage, model: usageModel };
+          yield { type: "usage", ...riskUsage, model: usageModel, node: "tools", internal: true };
             }
             yield {
               type: "tool_result",
@@ -487,7 +503,7 @@ export async function* runGraphEvents(
               if (signature !== usageSignature) {
                 usageSignature = signature;
                 observeUsageMetrics(usageCallId ?? usageNode ?? "usage", usageAccum, usageModel);
-            yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId };
+                yield { type: "usage", ...usageAccum, model: usageModel, callId: usageCallId, node: nodeKey, internal: internalNode };
               }
             }
             // 非流式兜底同样保留思考过程；同一消息已流式产出思考时不重复。
@@ -497,7 +513,7 @@ export async function* runGraphEvents(
             }
             if (internalNode) continue;
             const text = contentText(msg.content);
-            if (!text) continue;
+            if (!text || looksLikeRiskJson(text)) continue;
             if (msg.id && streamedIds.has(msg.id)) continue; // 已流式输出过 → 去重
             if (!msg.id && streamedSinceBoundary) continue;  // 无 id 且刚流过 → 视为回显
             if (msg.id) streamedIds.add(msg.id);

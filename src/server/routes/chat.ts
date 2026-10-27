@@ -16,14 +16,23 @@ import {
   getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord,
   recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
-import { getActiveModality } from "../settings.js";
+import { getActiveId, getActiveModality } from "../settings.js";
 import { lifecycle } from "../lifecycle.js";
 import { writeAudit } from "../audit.js";
 import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
 import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
+import { runWithModelSlot } from "../runtime/model-gate.js";
 
+function friendlyModelError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const status = Number(/(?:HTTP\s*)?\b(408|429|5\d{2})\b/i.exec(message)?.[1] ?? 0);
+  if (status === 408) return "模型供应商请求超时（408）。可稍后重试，系统不会自动重试以免消耗额外配额。";
+  if (status === 429) return "模型供应商触发限流（429）。请稍后重试或切换供应商；系统不会自动重试以免消耗额外配额。";
+  if (status >= 500) return `模型供应商暂时不可用（HTTP ${status}）。请稍后重试或切换供应商；本轮未自动重试。`;
+  return message;
+}
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -45,6 +54,10 @@ async function streamToClient(
   });
 
   const controller = new AbortController();
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(": heartbeat\n\n");
+  }, 15_000);
+  heartbeat.unref();
   let clientGone = false;
   // 登记 SSE 连接：优雅退出时 lifecycle 先写 shutdown 帧再 abort，客户端能区分
   // 「服务在重启」与「网络断了」；卸载放在 finally，避免已结束连接被反复通知。
@@ -88,11 +101,12 @@ async function streamToClient(
   } catch (err) {
     if (!controller.signal.aborted) {
       incCounter("agent_model_errors_total", { model: getActiveModelLabel() || "mock", reason: "stream" });
-      const message = err instanceof Error ? err.message : String(err);
+      const message = friendlyModelError(err);
       collected.push({ type: "error", message });
       writeEvent(res, { type: "error", message });
     }
   } finally {
+    clearInterval(heartbeat);
     unregisterSse();
     incGauge("agent_sse_active_streams", { kind: session.kind }, -1);
     const turnStatus = controller.signal.aborted
@@ -227,7 +241,7 @@ async function handleChatInner(
     ...(compactNote ? [new HumanMessage(compactNote)] : []),
     new HumanMessage(fullMessage),
   ];
-  await streamToClient(res, req, session, (signal) =>
+  await runWithModelSlot(getActiveId(), () => streamToClient(res, req, session, (signal) =>
     runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: graphInput }, {
       threadId: session.threadId,
       signal,
@@ -235,7 +249,7 @@ async function handleChatInner(
       turnId: session.turnHistory.at(-1)?.turnId,
       permissionMode: session.permissionMode,
     })
-  , (events) => completeTurnRecord(session, events));
+  , (events) => completeTurnRecord(session, events)));
 }
 
 export async function handleResume(
@@ -354,7 +368,7 @@ async function handleResumeInner(
 
   // 真实图：用 Command({ resume }) 把决定送回被暂停的图（见 agent/hitl.ts / workflow.ts）
   const { buildResumeCommand } = await import("../../agent/hitl.js");
-  await streamToClient(
+  await runWithModelSlot(getActiveId(), () => streamToClient(
     res,
     req,
     session,
@@ -378,5 +392,5 @@ async function handleResumeInner(
       }
       completeTurnRecord(session, events);
     }
-  );
+  ));
 }

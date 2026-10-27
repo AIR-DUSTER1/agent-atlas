@@ -273,3 +273,36 @@ test("MemorySaver 仍是 workflow 图可注入的轻量选项（编译冒烟）"
   const graph = createWorkflowGraph(testProfile, undefined, { checkpointer: new MemorySaver() });
   assert.ok(graph);
 });
+
+test("检查点 compact 后重启续聊仍保留完整会话上下文", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agent-ckpt-compact-context-"));
+  const file = join(dir, "checkpoints.ndjson");
+  let saverA: PersistentSaver | undefined;
+  let saverB: PersistentSaver | undefined;
+  try {
+    saverA = new PersistentSaver(file);
+    const graphA = createWorkflowGraph(testProfile, spyModels(new SpyModel([ANALYSIS_OK, "记住你叫小明。", REVIEW_OK])) as never, { checkpointer: saverA });
+    const thread = "th-compact-context";
+    await graphA.invoke({ messages: [new HumanMessage("我叫小明，请记住")] }, { configurable: { thread_id: thread } });
+    const graphA2 = createWorkflowGraph(testProfile, spyModels(new SpyModel([ANALYSIS_OK, "好的。", REVIEW_OK])) as never, { checkpointer: saverA });
+    await graphA2.invoke({ messages: [new HumanMessage("我们继续聊")] }, { configurable: { thread_id: thread } });
+    await saverA.flush();
+    const graphA3 = createWorkflowGraph(testProfile, spyModels(new SpyModel([ANALYSIS_OK, "继续。", REVIEW_OK])) as never, { checkpointer: saverA });
+    await graphA3.invoke({ messages: [new HumanMessage("第三轮继续")] }, { configurable: { thread_id: thread } });
+    await saverA.flush();
+    await saverA.compactNow();
+    await saverA.flush();
+
+    saverB = new PersistentSaver(file);
+    await saverB.loadFromDisk();
+    const model = new SpyModel([ANALYSIS_OK, "你叫小明。", REVIEW_OK]);
+    const graphB = createWorkflowGraph(testProfile, spyModels(model) as never, { checkpointer: saverB });
+    await graphB.invoke({ messages: [new HumanMessage("我叫什么？")] }, { configurable: { thread_id: thread } });
+    assert.match(JSON.stringify(model.seen), /我叫小明/);
+    assert.match(JSON.stringify(model.seen), /我们继续聊/);
+  } finally {
+    await saverA?.flush();
+    await saverB?.flush();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

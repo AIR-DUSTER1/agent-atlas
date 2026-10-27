@@ -28,12 +28,16 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { writeAudit } from "./audit.js";
-import { runWithLimit } from "./limits.js";
+import { recordDependency } from "./observability/dependency-status.js";
+import { incCounter } from "./observability/metrics.js";
+import { CircuitBreaker } from "./runtime/circuit-breaker.js";
+import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { log } from "./logging.js";
 
 /** 贝壳 CLI 资源桶（T2-5）：查询 + 后台 analyze 共用，2 并发上限 */
-const BEIKE_CLI_BUCKET = "beike-cli";
 const BEIKE_CLI_CONCURRENCY = 2;
+const beikeGauge = new ResourceGauge("beike", BEIKE_CLI_CONCURRENCY, 20, 15_000);
+const beikeBreaker = new CircuitBreaker("beike", 3, 30_000);
 
 // ---------------------------------------------------------------------------
 // 常量（限量即上限）
@@ -378,8 +382,15 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
   try {
     const { path: bin } = await ensureBeike();
     // T2-5：贝壳 CLI 全局并发上限 2（用户查询 + analyze 后台上报不会互相挤爆）
-    const r = await runWithLimit(BEIKE_CLI_BUCKET, BEIKE_CLI_CONCURRENCY, () =>
-      runBeikeRaw(bin, args, BEIKE_RUN_TIMEOUT_MS));
+    const r = await beikeBreaker.run(() => beikeGauge.run(() =>
+      runBeikeRaw(bin, args, BEIKE_RUN_TIMEOUT_MS)));
+    if (r.code === 0) {
+      recordDependency("beike", "ok", "贝壳 CLI 调用正常");
+      incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
+    } else {
+      recordDependency("beike", "degraded", "贝壳 CLI 返回错误");
+      incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
+    }
     if (r.code === 0) {
       const parsed = parseBeikeJson(r.stdout);
       if (parsed.ok) return { ok: true, action, data: parsed.data };
@@ -406,6 +417,8 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
       error: `贝壳查询失败（beike ${args[0]} ${args[1]}）：${detail}`,
     };
   } catch (err) {
+    recordDependency("beike", "down", "贝壳 CLI 不可用");
+    incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
     return { ...unavailableJSON(err), ok: false, action, error: err instanceof Error ? err.message : String(err) } as BeikeOutcome;
   }
 }

@@ -35,6 +35,8 @@ import { maskKey } from "./settings.js";
 import { log } from "./logging.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { incCounter } from "./observability/metrics.js";
+import { CircuitBreaker } from "./runtime/circuit-breaker.js";
+import { ResourceGauge } from "./runtime/resource-gauge.js";
 
 // ---------------------------------------------------------------------------
 // 配置
@@ -58,6 +60,8 @@ const DEFAULTS = { collection: "default", topK: 5 };
 const MAX_SEARCH_CHARS = 4_000;      // 迟缓网关兜底：摘要长度截断
 const SEARCH_TIMEOUT_MS = 30_000;
 const INGEST_TIMEOUT_MS = 90_000;
+const ragGauge = new ResourceGauge("rag", 3, 20, 5_000);
+const ragBreaker = new CircuitBreaker("rag", 3, 30_000);
 
 let rag: RagSaved = { baseURL: "", apiKey: "", ...DEFAULTS, docs: {} };
 let ragLoaded = false;
@@ -143,11 +147,11 @@ export async function testRagConnection(opts?: { baseURL?: string; apiKey?: stri
   const key = opts?.apiKey !== undefined ? String(opts.apiKey) : rag.apiKey;
   let res: Response;
   try {
-    res = await fetch(base + "/", {
+    res = await ragGauge.run(() => fetch(base + "/", {
       method: "GET",
       headers: key ? { Authorization: `Bearer ${key}` } : {},
       signal: AbortSignal.timeout(10_000),
-    });
+    }));
     recordDependency("rag", "ok", "RAG 服务可达");
     incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "success" });
   } catch (e) {
@@ -199,17 +203,26 @@ export async function searchRag(query: string, topK?: number): Promise<{ query: 
   if (!isRagConfigured()) throw new Error("未配置外部 RAG 服务：请在 📚 知识库面板填写服务地址");
   const q = query.trim();
   if (!q) throw new Error("检索词不能为空");
-  const res = await fetch(rag.baseURL + "/search", {
-    method: "POST",
-    headers: ragHeaders(),
-    body: JSON.stringify({
-      collection: rag.collection,
-      query: q,
-      topK: topK && topK >= 1 ? Math.min(20, Math.round(topK)) : rag.topK,
-    }),
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+  const res = await ragBreaker.run(() => ragGauge.run(async () => {
+    const response = await fetch(rag.baseURL + "/search", {
+      method: "POST",
+      headers: ragHeaders(),
+      body: JSON.stringify({
+        collection: rag.collection,
+        query: q,
+        topK: topK && topK >= 1 ? Math.min(20, Math.round(topK)) : rag.topK,
+      }),
+      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+    });
+    if (!response.ok) throw ragError(response, "search");
+    recordDependency("rag", "ok", "RAG 检索正常");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "success" });
+    return response;
+  })).catch((err) => {
+    recordDependency("rag", "down", "RAG 检索失败");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "error" });
+    throw err;
   });
-  if (!res.ok) throw ragError(res, "search");
   const body = (await res.json()) as unknown;
   if (!body || typeof body !== "object") throw new Error("RAG 服务 search 返回了非 JSON 内容");
   const hits = parseHits(body as Record<string, unknown>).map(normalizeHit);
@@ -218,13 +231,22 @@ export async function searchRag(query: string, topK?: number): Promise<{ query: 
 
 /** 入库：送一批文档给外部服务（切块 / embedding 都由服务端完成） */
 async function ragIngest(documents: Array<{ id: string; name: string; text: string; meta: Record<string, unknown> }>): Promise<{ indexed: number; chunks: number | null }> {
-  const res = await fetch(rag.baseURL + "/ingest", {
-    method: "POST",
-    headers: ragHeaders(),
-    body: JSON.stringify({ collection: rag.collection, documents }),
-    signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
+  const res = await ragBreaker.run(() => ragGauge.run(async () => {
+    const response = await fetch(rag.baseURL + "/ingest", {
+      method: "POST",
+      headers: ragHeaders(),
+      body: JSON.stringify({ collection: rag.collection, documents }),
+      signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw ragError(response, "ingest");
+    recordDependency("rag", "ok", "RAG 入库正常");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "success" });
+    return response;
+  })).catch((err) => {
+    recordDependency("rag", "down", "RAG 入库失败");
+    incCounter("agent_external_dependency_calls_total", { dependency: "rag", status: "error" });
+    throw err;
   });
-  if (!res.ok) throw ragError(res, "ingest");
   let body: Record<string, unknown> = {};
   try { body = (await res.json()) as Record<string, unknown>; } catch { /* 契约不强制返回体 */ }
   const indexed = documents.length;
@@ -435,3 +457,8 @@ async function ingestTextBatch(
 }
 
 export type { RagDocMeta };
+
+/** 诊断用：RAG 熔断与资源队列快照（不含地址和凭据）。 */
+export function ragRuntimeSnapshot(): { circuit: ReturnType<CircuitBreaker["snapshot"]>; gauge: ReturnType<ResourceGauge["snapshot"]> } {
+  return { circuit: ragBreaker.snapshot(), gauge: ragGauge.snapshot() };
+}

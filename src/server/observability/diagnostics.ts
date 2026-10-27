@@ -12,10 +12,11 @@ import { readinessSnapshot } from "../health.js";
 import { isAuthEnabled } from "../auth.js";
 import { checkpointHealthReport, CHECKPOINT_SCHEMA_VERSION } from "../../checkpoint.js";
 import { journalHealthReport, JOURNAL_SCHEMA_VERSION } from "../session-store.js";
-import { getRagPublic } from "../rag.js";
-import { listMcpStatus, type McpServerStatus } from "../mcp.js";
+import { getRagPublic, ragRuntimeSnapshot } from "../rag.js";
+import { listMcpStatus, mcpRuntimeSnapshots, type McpServerStatus } from "../mcp.js";
 import { listDependencyStatuses } from "./dependency-status.js";
 import { isProductionMode } from "../production.js";
+import { modelGateSnapshots } from "../runtime/model-gate.js";
 import type { NdjsonHealthReport } from "../persistence/ndjson-health.js";
 
 function safeNdjson(report: NdjsonHealthReport | null) {
@@ -73,8 +74,10 @@ export async function buildDiagnostics(): Promise<Record<string, unknown>> {
     },
     secrets,
     dependencies: {
-      rag: { configured: Boolean((rag as { configured?: boolean }).configured), last: dependencies.find((d) => d.id === "rag") ?? null },
+      rag: { configured: Boolean((rag as { configured?: boolean }).configured), last: dependencies.find((d) => d.id === "rag") ?? null, runtime: ragRuntimeSnapshot() },
       mcp: mcp.map((server) => ({ id: server.id, enabled: server.enabled, connected: server.connected, error: server.error ?? "" })),
+      mcpRuntime: mcpRuntimeSnapshots(),
+      modelRuntime: modelGateSnapshots(),
       other: dependencies.filter((d) => d.id !== "rag"),
     },
   };

@@ -138,6 +138,7 @@ test("stream：重复 usage 快照不重复产出，工具返回后生成新的 
     [100, 10, 20],
     [160, 30, 40],
   ]);
+  assert.ok(usage.every((event) => event.internal === false && event.node === "agent"));
 });
 
 test("stream：自主审查 usage 从 ToolMessage 转发并跨双流去重", async () => {
@@ -167,5 +168,34 @@ test("stream：自主审查 usage 从 ToolMessage 转发并跨双流去重", asy
   assert.equal(usage.length, 1);
   assert.equal(usage[0].callId, "risk:thread:tool-1");
   assert.deepEqual([usage[0].inputTokens, usage[0].outputTokens, usage[0].cacheReadTokens], [300, 20, 100]);
+  assert.equal(usage[0].internal, true);
+  assert.equal(usage[0].node, "tools");
   assert.equal(events.filter((event) => event.type === "tool_result").length, 2);
+});
+
+test("stream：tools 节点风险审查 JSON 不进入用户正文，但工具结果仍保留", async () => {
+  const graph = {
+    stream: async () =>
+      (async function* () {
+        yield ["messages", [
+          new AIMessageChunk({
+            id: "risk-json",
+            content: '{"highRisk":false,"reason":"只读查询"}',
+            usage_metadata: { input_tokens: 80, output_tokens: 12, total_tokens: 92 },
+          }),
+          { langgraph_node: "tools", checkpoint_ns: "tools" },
+        ]];
+        yield ["messages", [
+          new ToolMessage({ content: "命令输出", tool_call_id: "tool-1", name: "terminal" }),
+          { langgraph_node: "tools", checkpoint_ns: "tools" },
+        ]];
+      })(),
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of runGraphEvents(graph, {}, { threadId: "risk-json-filter" })) events.push(event);
+  assert.equal(events.filter((event) => event.type === "token" || event.type === "ai_message").length, 0);
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 1);
+  const usage = events.filter((event) => event.type === "usage");
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].internal, true);
 });

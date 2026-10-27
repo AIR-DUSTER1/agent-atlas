@@ -85,6 +85,10 @@ export type AgentEvent =
        * 旧 journal 没有该字段时，统计层按连续快照去重。
        */
       callId?: string;
+      /** 产生用量的图节点；前端用它区分主循环与 review/analyze 辅助调用 */
+      node?: string;
+      /** 内部辅助模型调用：会计入统计成本，但不得覆盖上下文容量条 */
+      internal?: boolean;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }

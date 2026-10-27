@@ -39,6 +39,9 @@ import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor 
 // ---------------------------------------------------------------------------
 const tools = [calculator, getCurrentTime, getWeather, sendEmail];
 
+/** 单轮最多执行的工具调用；超限后要求模型总结，避免自主循环拖垮会话。 */
+const MAX_TOOL_CALLS_PER_TURN = 12;
+
 /** 传给 interrupt() 的载荷：CLI 根据它渲染审批提示 */
 export interface ApprovalRequest {
   type: "approval";
@@ -74,6 +77,53 @@ function messageText(content: BaseMessage["content"]): string {
   }).join("");
 }
 
+/** 稳定序列化对象键顺序，保证同一工具参数得到相同缓存键。 */
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`).join(",")}}`;
+  }
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+}
+
+function toolCallSignature(name: string, args: unknown): string {
+  return `${name}:${stableSerialize(args)}`;
+}
+
+interface TurnToolHistory {
+  calls: number;
+  completedBySignature: Map<string, { content: ToolMessage["content"]; status: string }>;
+}
+
+/** 只统计最近一条 HumanMessage 之后的工具调用与结果，用于单轮去重和次数封顶。 */
+function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
+  let start = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].getType() === "human") { start = index + 1; break; }
+  }
+  const calls = new Map<string, string>();
+  const completedBySignature = new Map<string, { content: ToolMessage["content"]; status: string }>();
+  let count = 0;
+  for (const message of messages.slice(start)) {
+    const ai = message as AIMessage;
+    if (Array.isArray(ai.tool_calls)) {
+      for (const call of ai.tool_calls) {
+        if (!call.id) continue;
+        const signature = toolCallSignature(call.name, call.args);
+        calls.set(call.id, signature);
+        count += 1;
+      }
+    }
+    if (message instanceof ToolMessageCls) {
+      const signature = calls.get(message.tool_call_id);
+      if (signature && message.status !== "error") {
+        completedBySignature.set(signature, { content: message.content, status: message.status ?? "success" });
+      }
+    }
+  }
+  return { calls: count, completedBySignature };
+}
 function lastHumanIntent(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -143,6 +193,9 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     const lastMessage = state.messages.at(-1) as AIMessage;
     const toolResults: ToolMessage[] = [];
     const userIntent = lastHumanIntent(state.messages);
+    const history = turnToolHistory(state.messages);
+    let callsThisTurn = Math.max(0, history.calls - (lastMessage.tool_calls?.length ?? 0));
+    const callSignatures = new Map<string, string>();
 
     // 阶段 2（F8）：把「可直接执行」的调用攒成一批并发跑，审批类仍逐个串行。
     //
@@ -160,6 +213,29 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     }> = [];
 
     for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
+      const signature = toolCallSignature(call.name, call.args);
+      const callKey = call.id || `call-${callIndex}`;
+      callSignatures.set(callKey, signature);
+      if (callsThisTurn >= MAX_TOOL_CALLS_PER_TURN) {
+        toolResults.push(new ToolMessageCls({
+          content: `本轮工具调用已达 ${MAX_TOOL_CALLS_PER_TURN} 次上限，未继续执行「${call.name}」。请基于已有结果直接总结，不要再次调用工具。`,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: "error",
+        }));
+        continue;
+      }
+      callsThisTurn += 1;
+      const prior = history.completedBySignature.get(signature);
+      if (prior) {
+        toolResults.push(new ToolMessageCls({
+          content: `检测到重复工具调用，已复用本轮上一次「${call.name}」的结果，未重复执行。\n${toolResultText(prior.content)}`.slice(0, 12_000),
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: prior.status === "error" ? "error" : "success",
+        }));
+        continue;
+      }
       const toolFn = toolMap.get(call.name);
       if (!toolFn) {
         // 模型可能伪造或残留旧工具调用：只返回模型可读的拒绝结果，不 throw 穿透图。
@@ -186,7 +262,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
       let riskUsage: ToolRiskAssessment["usage"];
       let riskCallId: string | undefined;
       if (action === "assess") {
-        const cacheKey = `${threadId}|${call.id || callIndex}|${call.name}|${JSON.stringify(call.args)}`;
+        const cacheKey = `${threadId}|${call.name}|${stableSerialize(call.args)}|${userIntent}`;
         let pendingAssessment = riskCache.get(cacheKey);
         if (!pendingAssessment) {
           if (riskCache.size >= MAX_RISK_CACHE_ENTRIES) {
@@ -252,6 +328,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           },
         } : {}),
       }));
+      if (status === "success") history.completedBySignature.set(signature, { content, status });
     }
 
     // ── 批量并发执行「可直接执行」的调用（F8 阶段 2）──
@@ -274,6 +351,9 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           name: entry.item.call.name,
           status: entry.status,
         }));
+        if (entry.status === "success") {
+          history.completedBySignature.set(toolCallSignature(entry.item.call.name, entry.item.call.args), { content: entry.content, status: entry.status });
+        }
       }
     }
 
