@@ -52,6 +52,25 @@ export function sessionMatchesSearch(s: Session, term: string): boolean {
   });
 }
 
+function startOfDay(ts: number): number {
+  const date = new Date(ts);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function sessionTimeLabel(ts: number, now = Date.now()): string {
+  const days = Math.round((startOfDay(now) - startOfDay(ts)) / 86_400_000);
+  const time = new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  if (days <= 0) return time;
+  if (days === 1) return `昨天 ${time}`;
+  if (days < 7) return `${days} 天前`;
+  return `${new Date(ts).getMonth() + 1}/${new Date(ts).getDate()}`;
+}
+
+function sessionDayGroup(ts: number, now = Date.now()): "今天" | "昨天" | "更早" {
+  const days = Math.round((startOfDay(now) - startOfDay(ts)) / 86_400_000);
+  return days <= 0 ? "今天" : days === 1 ? "昨天" : "更早";
+}
 export function renderSessions(): void {
   const list = $("session-list");
   if (!list) return;
@@ -80,7 +99,16 @@ export function renderSessions(): void {
       h("span", { class: "p-type-tag" }, group.project ? (group.project.type === "cloud" ? "云端" : "本地") : "已移除"),
     );
     list.appendChild(head);
-    for (const session of group.sessions) list.appendChild(renderSessionItem(session));
+    const sorted = [...group.sessions].sort((left, right) => right.createdAt - left.createdAt);
+    let day = "";
+    for (const session of sorted) {
+      const nextDay = sessionDayGroup(session.createdAt);
+      if (nextDay !== day) {
+        day = nextDay;
+        list.appendChild(h("div", { class: "session-time-head" }, day));
+      }
+      list.appendChild(renderSessionItem(session));
+    }
   }
   if (!list.children.length) {
     list.appendChild(h("div", { class: "fs-empty" }, term
@@ -92,7 +120,7 @@ export function renderSessions(): void {
 function renderSessionItem(session: Session): HTMLElement {
   const meta = h("div", { class: "s-meta" },
     h("span", { class: "s-demo" }, sessionTagText(session)),
-    h("span", null, new Date(session.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
+    h("span", null, sessionTimeLabel(session.createdAt)),
     session.pendingApproval ? h("span", { class: "s-pending" }, icon("Clock", { size: 12 }), "待审批") : null,
   );
 

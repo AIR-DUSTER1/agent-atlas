@@ -17,6 +17,7 @@ import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } fro
 import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
 import { icon, initIconHydration } from "./ui/icon.js";
+import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
@@ -77,6 +78,7 @@ bindCompactAction(compactContext);
 async function init(): Promise<void> {
   loadLocal();
   initIconHydration();
+  bindScrollToBottom();
   // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
   if (desktopBridge()?.isElectron) document.body.classList.add("in-desktop");
 
@@ -155,6 +157,14 @@ async function init(): Promise<void> {
   // 主题：顶栏 ☀️/🌙 切换 + 持久化
   updateThemeBtn();
   on("theme-btn", "click", toggleTheme);
+  // 空会话快捷起步：只填充输入框，不替用户自动发送
+  document.querySelectorAll<HTMLButtonElement>("[data-empty-prompt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      inputEl.value = button.dataset.emptyPrompt ?? "";
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.focus();
+    });
+  });
 
   // 窄屏抽屉侧栏：☰ 开关 / 遮罩关闭 / Esc 关闭
   on("sidebar-toggle", "click", () => setSidebarOpen(!$("sidebar")?.classList.contains("open")));

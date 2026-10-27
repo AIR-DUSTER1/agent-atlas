@@ -19,6 +19,8 @@ import {
 import { scrollBottom } from "../core/dom.js";
 import { decideApproval, decideClarification } from "../actions/approvals.js";
 import { renderToolEnhancers } from "./tool-enhancers.js";
+import { h } from "../ui/h.js";
+import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
 import type {
   AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
@@ -107,18 +109,17 @@ export function groupToolCallsIfNeeded(
   const errors = tools.filter((tool) => tool.result?.isError).length;
   const status = running ? `${running} 个运行中` : errors ? `${errors} 个失败` : "全部完成";
 
-  const details = document.createElement("details");
-  details.className = "tool-group";
-  details.innerHTML = `
-    <summary class="tool-group-summary">
-      <span class="tool-group-caret">▶</span>
-      <span class="tool-group-icon">🔧</span>
-      <span class="tool-group-title">tools</span>
-      <span class="tool-group-count"></span>
-      <span class="tool-group-names"></span>
-      <span class="tool-group-status"></span>
-    </summary>
-    <div class="tool-group-items"></div>`;
+  const details = h("details", { class: "tool-group" },
+    h("summary", { class: "tool-group-summary" },
+      h("span", { class: "tool-group-caret" }, "▶"),
+      h("span", { class: "tool-group-icon" }, icon("Wrench", { size: 13 })),
+      h("span", { class: "tool-group-title" }, "tools"),
+      h("span", { class: "tool-group-count" }),
+      h("span", { class: "tool-group-names" }),
+      h("span", { class: "tool-group-status" }),
+    ),
+    h("div", { class: "tool-group-items" }),
+  );
   const countEl = details.querySelector(".tool-group-count");
   if (countEl) countEl.textContent = `${tools.length} 次调用`;
   const namesEl = details.querySelector(".tool-group-names");
@@ -196,19 +197,20 @@ export function renderApprovalCard(part: ApprovalPart, el: HTMLElement): void {
   el.classList.toggle("done-approve", approved);
   el.classList.toggle("done-reject", rejected);
   el.classList.toggle("collapsed", collapsed);
-  el.innerHTML = `
-    <button type="button" class="approval-summary" aria-expanded="${!collapsed}">
-      <span class="approval-summary-icon">🛂</span>
-      <span class="approval-summary-copy"><strong></strong><small></small></span>
-      <span class="approval-verdict"></span>
-      <span class="approval-chevron">▸</span>
-    </button>
-    <div class="approval-body">
-      <div class="approval-risk-reason hidden"></div>
-      <div class="approval-desc"></div>
-      <div class="approval-args"></div>
-      <div class="approval-actions"></div>
-    </div>`;
+  el.replaceChildren(
+    h("button", { type: "button", class: "approval-summary", "aria-expanded": String(!collapsed) },
+      h("span", { class: "approval-summary-icon" }, icon("ShieldAlert", { size: 15 })),
+      h("span", { class: "approval-summary-copy" }, h("strong"), h("small")),
+      h("span", { class: "approval-verdict" }),
+      h("span", { class: "approval-chevron" }, icon("ChevronRight", { size: 12 })),
+    ),
+    h("div", { class: "approval-body" },
+      h("div", { class: "approval-risk-reason hidden" }),
+      h("div", { class: "approval-desc" }),
+      h("div", { class: "approval-args" }),
+      h("div", { class: "approval-actions" }),
+    ),
+  );
   const strong = el.querySelector(".approval-summary-copy strong");
   if (strong) {
     strong.textContent = pending
@@ -261,12 +263,13 @@ export function renderApprovalCard(part: ApprovalPart, el: HTMLElement): void {
 
 export function renderClarificationCard(part: ClarificationPart, el: HTMLElement): void {
   const req = part.req;
-  el.innerHTML = `
-    <div class="approval-title">🧭 需求澄清（请选择一个方向）</div>
-    <div class="approval-desc"></div>
-    <div class="clarify-options"></div>
-    <div class="clarify-custom hidden"></div>
-    <div class="approval-actions"></div>`;
+  el.replaceChildren(
+    h("div", { class: "approval-title" }, icon("CircleAlert", { size: 15 }), "需求澄清（请选择一个方向）"),
+    h("div", { class: "approval-desc" }),
+    h("div", { class: "clarify-options" }),
+    h("div", { class: "clarify-custom hidden" }),
+    h("div", { class: "approval-actions" }),
+  );
   const descEl = el.querySelector(".approval-desc");
   if (descEl) descEl.textContent = req.question || "请补充关键信息后继续";
   const options = el.querySelector(".clarify-options");
@@ -349,15 +352,16 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
   if (part.p === "thinking") {
     const details = document.createElement("details");
     details.className = "thinking-block";
-    details.innerHTML = `
-      <summary class="thinking-summary">
-        <span class="thinking-spark">💭</span>
-        <span class="thinking-title">思考过程</span>
-        <span class="thinking-node"></span>
-        <span class="thinking-meta"></span>
-        <span class="thinking-chevron">▶</span>
-      </summary>
-      <div class="thinking-body"><pre class="thinking-text"></pre></div>`;
+    details.append(
+      h("summary", { class: "thinking-summary" },
+        h("span", { class: "thinking-spark" }, icon("Brain", { size: 13 })),
+        h("span", { class: "thinking-title" }, "思考过程"),
+        h("span", { class: "thinking-node" }),
+        h("span", { class: "thinking-meta" }),
+        h("span", { class: "thinking-chevron" }, icon("ChevronRight", { size: 11 })),
+      ),
+      h("div", { class: "thinking-body" }, h("pre", { class: "thinking-text" })),
+    );
     const nodeEl = details.querySelector(".thinking-node");
     if (nodeEl) nodeEl.textContent = `${nodeIcon(part.node)} ${nodeLabel(part.node)}`;
     body.appendChild(details);
@@ -392,18 +396,19 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
   if (part.p === "tool") {
     const card = document.createElement("div");
     card.className = "tool-card running";
-    card.innerHTML = `
-      <div class="tool-head">
-        <span class="tool-icon"></span>
-        <span class="tool-name"></span>
-        <span class="tool-args-preview"></span>
-        <span class="tool-status"><span class="spinner"></span>运行中</span>
-        <span class="chevron">▶</span>
-      </div>
-      <div class="tool-body">
-        <div class="tool-section"><div class="tool-label">参数 (流式)</div><pre class="args-pre"></pre></div>
-        <div class="tool-section"><div class="tool-label">结果</div><pre class="result-pre">…</pre></div>
-      </div>`;
+    card.replaceChildren(
+      h("div", { class: "tool-head" },
+        h("span", { class: "tool-icon" }),
+        h("span", { class: "tool-name" }),
+        h("span", { class: "tool-args-preview" }),
+        h("span", { class: "tool-status" }, h("span", { class: "spinner" }), "运行中"),
+        h("span", { class: "chevron" }, "▶"),
+      ),
+      h("div", { class: "tool-body" },
+        h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "参数 (流式)"), h("pre", { class: "args-pre" })),
+        h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "结果"), h("pre", { class: "result-pre" }, "…")),
+      ),
+    );
     const iconEl = card.querySelector(".tool-icon");
     if (iconEl) iconEl.textContent = TOOL_ICONS[part.name] || "🔧";
     const nameEl = card.querySelector(".tool-name");
@@ -441,7 +446,7 @@ export function mountTyping(block: AssistantBlock): void {
   if (!body || block._typing) return;
   const t = document.createElement("div");
   t.className = "typing";
-  t.innerHTML = "<i></i><i></i><i></i>";
+  t.replaceChildren(h("i"), h("i"), h("i"));
   body.appendChild(t);
   block._typing = t;
 }

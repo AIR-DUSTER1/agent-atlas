@@ -32,6 +32,7 @@ export const CLIENT_SOURCES = [
   "ui/dialog.ts",
   "ui/menu.ts",
   "ui/toast.ts",
+  "ui/scroll-to-bottom.ts",
   // 协议与纯函数模块
   "modules/format.ts",
   "modules/chat-flow.ts",

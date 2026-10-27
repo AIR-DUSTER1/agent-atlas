@@ -222,3 +222,13 @@ button > .ui-icon { pointer-events: none; }
 }
 .cm-arr.ui-icon { --icon-size: 10px; margin-left: 2px; }
 .settings-note .ui-icon { vertical-align: -2px; margin-right: 3px; }
+.approval-summary-icon,
+.thinking-spark,
+.tool-group-icon { display: inline-flex; align-items: center; }
+.approval-summary-icon .ui-icon { --icon-size: 15px; }
+.thinking-spark .ui-icon { --icon-size: 13px; }
+.tool-group-icon .ui-icon { --icon-size: 13px; }
+.approval-chevron,
+.thinking-chevron { display: inline-flex; align-items: center; justify-content: center; }
+.approval-chevron .ui-icon { --icon-size: 11px; }
+.thinking-chevron .ui-icon { --icon-size: 10px; }

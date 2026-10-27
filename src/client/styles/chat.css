@@ -441,3 +441,65 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;
 }
+
+/* 空会话：不再是黑屏，给出可直接执行的起步动作 */
+.empty-session {
+  width: min(var(--content-w), calc(100vw - 40px));
+  min-height: min(520px, calc(100vh - 260px));
+  margin: 0 auto;
+  padding: 56px 24px 100px;
+}
+.empty-session-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--info-bg), transparent);
+  color: var(--accent);
+}
+.empty-session-icon .ui-icon { --icon-size: 27px; }
+.empty-session h2 { margin: 16px 0 6px; color: var(--content-1); font-size: var(--font-2xl); letter-spacing: -.02em; }
+.empty-session > p { max-width: 58ch; margin: 0; color: var(--content-2); font-size: var(--font-md); line-height: 1.75; }
+.empty-suggestions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
+.empty-suggestions button {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  padding: 8px 13px;
+  background: var(--surface-1);
+  color: var(--content-2);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.empty-suggestions button:hover { border-color: var(--accent); color: var(--content-1); background: var(--surface-hover); }
+@media (max-width: 640px) {
+  .empty-session { padding: 36px 8px 100px; }
+  .empty-session h2 { font-size: var(--font-xl); }
+}
+
+/* 阅读历史时的回到底部按钮；不抢滚动位置 */
+.scroll-bottom-btn {
+  position: absolute;
+  z-index: 35;
+  right: 28px;
+  bottom: 178px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 7px 11px;
+  background: var(--surface-2);
+  color: var(--content-2);
+  box-shadow: var(--shadow-2);
+  font: inherit;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.scroll-bottom-btn:hover { color: var(--content-1); border-color: var(--accent); }
+.scroll-bottom-btn[data-unread]:not([data-unread="0"]) { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 860px) {
+  .scroll-bottom-btn { right: 16px; bottom: 160px; }
+}

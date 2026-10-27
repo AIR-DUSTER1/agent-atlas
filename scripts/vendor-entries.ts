@@ -44,7 +44,7 @@ export const VENDOR_ENTRIES: VendorEntry[] = [
         CircleAlert, CircleCheck, Clock, Copy, Terminal, MoreHorizontal, Pencil,
         SlidersHorizontal, Plug, Database, BarChart3, LineChart, PieChart,
         Activity, Zap, Globe, MessageSquare, Command, BookOpen, Server, Menu,
-        ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
+        ArrowDown, ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
         TriangleAlert, CircleX, Sparkles, Map, Settings2, PanelLeft,
         ChevronsUpDown, Calendar, Code, FileCode, FolderTree, CheckCircle2,
         XCircle

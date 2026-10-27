@@ -98,8 +98,12 @@
         <button id="sidebar-toggle" class="settings-btn" title="会话 / 项目列表">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
-        <div class="title-wrap">
-          <span id="session-title">未选择会话</span>
+                <div class="title-wrap">
+          <div class="topbar-breadcrumb" aria-label="当前位置">
+            <span id="breadcrumb-project">工作台</span>
+            <i class="ui-icon" data-icon="ChevronRight" aria-hidden="true"></i>
+            <span id="session-title">未选择会话</span>
+          </div>
           <span id="demo-badge" class="badge hidden"></span>
         </div>
         <div class="topbar-right">
@@ -129,7 +133,16 @@
           <div class="examples-label">内置示例（学习 Demo）</div>
           <div id="demo-cards" class="demo-cards"></div>
         </div>
-        <div id="messages"></div>
+        <section id="empty-session" class="empty-session hidden" aria-labelledby="empty-session-title">
+          <div class="empty-session-icon"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i></div>
+          <h2 id="empty-session-title">开始一个新任务</h2>
+          <p>可以直接提问，也可以从一个明确动作开始。发送前可以附加文件、切换模型或调整权限。</p>
+          <div class="empty-suggestions">
+            <button type="button" data-empty-prompt="审查当前项目的改动，先指出高风险问题，再给出修复建议。">审查当前改动</button>
+            <button type="button" data-empty-prompt="读取我提供的网页或文件，提炼结论并列出证据。">读网页 / 文件</button>
+            <button type="button" data-empty-prompt="统计最近的模型调用和工具使用情况，指出异常和可优化项。">查看用量</button>
+          </div>
+        </section>        <div id="messages"></div>
       </div>
 
       <footer id="composer">

@@ -14,6 +14,8 @@ import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert, uiPrompt } from "../ui/dialog.js";
+import { h } from "../ui/h.js";
+import { icon } from "../ui/icon.js";
 import { fmtSize } from "../modules/format.js";
 import type { FsEntry, FsListResult, PendingFile } from "../modules/types.js";
 
@@ -242,10 +244,9 @@ let dragDepth = 0;
 
 export function setupDragDrop(): void {
   // 全页拖放浮层
-  const overlay = document.createElement("div");
-  overlay.id = "drop-overlay";
-  overlay.className = "hidden";
-  overlay.innerHTML = `<div class="drop-box">📎 松开鼠标，把文件附加到当前对话</div>`;
+  const overlay = h("div", { id: "drop-overlay", class: "hidden" },
+    h("div", { class: "drop-box" }, icon("Paperclip", { size: 20 }), "松开鼠标，把文件附加到当前对话"),
+  );
   document.body.appendChild(overlay);
 
   const hasFiles = (e: DragEvent): boolean => Array.from(e.dataTransfer?.types || []).includes("Files");

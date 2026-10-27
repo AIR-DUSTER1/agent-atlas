@@ -64,8 +64,8 @@ test("审批完成后默认折叠为摘要行，仍可手动展开详情", async
   const app = await readClientSource();
   const css = await readClientCss();
   assert.match(app, /part\.collapsed = true/);
-  assert.match(app, /class="approval-summary"/);
-  assert.match(app, /class="approval-body"/);
+  assert.match(app, /class: "approval-summary"/);
+  assert.match(app, /class: "approval-body"/);
   assert.match(app, /part\.collapsed = !part\.collapsed/);
   assert.match(css, /\.approval-card\.collapsed \.approval-body\s*\{\s*display:\s*none/s);
 });
@@ -76,7 +76,7 @@ test("思考过程使用默认折叠的 details，点击摘要可手动展开", 
   assert.match(app, /case "reasoning": appendReasoning\(ablock, ev\)/);
   assert.match(app, /export function appendReasoning\(ablock: AssistantBlock, ev: \{ text\?: string; node\?: string \}\): void/);
   assert.match(app, /document\.createElement\("details"\)/);
-  assert.match(app, /<summary class="thinking-summary">/);
+  assert.match(app, /h\("summary", \{ class: "thinking-summary" \}/);
   assert.doesNotMatch(app, /details\.open\s*=\s*true/, "思考内容不能默认展开");
   assert.match(app, /thinking-node/);
   assert.match(app, /details\.addEventListener\("toggle"/);

@@ -21,6 +21,7 @@ import { finalize } from "../stream/turn.js";
 import { markInterruptsResolved, markLatestInterruptPending, renderSessions } from "./sessions.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
+import { projectById } from "./projects.js";
 import type { ChatBlock, PermissionModeId, Session } from "../modules/types.js";
 
 const DEMO_BADGE_TEXT: Record<number, string> = {
@@ -49,9 +50,12 @@ export const PERMISSION_MODES: PermissionMode[] = [
 export function showWelcomeState(): void {
   closeComposerMenu();
   const title = $("session-title");
-  if (title) title.textContent = "未选择会话";
+  if (title) title.textContent = "选择会话";
+  const breadcrumb = $("breadcrumb-project");
+  if (breadcrumb) breadcrumb.textContent = projectById(state.projectView)?.name ?? "工作台";
   $("demo-badge")?.classList.add("hidden");
   welcomeEl.classList.remove("hidden");
+  $("empty-session")?.classList.add("hidden");
   messagesEl.innerHTML = "";
   $("context-bar")?.classList.add("hidden");
   inputEl.disabled = true;
@@ -61,8 +65,11 @@ export function showWelcomeState(): void {
 
 export function showChatState(session: Session): void {
   welcomeEl.classList.add("hidden");
+  $("empty-session")?.classList.toggle("hidden", transcript(session.id).length > 0);
   const title = $("session-title");
   if (title) title.textContent = session.title;
+  const breadcrumb = $("breadcrumb-project");
+  if (breadcrumb) breadcrumb.textContent = projectById(session.projectId)?.name ?? "未归属项目";
   const badge = $("demo-badge");
   if (badge) {
     const profile = profileMetaForSession(session);

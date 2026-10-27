@@ -178,3 +178,5 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+#drop-overlay .drop-box { display: flex; align-items: center; gap: 10px; }
+#drop-overlay .ui-icon { --icon-size: 20px; color: var(--accent); }

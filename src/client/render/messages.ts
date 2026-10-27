@@ -2,94 +2,85 @@
  * ============================================================
  * render/messages.ts — 一轮对话的「块」挂载与整体重放
  * ============================================================
- * 职责：user / assistant / notice / error 四种块的 DOM 骨架，以及整段
- * 历史的一次性重建（renderAll）。
- * 设计立场：
- *  - 块级只搭骨架与静态内容，助手块内部部件交给 parts.ts —— 两者职责分明；
- *  - 重放必须清空 partEls/blockBodies，否则旧 DOM 引用会指到已移除节点，
- *    导致增量更新写进空气；
- *  - 用户块与 notice 全部 textContent 填充，模型/服务端文案不可信。
+ * 用户正文、附件名、错误和服务端文案全部作为 textContent 子节点写入；
+ * 只有受控 Markdown 边界允许生成 HTML。重放时清理所有旧 DOM 引用，防止
+ * 增量更新写到已移除节点。
  */
-
 import { blockBodies, partEls, state, transcript, usageEls } from "../core/state.js";
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
+import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
+import { h } from "../ui/h.js";
+import { icon } from "../ui/icon.js";
 import type { AssistantBlock, ChatBlock, NoticeBlock } from "../modules/types.js";
 
 /** 用量小字：↑ 输入 · ↓ 输出 · 缓存 N% */
 export function updateTurnCaption(ablock: AssistantBlock): void {
-  const u = ablock._usage;
-  if (!u) return;
+  const usage = ablock._usage;
+  if (!usage) return;
   const body = blockBodies.get(ablock);
   if (!body) return;
   let el = usageEls.get(ablock);
   if (!el || !el.isConnected) {
-    el = document.createElement("div");
-    el.className = "usage-caption";
+    el = h("div", { class: "usage-caption" });
     body.appendChild(el);
     usageEls.set(ablock, el);
   }
-  const cache = u.lastCache > 0 && u.lastInput > 0 ? ` · 缓存 ${Math.round((u.lastCache / u.lastInput) * 100)}%` : "";
-  el.textContent = `↑ ${u.lastInput.toLocaleString("zh-CN")} · ↓ ${u.lastOutput.toLocaleString("zh-CN")}${cache}`;
+  const cache = usage.lastCache > 0 && usage.lastInput > 0
+    ? ` · 缓存 ${Math.round((usage.lastCache / usage.lastInput) * 100)}%`
+    : "";
+  el.textContent = `↑ ${usage.lastInput.toLocaleString("zh-CN")} · ↓ ${usage.lastOutput.toLocaleString("zh-CN")}${cache}`;
 }
 
-/** 把一个 block 挂到消息流末尾 */
-export function mountBlock(block: ChatBlock): void {
+function syncEmptySession(): void {
+  const empty = document.getElementById("empty-session");
+  if (!empty) return;
+  empty.classList.toggle("hidden", Boolean(state.currentId && transcript(state.currentId).length));
+}
+
+/** 把一个 block 挂到消息流末尾。live=false 用于整段历史重放，不累计“新消息”。 */
+export function mountBlock(block: ChatBlock, live = true): void {
+  if (live) markNewMessage();
+  document.getElementById("empty-session")?.classList.add("hidden");
+
   if (block.t === "user") {
-    const wrap = document.createElement("div");
-    wrap.className = "msg-user";
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    // 附件 chips（文件上下文来源：项目 / 远程 / 本地上传）
+    const bubble = h("div", { class: "bubble" });
     if (block.files?.length) {
-      const chips = document.createElement("div");
-      chips.className = "f-chips";
-      for (const f of block.files) {
-        const c = document.createElement("span");
-        c.className = "f-chip";
-        c.innerHTML = `${f.image ? "🖼" : "📎"} <span class="fname"></span><span class="fsrc"></span>`;
-        const name = c.querySelector(".fname");
-        if (name) name.textContent = f.name;
-        const src = c.querySelector(".fsrc");
-        if (src) src.textContent = f.source;
-        chips.appendChild(c);
+      const chips = h("div", { class: "f-chips" });
+      for (const file of block.files) {
+        chips.appendChild(h("span", { class: "f-chip" },
+          icon(file.image ? "Image" : "Paperclip", { size: 12 }),
+          h("span", { class: "fname" }, file.name),
+          h("span", { class: "fsrc" }, file.source),
+        ));
       }
       bubble.appendChild(chips);
     }
-    const textDiv = document.createElement("div");
-    textDiv.textContent = block.text;
-    bubble.appendChild(textDiv);
-    wrap.appendChild(bubble);
+    bubble.appendChild(h("div", null, block.text));
+    const wrap = h("div", { class: "msg-user" }, bubble);
     messagesEl.appendChild(wrap);
     block._el = wrap;
     return;
   }
+
   if (block.t === "notice") {
-    const el = document.createElement("div");
-    el.className = "notice-block" + (block.loading ? " loading" : "");
+    const el = h("div", { class: "notice-block" + (block.loading ? " loading" : "") });
     messagesEl.appendChild(el);
     block._el = el;
     renderNoticeBlock(block);
     return;
   }
+
   if (block.t === "error") {
-    const el = document.createElement("div");
-    el.className = "error-block";
-    el.textContent = "⚠️ " + block.text;
+    const el = h("div", { class: "error-block" }, icon("TriangleAlert", { size: 14 }), h("span", null, block.text));
     messagesEl.appendChild(el);
     block._el = el;
     return;
   }
-  // assistant
-  const wrap = document.createElement("div");
-  wrap.className = "msg-assistant";
-  const avatar = document.createElement("div");
-  avatar.className = "avatar";
-  avatar.textContent = "⚡";
-  const body = document.createElement("div");
-  body.className = "assistant-body";
-  wrap.appendChild(avatar);
-  wrap.appendChild(body);
+
+  const avatar = h("div", { class: "avatar", "aria-hidden": "true" }, icon("Zap", { size: 15 }));
+  const body = h("div", { class: "assistant-body" });
+  const wrap = h("div", { class: "msg-assistant" }, avatar, body);
   messagesEl.appendChild(wrap);
   block._el = wrap;
   blockBodies.set(block, body);
@@ -103,31 +94,29 @@ export function renderNoticeBlock(block: NoticeBlock): void {
   const el = block._el;
   if (!el) return;
   el.classList.toggle("loading", Boolean(block.loading));
-  el.innerHTML = `<div class="notice-title"></div><div class="notice-text"></div>`;
-  const title = el.querySelector(".notice-title");
-  if (title) title.textContent = block.title || "提示";
-  const text = el.querySelector(".notice-text");
-  if (text) text.textContent = block.text || "";
+  const children: Node[] = [
+    h("div", { class: "notice-title" }, block.title || "提示"),
+    h("div", { class: "notice-text" }, block.text || ""),
+  ];
   if (block.summary) {
-    const details = document.createElement("details");
-    details.className = "notice-details";
-    const summary = document.createElement("summary");
-    summary.textContent = "查看压缩摘要";
-    const pre = document.createElement("pre");
-    pre.textContent = block.summary;
-    details.append(summary, pre);
-    el.appendChild(details);
+    children.push(h("details", { class: "notice-details" },
+      h("summary", null, "查看压缩摘要"),
+      h("pre", null, block.summary),
+    ));
   }
+  el.replaceChildren(...children);
 }
 
 /** 全量重绘当前会话（切换会话 / 回放补数据后） */
 export function renderAll(): void {
-  messagesEl.innerHTML = "";
+  resetNewMessageCount();
+  messagesEl.replaceChildren();
   partEls.clear();
   blockBodies.clear();
   usageEls.clear();
   const sid = state.currentId;
   if (!sid) return;
-  for (const block of transcript(sid)) mountBlock(block);
+  for (const block of transcript(sid)) mountBlock(block, false);
   scrollBottom(true);
+  syncEmptySession();
 }
