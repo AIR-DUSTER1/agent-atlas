@@ -32,6 +32,7 @@ export const CLIENT_SOURCES = [
   // 渲染层
   "render/parts.ts",
   "render/messages.ts",
+  "render/tool-enhancers.ts",
   // 流与动作
   "stream/events.ts",
   "stream/turn.ts",
@@ -58,6 +59,11 @@ export const CLIENT_SOURCES = [
   "views/model-menu.ts",
   // 输入框菜单
   "composer/menu.ts",
+  // 第三方隔离 wrapper（业务只允许从这里使用 npm 前端库）
+  "vendor/chart.ts",
+  "vendor/icons.ts",
+  "vendor/markdown.ts",
+  "vendor/highlight.ts",
 ];
 
 /** 读取全部前端源码并拼成一段文本（保留文件边界注释，便于定位断言来源） */

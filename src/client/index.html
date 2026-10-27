@@ -7,11 +7,30 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
   <script>
-    // 防闪烁：样式表应用前先恢复上次选择的主题
-    try { if (localStorage.getItem("lg-agent-theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+    (() => {
+      // 防闪烁：样式表应用前恢复主题；同时提前识别不支持的 import map 浏览器
+      try { if (localStorage.getItem("lg-agent-theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+      if (!HTMLScriptElement.supports || !HTMLScriptElement.supports("importmap")) {
+        document.documentElement.dataset.importmapUnsupported = "true";
+      }
+    })();
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "chart.js": "/vendor/chart-lib.js",
+        "lucide": "/vendor/icons-lib.js",
+        "marked": "/vendor/marked-lib.js",
+        "dompurify": "/vendor/dompurify-lib.js",
+        "highlight.js": "/vendor/highlight-lib.js"
+      }
+    }
   </script>
 </head>
 <body>
+  <div id="browser-compat" role="alert">
+    当前浏览器不支持原生 import map，图表、图标与 Markdown 增强功能将不可用。请升级到 Chrome 89+、Safari 16.4+ 或 Firefox 108+。
+  </div>
   <div id="sidebar-scrim" class="hidden"></div>
   <div id="app">
     <!-- ============ 侧栏：会话管理（参考 ZCode 的会话列表） ============ -->

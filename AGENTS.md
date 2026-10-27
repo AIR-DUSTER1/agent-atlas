@@ -34,11 +34,11 @@ TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、�
 
 | 依赖 | 用途 | 许可证 | 体积（min / gzip） | 状态 |
 |---|---|---|---|---|
-| `chart.js` | 统计页柱状 / 折线 / 环形图 | MIT | ~192 KB / ~67 KB（按需注册控制器） | 已选型，待引入 |
-| `lucide` | 线性图标（按图标具名导入，勿整包） | ISC | 每个图标 ~0.2 KB；34 个图标合计 ~8 KB / ~2.7 KB | 已选型，待引入 |
-| `marked` | Markdown 解析（必须与 DOMPurify 同批引入） | MIT | 与 DOMPurify 合计 ~78 KB / ~26 KB | 已选型，待引入 |
-| `dompurify` | 渲染前 HTML 净化，守住注入防线 | MPL-2.0 OR Apache-2.0 | 见上一行 | 已选型，待引入 |
-| `highlight.js` | 代码块语法高亮（按语言子包导入） | BSD-3-Clause | ~69 KB / ~22 KB（10 种语言） | 已选型，待引入 |
+| `chart.js` 4.6.1 | 统计页柱状 / 折线 / 环形图 | MIT | 201 KB / 69 KB（按需注册控制器） | 已安装 |
+| `lucide` 1.61.0 | 线性图标（按图标具名导入，勿整包） | ISC | 70 个图标 23 KB / 4 KB | 已安装 |
+| `marked` 18.1.1 | Markdown 解析（必须与 DOMPurify 同批引入） | MIT | 45 KB / 14 KB | 已安装 |
+| `dompurify` 3.4.17 | 渲染前 HTML 净化，守住注入防线 | MPL-2.0 OR Apache-2.0 | 30 KB / 12 KB | 已安装 |
+| `highlight.js` 11.12.0 | 代码块语法高亮（按语言子包导入） | BSD-3-Clause | 67 KB / 22 KB（10 种语言） | 已安装 |
 
 引入方式：不引 Vite/Webpack。用 esbuild（已是 `tsx` 的传递依赖）把每个库打成**自包含**
 ESM 放 `public/vendor/`；`tsc` 照旧从 `node_modules` 读类型；浏览器用 `<script type="importmap">`
@@ -67,6 +67,7 @@ src/
     main.ts        #   入口：初始化与全部 DOM 事件绑定
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
     modules/       #   纯函数与协议类型（format / ui-dialog / types…）
+    vendor/        #   第三方库唯一隔离层；业务只能 import wrapper，不能直接 import npm 前端库
     render/        #   渲染层（parts 部件 / messages 块）
     stream/        #   SSE 消费与一轮对话生命周期
     composer/      #   输入框 / 命令与 @ 文件菜单
@@ -89,6 +90,8 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
 - `src/agent/*` 只依赖 `src/` 顶层与 `@langchain/*`，**禁止 import `server/*`**（图要在 CLI 下可独立运行）。
 - `src/server/*` 可以 import `src/` 顶层；互相之间通过导出函数协作，不做隐式单例外的全局状态。
 - 前端 `src/client/**` 只能与 `/api/*` 通信，不 import 服务端代码（类型也不允许）。
+- 业务前端源码不得直接 import npm 前端库；只允许 `src/client/vendor/*` wrapper 接触第三方 API。
+- 通用消息渲染不得 import 房产 / 租房实现；业务专属工具卡通过渲染增强注册表注入。
 
 ## 4. 代码风格（全仓库统一）
 

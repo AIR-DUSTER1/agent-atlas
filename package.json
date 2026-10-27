@@ -14,7 +14,7 @@
     "demo:5": "tsx src/cli.ts 5",
     "start": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.desktop.json --noEmit",
-    "test": "tsx --test --test-concurrency=1 tests/unit/format.test.ts tests/unit/llm-transport.test.ts tests/unit/settings-page.test.ts tests/unit/plugin-registry.test.ts tests/unit/chat-flow.test.ts tests/unit/workflow.test.ts tests/unit/tool-isolation.test.ts tests/unit/permission.test.ts tests/unit/tool-risk.test.ts tests/unit/tools-computer.test.ts tests/unit/subagent.test.ts tests/unit/context-builder.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/stream.test.ts tests/unit/limits.test.ts tests/unit/files.test.ts tests/unit/prehistory.test.ts tests/unit/checkpoint.test.ts tests/unit/memory.test.ts tests/unit/stats.test.ts tests/unit/backup.test.ts tests/unit/restore.test.ts tests/unit/logging.test.ts tests/unit/lifecycle.test.ts tests/unit/subprocess.test.ts tests/unit/tools-web.test.ts tests/unit/commands.test.ts tests/unit/skills.test.ts tests/unit/mcp.test.ts tests/unit/tool-parallel.test.ts tests/integration/server.test.ts tests/integration/agent-profile.test.ts tests/security/http.test.ts",
+    "test": "tsx --test --test-concurrency=1 tests/unit/format.test.ts tests/unit/client-architecture.test.ts tests/unit/llm-transport.test.ts tests/unit/settings-page.test.ts tests/unit/plugin-registry.test.ts tests/unit/chat-flow.test.ts tests/unit/workflow.test.ts tests/unit/tool-isolation.test.ts tests/unit/permission.test.ts tests/unit/tool-risk.test.ts tests/unit/tools-computer.test.ts tests/unit/subagent.test.ts tests/unit/context-builder.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/stream.test.ts tests/unit/limits.test.ts tests/unit/files.test.ts tests/unit/prehistory.test.ts tests/unit/checkpoint.test.ts tests/unit/memory.test.ts tests/unit/stats.test.ts tests/unit/backup.test.ts tests/unit/restore.test.ts tests/unit/logging.test.ts tests/unit/lifecycle.test.ts tests/unit/subprocess.test.ts tests/unit/tools-web.test.ts tests/unit/commands.test.ts tests/unit/skills.test.ts tests/unit/mcp.test.ts tests/unit/tool-parallel.test.ts tests/integration/server.test.ts tests/integration/agent-profile.test.ts tests/security/http.test.ts",
     "build:client": "tsx scripts/build-client.ts",
     "preweb": "npm run build:client",
     "predesktop": "npm run build:desktop",
@@ -35,12 +35,18 @@
     "@langchain/google-genai": "^2.3.2",
     "@langchain/langgraph": "^1.4.9",
     "@langchain/openai": "^1.5.6",
+    "chart.js": "4.6.1",
+    "dompurify": "3.4.17",
     "dotenv": "^17.4.2",
+    "highlight.js": "11.12.0",
+    "lucide": "1.61.0",
+    "marked": "18.1.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "electron": "^44.8.0",
+    "esbuild": "0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   }

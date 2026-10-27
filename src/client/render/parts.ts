@@ -18,8 +18,7 @@ import {
 } from "../core/state.js";
 import { scrollBottom } from "../core/dom.js";
 import { decideApproval, decideClarification } from "../actions/approvals.js";
-import { renderEstateInToolCard } from "../views/estate.js";
-import { renderRagHitsInToolCard } from "../views/rag.js";
+import { renderToolEnhancers } from "./tool-enhancers.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
 import type {
   AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
@@ -160,12 +159,10 @@ export function updateToolCard(part: ToolPart): void {
       resultPre.textContent = part.result.content;
       resultPre.className = "result-pre" + (part.result.isError ? " err" : "");
     }
-    // 知识检索专属：解析 JSON 结果，渲染「命中来源」卡片
-    if (part.name === "retrieve_docs") renderRagHitsInToolCard(part, card);
-    // 委派专属：子 Agent 耗时 + 用过的工具（F8 过程可见）
+    // 委派是通用编排能力，直接渲染耗时与子 Agent 工具
     if (part.name === "delegate_agent") renderDelegateInToolCard(part, card);
-    // 房产专属：解析 JSON 结果，渲染房源列表 / 内嵌地图 / 户型图 / 安装引导
-    if (part.name && part.name.startsWith("house_")) renderEstateInToolCard(part, card);
+    // 知识库 / 房产等业务增强由 main.ts 注册，render/* 不反向依赖 views/*
+    renderToolEnhancers(part, card);
   }
 }
 

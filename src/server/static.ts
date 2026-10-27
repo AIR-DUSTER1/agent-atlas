@@ -2,16 +2,13 @@
  * ============================================================
  * static.ts — 前端静态文件分发（白名单式防目录穿越）
  * ============================================================
- * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与一层子目录
- * （core/ composer/ render/ stream/ views/ actions/ modules/），其余一律 404
- * —— 杜绝 ../ 穿越与深层探测。
- * 为什么允许子目录：前端源码已 TypeScript 化，构建产物按职责分目录
- * （src/client/* → src/server/public/*），不再是单个 app.js。
- * 全部 no-store：页面与脚本始终取最新（禁用浏览器缓存，避免
- * 「更新代码后浏览器还在跑旧脚本 → 按钮点了没反应」）。
+ * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与一层已登记子目录
+ * （core/ composer/ render/ stream/ views/ actions/ modules/ vendor/ styles/）。
+ * 在路径正则之外再做 realpath 边界和 lstat 普通文件校验，拒绝符号链接、
+ * 未知扩展与目录列表；全部 no-store，页面和脚本始终取最新构建。
  */
-import { readFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { join, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerResponse } from "node:http";
 
@@ -28,8 +25,14 @@ const MIME: Record<string, string> = {
 
 /** 允许的一层子目录（字面量白名单；不含用户可控段） */
 const ALLOWED_DIRS = new Set([
-  "modules", "core", "composer", "render", "stream", "views", "actions",
+  "modules", "core", "composer", "render", "stream", "views", "actions", "vendor", "styles",
 ]);
+
+/** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */
+function isInside(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
 
 export async function serveStatic(pathname: string, res: ServerResponse): Promise<boolean> {
   const raw = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
@@ -47,11 +50,21 @@ export async function serveStatic(pathname: string, res: ServerResponse): Promis
     rel = single?.[1] ?? "";
   }
 
+  const ext = rel.slice(rel.lastIndexOf("."));
+  const mime = MIME[ext];
+  if (!mime) return false;
+
+  const target = join(PUBLIC_DIR, rel);
   try {
-    const data = await readFile(join(PUBLIC_DIR, rel));
-    const ext = rel.slice(rel.lastIndexOf("."));
+    const [rootReal, targetReal, info] = await Promise.all([
+      realpath(PUBLIC_DIR),
+      realpath(target),
+      lstat(target),
+    ]);
+    if (!info.isFile() || info.isSymbolicLink() || !isInside(rootReal, targetReal)) return false;
+    const data = await readFile(targetReal);
     res.writeHead(200, {
-      "Content-Type": MIME[ext] ?? "application/octet-stream",
+      "Content-Type": mime,
       "Cache-Control": "no-store",
     });
     res.end(data);

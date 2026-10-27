@@ -64,6 +64,15 @@ function rawPost(base: string, path: string, headers: Record<string, string | nu
   });
 }
 
+test("页面响应头不再放行任意 inline script", async () => {
+  const res = await fetch(srv.base + "/");
+  assert.equal(res.status, 200);
+  const csp = res.headers.get("content-security-policy") ?? "";
+  assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
+  assert.match(csp, /script-src[^;]*'sha256-/);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
+});
 test("跨站 POST 被拒（Origin 非本机）", async () => {
   const res = await rawPost(srv.base, "/api/sessions", { Origin: "http://evil.example" }, JSON.stringify({ kind: "agent" }));
   assert.equal(res.status, 403);
@@ -112,8 +121,18 @@ test("认证开启：无 Bearer 401，正确 Bearer 放行", async () => {
   assert.equal(wrong.status, 401);
 });
 
-test("静态分发拒绝目录穿越（明文/编码）", async () => {
-  for (const path of ["/../.env", "/%2e%2e%2f%2e%2e%2fpackage.json", "/modules/../config-store.ts", "/modules/%2e%2e%2fsecret.js"]) {
+test("静态分发拒绝目录穿越、未知扩展与 vendor 探测", async () => {
+  for (const path of [
+    "/../.env",
+    "/%2e%2e%2f%2e%2e%2fpackage.json",
+    "/modules/../config-store.ts",
+    "/modules/%2e%2e%2fsecret.js",
+    "/vendor/../package.json",
+    "/vendor/",
+    "/vendor/chart-lib.js.map",
+    "/vendor/unknown.txt",
+    "/styles/unknown.css",
+  ]) {
     const res = await fetch(srv.base + path);
     assert.notEqual(res.status, 200, path);
   }

@@ -15,6 +15,7 @@ import { api } from "./core/api.js";
 import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/state.js";
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./modules/ui-dialog.js";
 import { renderAll } from "./render/messages.js";
+import { registerToolEnhancer } from "./render/tool-enhancers.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
@@ -28,8 +29,8 @@ import { addExternalFlow, bindCreateSession as bindExtCreate, loadExternalAgents
 import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
 } from "./views/attachments.js";
-import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb } from "./views/rag.js";
-import { closeEstate, installBeikeCli, openEstate, saveEstateKey, loadEstate } from "./views/estate.js";
+import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
+import { closeEstate, installBeikeCli, openEstate, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 import { closeProviderForm, openProviderForm, saveModel } from "./views/model-form.js";
 import {
   activateModel, fetchGatewayModelChips, removeProvider, saveProvider,
@@ -52,6 +53,8 @@ import type { AppConfig, Session } from "./modules/types.js";
 /* ---------------------------------------------------------------------------
  * 接线：视图层互相需要的回调统一在这里注入
  * ------------------------------------------------------------------------- */
+registerToolEnhancer((part) => part.name === "retrieve_docs", renderRagHitsInToolCard);
+registerToolEnhancer((part) => Boolean(part.name?.startsWith("house_")), renderEstateInToolCard);
 bindProjectsChanged(() => renderSessions());
 bindShellCreate(createSession);
 bindExtCreate(createSession);

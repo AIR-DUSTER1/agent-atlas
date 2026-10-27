@@ -40,6 +40,13 @@ jobs:
           test -f src/server/public/main.js
           test -f src/server/public/index.html
           test -f src/server/public/style.css
+          test -f src/server/public/vendor/chart.js
+          test -f src/server/public/vendor/chart-lib.js
+          test -f src/server/public/vendor/icons-lib.js
+          test -f src/server/public/vendor/marked-lib.js
+          test -f src/server/public/vendor/dompurify-lib.js
+          test -f src/server/public/vendor/highlight-lib.js
+          ! find src/server/public/vendor -name "*.map" -print -quit | grep -q .
           test -f desktop/build/main.js
           test -f desktop/build/preload.cjs
 

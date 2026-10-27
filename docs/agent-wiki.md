@@ -1683,3 +1683,22 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 **过程可见**：`delegate_agent` 返回结构化 JSON（`durationMs` / `toolsUsed`），
 前端委派卡渲染「委派到哪个 Agent · 耗时 · 用了哪几个工具」。子 Agent 的完整
 对话仍是黑盒，但这两项足以让用户判断结论可信度。
+
+### 3.34 `scripts/build-vendor.ts` + `src/client/vendor/*` — 前端依赖隔离与 CSP hash
+
+**问题**：图表 / 图标 / Markdown / 高亮不能整包塞进应用代码，也不能让业务直接依赖 npm
+库；同时 `script-src 'unsafe-inline'` 会削弱 XSS 防线。
+
+**设计**：
+
+| 机制 | 实现 |
+|---|---|
+| 依赖隔离 | 业务只 import `src/client/vendor/*` wrapper；wrapper 里的裸导入由 import map 指向自包含 `*-lib.js` |
+| 产物命名 | wrapper 由 tsc 输出为 `chart.js` 等；esbuild 输出为 `chart-lib.js`，刻意不重名，避免互相覆盖 |
+| 自包含校验 | esbuild metafile 必须没有任何输出 import；禁止 source map 与清单外文件 |
+| CSP | 主题脚本与 import map 使用 SHA-256 hash；构建时重新计算，hash 不同步直接失败 |
+| 旧浏览器 | 检测 `HTMLScriptElement.supports("importmap")`，不支持时显示升级提示，不白屏 |
+| 静态分发 | 只服务同源、白名单目录、普通文件；拒绝未知扩展、目录列表、符号链接与路径穿越 |
+
+**踩坑**：npm 包名若直接映射到与 wrapper 同名的 `/vendor/chart.js`，tsc 产物与 esbuild
+产物会争抢同一路径，甚至形成模块自引用。必须固定为 wrapper 与 `*-lib.js` 双层命名。

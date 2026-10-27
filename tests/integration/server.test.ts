@@ -256,6 +256,8 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   assert.equal(index.status, 200);
   const html = await index.text();
   assert.match(html, /<script type="module" src="\/main\.js"><\/script>/);
+  assert.match(html, /<script type="importmap">/);
+  assert.match(html, /"chart\.js": "\/vendor\/chart-lib\.js"/);
 
   // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
   for (const file of [
@@ -266,6 +268,8 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
     "/render/parts.js", "/render/messages.js",
     "/stream/events.js", "/stream/turn.js",
     "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",
+    "/vendor/chart.js", "/vendor/chart-lib.js", "/vendor/icons-lib.js",
+    "/vendor/marked-lib.js", "/vendor/dompurify-lib.js", "/vendor/highlight-lib.js",
   ]) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);

@@ -12,11 +12,12 @@
  *    「same-origin 或 bearer」满足其或分支），避免给零依赖前端再加一套令牌流转；
  *  - 安全响应头一次性 setHeader（writeHead 会合并继承），对 HTML 也有 CSP；
  *  - OSM 地图 iframe 是唯一外部 frame 源，frame-src 白名单放行官方域名；
- *  - index.html 首屏主题切换是内联脚本，故 script-src 需要 'unsafe-inline'
- *    （本前端零构建的代价，接受；敏感操作都在 API 层另有认证/同源防线）。
+ *  - index.html 的首屏主题脚本与 import map 是静态内联脚本，使用精确 SHA-256 hash
+ *    script-src 不再放行任意 inline script，敏感操作仍有认证/同源防线。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { UNAUTHORIZED_MSG } from "./auth.js";
+import { CSP_SCRIPT_HASHES } from "./csp-hashes.js";
 
 /** GET/HEAD 属幂等只读，不做同源检验（页面加载/静态资源/GET API） */
 function isIdempotent(method: string | undefined): boolean {
@@ -62,11 +63,11 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
   // 禁止被嵌入他人页面的 iframe（点击劫持）
   "X-Frame-Options": "DENY",
-  // 内容来源白名单：地图 iframe 白名单放 OSM 官方域；inline 为首屏主题脚本妥协
+  // 内容来源白名单：脚本仅同源 + 两个静态内联脚本的精确 hash；地图只放 OSM 官方域
   "Content-Security-Policy":
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' https: data:; connect-src 'self'; frame-src https://www.openstreetmap.org; " +
-    "base-uri 'self'; form-action 'none'",
+    `default-src 'self'; script-src 'self' ${CSP_SCRIPT_HASHES.map((hash) => `'${hash}'`).join(" ")}; ` +
+    `style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; ` +
+    `frame-src https://www.openstreetmap.org; base-uri 'self'; form-action 'none'`,
 };
 
 /** 一次性把安全头挂到响应上（后续 writeHead 字段会与之合并，不冲突即继承） */

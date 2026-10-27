@@ -1,20 +1,17 @@
 /**
- * scripts/build-client.ts — 前端构建：TS → 浏览器可执行 ESM + 静态资源拷贝
+ * scripts/build-client.ts — 前端构建：TS → 浏览器可执行 ESM + vendor + 静态资源
  * ============================================================
- * 为什么需要这一步：前端已全面 TypeScript 化（有类型检查、按职责分模块），
- * 但浏览器只能执行 JS，所以必须有编译步骤。本项目坚持「不加打包器」：
- * 只用 tsc 把 src/client/**.ts 一比一编译到 src/server/public/，
- * import 路径保持原样（浏览器原生 ESM 直接加载），再把 index.html / style.css
- * 原样拷过去。产物目录进 .gitignore，源码才是唯一真相。
- *
- * 约束：与 tsconfig.client.json 的 rootDir/outDir 保持一致；
- * 编译失败必须非 0 退出（CI 与 preweb/pretest 都靠退出码把关）。
+ * 本项目坚持「不加整体打包器」：tsc 一比一编译应用源码，只有 npm 前端库经
+ * esbuild 打成自包含 vendor。每次从空目录构建，并校验 import map 对应的
+ * CSP hash，任何缺产物或清单漂移都必须非 0 退出。
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { buildVendors } from "./build-vendor.js";
+import { assertCspHashes } from "./csp-integrity.js";
 
 const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,6 +22,13 @@ const OUT = join(ROOT, "src", "server", "public");
 const STATIC_ASSETS = ["index.html", "style.css"];
 
 async function main(): Promise<void> {
+  // 每次从空产物目录构建，防止已删除模块继续被静态服务
+  await rm(OUT, { recursive: true, force: true });
+  await mkdir(OUT, { recursive: true });
+
+  // 内联脚本一旦改动而 CSP hash 未同步，浏览器会直接拒绝执行；先 fail-fast
+  await assertCspHashes(join(SRC, "index.html"));
+
   // tsc 用项目本地版本：直接调 node_modules 里的 tsc，避免 PATH 差异
   const tscBin = join(ROOT, "node_modules", "typescript", "bin", "tsc");
   try {
@@ -39,10 +43,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await mkdir(OUT, { recursive: true });
   for (const name of STATIC_ASSETS) {
     await copyFile(join(SRC, name), join(OUT, name));
   }
+
+  // wrapper 已由 tsc 输出；这里生成同名隔离的 *-lib.js 并做自包含检查
+  await buildVendors();
 
   // 产物自检：入口脚本必须存在，否则页面会白屏而 CI 仍是绿的
   const entries = await readdir(OUT);
