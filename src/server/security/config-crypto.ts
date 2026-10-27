@@ -136,3 +136,11 @@ export function hasPlaintextSecrets(value: unknown, envContext = false): boolean
   }
   return false;
 }
+
+/** 配置中是否存在已封存的敏感值；用于区分 encrypted 与 none。 */
+export function hasSealedSecrets(value: unknown): boolean {
+  if (isSealedSecret(value)) return true;
+  if (Array.isArray(value)) return value.some(hasSealedSecrets);
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).some(hasSealedSecrets);
+}

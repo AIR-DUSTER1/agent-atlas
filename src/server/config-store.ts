@@ -24,7 +24,7 @@ import { open, readFile, rename, writeFile, unlink, stat, copyFile, appendFile }
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./logging.js";
-import { SecretDecryptionError, hasDataKey, hasPlaintextSecrets, sealSensitiveConfig, unsealSensitiveConfig } from "./security/config-crypto.js";
+import { SecretDecryptionError, hasDataKey, hasPlaintextSecrets, hasSealedSecrets, sealSensitiveConfig, unsealSensitiveConfig } from "./security/config-crypto.js";
 import { secureFilePermissions } from "./security/file-permissions.js";
 
 // 测试钩子：e2e 用临时配置文件（tests/helpers 注入 WEB_CONFIG_FILE），

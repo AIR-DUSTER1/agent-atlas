@@ -83,3 +83,37 @@ test("恢复的防御：坏名拒绝、不存在的备份给中文错误", async
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("备份篡改：任意文件字节变化都会被 SHA-256 校验拒绝", async () => {
+  const { dir, env, backup } = await prepareEnv();
+  try {
+    await writeFile(env.SESSIONS_FILE, JSON.stringify({ ev: "schema", schemaVersion: 1 }) + "\n", "utf8");
+    const created = await backup.createBackup();
+    const manifest = JSON.parse(await readFile(join(env.BACKUP_DIR, created.name, "manifest.json"), "utf8")) as { version: number };
+    assert.equal(manifest.version, 2);
+    await writeFile(join(env.BACKUP_DIR, created.name, "sessions.ndjson"), "tampered-byte\n", "utf8");
+    await assert.rejects(() => backup.restoreBackup(created.name), /校验失败|大小不匹配/);
+    const audit = await backup.auditBackups();
+    assert.equal(audit.invalid, 1);
+  } finally {
+    for (const key of Object.keys(env)) delete process.env[key];
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("备份保留策略：保留最近 N 份并清理更旧目录", async () => {
+  const { dir, env, backup } = await prepareEnv();
+  process.env.BACKUP_KEEP_LATEST = "2";
+  process.env.BACKUP_KEEP_DAYS = "1";
+  try {
+    await writeFile(env.SESSIONS_FILE, JSON.stringify({ ev: "schema", schemaVersion: 1 }) + "\n", "utf8");
+    for (let i = 0; i < 4; i += 1) await backup.createBackup();
+    const list = await backup.listBackups();
+    assert.equal(list.length, 2);
+  } finally {
+    for (const key of Object.keys(env)) delete process.env[key];
+    delete process.env.BACKUP_KEEP_LATEST;
+    delete process.env.BACKUP_KEEP_DAYS;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

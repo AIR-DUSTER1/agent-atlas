@@ -230,6 +230,9 @@ export interface BackupEntry {
   name: string;
   createdAt: number;
   files: string[];
+  manifestVersion?: 1 | 2;
+  secrets?: "encrypted" | "plaintext-risk" | "none" | "unknown";
+  verified?: boolean;
 }
 
 export interface MemoryEntry {

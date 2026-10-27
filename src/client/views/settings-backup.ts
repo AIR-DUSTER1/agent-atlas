@@ -5,7 +5,7 @@
  * 职责：备份列表渲染、创建备份、从备份恢复（恢复前自动快照当前状态）。
  * 设计立场：
  *  - 恢复是破坏性动作：二次确认写明「会先自动快照」与「需重启生效」；
- *  - 备份目录含 API Key 明文，创建成功后的提示里要再次提醒保管；
+ *  - 备份密钥状态由服务端 manifest 标注，UI 必须把明文风险显式展示；
  *  - 列表失败不让设置页整体挂掉（调用方 catch 掉）。
  */
 
@@ -36,7 +36,8 @@ export async function refreshBackups(): Promise<void> {
     if (nameEl) nameEl.textContent = b.name;
     const when = b.createdAt ? new Date(b.createdAt).toLocaleString("zh-CN") : "时间未知";
     const metaEl = row.querySelector(".b-meta");
-    if (metaEl) metaEl.textContent = `${when} · ${b.files.length} 个文件`;
+    const security = b.secrets === "encrypted" ? "密文密钥" : b.secrets === "plaintext-risk" ? "明文密钥风险" : b.secrets === "unknown" ? "旧版未验证" : "无密钥";
+    if (metaEl) metaEl.textContent = `${when} · ${b.files.length} 个文件 · ${security}`;
     row.querySelector(".b-restore")?.addEventListener("click", async () => {
       const ok = await uiConfirm(
         `确定恢复备份 ${b.name} 吗？\n\n恢复前会自动创建一份当前状态的快照（可退回）。\n恢复后需要重启服务（npm run web）才生效。`,

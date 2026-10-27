@@ -20,7 +20,9 @@ export async function handleCreateBackup(res: import("node:http").ServerResponse
     res.end(JSON.stringify({
       ok: true,
       ...info,
-      hint: "备份已创建（含 API Key，请妥善保管 .setting/backups/ 目录，不要外发）",
+      hint: info.secrets === "encrypted"
+        ? "备份已创建，敏感配置为 AES-256-GCM 密文；仍请妥善保管备份目录，不要外发"
+        : "备份已创建，但当前配置含明文密钥风险（未设置 DATA_KEY）；请立即收紧目录权限，不要外发",
     }));
   } catch (err) {
     respondBadRequest(res, {} as import("node:http").IncomingMessage, err);

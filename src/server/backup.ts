@@ -1,155 +1,357 @@
 /**
  * ============================================================
- * backup.ts — 数据备份与恢复（F9，可用性主线收尾）
+ * backup.ts — 可校验、可保留、可回滚的数据备份（v2）
  * ============================================================
- * 把「全部本地状态」一键快照到带时间戳的目录并可恢复：
- *   journal（会话记录）/ 持久检查点 / 长期记忆 / 供应商配置 / 审计日志。
- * 换机、误删、版本升级前各来一份，恢复 = 目录内容写回原路径 + 重启服务。
+ * 职责：把 journal / checkpoint / 记忆 / 加密配置 / 审计打成平铺备份集。
+ * v2 manifest 记录每个文件的大小、SHA-256、schemaVersion 与密钥状态；恢复前
+ * 先全量校验，再快照当前状态，任一写回失败会从自动快照回滚已替换文件。
  *
  * 设计立场：
- * - 不做压缩打包：平铺目录 + manifest.json，肉眼可检、单文件可替换；
- * - ⚠ 备份含 API Key（web-config.json 里是明文）——目录放 .setting/backups/
- *   （gitignore 内），README 明确警示「妥善保管、不要外发」；
- * - 恢复前自动做一次「恢复前快照」：先 flush 全部在途写入 → 备份当前态 →
- *   覆盖文件；恢复只动磁盘、不动内存单例 —— 必须重启服务才真正生效
- *   （内存里的 journal/配置会把旧态写回去）；
- * - 写回用临时文件 + rename 原子替换（config-store 同模式），半写不损坏原文件。
+ *  - 不引压缩包：单文件仍可人工检查与替换；
+ *  - 备份可能含密文或开发模式明文 Key，manifest 必须标注 secrets 状态；
+ *  - 恢复只改磁盘，内存态需重启；本函数不偷偷 reload 全局单例。
  */
-import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { PROJECT_ROOT } from "./files.js";
-import { journalPath, flushJournal } from "./session-store.js";
-import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
+import { journalPath, flushJournal, JOURNAL_SCHEMA_VERSION } from "./session-store.js";
+import { checkpointFilePath, flushCheckpointLog, CHECKPOINT_SCHEMA_VERSION } from "../checkpoint.js";
 import { memoriesFilePath } from "../memory-store.js";
-import { SETTINGS_FILE } from "./config-store.js";
+import { CONFIG_SCHEMA_VERSION, SETTINGS_FILE, configSecretsState } from "./config-store.js";
 import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { log } from "./logging.js";
+import { secureFilePermissions } from "./security/file-permissions.js";
 
-// 测试钩子：BACKUP_DIR 指向临时目录（不污染真实 .setting/backups）
 const DEFAULT_BACKUP_DIR = join(PROJECT_ROOT, ".setting", "backups");
-function backupRoot(): string {
+export function backupRoot(): string {
   return process.env.BACKUP_DIR || DEFAULT_BACKUP_DIR;
 }
 
-/** 备份集：key = 备份内的文件名，path = 当前实际生效路径（env 钩子随之变化） */
-function backupTargets(): Array<{ key: string; path: string }> {
+function backupTargets(): Array<{ key: string; path: string; schemaVersion: number | null }> {
   return [
-    { key: "sessions.ndjson", path: journalPath() },
-    { key: "checkpoints.ndjson", path: checkpointFilePath() },
-    { key: "memories.json", path: memoriesFilePath() },
-    { key: "web-config.json", path: SETTINGS_FILE },
-    { key: "audit.ndjson", path: auditFilePath() },
+    { key: "sessions.ndjson", path: journalPath(), schemaVersion: JOURNAL_SCHEMA_VERSION },
+    { key: "checkpoints.ndjson", path: checkpointFilePath(), schemaVersion: CHECKPOINT_SCHEMA_VERSION },
+    { key: "memories.json", path: memoriesFilePath(), schemaVersion: null },
+    { key: "web-config.json", path: SETTINGS_FILE, schemaVersion: CONFIG_SCHEMA_VERSION },
+    { key: "audit.ndjson", path: auditFilePath(), schemaVersion: null },
   ];
 }
 
-/** 备份目录名：backup-<yyyyMMdd-HHmmss[-SSS][-NN]>
- *  毫秒段与序号段防「恢复前快照与原备份同秒碰撞」（踩过：快照把破坏态
- *  覆盖进刚创建的同名备份目录，恢复出来的就是坏数据）。
- *  白名单严格限制为纯数字段（天然防路径穿越）。 */
 const NAME_RE = /^backup-\d{8}-\d{6}(?:-\d{1,3})*$/;
+const KEEP_LATEST_DEFAULT = 7;
+const KEEP_DAYS_DEFAULT = 7;
 
-async function nextBackupName(): Promise<string> {
-  const d = new Date();
-  const p = (n: number, len = 2) => String(n).padStart(len, "0");
-  let name = `backup-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${p(d.getMilliseconds(), 3)}`;
-  // 同毫秒仍在撞（理论场景）就追加序号段
-  for (let i = 0; i < 10 && await fileExists(join(backupRoot(), name, "manifest.json")); i += 1) {
-    name = `${name}-${i}`;
-  }
-  return name;
+export interface BackupFileEntry {
+  name: string;
+  bytes: number;
+  sha256: string;
+  schemaVersion: number | null;
 }
 
-export interface BackupManifest {
+export interface BackupManifestV2 {
+  version: 2;
+  createdAt: number;
+  files: BackupFileEntry[];
+  secrets: "encrypted" | "plaintext-risk" | "none";
+  schemaVersions: Record<string, number | null>;
+}
+
+interface BackupManifestV1 {
   version: 1;
   createdAt: number;
-  files: string[]; // 实际包含的数据文件名
+  files: string[];
 }
 
 export interface BackupInfo {
   name: string;
   createdAt: number;
   files: string[];
+  manifestVersion: 1 | 2;
+  secrets: "encrypted" | "plaintext-risk" | "none" | "unknown";
+  verified: boolean;
+}
+
+export interface BackupAudit {
+  total: number;
+  valid: number;
+  invalid: number;
+  issues: Array<{ name: string; reason: string }>;
 }
 
 async function fileExists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => null)) !== null;
 }
 
-/** 创建一份备份：flush 在途写入 → 拷贝存在的数据文件 → 写 manifest */
+function sha256(data: Buffer | string): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+async function hashFile(path: string): Promise<string> {
+  return sha256(await readFile(path));
+}
+
+export async function fileSha256(path: string): Promise<string> {
+  return hashFile(path);
+}
+
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) return fallback;
+  return value;
+}
+
+function retentionLimits(): { latest: number; days: number } {
+  return {
+    latest: clampInt(process.env.BACKUP_KEEP_LATEST, KEEP_LATEST_DEFAULT, 1, 365),
+    days: clampInt(process.env.BACKUP_KEEP_DAYS, KEEP_DAYS_DEFAULT, 1, 3650),
+  };
+}
+
+async function nextBackupName(): Promise<string> {
+  const d = new Date();
+  const p = (n: number, len = 2) => String(n).padStart(len, "0");
+  let name = `backup-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${p(d.getMilliseconds(), 3)}`;
+  for (let i = 0; i < 10 && await fileExists(join(backupRoot(), name, "manifest.json")); i += 1) {
+    name = `${name}-${i}`;
+  }
+  return name;
+}
+
+function assertInsideBackupRoot(target: string): void {
+  const root = resolve(backupRoot());
+  const child = resolve(target);
+  const rel = relative(root, child);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("备份路径越界，已拒绝");
+}
+
+function normalizeManifest(value: unknown): BackupManifestV1 | BackupManifestV2 {
+  if (!value || typeof value !== "object") throw new Error("manifest 形状不正确");
+  const raw = value as Record<string, unknown>;
+  if (raw.version === 2 && Array.isArray(raw.files)) {
+    const files: BackupFileEntry[] = [];
+    for (const item of raw.files) {
+      const f = item as Partial<BackupFileEntry>;
+      if (typeof f.name !== "string" || typeof f.bytes !== "number" || typeof f.sha256 !== "string") {
+        throw new Error("manifest 文件条目损坏");
+      }
+      files.push({ name: f.name, bytes: f.bytes, sha256: f.sha256, schemaVersion: typeof f.schemaVersion === "number" ? f.schemaVersion : null });
+    }
+    return {
+      version: 2,
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0,
+      files,
+      secrets: raw.secrets === "encrypted" || raw.secrets === "plaintext-risk" ? raw.secrets : "none",
+      schemaVersions: raw.schemaVersions && typeof raw.schemaVersions === "object" ? raw.schemaVersions as Record<string, number | null> : {},
+    };
+  }
+  if (raw.version === 1 && Array.isArray(raw.files)) {
+    return {
+      version: 1,
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0,
+      files: raw.files.filter((f): f is string => typeof f === "string"),
+    };
+  }
+  throw new Error("manifest 版本不受支持");
+}
+
+async function loadManifest(name: string): Promise<BackupManifestV1 | BackupManifestV2> {
+  if (!NAME_RE.test(name)) throw new Error("备份名格式不对（应为 backup-日期-时间，从备份列表里选择）");
+  const dir = join(backupRoot(), name);
+  try {
+    return normalizeManifest(JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")));
+  } catch (err) {
+    if (err instanceof Error && /版本不受支持/.test(err.message)) throw err;
+    throw new Error(`备份 ${name} 不存在或 manifest 损坏`);
+  }
+}
+
+async function verifyManifest(name: string, manifest: BackupManifestV1 | BackupManifestV2): Promise<void> {
+  const dir = join(backupRoot(), name);
+  if (manifest.version === 1) {
+    if (!manifest.files.length) throw new Error(`备份 ${name} 里没有数据文件，无法恢复`);
+    for (const file of manifest.files) {
+      if (!(await fileExists(join(dir, basename(file))))) throw new Error(`旧版备份缺少文件：${file}`);
+    }
+    return;
+  }
+  if (!manifest.files.length) throw new Error(`备份 ${name} 里没有数据文件，无法恢复`);
+  for (const entry of manifest.files) {
+    const path = join(dir, basename(entry.name));
+    const st = await stat(path).catch(() => null);
+    if (!st?.isFile()) throw new Error(`备份文件缺失：${entry.name}`);
+    if (st.size !== entry.bytes) throw new Error(`备份文件大小不匹配：${entry.name}`);
+    const actual = await hashFile(path);
+    if (actual !== entry.sha256) throw new Error(`备份文件校验失败（可能被篡改）：${entry.name}`);
+  }
+}
+
+function infoFromManifest(name: string, manifest: BackupManifestV1 | BackupManifestV2, verified: boolean): BackupInfo {
+  return {
+    name,
+    createdAt: manifest.createdAt,
+    files: manifest.version === 1 ? manifest.files : manifest.files.map((f) => f.name),
+    manifestVersion: manifest.version,
+    secrets: manifest.version === 1 ? "unknown" : manifest.secrets,
+    verified,
+  };
+}
+
+async function pruneBackups(): Promise<number> {
+  const backups = await listBackups();
+  const limits = retentionLimits();
+  const keep = new Set(backups.slice(0, limits.latest).map((b) => b.name));
+  const days = new Set<string>();
+  for (const backup of backups) {
+    const day = new Date(backup.createdAt || 0).toISOString().slice(0, 10);
+    if (days.has(day) || days.size >= limits.days) continue;
+    days.add(day);
+    keep.add(backup.name);
+  }
+  let removed = 0;
+  for (const backup of backups) {
+    if (keep.has(backup.name)) continue;
+    const dir = resolve(backupRoot(), backup.name);
+    assertInsideBackupRoot(dir);
+    await rm(dir, { recursive: true, force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+/** 创建备份：flush → 复制 → manifest(v2) → 权限收紧 → 保留策略。 */
 export async function createBackup(): Promise<BackupInfo> {
-  // flush 让「恢复前快照」也拿到完整状态；平时创建备份同样受益（尾部不缺行）
   await flushJournal();
   await flushCheckpointLog();
   await flushAudit();
+  await mkdir(backupRoot(), { recursive: true });
+  await secureFilePermissions(backupRoot(), true);
 
   const name = await nextBackupName();
   const dir = join(backupRoot(), name);
-  await mkdir(dir, { recursive: true });
-  const files: string[] = [];
-  for (const { key, path } of backupTargets()) {
-    if (!(await fileExists(path))) continue; // 没有过的数据不造空文件
-    await copyFile(path, join(dir, key));
-    files.push(key);
+  await mkdir(dir, { recursive: false });
+  await secureFilePermissions(dir, true);
+
+  const fileEntries: BackupFileEntry[] = [];
+  const schemaVersions: Record<string, number | null> = {};
+  for (const target of backupTargets()) {
+    const st = await stat(target.path).catch(() => null);
+    if (!st?.isFile()) {
+      schemaVersions[target.key] = target.schemaVersion;
+      continue;
+    }
+    const destination = join(dir, target.key);
+    await copyFile(target.path, destination);
+    await secureFilePermissions(destination);
+    fileEntries.push({
+      name: target.key,
+      bytes: st.size,
+      sha256: await hashFile(target.path),
+      schemaVersion: target.schemaVersion,
+    });
+    schemaVersions[target.key] = target.schemaVersion;
   }
-  const manifest: BackupManifest = { version: 1, createdAt: Date.now(), files };
-  await writeFile(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-  log("info", "backup_created", { name, files: files.length });
-  return { name, createdAt: manifest.createdAt, files };
+
+  const manifest: BackupManifestV2 = {
+    version: 2,
+    createdAt: Date.now(),
+    files: fileEntries,
+    secrets: await configSecretsState(),
+    schemaVersions,
+  };
+  const manifestPath = join(dir, "manifest.json");
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), { encoding: "utf8", mode: 0o600 });
+  await secureFilePermissions(manifestPath);
+  const pruned = await pruneBackups();
+  log("info", "backup_created", { name, files: fileEntries.length, secrets: manifest.secrets, pruned });
+  return infoFromManifest(name, manifest, true);
 }
 
-/** 列出全部备份（读 manifest；坏目录跳过） */
+/** 列出全部备份；manifest 损坏的目录跳过，完整性问题走 auditBackups。 */
 export async function listBackups(): Promise<BackupInfo[]> {
   const root = backupRoot();
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => [] as Array<{ name: string; isDirectory: () => boolean }>);
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   const result: BackupInfo[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !NAME_RE.test(entry.name)) continue;
     try {
-      const manifest = JSON.parse(await readFile(join(root, entry.name, "manifest.json"), "utf8")) as Partial<BackupManifest>;
-      if (!Array.isArray(manifest.files)) continue;
-      result.push({ name: entry.name, createdAt: manifest.createdAt ?? 0, files: manifest.files });
+      const manifest = await loadManifest(entry.name);
+      result.push(infoFromManifest(entry.name, manifest, manifest.version === 2));
     } catch {
-      /* 坏 manifest 的目录直接不展示 */
+      /* 坏 manifest 不进入 UI 列表；data:check 会报告 */
     }
   }
   return result.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/** 恢复指定备份：先快照当前态 → 校验 manifest → 原子写回各文件。
- *  只动磁盘不动内存 —— 返回后调用方必须提示用户重启服务。 */
-export async function restoreBackup(name: string): Promise<{ restored: string[]; autoSnapshot: string }> {
-  if (!NAME_RE.test(name)) {
-    throw new Error("备份名格式不对（应为 backup-日期-时间，从备份列表里选择）");
+/** 对全部备份做文件级校验，供 data:check / 诊断使用。 */
+export async function auditBackups(): Promise<BackupAudit> {
+  const root = backupRoot();
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const dirs = entries.filter((entry) => entry.isDirectory() && NAME_RE.test(entry.name));
+  const issues: BackupAudit["issues"] = [];
+  for (const entry of dirs) {
+    try {
+      const manifest = await loadManifest(entry.name);
+      await verifyManifest(entry.name, manifest);
+    } catch (err) {
+      issues.push({ name: entry.name, reason: err instanceof Error ? err.message : String(err) });
+    }
   }
-  const dir = join(backupRoot(), name);
-  let manifest: BackupManifest;
-  try {
-    manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as BackupManifest;
-  } catch {
-    throw new Error(`备份 ${name} 不存在或 manifest 损坏`);
-  }
-  if (!Array.isArray(manifest.files) || !manifest.files.length) {
-    throw new Error(`备份 ${name} 里没有数据文件，无法恢复`);
-  }
+  return { total: dirs.length, valid: dirs.length - issues.length, invalid: issues.length, issues };
+}
 
-  // 恢复前快照：先把「当前态」完整落一份，误恢复也能退回来
+/** 恢复：先校验全部文件，再快照当前态；写回失败时从快照回滚已替换项。 */
+export async function restoreBackup(name: string): Promise<{ restored: string[]; autoSnapshot: string; verified: boolean }> {
+  const manifest = await loadManifest(name);
+  await verifyManifest(name, manifest);
   const snapshot = await createBackup();
-
+  const snapshotDir = join(backupRoot(), snapshot.name);
+  const sourceDir = join(backupRoot(), name);
   const targets = new Map(backupTargets().map((t) => [t.key, t.path]));
-  const restored: string[] = [];
-  for (const key of manifest.files) {
-    const dest = targets.get(key);
-    if (!dest) continue; // 未来版本新增的条目、本版本不认识 → 跳过
-    const src = join(dir, key);
-    if (!(await fileExists(src))) continue;
-    // 原子写回：临时文件 + rename（半写不会损坏目标）
-    const tmp = `${dest}.restore.tmp`;
-    await copyFile(src, tmp);
-    await rename(tmp, dest);
-    restored.push(key);
+
+  const selected: Array<{ key: string; source: string; dest: string; tmp: string }> = [];
+  for (const file of manifest.files) {
+    const key = typeof file === "string" ? file : file.name;
+    const safeKey = basename(key);
+    const dest = targets.get(safeKey);
+    if (!dest) continue;
+    const source = join(sourceDir, safeKey);
+    if (!(await fileExists(source))) continue;
+    selected.push({ key: safeKey, source, dest, tmp: `${dest}.restore.tmp` });
   }
-  if (!restored.length) throw new Error(`备份 ${name} 没有可恢复的文件`);
-  writeAudit("backup.restored", { name, files: restored.length, autoSnapshot: snapshot.name });
-  log("info", "backup_restored", { name, restored: restored.length });
-  return { restored, autoSnapshot: snapshot.name };
+  if (!selected.length) throw new Error(`备份 ${name} 没有可恢复的文件`);
+
+  try {
+    for (const item of selected) await copyFile(item.source, item.tmp);
+  } catch (err) {
+    await Promise.all(selected.map((item) => unlink(item.tmp).catch(() => {})));
+    throw err;
+  }
+
+  const restored: string[] = [];
+  try {
+    for (const item of selected) {
+      await rename(item.tmp, item.dest);
+      restored.push(item.key);
+    }
+  } catch (err) {
+    for (const key of restored) {
+      const dest = targets.get(key)!;
+      const snapshotFile = join(snapshotDir, key);
+      if (await fileExists(snapshotFile)) {
+        const rollbackTmp = `${dest}.rollback.tmp`;
+        await copyFile(snapshotFile, rollbackTmp).catch(() => {});
+        await rename(rollbackTmp, dest).catch(() => {});
+      } else {
+        await unlink(dest).catch(() => {});
+      }
+    }
+    await Promise.all(selected.map((item) => unlink(item.tmp).catch(() => {})));
+    throw new Error(`恢复写入失败，已从 ${snapshot.name} 回滚已替换文件：${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  writeAudit("backup.restored", { name, files: restored.length, autoSnapshot: snapshot.name, verified: manifest.version === 2 });
+  log("info", "backup_restored", { name, restored: restored.length, verified: manifest.version === 2 });
+  return { restored, autoSnapshot: snapshot.name, verified: manifest.version === 2 };
 }
