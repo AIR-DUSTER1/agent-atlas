@@ -34,6 +34,20 @@ test("拆分后的 CSS 花括号平衡且无 @import 隐式依赖", async () => 
   }
 });
 
+test("CSS 变量要么在样式里定义，要么由运行时内联注入", async () => {
+  const dir = join(CLIENT, "styles");
+  const css = (await Promise.all(
+    (await readdir(dir)).filter((name) => name.endsWith(".css"))
+      .map((name) => readFile(join(dir, name), "utf8")),
+  )).join("\n");
+  const defined = new Set([...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1] ?? ""));
+  const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1] ?? ""));
+  // 这两个由脚本内联设置（icon.ts 的 size、stats 条形宽度），且都带 fallback
+  const RUNTIME_INJECTED = new Set(["--icon-size", "--bar-width"]);
+  const missing = [...used].filter((name) => !defined.has(name) && !RUNTIME_INJECTED.has(name));
+  assert.deepEqual(missing, [], `以下 CSS 变量既未定义也非运行时注入：${missing.join(", ")}`);
+});
+
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const html = await readFile(join(CLIENT, "index.html"), "utf8");
   const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");

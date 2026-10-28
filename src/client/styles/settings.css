@@ -37,13 +37,13 @@
   flex: 0 0 auto;
   margin-left: auto;
   padding: 8px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-2);
   cursor: pointer;
 }
-.settings-logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.settings-logout-btn:hover { color: var(--text); border-color: var(--border-strong); }
 .settings-page-body {
   flex: 1; min-height: 0;
   display: grid;
