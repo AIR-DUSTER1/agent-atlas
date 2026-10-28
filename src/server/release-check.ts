@@ -25,6 +25,7 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."
 export const REQUIRED_RUNTIME_ASSETS = [
   "src/server/index.ts",
   "src/agent/general.ts",
+  "scripts/data-cli.ts",
   "src/server/public/index.html",
   "src/server/public/main.js",
   "src/server/public/vendor/chart.js",

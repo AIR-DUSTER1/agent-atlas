@@ -48,6 +48,27 @@ test("生产模式完整配置通过，DATA_KEY 必须恰好 32 字节", () => {
     NODE_ENV: "production",
   }).find((check) => check.id === "cookie-secure");
   assert.equal(insecureCookie?.ok, false);
+
+  const weakMetrics = productionEnvironmentChecks({
+    PRODUCTION: "1",
+    AUTH_TOKEN: "a".repeat(24),
+    SESSION_SECRET: "s".repeat(40),
+    DATA_KEY: VALID_KEY,
+    COOKIE_SECURE: "true",
+    NODE_ENV: "production",
+    METRICS_TOKEN: "short",
+  }).find((check) => check.id === "metrics-token");
+  assert.equal(weakMetrics?.ok, false);
+  const validMetrics = productionEnvironmentChecks({
+    PRODUCTION: "1",
+    AUTH_TOKEN: "a".repeat(24),
+    SESSION_SECRET: "s".repeat(40),
+    DATA_KEY: VALID_KEY,
+    COOKIE_SECURE: "true",
+    NODE_ENV: "production",
+    METRICS_TOKEN: "metrics-token-long-enough",
+  }).find((check) => check.id === "metrics-token");
+  assert.equal(validMetrics?.ok, true);
 });
 
 test("写探针使用短命文件且结束后清理", async () => {

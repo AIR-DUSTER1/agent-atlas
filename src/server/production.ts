@@ -80,6 +80,16 @@ export function productionEnvironmentChecks(env: NodeJS.ProcessEnv = process.env
   const dataKeyError = validateDataKey(nonEmpty(env.DATA_KEY));
   add("data-key", dataKeyError === null, dataKeyError ?? "DATA_KEY 已配置");
 
+  const metricsToken = nonEmpty(env.METRICS_TOKEN);
+  if (metricsToken) {
+    add(
+      "metrics-token",
+      metricsToken.length >= 16 && !isPlaceholder(metricsToken),
+      "METRICS_TOKEN 至少 16 位且不能使用示例占位值",
+      "observability"
+    );
+  }
+
   add(
     "cookie-secure",
     nonEmpty(env.COOKIE_SECURE).toLowerCase() !== "false",

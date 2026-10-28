@@ -114,6 +114,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(runtime, /USER node/);
   assert.match(runtime, /CHECKPOINT_FILE=\/data\/checkpoints\.ndjson/);
   assert.match(runtime, /MEMORIES_FILE=\/data\/memories\.json/);
+  assert.match(runtime, /scripts\/data-cli\.ts/);
 
   const productionCompose = await readFile("docker-compose.production.yml", "utf8");
   assert.match(productionCompose, /\$\{AGENT_IMAGE:\?/);

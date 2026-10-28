@@ -500,10 +500,13 @@ import 路径保持 `.js` 后缀原样加载，没有 webpack/vite。第三方�
 ```bash
 npm run typecheck      # 后端 + 前端 + 桌面端三套 tsconfig
 npm run build:client   # 前端 TS → 浏览器 ESM（npm run web / test 前置自动执行）
-npm test               # 单测 / 集成 / 安全三档（mock 模式，不耗真实配额）
+npm test               # 单测 / 集成 / 故障注入 / 负载基线（mock，不耗真实配额）
+npm run e2e            # Playwright 浏览器主链路（登录 / 对话 / 审批 / 刷新恢复）
+npm run audit:prod     # 生产依赖 high/critical 漏洞阻断
+npm run image:smoke    # 多阶段生产镜像 + 健康 / 登录 / 优雅停止验收
 ```
 
-CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查、构建产物校验和全部测试。
+CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查、全部测试、安全 / 持久化 / 认证路由覆盖率、浏览器 E2E、SBOM、生产依赖审计与镜像 smoke。
 
 ## 安全与可靠性（默认已做好）
 
@@ -518,6 +521,7 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查�
 - **配置原子写入**：写一半断电也不会坏，坏了还有 `.bak` 自动抢救；
 - **重启不丢数据**：对话记录、模型记忆（检查点）、长期记忆全部落盘，重启原样回来；
   删掉的对话不会复活；重启前「等审批」的卡片不会偷偷执行，会提示重发一次指令；
+- **生产认证与密钥**：短期 HttpOnly 会话、失败限流、AES-256-GCM 敏感配置加密、`METRICS_TOKEN` 独立指标抓取；
 - **Docker 部署**：提供 Dockerfile 与 compose（`docs/deployment.md`），带健康探针与优雅退出。
 
 完整的治理清单（认证细节、子进程限额、审计、反向代理）见
@@ -539,7 +543,12 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查�
 
 ## 更多文档
 
-- [docs/agent-wiki.md](docs/agent-wiki.md) —— 核心概念、每个模块的详解、示例调用链分析、从零自建模板；
+- [docs/agent-wiki.md](docs/agent-wiki.md) —— 核心概念、生产模块、示例调用链与踩坑表；
 - [docs/agent-orchestration.md](docs/agent-orchestration.md) —— 一次请求从进门到回答的完整编排；
 - [docs/agent-orchestration-vs-zcode.md](docs/agent-orchestration-vs-zcode.md) —— 与 ZCode / DSH 的编排对比；
-- [docs/deployment.md](docs/deployment.md) —— Docker / 探针 / 优雅退出 / 日志 / 反向代理。
+- [docs/deployment.md](docs/deployment.md) —— 部署与运维文档总览；
+- [docs/self-hosting.md](docs/self-hosting.md) —— 快速自托管；
+- [docs/production-checklist.md](docs/production-checklist.md) —— 上线 Checklist；
+- [docs/security-and-tls.md](docs/security-and-tls.md) / [docs/monitoring.md](docs/monitoring.md) —— TLS、Cookie、指标与告警；
+- [docs/backup-restore.md](docs/backup-restore.md) / [docs/upgrade-rollback.md](docs/upgrade-rollback.md) —— 备份恢复与升级回滚；
+- [docs/runbook.md](docs/runbook.md) / [docs/troubleshooting.md](docs/troubleshooting.md) / [docs/support.md](docs/support.md) —— 现场处置、故障排查与支持边界；

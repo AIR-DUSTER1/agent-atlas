@@ -213,3 +213,23 @@ test("认证开启时 /metrics 与 /api/diagnostics 不可匿名读取", async (
   assert.equal((await fetch(authSrv.base + "/metrics")).status, 401);
   assert.equal((await fetch(authSrv.base + "/api/diagnostics")).status, 401);
 });
+
+test("METRICS_TOKEN 仅授权指标端点，不能调用控制面 API", async () => {
+  const metricsSrv = await startServer({
+    AUTH_TOKEN: "test-secret",
+    METRICS_TOKEN: "metrics-scrape-token-123456",
+  });
+  try {
+    const metrics = await fetch(metricsSrv.base + "/metrics", {
+      headers: { Authorization: "Bearer metrics-scrape-token-123456" },
+    });
+    assert.equal(metrics.status, 200);
+    assert.match(await metrics.text(), /agent_http_inflight_requests|agent_process_uptime_seconds/);
+    const diagnostics = await fetch(metricsSrv.base + "/api/diagnostics", {
+      headers: { Authorization: "Bearer metrics-scrape-token-123456" },
+    });
+    assert.equal(diagnostics.status, 401);
+  } finally {
+    await metricsSrv.stop();
+  }
+});

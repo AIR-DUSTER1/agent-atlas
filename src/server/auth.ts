@@ -21,12 +21,30 @@ export function isAuthEnabled(): boolean {
 export const UNAUTHORIZED_MSG =
   "需要认证：请先通过 POST /api/auth/session 使用 AUTH_TOKEN 登录；会话过期后重新登录即可";
 
-export function verifyLoginSecret(candidate: string): boolean {
-  const expected = currentToken();
-  if (!expected || !candidate) return false;
+function constantTimeSecretEqual(candidate: string, expected: string): boolean {
+  if (!candidate || !expected) return false;
   const a = createHash("sha256").update(candidate).digest();
   const b = createHash("sha256").update(expected).digest();
   return timingSafeEqual(a, b);
+}
+
+function bearerToken(req: IncomingMessage): string {
+  const match = /^Bearer\s+(.+)$/i.exec((req.headers.authorization ?? "").trim());
+  return match?.[1]?.trim() ?? "";
+}
+
+export function verifyLoginSecret(candidate: string): boolean {
+  return constantTimeSecretEqual(candidate, currentToken());
+}
+
+/**
+ * /metrics 专用认证：优先接受已登录会话；生产环境 Prometheus 可用独立
+ * METRICS_TOKEN。该 token 不能访问 /api/*，避免监控凭据扩大为控制面凭据。
+ */
+export function verifyMetricsAuth(req: IncomingMessage): boolean {
+  if (verifyRequestAuth(req)) return true;
+  const expected = (process.env.METRICS_TOKEN ?? "").trim();
+  return constantTimeSecretEqual(bearerToken(req), expected);
 }
 
 /** 受保护 API：Cookie 会话优先；仅非生产环境接受旧 Bearer 兼容。 */

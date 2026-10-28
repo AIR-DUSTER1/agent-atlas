@@ -93,8 +93,14 @@ async function main(): Promise<void> {
     "-e", `AUTH_TOKEN=smoke-login-${suffix}-secret`,
     "-e", `SESSION_SECRET=smoke-session-${suffix}-${randomBytes(24).toString("hex")}`,
     "-e", `DATA_KEY=${dataKey}`,
+    "-e", `METRICS_TOKEN=smoke-metrics-${suffix}-token`,
     image,
     "node", "--import", "tsx", "src/server/index.ts", "--check-production",
+  ]);
+  must([
+    "run", "--rm",
+    image,
+    "node", "--import", "tsx", "scripts/data-cli.ts", "check",
   ]);
 
   let containerCreated = false;
@@ -103,6 +109,7 @@ async function main(): Promise<void> {
       "run", "-d", "--name", container,
       "-p", "127.0.0.1::3000",
       "-e", `AUTH_TOKEN=smoke-login-${suffix}-secret`,
+      "-e", `METRICS_TOKEN=smoke-metrics-${suffix}-token`,
       "-e", "LOG_LEVEL=info",
       image,
     ]);
@@ -138,6 +145,12 @@ async function main(): Promise<void> {
       signal: AbortSignal.timeout(5_000),
     });
     if (!status.ok) throw new Error(`认证状态 smoke 失败：HTTP ${status.status}`);
+    const metrics = await fetch(`${base}/metrics`, {
+      headers: { Authorization: `Bearer smoke-metrics-${suffix}-token` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!metrics.ok) throw new Error(`指标抓取 smoke 失败：HTTP ${metrics.status}`);
+    if (!(await metrics.text()).includes("agent_http_requests_total")) throw new Error("指标输出缺少 HTTP 计数");
     const logout = await fetch(`${base}/api/auth/logout`, {
       method: "POST",
       headers: { Cookie: cookie, "Content-Type": "application/json" },
@@ -162,6 +175,7 @@ async function main(): Promise<void> {
         readyz: ready.status,
         index: index.status,
         authCookie: true,
+        metrics: metrics.status,
         logout: logout.status,
         gracefulStop: true,
         runtimeSurfaceClean: true,

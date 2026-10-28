@@ -58,7 +58,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 ├── docs/agent-wiki.md    # 本文件
 ├── scripts/
 │   └── list-models.ts    # npm run models：查询网关支持的模型列表
-├── Dockerfile / docker-compose.yml  # 单实例容器部署（/data 数据卷，§3.19）
+├── Dockerfile / docker-compose*.yml # 单实例容器部署（/data 数据卷，§3.19）
 ├── desktop/
 │   ├── main.ts           # Electron 主进程：子进程托管 Web 服务 + 窗口加载（§3.14）
 │   ├── preload.ts        # 渲染进程最小桥，构建时编成 preload.cjs
@@ -757,8 +757,8 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 | `server/audit.ts` | 审计增强 | 新增 `AUDIT_FILE` 测试钩子与 `flushAudit()`；认证失败记 `auth_rejected`（只记 requestId/method/path，不带 token）；配置变更（`config.*`）、HITL 决定（`hitl.decided`）、项目授权（`project.authorized`）也落审计，均不带 Key/URL/工具参数 |
 | `server/session-store.ts` | journal 增强 | 写入任务进 `pendingWrites`，`flushJournal()` 循环等到清空（flush 期间新产生的写入也能等到） |
 | `server/index.ts` | 入口接线 | 每请求 `X-Request-Id`；handler `finally` 统一记 `http_request`（静态 debug、API info，避免 SSE abort 时 `res.close` 抢跑）；关闭中非探针请求回 503；`SIGINT/SIGTERM/SIGBREAK` → lifecycle；`EADDRINUSE` 中文提示 + 退出码 1 |
-| `Dockerfile` / `docker-compose.yml` | 单实例部署 | `node:22-slim` 多阶段；`npm ci --ignore-scripts`（跳过 electron 下载）；非 root `node`；`/data` 卷统一放配置/journal/审计；`CMD node --import tsx ...` 让 node 作 PID 1 收信号；compose 强制 `AUTH_TOKEN`、`init: true`、`stop_grace_period: 15s`、内置 healthcheck |
-| `docs/deployment.md` | 运维文档 | Docker 启动、环境变量表、探针语义、退出流程、日志/审计、Nginx/Caddy SSE 配置、桌面端打包评估、单实例边界 |
+| `Dockerfile` / compose | 单实例部署 | `node:24.14.0` 固定 digest；builder / production-deps / runtime 三层；非 root `node`；`/data` 统一数据卷；生产 compose 只读根文件系统、`cap_drop: ALL`、`no-new-privileges`、固定 digest、`init: true`、`stop_grace_period: 15s`、内置 healthcheck |
+| `docs/deployment.md` | 运维入口 | 快速自托管、上线 checklist、TLS、备份恢复、升级回滚、监控、runbook、故障排查与支持边界 |
 
 **SSE 退出帧**：`AgentEvent` 新增 `{type:"shutdown", message}`；`routes/chat.ts` 把
 连接登记进 lifecycle。退出时 lifecycle 直接往 `res` 写一帧再 abort，前端
@@ -769,8 +769,8 @@ node 子进程，容器停止时只能等宽限期结束吃 SIGKILL，journal/au
 Dockerfile 用 `CMD ["node", "--import", "tsx", ...]`，信号直达应用。
 
 **当前边界**：会话、限流闸、SSE 表都在进程内，`data/` 只能给一个实例用；
-多副本/共享存储属于 Phase 5。桌面端仍是开发壳（Windows 退出用 `taskkill /F`，
-不触发优雅退出），打包评估结论见 `docs/deployment.md` §7。
+多副本/共享存储不属于当前支持范围。桌面端仍是开发壳（Windows 退出用 `taskkill /F`，
+不触发优雅退出），生产交付以 Web + Docker 为准。
 
 ### 3.20 `src/agent/workflow.ts` — 产品默认编排（需求理解 / 澄清 / 反思）
 
@@ -1548,6 +1548,19 @@ console.log(result.messages.at(-1).content);
 
 ***
 
+### 7.4 生产化新增坑
+
+| 现象 | 根因 | 对策 |
+|---|---|---|
+| 页面一直“加载中”，探针却 200 | 新构建的 `observability/` 未加入静态目录白名单，模块图在首个 import 404 | 静态目录与构建清单同步；集成测试逐个请求构建子目录；E2E 监听 `pageerror` |
+| 镜像里 `npm run backup` 找不到脚本 | runtime 只复制 `src/`，漏了运维 CLI | release-check 将 `scripts/data-cli.ts` 列为必需运行资产 |
+| Prometheus 无法在 PRODUCTION 抓 `/metrics` | 生产关闭通用 Bearer，而浏览器 Cookie 不能作为 scrape 凭据 | 独立 `METRICS_TOKEN` 只授权 `/metrics`，不能访问 `/api/*` |
+| 前端初始化完成前 E2E 点击按钮无效 | `new-chat` 等控件在首屏就可见，事件绑定要等配置/项目/RAG 加载 | 初始化根节点维护 `data-app-ready=loading/true/error`，E2E 只等 ready 后操作 |
+| 浏览器 E2E 因缺 ffmpeg 全部失败 | 开启 video，但本地只安装了 Chrome | 默认只采集 trace/screenshot；需要 video 的环境单独安装 Playwright ffmpeg |
+| 测试子进程覆盖率显示 0 | Node 原生 test coverage 不合并独立 node:tsx 子进程 | 认证路由用同进程 coverage harness；安全/持久化使用 c8 阈值 |
+| Docker 构建上下文带入 `新对话.md` | `.dockerignore` 曾只排除 README | 排除用户会话、`.setting`、`.zcode`、artifacts 与所有本地密钥文件 |
+---
+
 ## 8. 概念速查表
 
 | 概念               | 一句话                             | Demo | 代码位置                                                |
@@ -1582,26 +1595,21 @@ console.log(result.messages.at(-1).content);
 
 ## 9. 架构治理与生产化路线（结论摘要）
 
-学习 Demo 与长期运行服务的安全边界不同：Web 一旦脱离 `127.0.0.1`，认证、CSRF、
-子进程限额、状态恢复、审计和部署探针就变成必选项。治理按阶段推进，节奏是
-「先默认安全与本地可靠 → 拆模块、补 CI → 评估多实例（含数据库/持久化 checkpointer
-是否引入新依赖的决策门）」；公开的文档位（README / 本 wiki）只沉淀**功能层面的
-结论**（见 §3 安全基建小节、§7 踩坑表），逐条弱点清单与阶段计划在内部工作目录
-维护，不入仓库。
+本项目已经从“学习 Demo 形态”完成 **Level 2 单实例自托管生产化**，但没有跨越到多租户或多副本架构。公开文档只沉淀功能、架构边界与 operator 可执行步骤；内部阶段计划和攻面分析仍留在 `.plans/`。
 
-**已落地**：Phase 0（只监听本机 / 请求体限量）、Phase 1（Bearer 认证 / 跨站防线 /
-安全头 / 外部命令白名单 / 子进程限额 / 审计 / 贝壳安装加固）、Phase 2（配置原子
-落盘 + 备份抢救、会话 journal 重启恢复、审批状态机与 resume 引导、历史上文注入、
-并发节流闸 —— §3.17）、Phase 3（服务端 index.ts → `routes/*.ts` 拆分、前端通用件
-`public/modules/` 原生 ESM、`tests/` 三档测试 + `npm test`、GitHub Actions CI —— §3.18）、
-Phase 4（`/healthz` + `/readyz` 探针、SIGINT/SIGTERM 优雅退出与 SSE `shutdown` 帧、
-结构化日志 + journal/audit flush、Docker/compose 与部署文档 —— §3.19），并已在
-Docker 28.5.1 实测镜像构建、healthcheck、`docker stop` 优雅退出与纯 NDJSON 日志。
+**生产化已完成**：
 
-**部分执行**：Phase 5 的自动化试点子集（硬杀重启后的会话恢复、配置损坏 `.bak`
-恢复、日志检索、60 请求资源冒烟）。**未执行**：3 天连续运行、真实反向代理/公网
-链路、子进程超时注入，以及多实例/共享存储（需要产品决策、依赖评审与连续运行
-观测；当前会话、限流、SSE 连接表都在单进程内，`data/` 只能给一个实例用）。
+- PP0 生产环境硬门禁、目录写探针与 release-check；
+- PP1 短期 HttpOnly 会话、续期/注销、失败限流；AES-256-GCM 密钥加密与旧明文迁移；
+- PP2 JSON schema migration、NDJSON 坏行隔离、备份 manifest v2、SHA-256、恢复回滚；
+- PP3 Prometheus 指标、diagnostics、trace 字段、审计归档、客户端错误摘要；
+- PP4 超时、退避、熔断、资源队列、模型并发闸、SSE 心跳与断连取消；
+- PP5 builder / production-deps / runtime 多阶段镜像、生产 compose、SBOM、依赖审计、镜像 smoke；
+- PP6 架构守门、上一版本 fixture、故障注入、负载基线、浏览器 E2E、关键模块覆盖率；
+- PP7 部署、TLS、上线 checklist、备份恢复、升级回滚、监控、runbook、故障排查与支持策略。
+
+当前质量基线见 `README` 与 `.github/workflows/ci.yml`。架构仍保持单写者：会话、限流和 SSE 连接表在进程内，`/data` 只能由一个实例写入。多实例需要共享会话、锁、任务与持久化层，属于后续独立计划，不应通过复制容器强行实现。
+
 
 ### 3.30 `src/server/mcp.ts` + `mcp-tools.ts` — MCP 客户端（F6）
 
@@ -1810,3 +1818,21 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 - 窄屏隐藏顶部重复的模型供应商切换和状态点，保留输入区模型 chip。
 
 **自动化与视觉证据**：最终 `npm test` 221 / 221；`docs/screenshots/main-empty.png`、`docs/screenshots/stats-dark.png`。
+### 3.41 生产化模块总览（PP0–PP7）
+
+| 领域 | 模块 | 关键契约 |
+|---|---|---|
+| 生产门禁 | `server/production.ts`、`server/release-check.ts` | `PRODUCTION=1` 时密钥、真实模型、目录写探针、非 root、运行面 fail-closed |
+| 会话认证 | `server/security/session.ts`、`routes/auth.ts` | HMAC 短期 HttpOnly Cookie、续期、注销、boot nonce、失败限流 |
+| 密钥保护 | `server/security/secrets.ts`、`config-store.ts` | AES-256-GCM；旧明文原子迁移；缺 Key / 篡改拒绝启动 |
+| 数据迁移 | `server/persistence/migrations.ts`、`ndjson-health.ts` | JSON schema 升级；NDJSON 坏行隔离；未来版本拒绝写入 |
+| 备份恢复 | `server/backup.ts`、`scripts/data-cli.ts` | manifest v2、SHA-256、自动快照、保留策略、恢复回滚 |
+| 可观测性 | `server/observability/*`、`routes/observability.ts` | Prometheus、diagnostics、requestId/trace、审计归档、客户端错误摘要 |
+| 运行韧性 | `server/runtime/*` | 超时、退避、熔断、资源队列、模型并发闸、SSE 心跳 |
+| 发布工程 | `Dockerfile`、`docker-compose.production.yml`、`scripts/docker-smoke.ts` | builder / prod-deps / runtime 三层；固定基础镜像 digest；镜像自检 |
+| 供应链 | `audit-production.ts`、`write-sbom.ts`、CI | high/critical 阻断、CycloneDX、Trivy advisory、dependency review |
+| 自动化验证 | `tests/e2e`、fixture、fault/load/architecture/coverage | 浏览器主链路、旧数据、断连、MCP 死亡、1000 会话、100KB 消息 |
+
+**生产启动顺序**：读生产环境 → 配置迁移 → 设置/扩展加载 → 真实模型与目录门禁 → journal 回放 → HTTP 监听。任何硬门失败只输出结构化错误并退出 1，不进入半可用状态。
+
+**发布镜像顺序**：builder 安装完整依赖并执行 typecheck + client build → production-deps 执行 `npm ci --omit=dev` → runtime 只复制源码、静态产物、生产依赖和 `scripts/data-cli.ts`。运行层不包含 Electron、TypeScript、tests、docs、`.env` 或本地数据。

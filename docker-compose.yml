@@ -21,6 +21,7 @@ services:
     environment:
       AUTH_TOKEN: ${AUTH_TOKEN:?请先设置 AUTH_TOKEN（容器监听 0.0.0.0，不能无认证对外开放）}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       TZ: ${TZ:-Asia/Shanghai}
       WEB_CONFIG_FILE: /data/web-config.json
       SESSIONS_FILE: /data/sessions.ndjson

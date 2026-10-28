@@ -42,7 +42,7 @@ import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
 import { loadEstate } from "./estate.js";
-import { isAuthEnabled, verifyRequestAuth } from "./auth.js";
+import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
@@ -229,7 +229,7 @@ const server = createServer(async (req, res) => {
 
     // Prometheus 指标不是 /api/*，但同样需要会话认证；静态页匿名无法读取。
     if (pathname === "/metrics") {
-      if (!verifyRequestAuth(req)) {
+      if (!verifyMetricsAuth(req)) {
         const decision = authFailureLimiter.recordFailure(clientIp(req));
         if (!decision.allowed) {
           res.writeHead(429, { "Content-Type": "application/json; charset=utf-8", "Retry-After": String(decision.retryAfterSeconds) });
