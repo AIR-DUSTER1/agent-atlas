@@ -1,6 +1,6 @@
-# CI — 质量门（typecheck / 语法门 / 测试）
+# CI — 质量、供应链、安全与生产镜像门禁
 # 约束：不读真实 .env、不调真实模型、不访问用户 .web-config.json。
-# 测试侧由 tests/helpers/server.ts 强制 mock 模式 + 临时端口 + 临时 journal/配置。
+# 测试侧由 tests/helpers/server.ts 强制 mock 模式 + 临时端口 + 临时数据文件。
 name: CI
 
 on:
@@ -13,10 +13,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -28,22 +32,15 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Typecheck (server + client)
+      - name: Typecheck (server + client + desktop)
         run: npm run typecheck
 
-      # 前端与桌面端源码已 TypeScript 化：语法正确性由 tsc 三配置覆盖，
-      # 这里只需确认两侧的构建产物真的生成了（否则白屏/preload 失效而 CI 仍是绿的）
       - name: Build artifacts (client + desktop)
         run: |
           npm run build:client
           npm run build:desktop
           test -f src/server/public/main.js
           test -f src/server/public/index.html
-          test -f src/server/public/styles/reset.css
-          test -f src/server/public/styles/layout.css
-          test -f src/server/public/styles/chat.css
-          test -f src/server/public/styles/settings.css
-          test -f src/server/public/styles/responsive.css
           test -f src/server/public/styles/tokens.css
           test -f src/server/public/styles/ui.css
           test -f src/server/public/vendor/chart.js
@@ -52,17 +49,80 @@ jobs:
           test -f src/server/public/vendor/marked-lib.js
           test -f src/server/public/vendor/dompurify-lib.js
           test -f src/server/public/vendor/highlight-lib.js
-          ! find src/server/public/vendor -name "*.map" -print -quit | grep -q .
           test -f desktop/build/main.js
           test -f desktop/build/preload.cjs
+          ! find src/server/public/vendor -name "*.map" -print -quit | grep -q .
 
       - name: Tests (unit / integration / security)
         run: npm test
         env:
-          # 双保险：即使 runner 上存在同名变量，也不允许测试触达真实网关
           API_KEY: ""
           AUTH_TOKEN: ""
 
-      - name: Dependency audit (advisory)
-        run: npm audit --omit=dev --registry=https://registry.npmjs.org
+      - name: Production dependency audit (block high/critical)
+        run: npm run audit:prod
+        env:
+          NPM_AUDIT_REGISTRY: https://registry.npmjs.org
+
+      - name: CycloneDX SBOM
+        run: npm run sbom
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: artifacts/sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build and smoke-test production image
+        run: npm run image:smoke
+        env:
+          GIT_COMMIT: ${{ github.sha }}
+          SMOKE_IMAGE: agent-ci:${{ github.sha }}
+          SMOKE_KEEP_IMAGE: "1"
+
+      - name: Trivy image scan (advisory)
+        uses: aquasecurity/trivy-action@0.28.0
         continue-on-error: true
+        with:
+          image-ref: agent-ci:${{ github.sha }}
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-smoke-evidence
+          path: artifacts/image-smoke.json
+          if-no-files-found: error
+          retention-days: 30
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

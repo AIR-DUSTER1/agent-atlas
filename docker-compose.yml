@@ -1,24 +1,36 @@
 # ============================================================
-# docker-compose.yml — 单实例自托管（Phase 4，仅 loopback 暴露）
+# docker-compose.yml — 本机构建 / 开发验收
 # ============================================================
-# 容器内 HOST=0.0.0.0，宿主机只映射到 127.0.0.1，公网访问必须经
-# 反向代理（见 docs/deployment.md）。AUTH_TOKEN 用 :? 强制必填：
-# 未设置时 compose 直接报错，避免「对外开放且无认证」的默认事故。
+# 仅用于本机构建与 smoke test：宿主机只映射 127.0.0.1。正式生产请使用
+# docker-compose.production.yml + 固定 digest，禁止在服务器上 build。
+# AUTH_TOKEN 用 :? 强制必填，避免「对外开放且无认证」的默认事故。
 
 services:
   agent:
-    build: .
-    image: langgraph-agent-demo:dev
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    image: ${AGENT_IMAGE:-langgraph-agent-demo:dev}
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${AGENT_PORT:-3000}:3000"
     environment:
       AUTH_TOKEN: ${AUTH_TOKEN:?请先设置 AUTH_TOKEN（容器监听 0.0.0.0，不能无认证对外开放）}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: ${TZ:-Asia/Shanghai}
+      WEB_CONFIG_FILE: /data/web-config.json
+      SESSIONS_FILE: /data/sessions.ndjson
+      CHECKPOINT_FILE: /data/checkpoints.ndjson
+      MEMORIES_FILE: /data/memories.json
+      SKILLS_DIR: /data/skills
+      AUDIT_FILE: /data/audit.ndjson
+      BACKUP_DIR: /data/backups
     volumes:
-      - ./data:/data
+      - ${AGENT_DATA_DIR:-./data}:/data
     stop_grace_period: 15s
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -31,3 +43,8 @@ services:
         limits:
           cpus: "2"
           memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

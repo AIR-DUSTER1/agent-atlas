@@ -1,6 +1,7 @@
 # 依赖与构建缓存（镜像内由 npm ci 重新安装）
 node_modules
 dist
+coverage
 *.tsbuildinfo
 
 # 构建产物（镜像内重新构建）
@@ -14,19 +15,26 @@ desktop/build
 .plans
 AGENTS.md
 docs
-tests
-desktop
+new-conversation.md
+新对话.md
 
-# 本机数据与密钥：绝不进镜像
+# 本机数据、密钥与测试产物：绝不进镜像
 .env
 .env.*
+!.env.example
 .web-config.json*
 .setting
+.zcode
+.playwright-mcp
 data
+artifacts
+production.env*
 *.log
+*.tmp
 
-# 容器编排文件本身不需要进镜像
+# 容器编排文件本身不需要进构建上下文
 Dockerfile
 .dockerignore
 docker-compose.yml
+docker-compose.production.yml
 README.md

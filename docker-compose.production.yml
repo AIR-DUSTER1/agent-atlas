@@ -1,0 +1,59 @@
+# ============================================================
+# docker-compose.production.yml — 单实例生产部署
+# ============================================================
+# 镜像必须使用 registry/repository@sha256:<digest>；服务器只拉取，不 build。
+# production.env 提供密钥与应用变量，数据目录由宿主机持久化。
+# 经 TLS 反向代理访问；容器端口仍只绑定宿主机 loopback。
+
+services:
+  agent:
+    image: ${AGENT_IMAGE:?AGENT_IMAGE 必须是固定 digest，例如 registry.example/agent@sha256:...}
+    init: true
+    restart: unless-stopped
+    pull_policy: missing
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-3000}:3000"
+    env_file:
+      - ${AGENT_ENV_FILE:-production.env}
+    environment:
+      PRODUCTION: "1"
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "1"
+      WEB_CONFIG_FILE: /data/web-config.json
+      SESSIONS_FILE: /data/sessions.ndjson
+      CHECKPOINT_FILE: /data/checkpoints.ndjson
+      MEMORIES_FILE: /data/memories.json
+      SKILLS_DIR: /data/skills
+      AUDIT_FILE: /data/audit.ndjson
+      BACKUP_DIR: /data/backups
+      BACKUP_KEEP_LATEST: ${BACKUP_KEEP_LATEST:-7}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      - ${AGENT_DATA_DIR:-./data}:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "Promise.all([fetch('http://127.0.0.1:3000/healthz'),fetch('http://127.0.0.1:3000/readyz')]).then(rs=>process.exit(rs.every(r=>r.ok)?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

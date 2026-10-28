@@ -42,3 +42,9 @@ data/
 
 # 开发过程内部文档（架构计划/阶段清单/攻面分析）——公开仓库不下发
 .plans/
+# 生产 compose 环境、SBOM 与镜像验收产物
+production.env
+artifacts/
+.playwright/
+test-results/
+playwright-report/

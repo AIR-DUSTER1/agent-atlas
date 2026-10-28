@@ -55,6 +55,7 @@ import { loadMemories, memoriesFilePath } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
+import { collectProductionReleaseChecks, failedReleaseChecks } from "./release-check.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
 import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics } from "./observability/metrics.js";
 import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/observability.js";
@@ -92,6 +93,18 @@ const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
 /** 认证是否已启用（Phase 1：auth.ts 提供判定，本常量用于启动提示与 Phase 0 边界短路） */
 const AUTH_ENABLED = isAuthEnabled();
+
+// 生产镜像自检：必须在迁移、加载用户配置和监听端口之前完成。
+// 该分支只输出结构化结果；任何失败都以非 0 退出，避免坏镜像被编排器上线。
+if (process.argv.includes("--check-production")) {
+  const checks = await collectProductionReleaseChecks();
+  const failures = failedReleaseChecks(checks);
+  const report = { ok: failures.length === 0, check: "production-release", checks };
+  await new Promise<void>((resolve) => {
+    process.stdout.write(JSON.stringify(report) + "\n", () => resolve());
+  });
+  process.exit(failures.length === 0 ? 0 : 1);
+}
 
 /**
  * 重新加载 MCP 工具并注入 general profile。
