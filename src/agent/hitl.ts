@@ -39,9 +39,6 @@ import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor 
 // ---------------------------------------------------------------------------
 const tools = [calculator, getCurrentTime, getWeather, sendEmail];
 
-/** 单轮最多执行的工具调用；超限后要求模型总结，避免自主循环拖垮会话。 */
-const MAX_TOOL_CALLS_PER_TURN = 12;
-
 /** 传给 interrupt() 的载荷：CLI 根据它渲染审批提示 */
 export interface ApprovalRequest {
   type: "approval";
@@ -92,11 +89,10 @@ function toolCallSignature(name: string, args: unknown): string {
 }
 
 interface TurnToolHistory {
-  calls: number;
   completedBySignature: Map<string, { content: ToolMessage["content"]; status: string }>;
 }
 
-/** 只统计最近一条 HumanMessage 之后的工具调用与结果，用于单轮去重和次数封顶。 */
+/** 只收集最近一条 HumanMessage 之后已成功的工具结果，用于识别完全重复的调用。 */
 function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
   let start = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -104,7 +100,6 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
   }
   const calls = new Map<string, string>();
   const completedBySignature = new Map<string, { content: ToolMessage["content"]; status: string }>();
-  let count = 0;
   for (const message of messages.slice(start)) {
     const ai = message as AIMessage;
     if (Array.isArray(ai.tool_calls)) {
@@ -112,7 +107,6 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
         if (!call.id) continue;
         const signature = toolCallSignature(call.name, call.args);
         calls.set(call.id, signature);
-        count += 1;
       }
     }
     if (message instanceof ToolMessageCls) {
@@ -122,7 +116,7 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
       }
     }
   }
-  return { calls: count, completedBySignature };
+  return { completedBySignature };
 }
 function lastHumanIntent(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -194,8 +188,6 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     const toolResults: ToolMessage[] = [];
     const userIntent = lastHumanIntent(state.messages);
     const history = turnToolHistory(state.messages);
-    let callsThisTurn = Math.max(0, history.calls - (lastMessage.tool_calls?.length ?? 0));
-    const callSignatures = new Map<string, string>();
 
     // 阶段 2（F8）：把「可直接执行」的调用攒成一批并发跑，审批类仍逐个串行。
     //
@@ -214,18 +206,6 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
 
     for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
       const signature = toolCallSignature(call.name, call.args);
-      const callKey = call.id || `call-${callIndex}`;
-      callSignatures.set(callKey, signature);
-      if (callsThisTurn >= MAX_TOOL_CALLS_PER_TURN) {
-        toolResults.push(new ToolMessageCls({
-          content: `本轮工具调用已达 ${MAX_TOOL_CALLS_PER_TURN} 次上限，未继续执行「${call.name}」。请基于已有结果直接总结，不要再次调用工具。`,
-          tool_call_id: call.id ?? "",
-          name: call.name,
-          status: "error",
-        }));
-        continue;
-      }
-      callsThisTurn += 1;
       const prior = history.completedBySignature.get(signature);
       if (prior) {
         toolResults.push(new ToolMessageCls({

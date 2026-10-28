@@ -245,6 +245,42 @@ test("审批项未绑定当前 profile 工具时在装配期直接失败", () =>
   );
 });
 
+test("长任务可连续执行超过 12 次不同工具调用", async () => {
+  let executed = 0;
+  const probe = tool(async ({ step }) => {
+    executed += 1;
+    return `step-${step}-done`;
+  }, {
+    name: "long_task_probe",
+    description: "测试长任务连续工具调用",
+    schema: z.object({ step: z.number().int() }),
+  });
+  const profile = { ...generalProfile, tools: [probe], approvalDescriptions: {} };
+  const responses = [
+    ...Array.from({ length: 20 }, (_, step) => new AIMessage({
+      content: "",
+      tool_calls: [{ name: "long_task_probe", args: { step }, id: `long-task-${step}` }],
+    })),
+    new AIMessage("长任务完成"),
+  ];
+  const graph = createWorkflowGraph(profile, models(scriptedAgent(responses)), {
+    checkpointer: new MemorySaver(),
+  });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("执行二十步长任务")] },
+    {
+      recursionLimit: 1_000,
+      configurable: { thread_id: "long-task-no-fixed-cap", permission_mode: "auto" },
+    }
+  ) as unknown as GraphResult;
+
+  assert.equal(executed, 20, "不同参数的连续步骤不能因固定次数上限被截断");
+  const toolResults = result.messages.filter((message) => message instanceof ToolMessage);
+  assert.equal(toolResults.length, 20);
+  assert.ok(toolResults.every((message) => message.status !== "error"));
+  assert.doesNotMatch(toolResults.map((message) => String(message.content)).join("\n"), /调用已达|次数上限/);
+});
+
 test("源码层不再存在跨域全局工具表", async () => {
   const toolsSource = await readFile(new URL("../../src/tools.ts", import.meta.url), "utf8");
   const hitlSource = await readFile(new URL("../../src/agent/hitl.ts", import.meta.url), "utf8");

@@ -281,6 +281,9 @@ export async function* runGraphEvents(
   const usageModel = getActiveModelLabel() || undefined;
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
+    // 不用 LangGraph 默认的 25 步：长任务通常在十几次工具调用后就超过该值。
+    // 这里使用可配置的应急上限，业务层不再另设固定工具次数。
+    recursionLimit: config.agentRecursionLimit,
     // permission_mode 会被 LangGraph 透传给每个节点函数的 config（不传 = 默认审批行为）
     configurable: {
       thread_id: options.threadId,

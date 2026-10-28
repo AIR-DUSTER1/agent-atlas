@@ -14,6 +14,21 @@
 import "dotenv/config";
 import { DEFAULT_REASONING, type ReasoningSetting } from "./reasoning.js";
 
+/**
+ * LangGraph 的应急超步上限，不是业务层的工具调用次数。
+ * 每次工具调用通常消耗「agent → tools → agent」约两个超步；默认值足以覆盖长任务，
+ * 同时保留故障保护，避免模型或图路由异常时无限消耗资源。
+ */
+const DEFAULT_AGENT_RECURSION_LIMIT = 1_000;
+const MIN_AGENT_RECURSION_LIMIT = 100;
+
+function resolveAgentRecursionLimit(raw: string | undefined): number {
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= MIN_AGENT_RECURSION_LIMIT
+    ? value
+    : DEFAULT_AGENT_RECURSION_LIMIT;
+}
+
 export const config = {
   /** 兼容 OpenAI 格式的 API 地址（例如 https://tokenrhythm.studio/v1） */
   baseURL: process.env.BASE_URL ?? "https://tokenrhythm.studio/v1",
@@ -43,7 +58,17 @@ export const config = {
    * 所以这里存的是「方言 + 档位」，由 reasoning.ts 翻译成真正的请求参数。
    */
   reasoning: { ...DEFAULT_REASONING } as ReasoningSetting,
-} as { baseURL: string; apiKey: string; model: string; protocol: Protocol; reasoning: ReasoningSetting };
+
+  /** 长任务图的应急超步上限；可通过 AGENT_RECURSION_LIMIT 显式调整。 */
+  agentRecursionLimit: resolveAgentRecursionLimit(process.env.AGENT_RECURSION_LIMIT),
+} as {
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  protocol: Protocol;
+  reasoning: ReasoningSetting;
+  agentRecursionLimit: number;
+};
 
 export type Protocol = "openai" | "openai-responses" | "anthropic" | "gemini";
 

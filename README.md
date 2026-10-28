@@ -51,10 +51,10 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 
 | 模块 | 当前状态 |
 |---|---|
-| 通用 Agent | 需求理解、澄清、ReAct 工具循环、结果反思 |
+| 通用 Agent | 需求理解、澄清、ReAct 工具循环（长任务持续执行，不再受 12 次固定上限截断）、结果反思 |
 | 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
 | 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议 |
-| 会话 | SSE 流式输出、停止、刷新恢复、导出、搜索与清理 |
+| 会话 | 新建会话独立开始、SSE 流式输出、停止、刷新恢复、导出、搜索与清理 |
 | 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
 | 记忆 | LangGraph checkpoint、跨会话记忆、上下文压缩 |
 | 文件与项目 | 附件、项目目录、远程文件夹、文件搜索与读取 |
@@ -130,6 +130,7 @@ docs/          用户文档与运维参考
 | `SESSION_SECRET` | 生产模式所需的会话签名密钥 |
 | `DATA_KEY` | 生产模式所需的配置加密主密钥 |
 | `METRICS_TOKEN` | 仅用于 `/metrics` 的只读抓取令牌 |
+| `AGENT_RECURSION_LIMIT` | 长任务图的应急超步上限，默认 `1000`，不是工具调用次数 |
 
 `.env`、`.web-config.json`、`.setting/` 和 `data/` 已加入 gitignore，不要提交。
 

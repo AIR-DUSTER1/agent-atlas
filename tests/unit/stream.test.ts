@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AIMessage, AIMessageChunk, ToolMessage } from "@langchain/core/messages";
+import { config } from "../../src/config.js";
 import { runGraphEvents } from "../../src/server/stream.js";
 import type { AgentEvent } from "../../src/server/events.js";
+
+test("stream：把可配置的长任务递归保护传给 LangGraph", async () => {
+  let seenOptions: Record<string, unknown> | undefined;
+  const graph = {
+    stream: async (_input: unknown, options: Record<string, unknown>) => {
+      seenOptions = options;
+      return (async function* () {})();
+    },
+  };
+  for await (const _event of runGraphEvents(graph, {}, { threadId: "long-task-limit-test" })) {
+    // 空流也必须正常结束；本用例只校验传给 LangGraph 的运行参数。
+  }
+  assert.equal(seenOptions?.recursionLimit, config.agentRecursionLimit);
+  assert.ok((seenOptions?.recursionLimit as number) >= 100);
+});
 
 test("stream：过滤内部模型节点，保留可见回答与澄清 interrupt", async () => {
   const graph = {
