@@ -25,7 +25,7 @@ const MIME: Record<string, string> = {
 
 /** 允许的一层子目录（字面量白名单；不含用户可控段） */
 const ALLOWED_DIRS = new Set([
-  "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles",
+  "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles", "observability",
 ]);
 
 /** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */

@@ -1,0 +1,2 @@
+{"ts":1760000000000,"ev":"session","session":{"id":"legacy-session","kind":"agent","demo":null,"agentId":null,"projectId":"default","title":"旧版会话","createdAt":1760000000000,"threadId":"web-legacy-thread","permissionMode":"approve"}}
+{"ts":1760000001000,"ev":"turn","id":"legacy-session","turnId":"legacy-turn-1","user":"旧版消息回放","events":[{"type":"token","text":"旧版回答仍可读取"},{"type":"done"}],"startedAt":1760000000000,"finishedAt":1760000001000,"durationMs":1000}

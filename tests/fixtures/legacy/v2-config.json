@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "providers": [
+    {
+      "id": "legacy-provider",
+      "name": "旧版供应商",
+      "baseURL": "https://legacy.example.invalid/v1",
+      "apiKey": "legacy-fixture-key",
+      "protocol": "openai",
+      "models": [
+        {
+          "id": "legacy-model",
+          "name": "legacy-model-v1",
+          "active": true,
+          "contextWindow": 200000
+        }
+      ]
+    }
+  ]
+}

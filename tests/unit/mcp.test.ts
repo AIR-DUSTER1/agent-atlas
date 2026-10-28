@@ -19,6 +19,7 @@ import { test } from "node:test";
 const dir = await mkdtemp(join(tmpdir(), "agent-mcp-"));
 const configFile = join(dir, "web-config.json");
 const serverScript = join(dir, "echo-mcp.mjs");
+const crashScript = join(dir, "crash-mcp.mjs");
 process.env.WEB_CONFIG_FILE = configFile;
 
 /**
@@ -63,6 +64,27 @@ const FIXTURE_LINES = [
   "});",
 ];
 await writeFile(serverScript, FIXTURE_LINES.join("\n") + "\n", "utf8");
+const CRASH_LINES = [
+  'let buf = "";',
+  'process.stdin.setEncoding("utf8");',
+  "const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');",
+  'process.stdin.on("data", (chunk) => {',
+  "  buf += chunk;",
+  '  let idx;',
+  '  while ((idx = buf.indexOf("\\n")) >= 0) {',
+  "    const line = buf.slice(0, idx).trim();",
+  "    buf = buf.slice(idx + 1);",
+  "    if (!line) continue;",
+  "    let msg;",
+  "    try { msg = JSON.parse(line); } catch { continue; }",
+  "    if (msg.id == null) continue;",
+  "    if (msg.method === 'initialize') send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'crash', version: '1.0.0' } } });",
+  "    else if (msg.method === 'tools/list') send({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'crash', description: '调用即退出', inputSchema: { type: 'object', properties: {} } }] } });",
+  "    else if (msg.method === 'tools/call') process.exit(23);",
+  "  }",
+  "});",
+];
+await writeFile(crashScript, CRASH_LINES.join("\n") + "\n", "utf8");
 
 const { saveMcpServer, deleteMcpServer, listMcpServers, listMcpStatus, testMcpServer, disconnectAll } =
   await import("../../src/server/mcp.js");
@@ -149,4 +171,20 @@ test("删除 server：从配置移除并断开连接", async () => {
   const after = await listMcpStatus();
   assert.equal(after.find((s) => s.id === "loose_srv"), undefined, "删除后不应再出现在状态里");
   assert.equal((await listMcpServers()).some((s) => s.id === "loose_srv"), false);
+});
+test("MCP 子进程死亡：调用返回可读错误且状态转为断开", async () => {
+  await saveMcpServer({
+    id: "crash_srv",
+    name: "会退出的服务",
+    command: process.execPath,
+    args: [crashScript],
+  });
+  const connected = await testMcpServer("crash_srv");
+  assert.equal(connected.connected, true);
+  const output = await callTool("mcp__crash_srv__crash", {});
+  assert.match(output, /error/i);
+  assert.match(output, /MCP|退出|关闭|crash/i);
+  const status = await listMcpStatus();
+  assert.equal(status.find((item) => item.id === "crash_srv")?.connected, false);
+  await deleteMcpServer("crash_srv");
 });

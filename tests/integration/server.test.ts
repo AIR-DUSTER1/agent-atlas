@@ -280,6 +280,7 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
     "/stream/events.js", "/stream/turn.js",
     "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",
     "/views/stats/index.js", "/views/stats/kpi.js", "/views/stats/charts.js", "/views/stats/tables.js",
+    "/observability/client-errors.js",
     "/vendor/chart.js", "/vendor/chart-lib.js", "/vendor/icons-lib.js",
     "/vendor/marked-lib.js", "/vendor/dompurify-lib.js", "/vendor/highlight-lib.js",
   ]) {

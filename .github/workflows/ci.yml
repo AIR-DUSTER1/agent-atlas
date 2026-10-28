@@ -59,6 +59,12 @@ jobs:
           API_KEY: ""
           AUTH_TOKEN: ""
 
+      - name: Critical module coverage (security / persistence / auth routes)
+        run: |
+          npm run coverage:security
+          npm run coverage:persistence
+          npm run coverage:routes
+
       - name: Production dependency audit (block high/critical)
         run: npm run audit:prod
         env:
@@ -74,10 +80,49 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser E2E (mock, no model quota)
+        run: npm run e2e
+        env:
+          API_KEY: ""
+          AUTH_TOKEN: ""
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: quality
+    needs: [quality, e2e]
     steps:
       - uses: actions/checkout@v4
 

@@ -77,6 +77,7 @@ bindCompactAction(compactContext);
  * 启动
  * ------------------------------------------------------------------------- */
 async function init(): Promise<void> {
+  document.documentElement.dataset.appReady = "loading";
   loadLocal();
   initIconHydration();
   bindScrollToBottom();
@@ -490,6 +491,7 @@ async function init(): Promise<void> {
   const first = state.sessions[0];
   if (first) selectSession(first.id);
   else showWelcomeState();
+  document.documentElement.dataset.appReady = "true";
 
 
 }
@@ -503,6 +505,7 @@ function isProviderFormOpen(): boolean {
 // 入口兜底：init 抛错时在页面上直接可见（否则所有按钮都静默失效）
 installClientErrorReporting();
 init().catch((err) => {
+  document.documentElement.dataset.appReady = "error";
   console.error("[init] 初始化失败：", err);
   showFatalBanner("初始化失败：" + (err && (err as Error).stack ? (err as Error).stack : String(err)));
 });

@@ -48,3 +48,8 @@ artifacts/
 .playwright/
 test-results/
 playwright-report/
+
+# 覆盖率临时产物
+/coverage/
+.c8temp*/
+.coverage-raw-*/

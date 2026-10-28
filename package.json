@@ -18,7 +18,7 @@
     "demo:5": "tsx src/cli.ts 5",
     "start": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.desktop.json --noEmit",
-    "test": "tsx --test --test-concurrency=1 tests/unit/format.test.ts tests/unit/production.test.ts tests/unit/release-check.test.ts tests/unit/auth-session.test.ts tests/unit/config-crypto.test.ts tests/unit/persistence-migrations.test.ts tests/unit/observability.test.ts tests/unit/client-architecture.test.ts tests/unit/ui-primitives.test.ts tests/unit/ui-interactions.test.ts tests/unit/ui-styles.test.ts tests/unit/main-ui.test.ts tests/unit/markdown-security.test.ts tests/unit/a11y.test.ts tests/unit/llm-transport.test.ts tests/unit/settings-page.test.ts tests/unit/plugin-registry.test.ts tests/unit/chat-flow.test.ts tests/unit/workflow.test.ts tests/unit/tool-isolation.test.ts tests/unit/permission.test.ts tests/unit/tool-risk.test.ts tests/unit/tools-computer.test.ts tests/unit/subagent.test.ts tests/unit/context-builder.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/stream.test.ts tests/unit/limits.test.ts tests/unit/runtime-resilience.test.ts tests/unit/files.test.ts tests/unit/prehistory.test.ts tests/unit/checkpoint.test.ts tests/unit/memory.test.ts tests/unit/stats.test.ts tests/unit/backup.test.ts tests/unit/backup-crypto-state.test.ts tests/unit/restore.test.ts tests/unit/logging.test.ts tests/unit/audit-rotation.test.ts tests/unit/lifecycle.test.ts tests/unit/subprocess.test.ts tests/unit/tools-web.test.ts tests/unit/commands.test.ts tests/unit/skills.test.ts tests/unit/mcp.test.ts tests/unit/tool-parallel.test.ts tests/integration/server.test.ts tests/integration/agent-profile.test.ts tests/security/http.test.ts",
+    "test": "tsx --test --test-concurrency=1 tests/integration/agent-profile.test.ts tests/integration/fault-injection.test.ts tests/integration/server.test.ts tests/security/http.test.ts tests/unit/a11y.test.ts tests/unit/agent-profile-ui.test.ts tests/unit/architecture.test.ts tests/unit/audit-rotation.test.ts tests/unit/auth-session.test.ts tests/unit/backup-crypto-state.test.ts tests/unit/backup.test.ts tests/unit/chat-flow.test.ts tests/unit/checkpoint.test.ts tests/unit/client-architecture.test.ts tests/unit/commands.test.ts tests/unit/config-crypto.test.ts tests/unit/context-builder.test.ts tests/unit/files.test.ts tests/unit/format.test.ts tests/unit/lifecycle.test.ts tests/unit/limits.test.ts tests/unit/llm-transport.test.ts tests/unit/load-baseline.test.ts tests/unit/logging.test.ts tests/unit/main-ui.test.ts tests/unit/markdown-security.test.ts tests/unit/mcp.test.ts tests/unit/memory.test.ts tests/unit/observability.test.ts tests/unit/permission.test.ts tests/unit/persistence-migrations.test.ts tests/unit/plugin-registry.test.ts tests/unit/prehistory.test.ts tests/unit/production.test.ts tests/unit/release-check.test.ts tests/unit/restore.test.ts tests/unit/runtime-resilience.test.ts tests/unit/settings-page.test.ts tests/unit/skills.test.ts tests/unit/stats.test.ts tests/unit/stream.test.ts tests/unit/subagent.test.ts tests/unit/subprocess.test.ts tests/unit/tool-isolation.test.ts tests/unit/tool-parallel.test.ts tests/unit/tool-risk.test.ts tests/unit/tools-computer.test.ts tests/unit/tools-web.test.ts tests/unit/ui-interactions.test.ts tests/unit/ui-primitives.test.ts tests/unit/ui-styles.test.ts tests/unit/upgrade-fixtures.test.ts tests/unit/workflow.test.ts",
     "build:client": "tsx scripts/build-client.ts",
     "preweb": "npm run build:client",
     "predesktop": "npm run build:desktop",
@@ -27,7 +27,12 @@
     "build:desktop": "tsx scripts/build-desktop.ts",
     "audit:prod": "tsx scripts/audit-production.ts",
     "sbom": "tsx scripts/write-sbom.ts",
-    "image:smoke": "tsx scripts/docker-smoke.ts"
+    "image:smoke": "tsx scripts/docker-smoke.ts",
+    "e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "pree2e": "npm run build:client",
+    "coverage:security": " c8 --include=src/server/security/**/*.ts --check-coverage --lines 90 --functions 85 --branches 80 node --import tsx --test tests/unit/auth-session.test.ts",
+    "coverage:persistence": " c8 --include=src/server/persistence/**/*.ts --check-coverage --lines 90 --functions 80 --branches 80 node --import tsx --test tests/unit/persistence-migrations.test.ts",
+    "coverage:routes": " c8 --include=src/server/routes/auth.ts --check-coverage --lines 80 --functions 75 --branches 65 node --import tsx tests/coverage/auth-routes.ts"
   },
   "keywords": [
     "langgraph",
@@ -47,7 +52,9 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.2.0",
+    "c8": "^12.0.0",
     "chart.js": "^4.6.1",
     "dompurify": "^3.4.17",
     "electron": "^44.8.0",
