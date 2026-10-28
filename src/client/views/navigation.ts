@@ -88,6 +88,8 @@ export function showChatState(session: Session): void {
     ? "这是历史会话（服务已重启），仅供查看 —— 点击「＋ 新建对话」继续"
     : "给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）";
   renderPermChip(session);
+  // 会话切换和新建后都要重算容量条；否则新会话会残留上一会话的用量。
+  updateContextBar();
 }
 
 /** 权限 chip 只对有 Agent 执行力的会话显示（demo / external / 历史失效会话隐藏） */

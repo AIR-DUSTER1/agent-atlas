@@ -28,6 +28,15 @@ test("顶栏面包屑与空状态切换已接线", async () => {
   assert.match(source, /classList\.toggle\("hidden", transcript\(session\.id\)\.length > 0\)/);
 });
 
+test("新建会话会刷新上下文容量条，不残留上一会话用量", async () => {
+  const navigation = await readClientFiles(["views/navigation.ts"]);
+  const turn = await readClientFiles(["stream/turn.ts"]);
+  assert.match(navigation, /renderPermChip\(session\);\s*\/\/[^\n]*容量条/);
+  assert.match(navigation, /updateContextBar\(\);/);
+  assert.match(turn, /showChatState\(created\)/);
+  assert.doesNotMatch(turn, /showChatState\(state\.sessions\[0\]\)/);
+});
+
 test("侧栏按项目与今天/昨天/更早分组，并显示相对时间", async () => {
   const source = await readClientFiles(["views/sessions.ts"]);
   assert.match(source, /function sessionDayGroup/);

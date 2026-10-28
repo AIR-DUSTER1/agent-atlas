@@ -194,10 +194,11 @@ export async function createSession(
       ? { kind: "demo", demo, projectId }
       : { kind: kind || "agent", projectId, ...(kind === "external" ? { agentId, title: prefill || undefined } : {}) }),
   });
-  state.sessions.unshift({ ...(data as unknown as Session), stale: false });
-  state.currentId = data.id;
+  const created = { ...(data as unknown as Session), stale: false };
+  state.sessions.unshift(created);
+  state.currentId = created.id;
   renderSessions();
-  showChatState(state.sessions[0]);
+  showChatState(created);
   renderAll();
   closeModalImpl();
   if (prefill) {

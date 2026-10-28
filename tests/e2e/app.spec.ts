@@ -64,6 +64,16 @@ test("会话发送、刷新恢复、人工审批折叠且只出现一个助手�
   expect(pageErrors).toEqual([]);
 });
 
+test("新建会话不继承上一会话的上下文用量显示", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await sendMessage(page, "你好");
+  await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
+
+  await createChat(page);
+  await expect(page.locator("#context-bar")).toBeHidden();
+});
+
 test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await login(page);
   await createChat(page);
