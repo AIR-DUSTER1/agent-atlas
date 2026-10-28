@@ -78,6 +78,8 @@ export function mountBlock(block: ChatBlock, live = true): void {
     return;
   }
 
+  // 切走后旧 typing 节点已脱离 DOM；切回来必须允许挂载新的指示器。
+  if (block._typing && !block._typing.isConnected) block._typing = null;
   const avatar = h("div", { class: "avatar", "aria-hidden": "true" }, icon("Zap", { size: 15 }));
   const body = h("div", { class: "assistant-body" });
   const wrap = h("div", { class: "msg-assistant" }, avatar, body);

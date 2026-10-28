@@ -17,7 +17,7 @@ import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
 import { renderAll } from "../render/messages.js";
 import { applyUsage, handleEvent } from "../stream/events.js";
-import { finalize } from "../stream/turn.js";
+import { finalize, syncComposerState } from "../stream/turn.js";
 import { markInterruptsResolved, markLatestInterruptPending, renderSessions } from "./sessions.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
@@ -60,6 +60,8 @@ export function showWelcomeState(): void {
   $("context-bar")?.classList.add("hidden");
   inputEl.disabled = true;
   sendBtn.disabled = true;
+  sendBtn.classList.remove("hidden");
+  $("stop-btn")?.classList.add("hidden");
   inputEl.placeholder = "先选择一个 Demo 新建会话…";
 }
 
@@ -90,6 +92,8 @@ export function showChatState(session: Session): void {
   renderPermChip(session);
   // 会话切换和新建后都要重算容量条；否则新会话会残留上一会话的用量。
   updateContextBar();
+  // 输入区按“当前会话自己的”流状态恢复：后台会话可继续生成，但不会锁住这里。
+  syncComposerState(session.id);
 }
 
 /** 权限 chip 只对有 Agent 执行力的会话显示（demo / external / 历史失效会话隐藏） */
@@ -163,7 +167,6 @@ export function closeCmMenus(): void {
 }
 
 export function selectSession(sid: string): void {
-  if (state.streaming) { uiAlert("当前正在生成回复，请先停止或等待完成", "请稍候"); return; }
   closeComposerMenu();
   state.currentId = sid;
   setSidebarOpen(false); // 窄屏抽屉：选中即收起
@@ -209,8 +212,8 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
             } satisfies ChatBlock, ablock);
           }
         }
-        for (const ev of rec.events || []) handleEvent(ev as never, ablock);
-        finalize(ablock);
+        for (const ev of rec.events || []) handleEvent(ev as never, ablock, s.id);
+        finalize(ablock, s.id);
       }
     } else {
       // 本地已有正文时不再重复重建 DOM，但仍从 journal 恢复本轮 usage；

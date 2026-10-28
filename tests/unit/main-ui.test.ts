@@ -45,6 +45,20 @@ test("侧栏按项目与今天/昨天/更早分组，并显示相对时间", asy
   assert.match(source, /天前/);
 });
 
+test("多个会话可并行生成，切换会话不再被全局流状态拦截", async () => {
+  const turn = await readClientFiles(["stream/turn.ts"]);
+  const navigation = await readClientFiles(["views/navigation.ts"]);
+  const sessions = await readClientFiles(["views/sessions.ts"]);
+  const events = await readClientFiles(["stream/events.ts"]);
+
+  assert.match(turn, /state\.streams\[sid\]/);
+  assert.match(turn, /syncComposerState\(sid\)/);
+  assert.match(turn, /state\.streams\[state\.currentId\]\?\.ctrl\.abort\(\)/);
+  assert.match(navigation, /export function selectSession\(sid: string\): void \{\s*closeComposerMenu\(\);/);
+  assert.doesNotMatch(navigation, /当前正在生成回复，请先停止或等待完成/);
+  assert.match(sessions, /class: "s-running"/);
+  assert.match(events, /const visible = sid === state\.currentId/);
+});
 test("消息流有回到底部按钮与未读累计", async () => {
   const source = await readClientSource();
   assert.match(source, /function distanceFromBottom/);

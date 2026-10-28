@@ -19,7 +19,7 @@ import { runResume } from "../stream/turn.js";
 import type { ApprovalPart, ClarificationPart } from "../modules/types.js";
 
 export async function decideApproval(part: ApprovalPart, status: "approved" | "rejected"): Promise<void> {
-  if (state.streaming) return;
+  if (state.currentId && (state.streams[state.currentId] || state.compacting[state.currentId])) return;
   part.status = status;
   const refs = partEls.get(part);
   if (refs) renderApprovalCard(part, refs.el);
@@ -34,7 +34,7 @@ export async function decideApproval(part: ApprovalPart, status: "approved" | "r
 }
 
 export async function decideClarification(part: ClarificationPart, choice: string, label: string): Promise<void> {
-  if (state.streaming) return;
+  if (state.currentId && (state.streams[state.currentId] || state.compacting[state.currentId])) return;
   const value = String(choice || "").trim();
   if (!value) return;
   part.status = "answered";

@@ -85,6 +85,42 @@ test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await expect(page.locator("#composer-hint")).toBeVisible();
 });
 
+test("多个会话可并行生成，切换会话不弹等待框", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/chat", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.continue();
+  });
+
+  await createChat(page); // 会话 A
+  await createChat(page); // 会话 B（最新项，索引 0）
+
+  const items = page.locator("#session-list .session-item");
+  await items.nth(1).click(); // 切回 A
+  await sendMessage(page, "并发任务一：请写一段较长的自我介绍");
+  await expect(page.locator("#stop-btn")).toBeVisible();
+
+  await items.nth(0).click(); // A 仍生成时切到 B
+  await expect(items.nth(0)).toHaveClass(/active/);
+  await expect(page.locator("#ui-dialog-mask")).toBeHidden();
+  await expect(page.locator("#send-btn")).toBeVisible();
+  await expect(page.locator("#stop-btn")).toBeHidden();
+
+  await sendMessage(page, "并发任务二：请写一首短诗");
+  await expect(page.locator("#stop-btn")).toBeVisible();
+  await expect(page.locator("#session-list .s-running")).toHaveCount(2);
+
+  await items.nth(1).click(); // 回到仍在生成的 A
+  await expect(page.locator("#stop-btn")).toBeVisible();
+  await page.locator("#stop-btn").click();
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
+
+  await items.nth(0).click();
+  await expect(page.locator("#stop-btn")).toBeVisible();
+  await page.locator("#stop-btn").click();
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
+});
+
 test("100KB Markdown 用户消息换行正常且不撑破容器", async ({ page }) => {
   await login(page);
   const message = "# 负载测试标题\n".repeat(18_000);

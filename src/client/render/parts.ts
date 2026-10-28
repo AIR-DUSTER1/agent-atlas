@@ -54,7 +54,7 @@ export function scheduleThinkingRender(part: ThinkingPart): void {
 }
 
 /** 供应商原生思考增量：同一节点的连续分片合并；新一轮思考另起折叠块。 */
-export function appendReasoning(ablock: AssistantBlock, ev: { text?: string; node?: string }): void {
+export function appendReasoning(ablock: AssistantBlock, ev: { text?: string; node?: string }, visible = true): void {
   const text = String(ev.text || "");
   if (!text) return;
   const node = ev.node || "agent";
@@ -75,7 +75,7 @@ export function appendReasoning(ablock: AssistantBlock, ev: { text?: string; nod
   }
   last.text += text;
   scheduleThinkingRender(last);
-  scrollBottom();
+  if (visible) scrollBottom();
 }
 
 /* ---------------------------------------------------------------------------
@@ -468,8 +468,8 @@ export function unmountTyping(block: AssistantBlock): void {
   if (block._typing) { block._typing.remove(); block._typing = null; }
 }
 
-/** 供 stream 层使用的当前会话判定（避免各处重复查表） */
-export function setPendingApproval(on: boolean): void {
-  const s = state.sessions.find((x) => x.id === state.currentId);
+/** 审批状态属于产生 interrupt 的会话，不能写到用户当前正在查看的另一个会话。 */
+export function setPendingApproval(on: boolean, sid: string | null = state.currentId): void {
+  const s = state.sessions.find((x) => x.id === sid);
   if (s) s.pendingApproval = on;
 }

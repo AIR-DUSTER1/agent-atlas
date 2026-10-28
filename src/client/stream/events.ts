@@ -35,7 +35,7 @@ function sealStreamingParts(ablock: AssistantBlock, kinds: Array<"text" | "think
     else if (part.p === "thinking") updateThinkingPart(part);
   }
 }
-export function appendToken(ablock: AssistantBlock, text: string): void {
+export function appendToken(ablock: AssistantBlock, text: string, visible = true): void {
   const parts = ablock.parts;
   let last = parts[parts.length - 1];
   if (!last || last.p !== "text" || !last.streaming) {
@@ -48,11 +48,11 @@ export function appendToken(ablock: AssistantBlock, text: string): void {
     last.text += text;
     scheduleTextRender(last);
   }
-  scrollBottom();
+  if (visible) scrollBottom();
 }
 
 export function upsertToolCall(
-  ablock: AssistantBlock, ev: { id: string; name?: string; argsFragment?: string }
+  ablock: AssistantBlock, ev: { id: string; name?: string; argsFragment?: string }, visible = true
 ): void {
   sealStreamingParts(ablock);
   let part = [...ablock.parts].reverse().find(
@@ -77,13 +77,12 @@ export function upsertToolCall(
   }
   part.argsText += ev.argsFragment || "";
   updateToolCard(part);
-  scrollBottom();
+  if (visible) scrollBottom();
 }
 
 export function fillToolResult(
-  ablock: AssistantBlock, ev: { id: string; content: string; isError?: boolean }
+  ablock: AssistantBlock, ev: { id: string; content: string; isError?: boolean }, sid: string | null, visible = true
 ): void {
-  const sid = state.currentId;
   const blocks = (sid ? state.blocks[sid] : []) || [];
   // 结果可能晚于换会话到达：先在当前块找，再回退到本会话所有助手块
   const fromAll = blocks
@@ -94,10 +93,10 @@ export function fillToolResult(
   if (!part) return;
   part.result = { content: ev.content, isError: Boolean(ev.isError) };
   updateToolCard(part);
-  scrollBottom();
+  if (visible) scrollBottom();
 }
 
-export function addNodeChip(ablock: AssistantBlock, name: string): void {
+export function addNodeChip(ablock: AssistantBlock, name: string, visible = true): void {
   sealStreamingParts(ablock);
   // 同一节点的思考卡已经承担了步骤标题，不再重复生成静态 chip。
   const thinking = [...ablock.parts].reverse().find(
@@ -112,10 +111,10 @@ export function addNodeChip(ablock: AssistantBlock, name: string): void {
   const part: AssistantPart = { p: "node", name };
   ablock.parts.push(part);
   mountPart(ablock, part);
-  scrollBottom();
+  if (visible) scrollBottom();
 }
 
-export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload): void {
+export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, sid: string | null, visible = true): void {
   sealStreamingParts(ablock);
   if (payload.type === "clarification") {
     const part: AssistantPart = { p: "clarification", req: payload, status: "pending" };
@@ -126,15 +125,18 @@ export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload):
     ablock.parts.push(part);
     mountPart(ablock, part);
   }
-  setPendingApproval(true);
-  scrollBottom(true);
+  setPendingApproval(true, sid);
+  if (visible) scrollBottom(true);
 }
 
-export function addErrorBlock(message: string): void {
+export function addErrorBlock(message: string, sid: string | null = state.currentId): void {
   const block = { t: "error" as const, text: message };
-  transcript(state.currentId).push(block);
-  mountBlock(block);
-  scrollBottom(true);
+  transcript(sid).push(block);
+  if (sid === state.currentId) {
+    mountBlock(block);
+    scrollBottom(true);
+  }
+  saveLocal();
 }
 
 /* ---------------------------------------------------------------------------
@@ -161,13 +163,14 @@ export function applyUsage(
   if (sid === state.currentId) updateContextBar();
   saveLocal();
 }
-export function handleEvent(ev: AgentEvent, ablock: AssistantBlock): void {
+export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string | null = state.currentId): void {
+  const visible = sid === state.currentId;
   switch (ev.type) {
-    case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text); break;
-    case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev); break;
-    case "tool_call": upsertToolCall(ablock, ev); break;
-    case "tool_result": sealStreamingParts(ablock); fillToolResult(ablock, ev); break;
-    case "node": addNodeChip(ablock, ev.name); break;
+    case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text, visible); break;
+    case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev, visible); break;
+    case "tool_call": upsertToolCall(ablock, ev, visible); break;
+    case "tool_result": sealStreamingParts(ablock); fillToolResult(ablock, ev, sid, visible); break;
+    case "node": addNodeChip(ablock, ev.name, visible); break;
     case "ai_message": {
       sealStreamingParts(ablock);
       const last = ablock.parts[ablock.parts.length - 1];
@@ -178,8 +181,8 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock): void {
       }
       break;
     }
-    case "interrupt": addInterrupt(ablock, ev.payload); break;
-    case "usage": applyUsage(ev, ablock); break;
+    case "interrupt": addInterrupt(ablock, ev.payload, sid, visible); break;
+    case "usage": applyUsage(ev, ablock, sid); break;
     case "shutdown": {
       // 服务端优雅退出的最后一帧：常驻顶部提示；刷新时若服务已恢复则自然消失
       let banner = document.getElementById("shutdown-banner");
@@ -193,7 +196,7 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock): void {
       banner.textContent = ev.message || "服务正在关闭，请稍后刷新页面重连";
       break;
     }
-    case "error": addErrorBlock(ev.message); break;
+    case "error": addErrorBlock(ev.message, sid); break;
     case "done": break;
     default: {
       // 穷尽性校验：新增事件类型时这里编译失败（而不是运行时静默失联）

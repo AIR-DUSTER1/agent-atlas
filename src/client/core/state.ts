@@ -15,7 +15,7 @@ import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-10-28-28";
+export const APP_VERSION = "web-2026-10-28-29";
 
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
@@ -40,8 +40,8 @@ export const state: AppState = {
   currentId: null,
   blocks: {},          // sessionId -> [block]
   usage: {},           // sessionId -> 本轮 usage
-  streaming: null,     // 正在流式的回合
-  compacting: false,   // /压缩上下文 请求进行中（与 SSE streaming 互斥）
+  streams: {},         // sessionId -> 正在流式的回合（不同会话可并行）
+  compacting: {},      // sessionId -> /压缩上下文是否进行中（仅互斥同一会话）
   settingsView: "models",
   pendingFiles: [],    // 输入框待发送附件
 };

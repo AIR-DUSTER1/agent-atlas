@@ -147,6 +147,9 @@ function renderSessionItem(session: Session): HTMLElement {
   const meta = h("div", { class: "s-meta" },
     h("span", { class: "s-demo" }, sessionTagText(session)),
     h("span", null, sessionTimeLabel(session.createdAt)),
+    state.streams[session.id]
+      ? h("span", { class: "s-running", title: "该会话正在后台生成回复" }, icon("LoaderCircle", { size: 12 }), "生成中")
+      : null,
     session.pendingApproval ? h("span", { class: "s-pending" }, icon("Clock", { size: 12 }), "待审批") : null,
   );
 
@@ -168,6 +171,10 @@ function renderSessionItem(session: Session): HTMLElement {
     "aria-label": "删除当前会话",
     onclick: async (event: MouseEvent) => {
       event.stopPropagation();
+      // 先中止本会话在途生成，再请求服务端删除，避免 journal 回填与删除竞态。
+      state.streams[session.id]?.ctrl.abort();
+      delete state.streams[session.id];
+      delete state.compacting[session.id];
       if (!session.stale) {
         try { await api(`/api/sessions/${session.id}`, { method: "DELETE" }); } catch { /* 本地仍可清理 */ }
       }

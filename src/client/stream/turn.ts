@@ -3,7 +3,7 @@
  * stream/turn.ts — 发送 / 审批续跑 / 停止（一轮对话的生命周期）
  * ============================================================
  * 职责：把输入框内容或 resume 载荷变成一次 SSE 请求，并维护
- * state.streaming、按钮显隐、状态点与收尾。
+ * state.streams 中对应会话的按钮显隐、状态点与收尾。
  * 设计立场：
  *  - 「一个回合 = 一个助手块」：审批 / 澄清续跑必须沿用原块，否则会多出头像；
  *  - 中断（AbortError）不当作错误展示 —— 用户点停止是正常操作；
@@ -49,13 +49,14 @@ export function setStatus(mode: "idle" | "busy"): void {
 }
 export async function send(): Promise<void> {
   const text = inputEl.value.trim();
-  if (!text || !state.currentId || state.streaming || state.compacting) return;
-  const cur = state.sessions.find((x) => x.id === state.currentId);
+  const sid = state.currentId;
+  if (!text || !sid || state.streams[sid] || state.compacting[sid]) return;
+  const cur = state.sessions.find((x) => x.id === sid);
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
   // 新一轮上下文用量必须从空开始，否则上一轮峰值会污染本轮容量条。
-  delete state.usage[state.currentId];
+  delete state.usage[sid];
   document.getElementById("context-bar")?.classList.add("hidden");
 
   const pending = state.pendingFiles;
@@ -64,7 +65,7 @@ export async function send(): Promise<void> {
   inputEl.value = "";
   autoGrowImpl();
 
-  const arr = transcript(state.currentId);
+  const arr = transcript(sid);
   const userBlock: ChatBlock = { t: "user", text, ...(filesMeta.length ? { files: filesMeta } : {}) };
   const ablock: AssistantBlock = { t: "assistant", parts: [] };
   arr.push(userBlock, ablock);
@@ -75,7 +76,7 @@ export async function send(): Promise<void> {
   renderAttachChips();
 
   // 首条消息自动作为会话标题
-  const s = state.sessions.find((x) => x.id === state.currentId);
+  const s = state.sessions.find((x) => x.id === sid);
   if (s && !s._renamed) {
     s.title = text.slice(0, 24) + (text.length > 24 ? "…" : "");
     s._renamed = true;
@@ -84,39 +85,37 @@ export async function send(): Promise<void> {
     renderSessions();
   }
   await streamTurn("/api/chat", {
-    sessionId: state.currentId,
+    sessionId: sid,
     message: text,
     ...(fileRefs.length ? { files: fileRefs } : {}),
-  }, ablock);
+  }, ablock, sid);
 }
 
 export async function runResume(
   payload: Record<string, unknown>, targetBlock: AssistantBlock | null = null
 ): Promise<void> {
-  if (!state.currentId || state.streaming) return;
+  const sid = state.currentId;
+  if (!sid || state.streams[sid] || state.compacting[sid]) return;
   let ablock = targetBlock;
   if (ablock) {
     // 审批 / 澄清恢复沿用原助手块：一个完整回合始终只有一个头像。
     mountTyping(ablock);
   } else {
     const created: AssistantBlock = { t: "assistant", parts: [] };
-    transcript(state.currentId).push(created);
+    transcript(sid).push(created);
     mountBlock(created);
     ablock = created;
   }
-  await streamTurn("/api/resume", { sessionId: state.currentId, ...payload }, ablock);
+  await streamTurn("/api/resume", { sessionId: sid, ...payload }, ablock, sid);
 }
 
 async function streamTurn(
-  url: string, body: Record<string, unknown>, ablock: AssistantBlock
+  url: string, body: Record<string, unknown>, ablock: AssistantBlock, sid: string
 ): Promise<void> {
-  const sid = state.currentId;
-  if (!sid) return;
   const ctrl = new AbortController();
-  state.streaming = { ctrl, sid, ablock };
-  stopBtn.classList.remove("hidden");
-  sendBtn.classList.add("hidden");
-  setStatus("busy");
+  state.streams[sid] = { ctrl, sid, ablock };
+  syncComposerState(sid);
+  renderSessions();
   const wasNear = nearBottomImpl();
 
   try {
@@ -130,16 +129,16 @@ async function streamTurn(
       const data = await res.json().catch(() => ({})) as { error?: string };
       throw new Error(data.error || `HTTP ${res.status}`);
     }
-    await consumeSSE(res, (ev) => handleEvent(ev, ablock));
+    await consumeSSE(res, (ev) => handleEvent(ev, ablock, sid));
   } catch (err) {
     const error = err as Error;
     if (error.name !== "AbortError") {
       const { addErrorBlock } = await import("./events.js");
-      addErrorBlock(`请求失败：${error.message}`);
+      addErrorBlock(`请求失败：${error.message}`, sid);
     }
   } finally {
-    finalize(ablock);
-    if (wasNear) chatScroll.scrollTop = chatScroll.scrollHeight;
+    finalize(ablock, sid);
+    if (sid === state.currentId && wasNear) chatScroll.scrollTop = chatScroll.scrollHeight;
   }
 }
 
@@ -148,12 +147,12 @@ function nearBottomImpl(): boolean {
 }
 
 /** finalize：结束流式态，清空光标 / 清理空块 */
-export function finalize(ablock: AssistantBlock | null): void {
+export function finalize(ablock: AssistantBlock | null, sid: string | null = state.currentId): void {
   if (ablock) {
     if (!ablock.parts.length) {
       // 整轮无输出（请求失败 / 立即中止）→ 移除空助手块
       ablock._el?.remove();
-      const arr = transcript(state.currentId);
+      const arr = transcript(sid);
       const i = arr.indexOf(ablock);
       if (i >= 0) arr.splice(i, 1);
     } else {
@@ -168,16 +167,27 @@ export function finalize(ablock: AssistantBlock | null): void {
       }
     }
   }
-  state.streaming = null;
-  stopBtn.classList.add("hidden");
-  sendBtn.classList.remove("hidden");
-  sendBtn.disabled = !state.currentId;
-  setStatus("idle");
+  if (sid && state.streams[sid]?.ablock === ablock) delete state.streams[sid];
+  if (sid === state.currentId) syncComposerState(sid);
+  renderSessions();
   saveLocal();
 }
 
+/** 当前会话的输入区只受本会话流 / 压缩状态影响，后台会话不锁输入。 */
+export function syncComposerState(sid: string | null = state.currentId): void {
+  const session = state.sessions.find((item) => item.id === sid);
+  if (!session || !sid || sid !== state.currentId) return;
+  const streaming = Boolean(state.streams[sid]);
+  const compacting = Boolean(state.compacting[sid]);
+  inputEl.disabled = Boolean(session.stale) || compacting;
+  sendBtn.classList.toggle("hidden", streaming);
+  stopBtn.classList.toggle("hidden", !streaming);
+  sendBtn.disabled = Boolean(session.stale) || compacting;
+  setStatus(streaming || compacting ? "busy" : "idle");
+}
+
 export function stopStreaming(): void {
-  state.streaming?.ctrl.abort();
+  if (state.currentId) state.streams[state.currentId]?.ctrl.abort();
 }
 
 /** 新建会话（含 demo / external / estate 三种归属） */

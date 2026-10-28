@@ -386,6 +386,11 @@
 #project-menu .pm-check { flex: none; min-width: 10px; color: var(--accent); text-align: center; }
 .session-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .session-item .s-pending { display: inline-flex; align-items: center; gap: 3px; color: var(--amber); }
+.session-item .s-running { display: inline-flex; align-items: center; gap: 3px; color: var(--green); }
+.session-item .s-running .ui-icon { animation: spin 1.1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .session-item .s-running .ui-icon { animation: none; }
+}
 .topbar-breadcrumb {
   display: flex;
   min-width: 0;

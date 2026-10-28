@@ -164,6 +164,12 @@ export interface ComposerTrigger {
 
 import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent } from "./types-api.js";
 
+export interface SessionStreamState {
+  ctrl: AbortController;
+  sid: string;
+  ablock: AssistantBlock;
+}
+
 export interface AppState {
   config: AppConfig | null;
   sessions: Session[];
@@ -175,8 +181,10 @@ export interface AppState {
   currentId: string | null;
   blocks: Record<string, ChatBlock[]>;
   usage: Record<string, UsageInfo & { contextTokens?: number }>;
-  streaming: { ctrl: AbortController; sid: string; ablock: AssistantBlock } | null;
-  compacting: boolean;
+  /** 会话 id → 正在运行的 SSE 回合；允许多个会话并行生成。 */
+  streams: Record<string, SessionStreamState>;
+  /** 会话 id → 是否正在压缩上下文；只互斥同一会话。 */
+  compacting: Record<string, boolean>;
   settingsView: string;
   pendingFiles: PendingFile[];
   /** 记忆 / 统计等懒加载分区的缓存（目前主要给插件卡片判定） */

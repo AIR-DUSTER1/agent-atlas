@@ -135,7 +135,7 @@ export function closeComposerMenu(): void {
 }
 
 function currentComposerTrigger(): ComposerTrigger | null {
-  if (!state.currentId || state.streaming || state.compacting || inputEl.disabled) return null;
+  if (!state.currentId || state.streams[state.currentId] || state.compacting[state.currentId] || inputEl.disabled) return null;
   const cur = state.sessions.find((s) => s.id === state.currentId);
   if (cur?.stale) return null;
   const end = inputEl.selectionStart ?? 0;
