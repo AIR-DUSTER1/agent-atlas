@@ -547,6 +547,7 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时自动跑三套类型检查�
 - [docs/agent-wiki.md](docs/agent-wiki.md) —— 核心概念、生产模块、示例调用链与踩坑表；
 - [docs/agent-orchestration.md](docs/agent-orchestration.md) —— 一次请求从进门到回答的完整编排；
 - [docs/agent-orchestration-vs-zcode.md](docs/agent-orchestration-vs-zcode.md) —— 与 ZCode / DSH 的编排对比；
+- [docs/production-readiness.md](docs/production-readiness.md) —— `v1.1.0` 生产 readiness 终审证据；
 - [docs/deployment.md](docs/deployment.md) —— 部署与运维文档总览；
 - [docs/self-hosting.md](docs/self-hosting.md) —— 快速自托管；
 - [docs/production-checklist.md](docs/production-checklist.md) —— 上线 Checklist；
