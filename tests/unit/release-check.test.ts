@@ -130,3 +130,17 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.equal(new Set(REQUIRED_RUNTIME_ASSETS).size, REQUIRED_RUNTIME_ASSETS.length);
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes("node_modules/electron"));
 });
+test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const refs = [...workflow.matchAll(/uses:\s*([^\s#]+)(?:\s*#\s*(\S+))?/g)].map((match) => ({
+    ref: match[1] ?? "",
+    version: match[2] ?? "",
+  }));
+  assert.ok(refs.length >= 10, `CI Action 数量异常：${refs.length}`);
+  for (const item of refs) {
+    assert.match(item.ref, /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/, item.ref);
+    assert.match(item.version, /^v\d+\.\d+\.\d+$/, `${item.ref} 缺少可读版本注释`);
+  }
+  assert.ok(refs.some((item) => item.ref === "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"));
+  assert.doesNotMatch(workflow, /aquasecurity\/trivy-action@0\.28\.0/);
+});
