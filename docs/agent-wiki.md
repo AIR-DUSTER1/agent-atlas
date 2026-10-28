@@ -28,7 +28,7 @@
 
 ### 1.1 这是什么
 
-一个用 **LangGraph.js（v1.4.9）+ TypeScript** 搭建的 **Agent Web 应用**（可正常使用），
+一个用 **LangGraph.js（v1.4.9）+ TypeScript** 搭建、可单实例自托管生产的 **Agent Web 应用**，
 同时内置 **5 个学习示例**作为「事例选择」：
 新建对话默认使用**通用 Agent**（`src/agent/general.ts`：需求理解 → 澄清 →
 ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件上下文，按产品逻辑组装）；

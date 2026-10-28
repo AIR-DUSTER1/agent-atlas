@@ -3,8 +3,8 @@
 一个用 **LangGraph.js**（TypeScript）写的 Agent 应用，网页版和桌面版（Electron）都有：
 多轮对话、📎 文件上下文、多供应商模型切换、🧠 长期记忆、高风险操作人工审批、📚 外部知识库。
 
-定位是「学习项目形态，可正常当产品用」—— 代码是带详细中文注释的 LangGraph 教材，
-同时也是日常真能拿来干活的 Agent 工作台。
+定位是 **生产可自托管的单实例 Agent 工作台**，同时保留带详细中文注释的 LangGraph 教材属性。
+安全、数据恢复、镜像发布与运维按 Level 2 标准执行；不包含多租户、RBAC 或多副本 SaaS 能力。
 
 ![空会话工作台](docs/screenshots/main-empty.png)
 
@@ -18,10 +18,11 @@ cp .env.example .env        # 填入你的 BASE_URL / API_KEY / MODEL
 npm run models              # 查一下网关支持哪些模型（防 400）
 npm run web                 # 启动网页版 → http://localhost:3000
 npm run desktop             # 或桌面版（Electron，默认端口 3123）
-npm test                    # 全部测试（mock 模式，不耗真实配额）
+npm test                    # 全部 Node 测试（mock，不耗真实配额）
+npm run e2e                 # Playwright 浏览器主流程
 
-# 或 Docker 部署（需先设置 AUTH_TOKEN，详见 docs/deployment.md）
-docker compose up -d --build
+# 生产自托管：见 docs/self-hosting.md（固定镜像 digest + TLS + 密钥）
+docker compose up -d --build   # 仅本机构建验收
 ```
 
 > 💡 **没有 API Key 也能跑**：不配 Key 会自动进入**模拟模式** —— 回答由本地脚本生成，

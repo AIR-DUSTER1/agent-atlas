@@ -1,7 +1,7 @@
 {
   "name": "langgraph-agent-demo",
   "version": "1.1.0",
-  "description": "用 LangGraph.js 搭建 Agent 流程的学习 Demo（TypeScript + CLI + Web）",
+  "description": "生产可自托管的单实例 LangGraph Agent 工作台（TypeScript + CLI + Web）",
   "type": "module",
   "scripts": {
     "models": "tsx scripts/list-models.ts",
