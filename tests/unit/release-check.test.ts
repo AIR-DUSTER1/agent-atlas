@@ -29,7 +29,7 @@ const PRODUCTION_ENV: NodeJS.ProcessEnv = {
 
 async function makeRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agent-release-check-"));
-  await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.1.0", dependencies: { tsx: "4.23.15" } }));
+  await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.9.0-beta.1", dependencies: { tsx: "4.23.15" } }));
   for (const relative of REQUIRED_RUNTIME_ASSETS) {
     await mkdir(dirname(join(root, relative)), { recursive: true });
     await writeFile(join(root, relative), "fixture", "utf8");
@@ -97,7 +97,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "1.1.0");
+  assert.equal(pkg.version, "0.9.0-beta.1");
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);

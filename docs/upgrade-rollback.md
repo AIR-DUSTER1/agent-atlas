@@ -2,9 +2,9 @@
 
 ## 1. 发布约定
 
-- 版本使用语义化版本：`MAJOR.MINOR.PATCH`。
-- Git tag 与镜像标签使用同一版本，例如 `v1.1.0` 与 `agent:1.1.0`。
-- 生产只记录并部署 digest，不使用浮动 `latest`。
+- 当前处于 `pre-1.0` 开发预览阶段，不创建正式 Git tag；镜像标签仅用于本地构建和演练。
+- 正式发布时按不可变 digest 部署，不使用浮动 `latest`。
+- 发布记录至少包含：app version、git commit、镜像 digest、SBOM SHA-256、备份名、操作者与时间。
 - 发布记录至少包含：app version、git commit、镜像 digest、SBOM SHA-256、备份名、操作者与时间。
 
 ## 2. 升级前检查
@@ -25,17 +25,17 @@ npm run sbom
 
 ```bash
 docker build \
-  --build-arg APP_VERSION=1.1.0 \
+  --build-arg APP_VERSION=0.9.0-beta.1 \
   --build-arg GIT_COMMIT=<commit> \
   --build-arg BUILD_TIME=<ISO-8601> \
-  -t registry.example.com/agent:1.1.0 .
-docker push registry.example.com/agent:1.1.0
+  -t registry.example.com/agent:0.9.0-beta.1 .
+docker push registry.example.com/agent:0.9.0-beta.1
 ```
 
 记录 digest：
 
 ```bash
-docker image inspect registry.example.com/agent:1.1.0 \
+docker image inspect registry.example.com/agent:0.9.0-beta.1 \
   --format '{{index .RepoDigests 0}}'
 ```
 
