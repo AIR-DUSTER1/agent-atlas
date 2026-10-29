@@ -51,7 +51,7 @@ import { lifecycle } from "./lifecycle.js";
 import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { flushJournal, journalPath } from "./session-store.js";
 import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
-import { loadMemories, memoriesFilePath } from "../memory-store.js";
+import { loadMemories, memoriesFilePath, flushMemoryUsage } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
@@ -60,6 +60,7 @@ import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
 import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics } from "./observability/metrics.js";
 import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/observability.js";
 import { runPersistenceMigrations } from "./persistence/migrations.js";
+import { applyMemoryRuntime } from "./memory-http.js";
 import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -72,6 +73,7 @@ import { handleListProjects, handleAddProject, handleSetActiveProject, handleDel
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import { handleListMemories, handleSaveMemory, handleDeleteMemory } from "./routes/memories.js";
+import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, handleMemoryStatus } from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
@@ -151,8 +153,9 @@ try {
   await loadExternalAgents();
   await loadRag();
   await loadEstate();
-  // F1：跨会话长期记忆（agent 层 memoryNote 每轮读内存索引，这里启动时预热落盘数据）
+  // F1：跨会话长期记忆先预热本地文件，再按配置注册 / 激活本地或 HTTP Provider。
   await loadMemories();
+  await applyMemoryRuntime();
   // MCP：启动时连接已配置的 server 并把工具注入 general profile。
   // 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
   await refreshMcpTools();
@@ -354,7 +357,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧经 memory_save 工具同一存储）
+    // 记忆插槽配置 / 连接测试 / 运行状态
+    if (pathname === "/api/memory/config" && req.method === "GET") { await handleGetMemoryConfig(res); return; }
+    if (pathname === "/api/memory/config" && req.method === "PUT") { await handleUpdateMemoryConfig(res, req); return; }
+    if (pathname === "/api/memory/test" && req.method === "POST") { await handleTestMemory(res, req); return; }
+    if (pathname === "/api/memory/status" && req.method === "GET") { await handleMemoryStatus(res); return; }
+
+    // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
     if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
@@ -481,6 +490,7 @@ function handleSignal(signal: string): void {
       await flushJournal();
       await flushAudit();
       await flushCheckpointLog();
+      await flushMemoryUsage();
   await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，

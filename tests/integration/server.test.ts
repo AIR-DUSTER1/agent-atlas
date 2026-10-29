@@ -339,6 +339,36 @@ test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async 
   assert.equal(recheck.status, 404);
 });
 
+test("记忆插槽 API：默认 local、状态可读、危险 HTTP 切换被拒", async () => {
+  const config = await json("/api/memory/config");
+  assert.equal(config.status, 200);
+  assert.equal(config.body.config.activeProvider, "local");
+  assert.equal(config.body.config.http.apiKey, "");
+  assert.equal(config.body.config.http.hasApiKey, false);
+
+  const status = await json("/api/memory/status");
+  assert.equal(status.status, 200);
+  assert.equal(status.body.activeProvider, "local");
+  assert.equal(status.body.health.status, "ok");
+  assert.ok(["ok", "missing", "migrated"].includes(status.body.localStore.state));
+
+  const unsafe = await json("/api/memory/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ activeProvider: "http" }),
+  });
+  assert.equal(unsafe.status, 400);
+  assert.match(unsafe.body.error, /必须先启用/);
+
+  const noTarget = await json("/api/memory/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(noTarget.status, 400);
+  assert.match(noTarget.body.error, /baseURL/);
+});
+
 test("统计接口：mock 对话后 usage 计入按天/按模型聚合", async () => {
   // 先建会话聊一轮（mock 模式也产 usage 事件，model 标「模拟模式」）
   const created = await json("/api/sessions", {
