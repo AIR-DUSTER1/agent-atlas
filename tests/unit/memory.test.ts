@@ -20,8 +20,12 @@ import {
   listMemories,
   listMemoriesAsync,
   memoryStoreStatus,
+  flushMemoryUsage,
+  MAX_INJECT_MEMORIES,
+  MEMORY_PROMPT_CHAR_BUDGET,
 } from "../../src/memory-store.js";
 import { memorySave, memoryRecall, createMemoryTools } from "../../src/tools-memory.js";
+import { rankMemories } from "../../src/memory/providers/local-search.js";
 import { buildAgentContext } from "../../src/agent/context-builder.js";
 import { subagentProfileOf } from "../../src/agent/subagent.js";
 import { generalProfile } from "../../src/agent/general.js";
@@ -77,13 +81,13 @@ test("v1 数组自动迁移 v2：原字段保留，旧记忆默认归入 general
   }
 });
 
-test("存储核心：同 scope 同 key 更新保留 id，跨 scope 不覆盖", async () => {
+test("存储核心：同 scope 同 key 新内容进入历史，跨 scope 不覆盖", async () => {
   const { dir, file } = await freshStore();
   try {
     const first = await saveMemory("回答风格", "结论先行", "agent", "general");
     await new Promise((resolve) => setTimeout(resolve, 5));
     const second = await saveMemory("回答风格", "结论先行，少用列表", "user", "general");
-    assert.equal(second.id, first.id);
+    assert.notEqual(second.id, first.id, "内容变化应生成新 active 版本");
     const estate = await saveMemory("回答风格", "房产回答要带风险提示", "user", "estate");
     assert.notEqual(estate.id, first.id);
     assert.equal(await loadMemories("general"), 1);
@@ -93,7 +97,7 @@ test("存储核心：同 scope 同 key 更新保留 id，跨 scope 不覆盖", a
 
     const persisted = JSON.parse(await readFile(file, "utf8")) as { schemaVersion: number; entries: unknown[] };
     assert.equal(persisted.schemaVersion, 2);
-    assert.equal(persisted.entries.length, 2);
+    assert.equal(persisted.entries.length, 3, "general 两条历史 + estate 一条 active");
   } finally {
     await dropStore(dir);
   }
@@ -181,6 +185,93 @@ test("轻量检索：多词 OR、大小写不敏感、空查询返回当前 scop
     const hits = await searchMemories("editor 北京", 10, "general");
     assert.equal(hits.length, 2);
     assert.equal((await searchMemories("", 1, "general")).length, 1);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("历史版本：内容变化保留 superseded，完全相同只刷新不新增", async () => {
+  const { dir, file } = await freshStore();
+  try {
+    const first = await saveMemory("回答风格", "结论先行", "agent", "general");
+    const second = await saveMemory("回答风格", "结论先行，少用列表", "user", "general");
+    assert.notEqual(second.id, first.id);
+    const active = await listMemoriesAsync("general");
+    assert.equal(active.length, 1);
+    assert.equal(active[0].content, "结论先行，少用列表");
+    const history = await listMemoriesAsync("general", { includeHistory: true });
+    assert.equal(history.length, 2);
+    assert.equal(history.find((item) => item.id === first.id)?.status, "superseded");
+
+    await saveMemory("回答风格", "结论先行，少用列表", "agent", "general");
+    assert.equal((await listMemoriesAsync("general", { includeHistory: true })).length, 2, "同内容不新增历史");
+
+    const persisted = JSON.parse(await readFile(file, "utf8")) as { entries: Array<{ status: string }> };
+    assert.equal(persisted.entries.filter((item) => item.status === "active").length, 1);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("相关性评分：key 命中优先于 content，中文 bigram 可命中近似表达", () => {
+  const now = Date.now();
+  const base = { scope: { profileId: "general" as const, userId: "local" }, tags: [], source: "agent" as const, status: "active" as const, createdAt: now, updatedAt: now };
+  const ranked = rankMemories([
+    { ...base, id: "content", key: "其他", content: "用户希望回答风格保持一致" },
+    { ...base, id: "key", key: "回答风格", content: "结论先行" },
+    { ...base, id: "irrelevant", key: "部署", content: "使用 Docker" },
+  ], "回答风格", 8, now);
+  assert.equal(ranked[0].record.id, "key");
+  assert.ok(ranked.some((item) => item.record.id === "content"));
+  assert.ok(!ranked.some((item) => item.record.id === "irrelevant"));
+});
+
+test("注入预算：最多 8 条且总字符不超过 2400，空查询不注入", async () => {
+  const { dir } = await freshStore();
+  try {
+    for (let i = 0; i < 12; i += 1) {
+      await saveMemory(`主题${i}`, `偏好内容${i} ${"细节".repeat(80)}`, "agent", "general");
+    }
+    const note = await memoryNoteForPrompt({ profileId: "general", query: "主题 偏好" });
+    assert.ok(note);
+    assert.ok(note.length <= MEMORY_PROMPT_CHAR_BUDGET, `actual=${note.length}`);
+    assert.ok((note.match(/\n- \[/g) ?? []).length <= MAX_INJECT_MEMORIES);
+    assert.equal(await memoryNoteForPrompt({ profileId: "general", query: "   " }), null);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("命中统计：searchMemories 更新 useCount/lastUsedAt，并节流后落盘", async () => {
+  const { dir, file } = await freshStore();
+  try {
+    await saveMemory("回答风格", "结论先行", "agent", "general");
+    const hits = await searchMemories("回答风格", 8, "general");
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].useCount, 1);
+    assert.ok(hits[0].lastUsedAt);
+    await flushMemoryUsage();
+    const persisted = JSON.parse(await readFile(file, "utf8")) as { entries: Array<{ useCount?: number; lastUsedAt?: number }> };
+    assert.equal(persisted.entries[0].useCount, 1);
+    assert.ok(persisted.entries[0].lastUsedAt);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("敏感信息：secret 永远拒绝，PII 默认拒绝但显式 allowPII 可保存", async () => {
+  const { dir } = await freshStore();
+  try {
+    await assert.rejects(
+      () => saveMemory("API", "token=sk-abcdefghijklmnopqrstuvwxyz", "agent", "general"),
+      /拒绝保存.*密钥/
+    );
+    await assert.rejects(
+      () => saveMemory("电话", "用户手机号 13800138000", "agent", "general"),
+      /手机号|身份证/
+    );
+    const saved = await saveMemory("电话", "用户手机号 13800138000", "user", "general", { allowPII: true });
+    assert.match(saved.content, /13800138000/);
   } finally {
     await dropStore(dir);
   }

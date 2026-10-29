@@ -57,6 +57,8 @@ let storeFile = resolveFile();
 let statusState: LocalStoreState = "missing";
 let statusExtra: Pick<LocalMemoryStoreStatus, "migratedFrom" | "quarantinedTo" | "message"> = {};
 let writeQueue: Promise<void> = Promise.resolve();
+let usageDirty = false;
+let usageTimer: ReturnType<typeof setTimeout> | undefined;
 
 function resolveFile(): string {
   return process.env.MEMORIES_FILE || DEFAULT_FILE;
@@ -155,6 +157,20 @@ function cloneRecords(items: MemoryRecord[]): MemoryRecord[] {
   return items.map(cloneRecord);
 }
 
+/** 历史只保留最近 1000 条；优先淘汰最老的 superseded，绝不为了腾位置删 active。 */
+function pruneHistory(items: MemoryRecord[]): MemoryRecord[] {
+  if (items.length <= MAX_HISTORY_RECORDS) return items;
+  const remove = new Set<string>();
+  const candidates = items
+    .filter((item) => item.status === "superseded")
+    .sort((a, b) => a.updatedAt - b.updatedAt);
+  for (const item of candidates) {
+    if (items.length - remove.size <= MAX_HISTORY_RECORDS) break;
+    remove.add(item.id);
+  }
+  return items.filter((item) => !remove.has(item.id));
+}
+
 async function persist(next: MemoryRecord[]): Promise<void> {
   const file: MemoryFileV2 = { schemaVersion: MEMORY_SCHEMA_VERSION, entries: next };
   await mkdir(dirname(storeFile), { recursive: true });
@@ -249,7 +265,7 @@ async function load(): Promise<void> {
     return;
   }
 
-  const normalized = normalizeRecords(entries, memoryScope(DEFAULT_MEMORY_PROFILE));
+  const normalized = pruneHistory(normalizeRecords(entries, memoryScope(DEFAULT_MEMORY_PROFILE)));
   records = normalized;
   loaded = true;
   blocked = false;
@@ -287,7 +303,7 @@ export function loadedLocalRecords(): MemoryRecord[] {
 }
 
 function normalizeAfterMutation(next: MemoryRecord[]): MemoryRecord[] {
-  return normalizeRecords(next, memoryScope(DEFAULT_MEMORY_PROFILE))
+  return pruneHistory(normalizeRecords(next, memoryScope(DEFAULT_MEMORY_PROFILE)))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -304,12 +320,58 @@ export async function updateLocalRecords<T>(mutator: (draft: MemoryRecord[]) => 
     const normalized = normalizeAfterMutation(draft);
     await persist(normalized);
     records = normalized;
+    usageDirty = false;
+    if (usageTimer) clearTimeout(usageTimer);
+    usageTimer = undefined;
     statusState = "ok";
     statusExtra = {};
   });
   writeQueue = run.catch(() => {});
   await run;
   return result;
+}
+
+function scheduleUsagePersist(): void {
+  if (usageTimer) return;
+  usageTimer = setTimeout(() => {
+    usageTimer = undefined;
+    void flushLocalUsage().catch(() => {});
+  }, 1000);
+  usageTimer.unref?.();
+}
+
+/**
+ * 检索命中后只更新内存计数，1 秒合并落盘；高频对话不会每轮都重写整份文件。
+ * 返回值是带最新 useCount/lastUsedAt 的副本，供本轮注入直接使用。
+ */
+export function touchLocalRecords(ids: string[], now = Date.now()): MemoryRecord[] {
+  if (!loaded || blocked || !ids.length) return [];
+  const targets = new Set(ids);
+  const touched: MemoryRecord[] = [];
+  for (const record of records) {
+    if (record.status !== "active" || !targets.has(record.id)) continue;
+    record.lastUsedAt = now;
+    record.useCount = (record.useCount ?? 0) + 1;
+    touched.push(cloneRecord(record));
+  }
+  if (touched.length) {
+    usageDirty = true;
+    scheduleUsagePersist();
+  }
+  return touched;
+}
+
+/** 测试、关停或设置页刷新前可强制冲刷命中统计。 */
+export async function flushLocalUsage(): Promise<void> {
+  const run = writeQueue.then(async () => {
+    if (!usageDirty) return;
+    await persist(records);
+    usageDirty = false;
+    statusState = "ok";
+    statusExtra = {};
+  });
+  writeQueue = run.catch(() => {});
+  await run;
 }
 
 export async function replaceLocalRecords(next: MemoryRecord[]): Promise<void> {
@@ -347,4 +409,7 @@ export function resetLocalStore(): void {
   statusState = "missing";
   statusExtra = {};
   writeQueue = Promise.resolve();
+  usageDirty = false;
+  if (usageTimer) clearTimeout(usageTimer);
+  usageTimer = undefined;
 }

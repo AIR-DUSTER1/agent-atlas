@@ -19,7 +19,7 @@ import { closeComposerMenu } from "../composer/menu.js";
 import { h } from "../ui/h.js";
 import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
-import { refreshMemories, memStatus } from "./settings-memories.js";
+import { refreshMemories, memStatus, bindMemorySettings } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
@@ -92,6 +92,7 @@ function filterSettingsNav(query: string): void {
 
 /** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
 export function bindSettingsNavigation(): void {
+  bindMemorySettings();
   document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
     button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
   });

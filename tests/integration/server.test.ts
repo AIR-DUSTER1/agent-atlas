@@ -304,22 +304,24 @@ test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async 
   assert.equal(created.body.entry.key, "测试偏好");
   const id = created.body.entry.id;
 
-  // 同 key 更新（id 稳定）
+  // 同 key 新内容生成 active 版本，旧版本保留为历史
   const updated = await json("/api/memories", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key: "测试偏好", content: "回答要结论先行、少用列表" }),
   });
   assert.equal(updated.status, 200);
-  assert.equal(updated.body.entry.id, id);
+  const updatedId = updated.body.entry.id;
+  assert.notEqual(updatedId, id);
 
   // 列表
   const listed = await json("/api/memories");
   assert.equal(listed.status, 200);
-  const found = (listed.body.memories || []).find((m: { id: string; content: string }) => m.id === id);
+  const found = (listed.body.memories || []).find((m: { id: string; content: string }) => m.id === updatedId);
   assert.ok(found, "列表应包含刚保存的记忆");
   assert.equal(found.content, "回答要结论先行、少用列表");
   assert.equal(found.source, "user");
+  assert.ok(!(listed.body.memories || []).some((m: { id: string }) => m.id === id));
 
   // 坏请求：缺 content → 400 中文错误
   const bad = await json("/api/memories", {
@@ -331,9 +333,9 @@ test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async 
   assert.match(bad.body.error, /不能为空/);
 
   // 删除 → 再删 404
-  const gone = await json(`/api/memories/${id}`, { method: "DELETE" });
+  const gone = await json(`/api/memories/${updatedId}`, { method: "DELETE" });
   assert.equal(gone.status, 200);
-  const recheck = await json(`/api/memories/${id}`, { method: "DELETE" });
+  const recheck = await json(`/api/memories/${updatedId}`, { method: "DELETE" });
   assert.equal(recheck.status, 404);
 });
 

@@ -247,7 +247,7 @@
             <div class="settings-nav-group-title">扩展</div>
             <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
               <span class="sn-icon"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i></span>
-              <span class="sn-copy"><strong>长期记忆</strong><small>查看、新增与删除记忆</small></span>
+              <span class="sn-copy"><strong>长期记忆</strong><small>按 Agent 隔离的相关性记忆</small></span>
             </button>
             <button type="button" class="settings-nav-item" data-settings-view="commands" role="tab" aria-selected="false" aria-controls="settings-view-commands">
               <span class="sn-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
@@ -412,8 +412,15 @@
           <div id="memories-modal" role="region" aria-labelledby="memories-title">
             <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 跨会话长期记忆</h2>
       <p class="settings-sub">Agent 在对话中「值得跨会话记住」的事实与偏好（用户说「以后都…」「记住…」时会自动调用 memory_save）。
-        每轮对话自动注入最近 30 条，跨会话生效；这里可以查看、手动补充与删除。</p>
+        每轮按当前问题检索最相关的 8 条（2400 字符预算），跨会话生效且通用 / 租房 Agent 严格隔离。</p>
 
+      <label class="field memory-scope-field">
+        <span class="field-label">Agent 范围 <em class="key-state">两个范围严格隔离，不互相注入</em></span>
+        <select id="mem-profile-filter" class="pf-select" aria-label="记忆所属 Agent 范围">
+          <option value="general">通用 Agent</option>
+          <option value="estate">租房 / 房产 Agent</option>
+        </select>
+      </label>
       <div class="field-label">记忆列表</div>
       <div id="memories-list" class="memories-list"></div>
 

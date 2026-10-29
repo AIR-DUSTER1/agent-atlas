@@ -17,6 +17,11 @@ import type { MemoryEntry } from "../modules/types.js";
 
 let memStatusTimer: ReturnType<typeof setTimeout> | undefined;
 
+function currentMemoryProfile(): "general" | "estate" {
+  const select = $("mem-profile-filter") as HTMLSelectElement | null;
+  return select?.value === "estate" ? "estate" : "general";
+}
+
 export function memStatus(text: string, cls: string): void {
   const el = $("memories-status");
   if (!el) return;
@@ -57,11 +62,12 @@ function renderMemoriesList(memories: MemoryEntry[]): void {
     if (contentEl) contentEl.textContent = m.content;
     const when = new Date(m.updatedAt).toLocaleString();
     const metaEl = row.querySelector(".m-meta");
-    if (metaEl) metaEl.textContent = `${m.source === "agent" ? "Agent 保存" : "手动添加"} · ${when}`;
+    const source = m.source === "agent" ? "Agent 保存" : m.source === "import" ? "导入" : "手动添加";
+    if (metaEl) metaEl.textContent = `${source} · ${m.scope.profileId === "estate" ? "租房 Agent" : "通用 Agent"} · 命中 ${m.useCount ?? 0} 次 · ${when}`;
     row.querySelector(".p-del")?.addEventListener("click", async () => {
       if (!(await uiConfirm(`删除记忆「${m.key}」？删除后无法恢复。`, { title: "删除记忆", okText: "删除", danger: true }))) return;
       try {
-        await api(`/api/memories/${encodeURIComponent(m.id)}`, { method: "DELETE" });
+        await api(`/api/memories/${encodeURIComponent(m.id)}?profileId=${currentMemoryProfile()}`, { method: "DELETE" });
         await refreshMemories();
         memStatus("已删除", "ok");
       } catch (err) {
@@ -73,7 +79,8 @@ function renderMemoriesList(memories: MemoryEntry[]): void {
 }
 
 export async function refreshMemories(): Promise<MemoryEntry[]> {
-  const data = await api<{ memories?: MemoryEntry[] }>("/api/memories");
+  const profileId = currentMemoryProfile();
+  const data = await api<{ memories?: MemoryEntry[] }>(`/api/memories?profileId=${profileId}`);
   renderMemoriesList(data.memories || []);
   return data.memories || [];
 }
@@ -92,7 +99,7 @@ export async function saveMemoryFromForm(): Promise<void> {
     await api("/api/memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, content }),
+      body: JSON.stringify({ profileId: currentMemoryProfile(), key, content }),
     });
     if (keyEl) keyEl.value = "";
     if (contentEl) contentEl.value = "";
@@ -101,4 +108,13 @@ export async function saveMemoryFromForm(): Promise<void> {
   } catch (err) {
     memStatus(`✗ ${(err as Error).message}`, "err");
   }
+}
+/** 绑定 Agent 范围切换；重复调用安全，同一 DOM 只注册一次。 */
+export function bindMemorySettings(): void {
+  const select = $("mem-profile-filter") as HTMLSelectElement | null;
+  if (!select || select.dataset.bound === "1") return;
+  select.dataset.bound = "1";
+  select.addEventListener("change", () => {
+    void refreshMemories().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
+  });
 }
