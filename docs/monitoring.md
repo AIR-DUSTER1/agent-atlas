@@ -23,7 +23,7 @@
 
 ```yaml
 scrape_configs:
-  - job_name: langgraph-agent
+  - job_name: agent-tools
     scheme: https
     metrics_path: /metrics
     authorization:

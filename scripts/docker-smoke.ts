@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const commit = process.env.GIT_COMMIT || (git.status === 0 ? git.stdout.trim() : "unknown");
   const buildTime = new Date().toISOString();
   const suffix = randomBytes(4).toString("hex");
-  const image = process.env.SMOKE_IMAGE || `langgraph-agent-demo:smoke-${suffix}`;
+  const image = process.env.SMOKE_IMAGE || `agent-tools:smoke-${suffix}`;
   const container = `agent-smoke-${suffix}`;
   const baseTagArgs = [
     "build",

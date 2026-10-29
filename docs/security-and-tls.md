@@ -94,7 +94,7 @@ Caddy 自动管理 TLS。若需要对 `/metrics` 限制来源，在站点内增�
 
 ```yaml
 scrape_configs:
-  - job_name: langgraph-agent
+  - job_name: agent-tools
     scheme: https
     authorization:
       type: Bearer

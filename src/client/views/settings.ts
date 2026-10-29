@@ -162,7 +162,7 @@ export function openSettings(view = "models", focusProviderId: string | null = n
   requestAnimationFrame(() => $("settings-back-btn")?.focus());
 }
 
-/** 返回工作台；表单状态在离开时清理，避免下次打开残留。 */
+/** 返回 agent-tools 主界面；表单状态在离开时清理，避免下次打开残留。 */
 export function closeSettingsPage(): void {
   const page = $("settings-page");
   if (!page || page.classList.contains("hidden")) return;

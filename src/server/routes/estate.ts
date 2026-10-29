@@ -38,7 +38,7 @@ export async function handleSaveBeikeKey(res: import("node:http").ServerResponse
     if (typeof body.apiKey !== "string" || !body.apiKey.trim()) {
       throw new Error("apiKey 不能为空：登录贝壳获取页面显示的完整凭证后粘贴");
     }
-    // beike auth --save：Key 只进 CLI 本地凭证，工作台不落盘不回显
+    // beike auth --save：Key 只进 CLI 本地凭证，agent-tools 不落盘不回显
     const r = await saveBeikeKey(body.apiKey);
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(r));

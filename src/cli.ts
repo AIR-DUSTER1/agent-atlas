@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * cli.ts — 4 个 LangGraph Demo 的统一入口（互动式 CLI）
+ * cli.ts — agent-tools 学习示例的统一入口（互动式 CLI）
  * ============================================================
  * 运行方式：
  *   npm run demo:1   基础 ReAct Agent（单轮，可带自定义问题）
@@ -26,6 +26,7 @@ import { createHitlGraph, buildResumeCommand } from "./agent/hitl.js";
 import type { ApprovalRequest } from "./agent/hitl.js";
 import { createMultiAgentGraph } from "./agent/multi.js";
 import { createParallelGraph, parseSubjects } from "./agent/parallel.js";
+import { PRODUCT_NAME } from "./product.js";
 
 type Rl = ReturnType<typeof createInterface>;
 
@@ -409,7 +410,7 @@ async function main(): Promise<void> {
     // 无参数：弹出选择菜单
     console.log(`
 ============================================
-   LangGraph.js Agent 学习 Demo 启动器
+   ${PRODUCT_NAME} 学习示例启动器
 ============================================
    1. 基础 ReAct Agent —— 搭图 / 节点 / 边 / 工具循环
    2. 对话记忆 —— Checkpointer + thread_id 多轮记忆

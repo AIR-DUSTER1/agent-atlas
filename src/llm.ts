@@ -29,6 +29,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { config } from "./config.js";
 import { resolveReasoning } from "./reasoning.js";
+import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "./product.js";
 
 /** 各协议客户端的统一视图：保证 bindTools 一定存在（图的代码都依赖它） */
 type ChatModelLike = BaseChatModel & {
@@ -43,9 +44,9 @@ export interface ChatModelOptions {
   fetch?: typeof fetch;
 }
 
-const MODEL_USER_AGENT = "langgraph-agent-workbench/1.0";
+const MODEL_USER_AGENT = PRODUCT_USER_AGENT;
 // CLI 没显式传 sessionId 时也在进程内保持稳定；Web 每个会话会传自己的 threadId。
-const FALLBACK_MODEL_SESSION_ID = `langgraph-agent-${randomUUID()}`;
+const FALLBACK_MODEL_SESSION_ID = `${PRODUCT_NAME}-${randomUUID()}`;
 
 /** OpenCode Go 要求客户端用稳定会话头发请求，缺失会直接 400。 */
 function isOpenCodeGateway(baseURL: string): boolean {

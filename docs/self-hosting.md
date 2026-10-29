@@ -58,13 +58,13 @@ docker build \
   --build-arg APP_VERSION=0.9.0-beta.1 \
   --build-arg GIT_COMMIT=<commit> \
   --build-arg BUILD_TIME=<ISO-8601> \
-  -t registry.example.com/agent:0.9.0-beta.1 .
-docker push registry.example.com/agent:0.9.0-beta.1
-docker image inspect registry.example.com/agent:0.9.0-beta.1 \
+  -t registry.example.com/agent-tools:0.9.0-beta.1 .
+docker push registry.example.com/agent-tools:0.9.0-beta.1
+docker image inspect registry.example.com/agent-tools:0.9.0-beta.1 \
   --format '{{index .RepoDigests 0}}'
 ```
 
-把输出的 `registry.example.com/agent@sha256:...` 写入 `AGENT_IMAGE`。生产 compose 不执行 build，只按 digest 拉取。
+把输出的 `registry.example.com/agent-tools@sha256:...` 写入 `AGENT_IMAGE`。生产 compose 不执行 build，只按 digest 拉取。
 
 ## 4. 启动
 

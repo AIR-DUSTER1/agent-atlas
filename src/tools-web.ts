@@ -20,6 +20,7 @@
  */
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { PRODUCT_USER_AGENT } from "./product.js";
 
 /** 抓取超时：网页比 API 慢，但仍要防挂死 */
 const FETCH_TIMEOUT_MS = 15_000;
@@ -157,7 +158,7 @@ async function fetchWithRedirects(start: URL, allowLocalhost: boolean): Promise<
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
         // 有些站点直接拒绝空 UA
-        "User-Agent": "langgraph-agent-workbench/1.0 (+local agent tool)",
+        "User-Agent": `${PRODUCT_USER_AGENT} (+local agent tools)`,
         Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
       },
     });

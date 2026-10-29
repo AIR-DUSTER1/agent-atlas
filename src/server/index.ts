@@ -3,7 +3,7 @@
  * index.ts — Agent Web 服务（零框架：node:http + SSE）
  * ============================================================
  * 为什么不用 Express？
- *   一共 6 个路由 + 静态文件，node:http 足够，学习 Demo 零额外依赖更好读。
+ *   一共 6 个路由 + 静态文件，node:http 足够，学习示例零额外依赖更好读。
  *
  * 路由：
  *   GET  /                  前端页面（public/ 下的静态文件）
@@ -36,6 +36,7 @@
  */
 import { createServer } from "node:http";
 import { config } from "../config.js";
+import { PRODUCT_NAME } from "../product.js";
 import { bumpConfigVersion, restoreSessions } from "./sessions.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
 import { loadProjects } from "./projects.js";
@@ -565,7 +566,7 @@ server.listen(PORT, HOST, async () => {
   // 人类可读横幅只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
   if (process.stdout.isTTY && !isProductionMode()) {
     console.log(
-      `\n  LangGraph Agent Web 已启动\n` +
+      `\n  ${PRODUCT_NAME} Web 已启动\n` +
       `  ➜  http://${displayHost}:${PORT}   (监听 ${HOST}:${PORT})\n` +
       `  模式: ${mode}   模型: ${config.model}   网关: ${config.baseURL}\n` +
       `  提示: 侧栏左下 ⚙ 设置 可在线修改供应商 / API Key / 模型\n`

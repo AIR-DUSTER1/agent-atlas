@@ -8,9 +8,12 @@
 
 ## 1. 项目定位一句话
 
-LangGraph.js（TypeScript）+ 零框架实现的 Agent 工作台：`node:http` + SSE 后端、
+agent-tools：LangGraph.js（TypeScript）+ 零框架实现的 Agent 工具集：`node:http` + SSE 后端、
 TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、外加 Electron 桌面端壳
-与「外部 RAG 知识库」HTTP 客户端。**学习项目形态，可正常当产品用**。
+与「外部 RAG 知识库」HTTP 客户端。**保留学习示例，同时作为可正常使用的本地产品维护**。
+
+后续能力路线：Hook、独立电脑操作 Agent、岗位获取 Agent、简历投递 Agent。规划与实现边界见
+`docs/agent-tools-roadmap.md`；未完成能力不得在 README「当前能力」中冒充已交付。
 
 ## 2. 技术栈红线（不许随意突破）
 
@@ -54,6 +57,7 @@ ESM 放 `public/vendor/`；`tsc` 照旧从 `node_modules` 读类型；浏览器�
 ```
 src/
   config.ts        # 全局运行时配置（.env 播种，可被内存覆盖；勿在别处直接读 process.env）
+  product.ts       # 产品名与对外客户端身份常量（UA / MCP clientInfo 统一来源）
   llm.ts           # 唯一的模型工厂：多协议差异全部收拢于此，graph 代码不感知协议
   tools.ts         # 基础工具（calculator / 时间 / 天气 / send_email），zod 声明参数
   tools-dev.ts     # 编程开发工具（terminal / read_file / write_file / list_dir / grep_search）
@@ -141,13 +145,15 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
   `hitl.ts` 的 `APPROVAL_TOOLS` 登记（含描述文案）；只读类工具（读/列/搜/检索）不登记、直接执行。
 - 工具执行失败**不要 throw 穿透图**：返回「模型可读的中文错误文本」或 JSON `{error}`，让模型转述。
 
-### 5.5 扩展机制三层（改这三处前先想清楚层次）
+### 5.5 扩展机制分层（改这些位置前先想清楚层次）
 
 | 机制 | 是什么 | 是否执行代码 | 风险 |
 |---|---|---|---|
 | 技能 `.setting/skills/*.md` | 按关键词注入的**文档** | ❌ 永不执行 | 只影响提示词 |
 | 自定义命令 `.setting/commands.json` | 输入框里的**提示词模板** | ❌ 只填文本 | 只影响提示词 |
 | MCP server（`server/mcp.ts`） | 外部**程序**（子进程） | ✅ 会跑第三方代码 | 工具默认全登记审批；只接受可信来源 |
+
+Hook 为后续规划项，不属于当前运行时。落地时按“可执行代码”治理：默认关闭、按事件授权、超时/递归/输出上限、关键副作用审批与审计；不得把 Hook 混同为技能文档或命令模板。
 
 新增扩展能力时先判断它属于哪一层：能做成文档/模板的就不要做成程序。
 

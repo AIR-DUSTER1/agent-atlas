@@ -1,4 +1,4 @@
-# Agent 流程编排说明
+# agent-tools 流程编排说明
 
 > 本文描述当前工作区的实际实现：从浏览器发出消息，到 LangGraph 执行、工具调用、
 > 人工审批、SSE 回传、会话持久化与上下文压缩的完整链路。
@@ -480,7 +480,7 @@ clone 仓库
 - 同时最多 2 个外部 Agent 消息；
 - `passCredentials` 为 true 时才把当前模型 Key / BASE_URL / MODEL 注入子进程环境。
 
-外部 Agent 没有本工作台的 `interrupt` 审批节点，也没有 LangGraph 的记忆语义。
+外部 Agent 没有 agent-tools 的 `interrupt` 审批节点，也没有 LangGraph 的记忆语义。
 
 ## 11. 配置、并发与安全边界
 

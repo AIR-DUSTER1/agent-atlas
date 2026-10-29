@@ -16,6 +16,7 @@
  */
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
+import { PRODUCT_NAME } from "../product.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -347,8 +348,8 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
         source: "mock",
         links: {
           amap: `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}&callnative=0`,
-          qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${encodeURIComponent(name)}&referer=langgraph-agent`,
-          baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${encodeURIComponent(name)}&output=html&src=langgraph-agent`,
+          qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${encodeURIComponent(name)}&referer=${PRODUCT_NAME}`,
+          baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${encodeURIComponent(name)}&output=html&src=${PRODUCT_NAME}`,
           osm: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`,
         },
       });
@@ -400,7 +401,7 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
     default: {
       yield { type: "node", name: "agent" };
       yield* streamText(
-        `你好！我是 LangGraph Agent 学习 Demo 的**模拟模式**助手（未检测到 \`API_KEY\`）。\n\n试试这些内置场景，对应 4 个学习 Demo：\n\n1. **ReAct 工具循环** —— 「北京天气怎么样？顺便算一下 (12+7)*3」\n2. **对话记忆** —— 「我叫小明，请记住我」\n3. **人工审批** —— 「给 boss@example.com 发一封邮件，主题是项目进度」\n4. **多 Agent 协作** —— 「帮我查北京天气，然后写一首关于它的四行诗」\n\n\`\`\`ts\n// 配置真实模型只需三步：\n// cp .env.example .env   → 填入 BASE_URL / API_KEY / MODEL\n// npm run web            → 重启后自动离开模拟模式\n\`\`\``,
+        `你好！我是 ${PRODUCT_NAME} 的**模拟模式**助手（未检测到 \`API_KEY\`）。\n\n试试这些内置场景，对应 4 个学习 Demo：\n\n1. **ReAct 工具循环** —— 「北京天气怎么样？顺便算一下 (12+7)*3」\n2. **对话记忆** —— 「我叫小明，请记住我」\n3. **人工审批** —— 「给 boss@example.com 发一封邮件，主题是项目进度」\n4. **多 Agent 协作** —— 「帮我查北京天气，然后写一首关于它的四行诗」\n\n\`\`\`ts\n// 配置真实模型只需三步：\n// cp .env.example .env   → 填入 BASE_URL / API_KEY / MODEL\n// npm run web            → 重启后自动离开模拟模式\n\`\`\``,
         signal,
         8
       );

@@ -1,12 +1,12 @@
-# 当前 Agent、ZCode 与 DeepSeek Harness 流程编排对比
+# agent-tools、ZCode 与 DeepSeek Harness 流程编排对比
 
 > 对比对象：
 >
-> - **当前工作台**：`docs/agent-orchestration.md`（本仓库，LangGraph.js）
+> - **agent-tools**：`docs/agent-orchestration.md`（本仓库，LangGraph.js）
 > - **ZCode**：`apps/zcode-cli`（外部参考实现）
 > - **DeepSeek Harness（DSH）**：`dsh`（外部参考实现）
 >
-> 三者不是同一量级的产品：当前项目是单进程的 Agent 工作台；ZCode 是带
+> 三者不是同一量级的产品：agent-tools 是单进程的 Agent 工具集；ZCode 是带
 > CLI / Electron / Web 和多进程 Host 的编码 Agent；DeepSeek Harness 是
 > 基于 Cordis 的可组合 Agent harness。下面的对比重点看流程与机制，
 > 不追求功能逐项对齐。
@@ -15,13 +15,13 @@
 
 | 系统 | 定位 | 编排核心 | 最适合观察什么 |
 |---|---|---|---|
-| 当前工作台 | 可运行的学习型 Agent 工作台 | LangGraph `StateGraph` | 需求理解 / 澄清、ReAct、工具审批、结果反思、SSE |
+| agent-tools | 可运行的学习型 Agent 工具集 | LangGraph `StateGraph` | 需求理解 / 澄清、ReAct、工具审批、结果反思、SSE |
 | ZCode | 完整编码 Agent 产品 | 自研 `AgentRuntime` + Turn 状态机 | 多客户端协议、命令队列、抢占、子代理 |
 | DeepSeek Harness | 可组合 Agent harness | Cordis 插件 + `agent-loop` | 事件溯源、turn/step、工具管线、能力 seam |
 
 一句话概括三者的架构重心：
 
-- **当前工作台是「图优先」**：编排逻辑写在 LangGraph 的节点和边里；
+- **agent-tools是「图优先」**：编排逻辑写在 LangGraph 的节点和边里；
 - **ZCode 是「运行时优先」**：命令网关和 Turn 状态机掌握调度权；
 - **DSH 是「事实日志优先」**：Session 事件日志是唯一事实来源，UI 和历史都是投影。
 
@@ -29,7 +29,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph CUR["当前工作台"]
+  subgraph CUR["agent-tools"]
     direction LR
     C1["Web / Electron"] --> C2["HTTP /api/chat<br/>SSE 回包"]
     C2 --> C3["LangGraph<br/>analyze → clarify? → agent ⇄ tools → review"]
@@ -51,7 +51,7 @@ flowchart TB
   end
 ```
 
-### 2.1 当前工作台
+### 2.1 agent-tools
 
 ```text
 浏览器 / Electron
@@ -170,7 +170,7 @@ flowchart LR
 
 概念对照：
 
-| 概念 | 当前工作台 | ZCode | DeepSeek Harness |
+| 概念 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 一次用户输入 | 一次 `/api/chat` 流；澄清时再接 `/api/resume` | `sendText` → `startPromptTurn` | 一个 turn（可含 0..N 个 step） |
 | 一次模型调用 | `agent` 节点一次执行；另有 analyze / review 内部调用 | Turn 中的 model step | 一个 step |
@@ -180,7 +180,7 @@ flowchart LR
 
 ## 4. 逐阶段对比
 
-| 阶段 | 当前工作台 | ZCode | DeepSeek Harness | 关键差异 |
+| 阶段 | agent-tools | ZCode | DeepSeek Harness | 关键差异 |
 |---|---|---|---|---|
 | 接入协议 | HTTP + SSE | v4 command + NDJSON stdio | Agent API + 事件 | 当前最简单；ZCode 面向多客户端；DSH 面向 harness |
 | 命令准入 | 同会话流槽 + 1.5s 节流 | CommandInbox CAS + 队列 | Agent Inbox（next-turn / next-step） | ZCode 解决并发命令；DSH 解决输入排队与插话 |
@@ -200,7 +200,7 @@ flowchart LR
 | 配置方式 | `.env` + `.web-config.json` | user/env/project 合并 | Cordis profile / bundle / preset / patch | DSH 的装配能力最强 |
 | 部署形态 | 单进程 Web / Docker | Electron Main → Host → agent 子进程 | Host / Web / SDK / 多客户端 | ZCode/DSH 都有进程或客户端分层 |
 
-> 当前工作台新增的 `analyze / clarify / review` 是图内显式节点；ZCode / DSH 的
+> agent-tools新增的 `analyze / clarify / review` 是图内显式节点；ZCode / DSH 的
 > 对应能力分散在 prompt、权限审批与工具/任务流程中，本文不做逐行对齐。
 
 ## 5. 工具执行与审批流程
@@ -240,7 +240,7 @@ flowchart LR
 
 三种审批模式的差异：
 
-| 维度 | 当前工作台 | ZCode | DeepSeek Harness |
+| 维度 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 判断依据 | 工具名是否在 `APPROVAL_TOOLS` | riskLevel、mode、input、workdir | `pre-execute` 策略 + 审批 seam |
 | 暂停方式 | LangGraph `interrupt()` | Broker 事件等待 UI | `ask` 决策等待审批 |
@@ -248,12 +248,12 @@ flowchart LR
 | 拒绝后果 | 返回拒绝 `ToolMessage` | 拒绝/不执行 | 结构化拒绝，fail-closed |
 | 强制层 | 文件授权 + HITL | 权限模式（plan 只读等） | sandbox + approval + OS/容器 |
 
-> 注意：当前工作台的「外部 Agent」不等于 ZCode 的 Subagent，也不等于 DSH 的
+> 注意：agent-tools的「外部 Agent」不等于 ZCode 的 Subagent，也不等于 DSH 的
 > `subagent`。外部 Agent 是独立通道；Subagent 是同一 runtime 体系内的子执行单元。
 
 ## 6. 工具系统对比
 
-| 能力 | 当前工作台 | ZCode | DeepSeek Harness |
+| 能力 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 工具来源 | 本仓库 `tools-*.ts` | handlers + registry | 插件注册到 `ctx.tools` |
 | schema | zod | 工具注册元数据 | `ToolDefinition` / JSON Schema |
@@ -271,7 +271,7 @@ ZCode 和 DSH 都把工具当作平台能力：注册、权限、并发、事件
 
 ## 7. 子 Agent 对比
 
-| 维度 | 当前工作台 | ZCode | DeepSeek Harness |
+| 维度 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 产品地位 | Demo 4 / Demo 5（CLI） | 一等 `Task` 子代理 | 一等 `subagent` 工具 |
 | 启动方式 | 子图 `invoke` | 独立 AgentRuntime | spawn / fork |
@@ -288,7 +288,7 @@ ZCode 和 DSH 都把工具当作平台能力：注册、权限、并发、事件
 
 ## 8. 持久化与恢复
 
-| 维度 | 当前工作台 | ZCode | DeepSeek Harness |
+| 维度 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 事实来源 | 内存 Session + JSONL journal | SQLite session store | append-only Session 事件日志 |
 | 消息历史 | `MemorySaver` + `turnHistory` | SQLite 恢复 | `deriveMessages()` 投影 |
@@ -298,11 +298,11 @@ ZCode 和 DSH 都把工具当作平台能力：注册、权限、并发、事件
 | 分支 / fork | 无 | 文档未展开 | 从日志 fork / 冷恢复 |
 
 DSH 的核心约束是「**模型可见即已记录**」：进入模型请求的内容必须能从日志重建。
-当前工作台更轻：`MemorySaver` 是主记忆，`turnHistory` 主要服务于回放和重启摘要。
+agent-tools更轻：`MemorySaver` 是主记忆，`turnHistory` 主要服务于回放和重启摘要。
 
 ## 9. 上下文压缩对比
 
-| 机制 | 当前工作台 | ZCode | DeepSeek Harness |
+| 机制 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 手动压缩 | `/compact` | `executeManualCompact` | `/compact` |
 | 自动压缩 | 无 | token 压力触发 `autoCompact` | 上下文压力 / 溢出触发 `compaction-basic` |
@@ -316,7 +316,7 @@ ZCode 和 DSH 都把压缩纳入持续上下文治理，只是 DSH 更强调「�
 
 ## 10. Prompt、配置与扩展
 
-| 维度 | 当前工作台 | ZCode | DeepSeek Harness |
+| 维度 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | Prompt 组装 | 每张图固定 system prompt | ContextBuilder：system / meta_user / dynamic | sections + runtime context + tool schema |
 | 缓存设计 | 无显式 prompt cache 分层 | stable / dynamic cacheHint | in-history / KV cache 前缀优化 |
@@ -327,7 +327,7 @@ ZCode 和 DSH 都把压缩纳入持续上下文治理，只是 DSH 更强调「�
 
 ## 11. 安全模型对比
 
-| 层次 | 当前工作台 | ZCode | DeepSeek Harness |
+| 层次 | agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|---|
 | 入口 | 认证 / 同源 / CSRF | 命令协议 + 客户端 | Agent API / Host |
 | 权限判断 | 工具名名单 | riskLevel × mode × input | `tools/pre-execute` 策略 |
@@ -338,7 +338,7 @@ ZCode 和 DSH 都把压缩纳入持续上下文治理，只是 DSH 更强调「�
 | 失败策略 | 拒绝并提示 | 拒绝/审批 | fail-closed，拒绝后不换路径重试 |
 
 DSH 的安全模型最完整：prompt 约束只是软层，策略层之后还有 sandbox 和 OS/容器边界。
-当前工作台主要依赖「工具名单 + 人工审批 + 文件授权」，适合学习和小规模使用。
+agent-tools主要依赖「工具名单 + 人工审批 + 文件授权」，适合学习和小规模使用。
 
 ## 12. 相同点
 
@@ -367,7 +367,7 @@ DSH 的安全模型最完整：prompt 约束只是软层，策略层之后还有
 
 ## 14. 选型/学习建议
 
-- **想理解最小 Agent 编排**：先看当前工作台，链路最短，LangGraph 的
+- **想理解最小 Agent 编排**：先看agent-tools，链路最短，LangGraph 的
   `analyze → clarify → agent ⇄ tools → review`、`interrupt` 和 `Command.resume`
   一眼能看懂。
 - **想看多客户端编码 Agent 的控制面**：看 ZCode，重点看 CommandInbox、
@@ -379,7 +379,7 @@ DSH 的安全模型最完整：prompt 约束只是软层，策略层之后还有
 
 ## 15. 术语对照
 
-| 当前工作台 | ZCode | DeepSeek Harness |
+| agent-tools | ZCode | DeepSeek Harness |
 |---|---|---|
 | LangGraph 图 | AgentRuntime / Turn | agent-loop |
 | `analyze` 节点 | 前置 prompt / 规划 | pre-step prompt 组装 |

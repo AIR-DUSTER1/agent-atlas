@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../../src/config.js";
 import { buildGatewayTransportHeaders, createChatModel } from "../../src/llm.js";
+import { PRODUCT_USER_AGENT } from "../../src/product.js";
 
 test("仅 OpenCode 网关生成专用会话头", () => {
   const headers = buildGatewayTransportHeaders(
@@ -10,7 +11,7 @@ test("仅 OpenCode 网关生成专用会话头", () => {
     "web-session-123"
   );
   assert.equal(headers?.["x-opencode-session"], "web-session-123");
-  assert.equal(headers?.["User-Agent"], "langgraph-agent-workbench/1.0");
+  assert.equal(headers?.["User-Agent"], PRODUCT_USER_AGENT);
   assert.ok(buildGatewayTransportHeaders("https://api.example.com/v1", "web-session-123") === undefined);
 
   const sanitized = buildGatewayTransportHeaders(
@@ -68,7 +69,7 @@ test("Responses 请求实际携带稳定的 OpenCode 会话头", async () => {
 
     assert.match(captured.url, /\/responses$/);
     assert.equal(captured.headers.get("x-opencode-session"), "web-session-123");
-    assert.equal(captured.headers.get("user-agent"), "langgraph-agent-workbench/1.0");
+    assert.equal(captured.headers.get("user-agent"), PRODUCT_USER_AGENT);
   } finally {
     config.baseURL = original.baseURL;
     config.apiKey = original.apiKey;

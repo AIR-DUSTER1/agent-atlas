@@ -2,7 +2,7 @@
  * ============================================================
  * external.ts — 第三方 Agent 接入（只需要一个 Git 仓库地址）
  * ============================================================
- * 场景：像 deepseek-harness 这样的第三方 agent 工具，想接入本工作台
+ * 场景：像 deepseek-harness 这样的第三方 agent 工具，想接入 agent-tools
  * 不用改代码 —— 提供它的 Git 地址即可：
  *
  *   1. 服务端 `git clone --depth 1` 到 .setting/agents/<名称>-<id>；
@@ -22,7 +22,7 @@
  *     "command": "node",               // 必填：可执行文件
  *     "args": ["agent.js", "{{prompt}}"], // 可选：{{prompt}} 会替换成用户消息；
  *     "env": { "KEY": "value" },       // 可选：附加环境变量
- *     "passCredentials": false          // 可选：true 时注入本工作台的网关配置
+ *     "passCredentials": false          // 可选：true 时注入 agent-tools 的网关配置
  *   }                                    （AGENT_API_KEY / AGENT_BASE_URL /
  *                                         AGENT_MODEL + OPENAI_* 同名变量）
  * 没有占位符时，用户消息从 stdin 写入（一行 JSON：{"message":"..."}）。
@@ -51,7 +51,7 @@ const MAX_AGENTS = 12;
 /** 单轮执行转发的 stdout 累计上限：防外部 Agent 刷屏把浏览器事件流冲爆 */
 const STDOUT_FORWARD_CAP_BYTES = 8_000_000;
 /**
- * 启动命令白名单（T1-5）：只允许解释器/包管理器裸命令，以及本工作台 clone
+ * 启动命令白名单（T1-5）：只允许解释器/包管理器裸命令，以及 agent-tools clone
  * 目录（.setting/agents）内的可执行文件。拒绝任意绝对路径系统命令 —— 若不限制，
  * 注册外部 Agent 等于给本机开了远程 shell。
  */
@@ -144,7 +144,7 @@ function assertCommandAllowed(command: string, agentPath: string): void {
     ? abs.toLowerCase().startsWith(root.toLowerCase() + "\\") || abs.toLowerCase() === root.toLowerCase()
     : abs.startsWith(root + "/") || abs === root;
   if (same) return;
-  throw new Error("启动命令不在本工作台 clone 目录内（" + root + "）：拒绝执行外部路径的程序");
+  throw new Error("启动命令不在 agent-tools clone 目录内（" + root + "）：拒绝执行外部路径的程序");
 }
 
 // ---------------------------------------------------------------------------

@@ -11,13 +11,15 @@
  *  - 所有直链都是免 key 的官方 Web 入口（不引 SDK、不需要前端依赖）。
  */
 
+import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "../product.js";
+
 const GEOCODE_TIMEOUT_MS = 8_000;         // 单次 Nominatim 请求
 const GEOCODE_MIN_INTERVAL_MS = 1_100;    // 公开服务限约 1 req/s，排队串行
 const GEOCODE_CACHE_MAX = 200;            // 地址 → 坐标缓存上限
 const GEOCODE_MAX_ITEMS = 6;              // 单次地图对比最多同时定位几个点
 
 /** Nominatim 要求带可识别的 UA，否则可能被拒 */
-const NOMINATIM_UA = "langgraph-agent-workbench/1.0 (local learning project)";
+const NOMINATIM_UA = `${PRODUCT_USER_AGENT} (local agent tools)`;
 
 // ---------------------------------------------------------------------------
 // 区位 geocode：Nominatim（无 key）+ 串行限速 + 内存缓存
@@ -44,9 +46,9 @@ function b64(input: string): string {
 export function buildMapLinks(name: string, lat: number, lng: number, city: string): GeocodePoint["links"] {
   const label = `${name}（${city}）`;
   return {
-    amap: `https://uri.amap.com/marker?position=${lng},${lat}&name=${b64(name)}&src=langgraph-agent&callnative=0`,
-    qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${b64(name)};addr:${b64(city)}&referer=langgraph-agent`,
-    baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${b64(name)}&content=${b64(label)}&output=html&src=langgraph-agent`,
+    amap: `https://uri.amap.com/marker?position=${lng},${lat}&name=${b64(name)}&src=${PRODUCT_NAME}&callnative=0`,
+    qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${b64(name)};addr:${b64(city)}&referer=${PRODUCT_NAME}`,
+    baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${b64(name)}&content=${b64(label)}&output=html&src=${PRODUCT_NAME}`,
     osm: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`,
   };
 }
@@ -54,9 +56,9 @@ export function buildMapLinks(name: string, lat: number, lng: number, city: stri
 /** 未定位的点也给出「名称搜索直链」（不需要坐标） */
 export function searchLinks(name: string, city: string): GeocodePoint["links"] {
   return {
-    amap: `https://uri.amap.com/search?keyword=${b64(name)}&city=${b64(city)}&src=langgraph-agent`,
-    qq: `https://apis.map.qq.com/uri/v1/search?keyword=${b64(name)}&region=${b64(city)}&referer=langgraph-agent`,
-    baidu: `https://api.map.baidu.com/place/search?query=${b64(name)}&region=${b64(city)}&output=html&src=langgraph-agent`,
+    amap: `https://uri.amap.com/search?keyword=${b64(name)}&city=${b64(city)}&src=${PRODUCT_NAME}`,
+    qq: `https://apis.map.qq.com/uri/v1/search?keyword=${b64(name)}&region=${b64(city)}&referer=${PRODUCT_NAME}`,
+    baidu: `https://api.map.baidu.com/place/search?query=${b64(name)}&region=${b64(city)}&output=html&src=${PRODUCT_NAME}`,
     osm: `https://www.openstreetmap.org/search?query=${b64(city + " " + name)}`,
   };
 }

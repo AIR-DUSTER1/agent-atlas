@@ -35,6 +35,7 @@ import { incCounter } from "./observability/metrics.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { writeAudit } from "./audit.js";
+import { PRODUCT_MCP_CLIENT_VERSION, PRODUCT_NAME } from "../product.js";
 
 /** 单次 JSON-RPC 请求超时（initialize 可能慢，工具调用给足时间） */
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -307,7 +308,7 @@ async function connect(server: McpServerConfig): Promise<McpConnection> {
     await request(conn, "initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "langgraph-agent-workbench", version: "1.0.0" },
+      clientInfo: { name: PRODUCT_NAME, version: PRODUCT_MCP_CLIENT_VERSION },
     }, LIST_TIMEOUT_MS);
     // 握手后按规范发一条 notification（无 id，不需要回复）
     sendNotification(conn, "notifications/initialized", {});

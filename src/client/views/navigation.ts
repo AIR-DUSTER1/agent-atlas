@@ -22,6 +22,7 @@ import { markInterruptsResolved, markLatestInterruptPending, renderSessions } fr
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
 import { projectById } from "./projects.js";
+import { PRODUCT_NAME } from "../modules/product.js";
 import type { ChatBlock, PermissionModeId, Session } from "../modules/types.js";
 
 const DEMO_BADGE_TEXT: Record<number, string> = {
@@ -52,7 +53,7 @@ export function showWelcomeState(): void {
   const title = $("session-title");
   if (title) title.textContent = "选择会话";
   const breadcrumb = $("breadcrumb-project");
-  if (breadcrumb) breadcrumb.textContent = projectById(state.projectView)?.name ?? "工作台";
+  if (breadcrumb) breadcrumb.textContent = projectById(state.projectView)?.name ?? PRODUCT_NAME;
   $("demo-badge")?.classList.add("hidden");
   welcomeEl.classList.remove("hidden");
   $("empty-session")?.classList.add("hidden");

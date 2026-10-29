@@ -4,7 +4,7 @@
  * ============================================================
  * 会话分两种：
  *   - kind: "agent"  通用 Agent（默认，正常产品逻辑：工具 + 审批 + 多轮记忆）
- *   - kind: "demo"   内置示例（学习 Demo 1-4，图结构刻意保持教学形态）
+ *   - kind: "demo"   内置示例（学习示例 1-4，图结构刻意保持教学形态）
  *
  * 每个会话一张图实例，产品图（agent / estate）共享文件版持久检查点
  * （src/checkpoint.ts）：thread_id 绑定 session id，服务重启后多轮上下文
@@ -39,7 +39,7 @@ export interface DemoMeta {
   example: string;
 }
 
-/** 内置示例（学习 Demo）：作为新建对话时的可选预设 */
+/** 内置示例（学习示例）：作为新建对话时的可选预设 */
 export const DEMOS: DemoMeta[] = [
   { id: 1, name: "基础 ReAct", desc: "示例 · State / Node / 边 / 工具调用循环", example: "北京现在天气怎么样？顺便帮我算一下 (12+7)*3 等于多少？" },
   { id: 2, name: "对话记忆", desc: "示例 · Checkpointer + thread_id 多轮记忆", example: "我叫小明，请记住我" },
@@ -87,7 +87,7 @@ export interface Session {
   demo: 1 | 2 | 3 | 4 | null;
   /** kind === "external"：接入的第三方 Agent id（external.ts 注册表） */
   agentId: string | null;
-  /** 归属的项目文件夹（"default" = 内置本仓库项目） */
+  /** 归属的项目文件夹（"default" = 未归属会话的内部兜底标识） */
   projectId: string;
   title: string;
   createdAt: number;
@@ -272,7 +272,7 @@ export function getTurnHistory(session: Session): TurnRecord[] {
   return session.turnHistory;
 }
 
-/** 项目删除后，把其会话迁移到默认项目 */
+/** 项目删除后，把其会话迁移到未归属（内部 default） */
 export function moveSessions(fromProjectId: string, toProjectId: string): number {
   let moved = 0;
   for (const s of sessions.values()) {

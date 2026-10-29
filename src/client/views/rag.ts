@@ -72,7 +72,7 @@ function setInput(id: string, value: string): void {
 async function renderKbRoots(): Promise<void> {
   const sel = $("kb-root") as HTMLSelectElement | null;
   if (!sel) return;
-  let roots = [{ path: "", name: "项目根（当前工作台仓库）", type: "local" }];
+  let roots = [{ path: "", name: "项目根（当前 agent-tools 仓库）", type: "local" }];
   try {
     const data = await api<FsListResult>("/api/fs/list", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",

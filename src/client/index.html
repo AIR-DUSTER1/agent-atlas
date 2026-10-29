@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LangGraph Agent 学习 Demo</title>
+  <title>agent-tools</title>
   <link rel="stylesheet" href="/styles/tokens.css" />
   <link rel="stylesheet" href="/styles/reset.css" />
   <link rel="stylesheet" href="/styles/layout.css" />
@@ -50,8 +50,8 @@
         <div class="logo">
           <span class="logo-mark"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></span>
           <div class="logo-text">
-            <strong>LangGraph Agent</strong>
-            <span>Agent 工作台 · 内置学习示例</span>
+            <strong>agent-tools</strong>
+            <span>可扩展 Agent 工具集 · 内置学习示例</span>
           </div>
         </div>
         <button id="new-chat-btn" title="新建对话（默认通用 Agent，归属当前项目）">＋ 新建对话</button>
@@ -100,7 +100,7 @@
         </button>
                 <div class="title-wrap">
           <div class="topbar-breadcrumb" aria-label="当前位置">
-            <span id="breadcrumb-project">工作台</span>
+            <span id="breadcrumb-project">agent-tools</span>
             <i class="ui-icon" data-icon="ChevronRight" aria-hidden="true"></i>
             <span id="session-title">未选择会话</span>
           </div>
@@ -125,12 +125,12 @@
         <div id="welcome" class="welcome">
           <div class="welcome-hero">
             <div class="welcome-logo"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></div>
-            <h1>LangGraph Agent</h1>
-            <p>可正常使用的 Agent 工作台：附加文件、切换模型、多轮追问，高风险操作会先请求确认</p>
+            <h1>agent-tools</h1>
+            <p>可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认</p>
           </div>
           <div class="examples-label">试试这些</div>
           <div id="example-chips" class="example-chips"></div>
-          <div class="examples-label">内置示例（学习 Demo）</div>
+          <div class="examples-label">内置示例（学习示例）</div>
           <div id="demo-cards" class="demo-cards"></div>
         </div>
         <section id="empty-session" class="empty-session hidden" aria-labelledby="empty-session-title">
@@ -214,7 +214,7 @@
   <!-- ============ 设置页：模型与供应商 / 长期记忆 / 使用统计 ============ -->
   <section id="settings-page" class="settings-page hidden" aria-labelledby="settings-title">
     <header class="settings-page-head">
-      <button id="settings-back-btn" class="settings-back-btn" type="button" title="返回工作台（Esc）">
+      <button id="settings-back-btn" class="settings-back-btn" type="button" title="返回 agent-tools（Esc）">
         <span class="back-arrow"><i class="ui-icon" data-icon="ArrowLeft" aria-hidden="true"></i></span><span>返回</span>
       </button>
       <div class="settings-page-heading">
@@ -233,7 +233,7 @@
         </label>
         <div class="settings-nav-scroll" role="tablist" aria-label="设置分区">
           <div class="settings-nav-group" data-settings-group="workbench">
-            <div class="settings-nav-group-title">工作台</div>
+            <div class="settings-nav-group-title">agent-tools</div>
             <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
               <span class="sn-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
               <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
@@ -858,7 +858,7 @@
   <div id="kb-mask" class="hidden">
     <div id="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-title">
       <h2 id="kb-title"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i> 知识库（外部 RAG）</h2>
-      <p class="settings-sub">向量存储 / 切块 / embedding 全部由外部 RAG 服务完成，本工作台按通用 HTTP 契约调用 ingest / search</p>
+      <p class="settings-sub">向量存储 / 切块 / embedding 全部由外部 RAG 服务完成，agent-tools 按通用 HTTP 契约调用 ingest / search</p>
 
       <div class="field-label">RAG 服务配置</div>
       <label class="field">
@@ -928,7 +928,7 @@
       </div>
       <p class="settings-note">安装会把官方 <code>beike.exe</code> 放到项目 <code>.setting/beike/</code> 目录并用 sha256 校验完整性；已装过 PATH 里的 beike 会被自动识别。</p>
 
-      <div class="field-label ext-head">第二步 · 保存授权 Key <em class="key-state">贝壳本地凭证，工作台不落盘不回显</em></div>
+      <div class="field-label ext-head">第二步 · 保存授权 Key <em class="key-state">贝壳本地凭证，agent-tools 不落盘不回显</em></div>
       <p class="settings-note" style="margin-top:0;">
         1. 浏览器打开登录页：<a href="https://building.ke.com/?action=get-key&source=beike_skill" target="_blank" rel="noopener">building.ke.com · 获取 Key</a><br>
         2. 登录后页面会显示一串只属于你的「身份凭证」，完整复制粘贴到下面（不会在对话中重复显示）<br>

@@ -52,7 +52,7 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     name: "知识库（RAG）",
     transport: "http",
     runtime: "REST /ingest · /search · /reset",
-    description: "外部向量库与 embedding 服务。当前工作台使用自有 HTTP 契约，因此归类为 HTTP 插件，而不是 MCP。",
+    description: "外部向量库与 embedding 服务。agent-tools 使用自有 HTTP 契约，因此归类为 HTTP 插件，而不是 MCP。",
     manageLabel: "配置 RAG",
   },
   {
