@@ -2,13 +2,13 @@
  * task-budget.test.ts — 逻辑任务跨审批预算/台账
  * ============================================================
  * 守：审批/澄清/继续继承同一任务；等待时间不计入活动时长；工具/模型按
- * id 去重统计；长任务没有执行时长与调用次数上限，停滞保护仍要能释放 SSE。
+ * id 去重统计；长任务没有执行时长、调用次数或墙钟停滞上限。
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Session } from "../../src/server/sessions.js";
 import {
-  beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskLedger, taskLimit, taskSnapshot,
+  beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskLedger, taskSnapshot,
 } from "../../src/server/task-budget.js";
 
 function session(): Session {
@@ -21,8 +21,6 @@ function session(): Session {
     activeTask: null, taskLedger: "",
   };
 }
-
-const limits = { idleTimeoutMs: 5_000 };
 
 test("继续继承任务，工具/模型按 id 去重并写入台账", () => {
   const s = session();
@@ -41,7 +39,7 @@ test("继续继承任务，工具/模型按 id 去重并写入台账", () => {
   assert.match(s.taskLedger, /a\.ts/);
 });
 
-test("长任务不因工具/模型次数触发上限，停滞仍会释放", () => {
+test("长任务不因工具/模型次数触发上限，活动时长照常统计", () => {
   const s = session();
   beginTaskSegment(s, false, "任务");
   for (let i = 0; i < 30; i += 1) {
@@ -51,10 +49,9 @@ test("长任务不因工具/模型次数触发上限，停滞仍会释放", () =
       cacheReadTokens: 0, callId: `model-${i}`,
     });
   }
-  assert.equal(taskLimit(s, limits), null, "工具/模型调用次数不是业务上限");
-
-  s.activeTask!.lastActivityAt = Date.now() - 6_000;
-  assert.equal(taskLimit(s, limits)?.reason, "idle");
+  assert.equal(taskSnapshot(s)?.toolCalls, 30);
+  assert.equal(taskSnapshot(s)?.modelCalls, 30);
+  assert.ok((taskSnapshot(s)?.activeMs ?? 0) >= 0);
 });
 
 test("用户显式继续保留台账和累计成本", () => {
@@ -67,7 +64,6 @@ test("用户显式继续保留台账和累计成本", () => {
   const before = taskSnapshot(s)!.toolCalls;
   beginTaskSegment(s, false, "继续");
   assert.equal(taskSnapshot(s)!.toolCalls, before, "累计工具数不能清零");
-  assert.equal(taskLimit(s, limits), null);
   assert.match(s.taskLedger, /read_file/);
 });
 
@@ -100,7 +96,6 @@ test("重启后首次「继续」从 journal 恢复最近任务台账", () => {
   assert.match(s.taskLedger, /sessions\.ts/);
   assert.equal(taskSnapshot(s)?.toolCalls, 1);
   assert.equal(taskSnapshot(s)?.modelCalls, 1);
-  assert.equal(taskLimit(s, limits), null, "恢复台账不触发执行上限");
 });
 
 test("usage 流式累计快照按峰值计算，不把分片重复相加", () => {

@@ -65,13 +65,12 @@ test("指数退避只重试明确允许的错误", async () => {
   assert.equal(isRetryableHttpStatus(400), false);
 });
 
-test("SSE 执行器包含心跳、任务预算看门狗且在 finally 清理", async () => {
+test("SSE 执行器包含心跳与取消竞速，但不设墙钟看门狗", async () => {
   const source = await readFile(fileURLToPath(new URL("../../src/server/routes/chat.ts", import.meta.url)), "utf8");
   assert.match(source, /setInterval\(\(\) => \{/);
   assert.match(source, /: heartbeat/);
   assert.match(source, /clearInterval\(heartbeat\)/);
-  assert.match(source, /taskLimit\(session, budgetLimits\)/);
   assert.match(source, /Promise\.race\(\[/);
-  assert.match(source, /limitSignal\.then/);
-  assert.match(source, /clearInterval\(watchdog\)/);
+  assert.match(source, /abortSignal\.then/);
+  assert.doesNotMatch(source, /taskLimit|budgetLimits|limitSignal|clearInterval\(watchdog\)/);
 });

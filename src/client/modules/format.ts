@@ -201,6 +201,17 @@ export function fmtArgs(part: Pick<ToolPart, "argsText">): string {
   try { return JSON.stringify(JSON.parse(part.argsText), null, 2); } catch { return part.argsText || "…"; }
 }
 
+/**
+ * 百分比统一保留一位小数；未真正达到 100% 时最多显示 99.9%，
+ * 避免 99.95% 一类数值被四舍五入后误读成缓存全命中。
+ */
+export function fmtPercent(value: number | null | undefined): string {
+  const safe = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  if (safe <= 0) return "0.0%";
+  if (safe >= 100) return "100.0%";
+  return `${Math.min(99.9, safe).toFixed(1)}%`;
+}
+
 export function fmtTokens(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "–";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";

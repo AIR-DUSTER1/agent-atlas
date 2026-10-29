@@ -71,6 +71,8 @@ interface NormalizeOptions {
   /** 跨审批任务台账与预算注记：只进入模型 system 注记，不写 checkpoint。 */
   taskLedger?: string;
   budgetNote?: string;
+  /** 当前模型总窗口；由路由在请求开始时冻结，避免流中途切换配置。 */
+  contextWindow?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +308,7 @@ export async function* runGraphEvents(
       ...(options.permissionMode ? { permission_mode: options.permissionMode } : {}),
       ...(options.taskLedger ? { task_ledger: options.taskLedger } : {}),
       ...(options.budgetNote ? { task_budget_note: options.budgetNote } : {}),
+      ...(options.contextWindow ? { context_window: options.contextWindow } : {}),
     },
     signal: options.signal,
   });

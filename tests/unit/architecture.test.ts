@@ -71,6 +71,13 @@ test("routes 不直接操作文件系统，统一走持久化服务", async () =
   );
 });
 
+test("聊天 SSE 不按墙钟中断静默等待，模型请求超时仍由供应商调用层负责", async () => {
+  const chat = await readFile(join(SRC, "server", "routes", "chat.ts"), "utf8");
+  const workflow = await readFile(join(SRC, "agent", "workflow.ts"), "utf8");
+  assert.doesNotMatch(chat, /taskLimit|agentIdleTimeoutMs|TaskLimitError/);
+  assert.match(workflow, /modelRequestTimeoutMs/);
+});
+
 test("架构例外清单为空；新增例外必须先修改本测试并完成评审", () => {
   const exceptions: Array<{ file: string; reason: string }> = [];
   assert.deepEqual(exceptions, []);

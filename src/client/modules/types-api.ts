@@ -66,6 +66,9 @@ export type AgentEvent =
       node?: string;
       internal?: boolean;
       contextWindow?: number;
+      contextInputBudget?: number;
+      outputReserveTokens?: number;
+      safetyMarginTokens?: number;
       taskInputTokens?: number;
       taskOutputTokens?: number;
       taskToolCalls?: number;
@@ -95,6 +98,9 @@ export interface ModelEntry {
   modality: "text" | "vision";
   active: boolean;
   contextWindow: number | null;
+  contextInputBudget?: number;
+  outputReserveTokens?: number;
+  safetyMarginTokens?: number;
   contextWindowSource?: "manual" | "gateway" | "default";
   manualContextWindow?: number | null;
   reasoningLevel?: string;
@@ -149,11 +155,19 @@ export interface DemoInfo {
   example: string;
 }
 
+export interface ContextBudget {
+  contextWindow: number;
+  outputReserveTokens: number;
+  safetyMarginTokens: number;
+  inputBudgetTokens: number;
+}
+
 export interface AppConfig {
   mock: boolean;
   model: string;
   baseURL?: string;
   contextWindow: number | null;
+  contextBudget?: ContextBudget;
   providers: ProviderEntry[];
   dialects?: DialectInfo[];
   reasoning?: ReasoningState;

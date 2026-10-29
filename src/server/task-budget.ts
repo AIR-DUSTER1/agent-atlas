@@ -1,10 +1,10 @@
 /**
- * task-budget.ts — 逻辑任务的跨审批预算与工作台账
+ * task-budget.ts — 逻辑任务的跨审批工作台账
  * ============================================================
  * 职责：把一个「用户目标 + 多次审批/澄清/继续」视为同一个逻辑任务，维护
  * 工具/模型调用台账、活动时长、已读文件与关键结果；只驻留内存，不写 checkpoint。
- * 设计立场：预算按执行片段累计（等待人审批的时间不算），台账在每次模型调用前
- * 由 graph 通过 configurable 读取最新版本，避免审批后的下一次 ReAct 丢失探索记忆。
+ * 设计立场：只记录事实，不做墙钟中断；审批、澄清和工具等待不设自动超时，
+ * 台账由 graph 通过 configurable 读取，避免审批后的下一次 ReAct 丢失探索记忆。
  */
 import { randomUUID } from "node:crypto";
 import type { AgentEvent } from "./events.js";
@@ -23,7 +23,6 @@ export interface TaskRunState {
   startedAt: number;
   activeMs: number;
   segmentStartedAt?: number;
-  lastActivityAt: number;
   goal: string;
   notes: string[];
   toolCalls: Map<string, TaskToolRecord>;
@@ -37,7 +36,6 @@ export interface TaskRunState {
   inputTokens: number;
   outputTokens: number;
   interrupted: boolean;
-  limited: boolean;
 }
 
 export interface TaskBudgetSnapshot {
@@ -46,15 +44,6 @@ export interface TaskBudgetSnapshot {
   modelCalls: number;
   inputTokens: number;
   outputTokens: number;
-}
-
-export type TaskLimitReason = "idle";
-
-export interface TaskLimit {
-  reason: TaskLimitReason;
-  message: string;
-  used: number;
-  limit: number;
 }
 
 const MAX_LEDGER_CHARS = 4_000;
@@ -71,7 +60,6 @@ function ensureTask(session: Session, preserve: boolean, user: string): TaskRunS
       id: randomUUID(),
       startedAt: now,
       activeMs: 0,
-      lastActivityAt: now,
       goal: user.replace(/\s+/g, " ").trim().slice(0, 500),
       notes: [],
       toolCalls: new Map(),
@@ -82,7 +70,6 @@ function ensureTask(session: Session, preserve: boolean, user: string): TaskRunS
       inputTokens: 0,
       outputTokens: 0,
       interrupted: false,
-      limited: false,
     };
     session.taskLedger = "";
   }
@@ -107,7 +94,6 @@ function rebuildTaskFromHistory(session: Session): void {
     id: randomUUID(),
     startedAt: Date.now(),
     activeMs: 0,
-    lastActivityAt: Date.now(),
     goal: records[start]?.user.slice(0, 500) || "继续当前任务",
     notes: [],
     toolCalls: new Map(),
@@ -118,7 +104,6 @@ function rebuildTaskFromHistory(session: Session): void {
     inputTokens: 0,
     outputTokens: 0,
     interrupted: false,
-    limited: false,
   };
   session.activeTask = task;
   for (const record of records.slice(start) as TurnRecord[]) {
@@ -141,7 +126,6 @@ export function beginTaskSegment(session: Session, continuation: boolean, user =
   const task = ensureTask(session, preserve, user || session.taskLedger || "继续当前任务");
   if (task.segmentStartedAt === undefined) task.segmentStartedAt = Date.now();
   task.segmentIndex += 1;
-  task.lastActivityAt = Date.now();
   task.interrupted = false;
   if (user && task.goal !== user.slice(0, 500)) {
     task.notes.push(user.slice(0, 300));
@@ -157,12 +141,7 @@ export function endTaskSegment(session: Session): void {
   if (!task?.segmentStartedAt) return;
   task.activeMs += Math.max(0, Date.now() - task.segmentStartedAt);
   task.segmentStartedAt = undefined;
-  task.lastActivityAt = Date.now();
   session.taskLedger = renderTaskLedger(task);
-}
-
-export interface TaskBudgetLimits {
-  idleTimeoutMs: number;
 }
 
 export function taskSnapshot(session: Session): TaskBudgetSnapshot | null {
@@ -187,7 +166,6 @@ function modelKey(event: Extract<AgentEvent, { type: "usage" }>): string {
 export function observeTaskEvent(session: Session, event: AgentEvent): void {
   const task = session.activeTask;
   if (!task) return;
-  task.lastActivityAt = Date.now();
   if (event.type === "tool_call") {
     const previous = task.toolCalls.get(event.id);
     const record = previous ?? { id: event.id, name: "", args: "", result: "", status: "running" as const };
@@ -230,19 +208,6 @@ export function renderTaskBudgetNote(session: Session): string {
   const snapshot = taskSnapshot(session);
   if (!task || !snapshot) return "";
   return `本逻辑任务已累计工具 ${snapshot.toolCalls} 次、模型 ${snapshot.modelCalls} 次、活动 ${Math.round(snapshot.activeMs / 1000)} 秒。系统不限制执行时长和调用次数；请基于台账推进目标，避免重复读取相同内容。`;
-}
-
-/** 唯一保护是停滞超时：模型连接完全无事件时释放 SSE，防止界面永久挂起。 */
-export function taskLimit(session: Session, limits: TaskBudgetLimits): TaskLimit | null {
-  const task = session.activeTask;
-  if (!task) return null;
-  if (Date.now() - task.lastActivityAt <= limits.idleTimeoutMs) return null;
-  return {
-    reason: "idle",
-    used: Date.now() - task.lastActivityAt,
-    limit: limits.idleTimeoutMs,
-    message: `已连续 ${Math.round(limits.idleTimeoutMs / 1_000)} 秒没有收到模型、工具或重试事件，已停止等待；请检查供应商后重试。`,
-  };
 }
 
 /** 生成给模型的工作台账；不包含原始工具输出，只保留可复用事实。 */

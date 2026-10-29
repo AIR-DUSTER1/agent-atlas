@@ -17,6 +17,7 @@ import {
   recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
 import { getActiveId, getActiveModality, getContextWindowForActive } from "../settings.js";
+import { createContextWindowBudget } from "../../context-window.js";
 import { lifecycle } from "../lifecycle.js";
 import { writeAudit } from "../audit.js";
 import { log } from "../logging.js";
@@ -27,7 +28,7 @@ import { runWithModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
 import {
   beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
-  renderTaskLedger, taskLimit, taskSnapshot,
+  renderTaskLedger, taskSnapshot,
 } from "../task-budget.js";
 
 function friendlyModelError(err: unknown): string {
@@ -48,7 +49,7 @@ function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent):
 
 const MODEL_RETRY_POLL_MS = 250;
 
-/** 把模型重试队列转成 SSE 事件；先观察再发送，停滞看门狗能被重试活动唤醒。 */
+/** 把模型重试队列转成 SSE 事件；先观察再发送，前端可实时看到供应商失败与重试进度。 */
 function drainRetryEvents(session: Session): AgentEvent[] {
   return drainModelRetryRecords(session.id).map((record) => ({ type: "model_retry" as const, ...record }));
 }
@@ -117,97 +118,83 @@ async function streamToClient(
   incGauge("agent_sse_active_streams", { kind: session.kind });
   const collected: AgentEvent[] = [];
   let sawInterrupt = false;
-  let limitReason: string | undefined;
-  const budgetLimits = { idleTimeoutMs: config.agentIdleTimeoutMs };
   // 清掉同会话上一条流的残留，避免旧重试状态回放到新请求。
   clearModelRetryRecords(session.id);
-  // 看门狗不能只靠「下一条事件」触发：模型/网关完全卡住时事件永远不会到。
-  // 这里只检查停滞，不限制任务总时长、工具次数或模型调用次数。
-  let notifyLimit: (() => void) | undefined;
-  const limitSignal = new Promise<void>((resolve) => { notifyLimit = resolve; });
-  const limitNow = (): string | undefined => {
-    if (limitReason) return limitReason;
-    const exceeded = taskLimit(session, budgetLimits);
-    if (!exceeded) return undefined;
-    limitReason = exceeded.reason;
-    if (session.activeTask) session.activeTask.limited = true;
-    incCounter("agent_task_limits_total", { reason: exceeded.reason, kind: session.kind });
-    const limitEvent: AgentEvent = { type: "error", message: exceeded.message };
-    collected.push(limitEvent);
-    if (!res.writableEnded) writeEvent(res, limitEvent);
-    controller.abort(new DOMException(exceeded.message, "TaskLimitError"));
-    notifyLimit?.();
-    return exceeded.reason;
-  };
-  const watchdog = setInterval(() => { limitNow(); }, 2_000);
-  watchdog.unref();
+  // 只响应真实的连接/生命周期取消，不再按“多久没事件”推断供应商故障：
+  // 审批、澄清和工具执行可能长时间合法静默，供应商超时由模型请求自身负责。
+  let notifyAbort = (): void => {};
+  const abortSignal = new Promise<"abort">((resolve) => {
+    notifyAbort = () => resolve("abort");
+    if (controller.signal.aborted) notifyAbort();
+    else controller.signal.addEventListener("abort", notifyAbort, { once: true });
+  });
   try {
-    // 续跑前先查一次累计预算；已经超限时不再启动新的图/模型请求。
-    if (limitNow()) {
-      // limitNow 已写出错误帧并 abort，直接进入统一收尾。
-    } else {
-      // 用 Promise.race 而不是裸 for-await：网关可能连「下一条事件」都不返回，
-      // 这时只有看门狗能把 streamToClient 从 await 中释放出来，finally 才能收尾。
-      const iterator = produce(controller.signal)[Symbol.asyncIterator]();
-      let nextPromise = iterator.next();
-      for (;;) {
-        let retryTimer: ReturnType<typeof setTimeout> | undefined;
-        const retrySignal = new Promise<"retry">((resolve) => {
-          retryTimer = setTimeout(() => resolve("retry"), MODEL_RETRY_POLL_MS);
-          retryTimer.unref();
-        });
-        const outcome = await Promise.race([
-          nextPromise.then((value) => ({ kind: "next" as const, value })),
-          retrySignal.then(() => ({ kind: "retry" as const })),
-          limitSignal.then(() => ({ kind: "limit" as const })),
-        ]);
-        if (retryTimer) clearTimeout(retryTimer);
-        // 模型退避等待时 graph 不会有下一条事件；重试队列由这里先行推给前端。
-        for (const retryEvent of drainRetryEvents(session)) {
-          observeTaskEvent(session, retryEvent);
-          collected.push(retryEvent);
-          if (!res.writableEnded) writeEvent(res, retryEvent);
-        }
-        if (outcome.kind === "retry") continue;
-        if (outcome.kind === "limit") {
-          // 生成器可能卡在底层 HTTP；先 abort，不阻塞 return（部分 SDK 的 return
-          // 也要等连接关闭）。请求结束后由 finally 落 journal / 清理槽位。
-          void iterator.return?.(undefined);
-          break;
-        }
-        if (outcome.value.done) break;
-        const event = outcome.value.value;
-        // 处理完当前帧后提前取下一帧，让下一轮 race 不再复用已完成 Promise。
-        nextPromise = iterator.next();
-        if (controller.signal.aborted) break;
-        observeTaskEvent(session, event);
-        if (limitNow()) break;
-        const snapshot = event.type === "usage" ? taskSnapshot(session) : null;
-        const contextWindow = event.type === "usage" ? getContextWindowForActive() : undefined;
-        const publicEvent: AgentEvent = event.type === "usage" && snapshot
-          ? {
-              ...event,
-              ...(contextWindow ? { contextWindow } : {}),
-              taskInputTokens: snapshot.inputTokens,
-              taskOutputTokens: snapshot.outputTokens,
-              taskToolCalls: snapshot.toolCalls,
-              taskModelCalls: snapshot.modelCalls,
-              taskActiveMs: snapshot.activeMs,
-            }
-          : event;
-        collected.push(publicEvent);
-        writeEvent(res, publicEvent);
-        if (event.type === "interrupt") {
-          recordApproval(session, event.payload);
-          sawInterrupt = true;
-        }
-        if (event.type === "risk_decision") {
-          recordAutoApprovalAudit(session, event);
-        }
-        // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
-        // 只有正常走完、没有新 interrupt 的流才清空（resume 的 onDone 在无新 interrupt 时也会再清一次）。
-        if (event.type === "done" && !sawInterrupt) session.pendingApproval = null;
+    // Promise.race 同时等待下一条事件、模型重试队列和客户端取消。这里没有墙钟
+    // 看门狗：静默本身不是故障，只有模型请求超时/失败或用户主动停止才结束等待。
+    const iterator = produce(controller.signal)[Symbol.asyncIterator]();
+    let nextPromise = iterator.next();
+    for (;;) {
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      const retrySignal = new Promise<"retry">((resolve) => {
+        retryTimer = setTimeout(() => resolve("retry"), MODEL_RETRY_POLL_MS);
+        retryTimer.unref();
+      });
+      const outcome = await Promise.race([
+        nextPromise.then((value) => ({ kind: "next" as const, value })),
+        retrySignal.then(() => ({ kind: "retry" as const })),
+        abortSignal.then(() => ({ kind: "abort" as const })),
+      ]);
+      if (retryTimer) clearTimeout(retryTimer);
+      // 模型退避等待时 graph 不会有下一条事件；重试队列由这里先行推给前端。
+      for (const retryEvent of drainRetryEvents(session)) {
+        observeTaskEvent(session, retryEvent);
+        collected.push(retryEvent);
+        if (!res.writableEnded) writeEvent(res, retryEvent);
       }
+      if (outcome.kind === "retry") {
+        if (controller.signal.aborted) break;
+        continue;
+      }
+      if (outcome.kind === "abort") {
+        void iterator.return?.(undefined);
+        break;
+      }
+      if (outcome.value.done) break;
+      const event = outcome.value.value;
+      // 处理完当前帧后提前取下一帧，让下一轮 race 不再复用已完成 Promise。
+      nextPromise = iterator.next();
+      if (controller.signal.aborted) break;
+      observeTaskEvent(session, event);
+      const snapshot = event.type === "usage" ? taskSnapshot(session) : null;
+      const contextBudget = event.type === "usage"
+        ? createContextWindowBudget(getContextWindowForActive())
+        : undefined;
+      const publicEvent: AgentEvent = event.type === "usage" && snapshot && contextBudget
+        ? {
+            ...event,
+            contextWindow: contextBudget.contextWindow,
+            contextInputBudget: contextBudget.inputBudgetTokens,
+            outputReserveTokens: contextBudget.outputReserveTokens,
+            safetyMarginTokens: contextBudget.safetyMarginTokens,
+            taskInputTokens: snapshot.inputTokens,
+            taskOutputTokens: snapshot.outputTokens,
+            taskToolCalls: snapshot.toolCalls,
+            taskModelCalls: snapshot.modelCalls,
+            taskActiveMs: snapshot.activeMs,
+          }
+        : event;
+      collected.push(publicEvent);
+      writeEvent(res, publicEvent);
+      if (event.type === "interrupt") {
+        recordApproval(session, event.payload);
+        sawInterrupt = true;
+      }
+      if (event.type === "risk_decision") {
+        recordAutoApprovalAudit(session, event);
+      }
+      // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
+      // 只有正常走完、没有新 interrupt 的流才清空（resume 的 onDone 在无新 interrupt 时也会再清一次）。
+      if (event.type === "done" && !sawInterrupt) session.pendingApproval = null;
     }
   } catch (err) {
     // 最终失败的重试明细可能还没被 250ms 轮询取走；错误帧前必须先补齐。
@@ -225,17 +212,15 @@ async function streamToClient(
   } finally {
     clearModelRetryRecords(session.id);
     clearInterval(heartbeat);
-    clearInterval(watchdog);
+    controller.signal.removeEventListener("abort", notifyAbort);
     unregisterSse();
     incGauge("agent_sse_active_streams", { kind: session.kind }, -1);
     endTaskSegment(session);
-    const turnStatus = limitReason
-      ? `limited:${limitReason}`
-      : controller.signal.aborted
-        ? "aborted"
-        : collected.some((event) => event.type === "error")
-          ? "error"
-          : sawInterrupt ? "waiting" : "completed";
+    const turnStatus = controller.signal.aborted
+      ? "aborted"
+      : collected.some((event) => event.type === "error")
+        ? "error"
+        : sawInterrupt ? "waiting" : "completed";
     incCounter("agent_sse_streams_total", {
       kind: session.kind,
       agentProfileId: session.agentProfileId ?? "none",
@@ -254,7 +239,6 @@ async function streamToClient(
       status: turnStatus,
       events: collected.length,
       durationMs: Math.max(0, Date.now() - turnStartedAt),
-      taskLimited: limitReason,
     });
     if (!clientGone) {
       writeEvent(res, { type: "done" });
@@ -355,6 +339,7 @@ async function handleChatInner(
     return;
   }
 
+  const contextWindow = getContextWindowForActive();
   const { HumanMessage } = await import("@langchain/core/messages");
   // T2-4：journal 回放来的会话首条真图消息 —— 前置注入历史上文摘录（一次性）
   const preNote = buildPrehistoryNote(session);
@@ -374,6 +359,7 @@ async function handleChatInner(
       permissionMode: session.permissionMode,
       taskLedger: renderTaskLedger(session.activeTask),
       budgetNote: renderTaskBudgetNote(session),
+      contextWindow,
     })
   , (events) => completeTurnRecord(session, events)));
 }
@@ -510,6 +496,7 @@ async function handleResumeInner(
         permissionMode: session.permissionMode,
         taskLedger: renderTaskLedger(session.activeTask),
         budgetNote: renderTaskBudgetNote(session),
+        contextWindow: getContextWindowForActive(),
       }
     ),
     (events) => {

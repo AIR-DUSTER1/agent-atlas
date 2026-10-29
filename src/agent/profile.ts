@@ -14,11 +14,11 @@ export type AgentProfileId = "general" | "estate";
 export type ApprovalDescriptions = Record<string, (args: Record<string, unknown>) => string>;
 
 export interface AgentContextPolicy {
-  /** 送给模型的最近消息上限；工具结果按字符预算再裁剪。 */
+  /** 历史消息数量的极端防线；正常裁剪由模型窗口 token 预算决定。 */
   maxRecentMessages: number;
   /** 单条 ToolMessage 进入模型上下文前的字符上限。 */
   maxToolResultChars: number;
-  /** 最近窗口的总字符预算，防止消息条数不变但内容持续膨胀。 */
+  /** @deprecated 旧字符预算字段；窗口裁剪只认 token 预算。 */
   maxContextChars: number;
 }
 

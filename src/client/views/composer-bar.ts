@@ -7,15 +7,15 @@
  *  - 这里是「配置 → 界面文案」的唯一映射处：applyConfigState 一次调用刷新全部；
  *  - 模型菜单按「供应商分组 × 组内全部模型」平铺 —— 同一个网关的第二、第三个
  *    模型必须有入口，不能让用户为了换模型再建一个供应商；
- *  - 容量条参考 ZCode：used 来自主模型 input+output usage，切换模型只更新
- *    contextWindow 分母，不清空历史上下文；下一轮 usage 再校正真实 token。
+ *  - used 取主模型最近一次请求的 input usage（不再叠加 output），分母使用
+ *    当前模型扣除输出预留后的输入预算；切换模型只换预算，不清空历史。
  */
 
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
-import { fmtTokens } from "../modules/format.js";
+import { fmtPercent, fmtTokens } from "../modules/format.js";
 import { activateModel } from "./model-actions.js";
 import { prepareModelSwitch } from "../actions/model-switch.js";
 import { closeCmMenus } from "./navigation.js";
@@ -51,6 +51,9 @@ export function applyConfigState(cfg: AppConfig): void {
   if (cfg.contextWindow && (targetChanged || cfg.contextWindow !== previousWindow)) {
     for (const usage of Object.values(state.usage)) {
       usage.contextWindow = cfg.contextWindow;
+      usage.contextInputBudget = cfg.contextBudget?.inputBudgetTokens;
+      usage.outputReserveTokens = cfg.contextBudget?.outputReserveTokens;
+      usage.safetyMarginTokens = cfg.contextBudget?.safetyMarginTokens;
       usage.contextPending = true;
     }
   }
@@ -241,12 +244,21 @@ export function updateContextBar(): void {
   const text = $("ctx-text");
   if (!fill || !text) return;
   const requestText = `${u.contextPending ? "上一请求" : "请求"} ↑ ${fmtTokens(u.lastInput)} · ↓ ${fmtTokens(u.lastOutput)}`;
+  const inputBudget = u.contextInputBudget
+    ?? state.config?.contextBudget?.inputBudgetTokens
+    ?? null;
   if (win) {
-    const pct = Math.min(100, (u.contextTokens / win) * 100);
+    // 进度条用「输入预算」做分母：输出预留本来就不应被历史吃掉，
+    // 否则 200k 窗口在 150k used 时仍显示健康，实际下一次请求可能已无输出空间。
+    const scale = inputBudget ?? win;
+    const pct = Math.min(100, (u.contextTokens / scale) * 100);
     fill.style.width = Math.max(1.5, pct) + "%";
     fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    const warning = u.contextTokens > win ? " · 已超出当前模型窗口，请压缩上下文" : "";
-    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}% · 当前模型窗口） · ${requestText}${warning}`;
+    const warning = u.contextTokens > scale ? " · 已超出输入预算，请压缩上下文" : "";
+    const budgetText = inputBudget
+      ? `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(inputBudget)} tokens（${pct.toFixed(1)}% · 模型窗口 ${fmtTokens(win)}，输出预留 ${fmtTokens(u.outputReserveTokens)}，安全余量 ${fmtTokens(u.safetyMarginTokens)}）`
+      : `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}% · 当前模型窗口）`;
+    text.textContent = `${budgetText} · ${requestText}${warning}`;
   } else {
     fill.style.width = "0%";
     fill.className = "ctx-fill";
@@ -256,7 +268,7 @@ export function updateContextBar(): void {
   const cacheEl = $("ctx-cache");
   if (!cacheEl) return;
   if (u.lastInput > 0 && u.lastCache > 0) {
-    cacheEl.textContent = `缓存命中 ${Math.round((u.lastCache / u.lastInput) * 100)}%`;
+    cacheEl.textContent = `缓存命中 ${fmtPercent((u.lastCache / u.lastInput) * 100)}`;
     cacheEl.classList.remove("hidden");
   } else {
     cacheEl.classList.add("hidden");

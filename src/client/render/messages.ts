@@ -10,6 +10,7 @@ import { blockBodies, partEls, state, transcript, usageEls } from "../core/state
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
 import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
+import { fmtPercent } from "../modules/format.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import type { AssistantBlock, ChatBlock, NoticeBlock } from "../modules/types.js";
@@ -27,7 +28,7 @@ export function updateTurnCaption(ablock: AssistantBlock): void {
     usageEls.set(ablock, el);
   }
   const cache = usage.lastCache > 0 && usage.lastInput > 0
-    ? ` · 缓存 ${Math.round((usage.lastCache / usage.lastInput) * 100)}%`
+    ? ` · 缓存 ${fmtPercent((usage.lastCache / usage.lastInput) * 100)}`
     : "";
   el.textContent = `↑ ${usage.lastInput.toLocaleString("zh-CN")} · ↓ ${usage.lastOutput.toLocaleString("zh-CN")}${cache}`;
 }

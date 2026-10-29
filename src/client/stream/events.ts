@@ -177,10 +177,15 @@ export function applyUsage(
   }
   u.lastActivityAt = Date.now();
   if (typeof ev.contextWindow === "number") u.contextWindow = ev.contextWindow;
+  if (typeof ev.contextInputBudget === "number") u.contextInputBudget = ev.contextInputBudget;
+  if (typeof ev.outputReserveTokens === "number") u.outputReserveTokens = ev.outputReserveTokens;
+  if (typeof ev.safetyMarginTokens === "number") u.safetyMarginTokens = ev.safetyMarginTokens;
   saveLocal();
   if (ev.internal) return;
-  const context = ev.inputTokens + ev.outputTokens;
-  // 一轮内可能多次调用主 Agent（工具后继续）；容量条取本轮峰值，避免工具调用间隙回跳。
+  // 上下文占用是「本次请求送进去的 input」，不能把生成出来的 output 再加一次：
+  // 下一轮只有 input 会重新进入上下文，output 已在 checkpoint 中体现为一条回答。
+  const context = ev.inputTokens;
+  // 一轮内可能多次调用主 Agent（工具后继续）；容量条取本轮输入峰值，避免工具间隙回跳。
   if (u.contextPending || !u.contextTokens || context >= u.contextTokens) {
     u.lastInput = ev.inputTokens;
     u.lastOutput = ev.outputTokens;

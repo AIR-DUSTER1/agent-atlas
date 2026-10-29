@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { buildAgentContext, resolveContextPolicy } from "../../src/agent/context-builder.js";
 import type { AgentProfile } from "../../src/agent/profile.js";
+import { createContextWindowBudget, estimateTextTokens } from "../../src/context-window.js";
 
 function profile(policy?: AgentProfile["contextPolicy"]): AgentProfile {
   return {
@@ -21,17 +22,18 @@ function profile(policy?: AgentProfile["contextPolicy"]): AgentProfile {
 }
 
 test("上下文策略有安全默认值，并采用 profile 覆盖", () => {
-  assert.equal(resolveContextPolicy(profile()).maxRecentMessages, 32);
+  assert.equal(resolveContextPolicy(profile()).maxRecentMessages, 10_000);
   assert.equal(resolveContextPolicy(profile({ maxRecentMessages: 4, maxToolResultChars: 300 })).maxRecentMessages, 4);
   assert.ok(resolveContextPolicy(profile()).maxContextChars > 0);
 });
 
-test("总字符预算生效：最近消息再长也不能无限膨胀", () => {
+test("token 预算生效：最近消息再长也不能无限膨胀", () => {
   const built = buildAgentContext({
     profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 1_000 }),
+    contextWindow: 32_000,
     messages: [
       new HumanMessage("旧消息"),
-      new HumanMessage("x".repeat(9_000)),
+      new HumanMessage("x".repeat(100_000)),
       new HumanMessage("最新消息"),
     ],
   });
@@ -42,6 +44,7 @@ test("总字符预算生效：最近消息再长也不能无限膨胀", () => {
 test("超预算的最新用户消息仍必须保留", () => {
   const built = buildAgentContext({
     profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 1_000 }),
+    contextWindow: 8_192,
     messages: [
       new HumanMessage("旧消息"),
       new HumanMessage("当前请求：" + "x".repeat(2_000)),
@@ -215,4 +218,49 @@ test("任务台账与预算注记进入 system，不混入用户正文", () => {
   const notes = String(built.messages[1].content);
   assert.match(notes, /已读 sessions\.ts/);
   assert.match(notes, /已用工具 3\/30/);
+});
+
+
+test("窗口预算：输出预留、安全余量与输入预算来自同一计算口径", () => {
+  const small = createContextWindowBudget(32_000);
+  assert.equal(small.contextWindow, 32_000);
+  assert.equal(small.outputReserveTokens, 8_000);
+  assert.equal(small.safetyMarginTokens, 1_600);
+  assert.equal(small.inputBudgetTokens, 22_400);
+  const large = createContextWindowBudget(1_000_000);
+  assert.equal(large.outputReserveTokens, 8_192);
+  assert.equal(large.safetyMarginTokens, 32_768);
+  assert.equal(large.inputBudgetTokens, 959_040);
+});
+
+test("token 估算对中文保守、对 ASCII 约 4 字符/token", () => {
+  assert.equal(estimateTextTokens(""), 0);
+  assert.equal(estimateTextTokens("abcd"), 1);
+  assert.equal(estimateTextTokens("中文"), 2);
+  assert.ok(estimateTextTokens("中a") >= 2);
+});
+
+test("更大的模型窗口会装入更多历史，不再卡在固定字符数", () => {
+  const messages = Array.from({ length: 400 }, (_, index) => new HumanMessage(`第${index}轮：` + "x".repeat(600)));
+  const small = buildAgentContext({ profile: profile(), messages, contextWindow: 32_000 });
+  const large = buildAgentContext({ profile: profile(), messages, contextWindow: 200_000 });
+  assert.ok(large.messages.length > small.messages.length, "窗口越大应装入越多历史");
+  const latestTokens = estimateTextTokens(String(messages.at(-1)?.content));
+  assert.ok(large.estimatedInputTokens <= large.budget.inputBudgetTokens + latestTokens);
+});
+
+
+test("窗口溢出时旧历史压成受预算约束的摘要，而不是静默消失", () => {
+  const messages = [
+    new HumanMessage("很早以前：项目根目录是 D:/code/agent"),
+    new AIMessage("收到，后续修改都基于该目录。"),
+    new HumanMessage("x".repeat(200_000)),
+    new HumanMessage("最新问题"),
+  ];
+  const built = buildAgentContext({ profile: profile(), messages, contextWindow: 32_000 });
+  assert.ok(built.omittedMessages >= 1);
+  const notes = String(built.messages[1].content);
+  assert.match(notes, /较早对话摘要/);
+  assert.match(notes, /D:\/code\/agent/);
+  assert.ok(built.estimatedInputTokens <= built.budget.inputBudgetTokens + estimateTextTokens("x".repeat(200_000)), "摘要不应让预算失控");
 });

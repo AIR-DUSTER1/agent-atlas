@@ -48,6 +48,7 @@ import {
 } from "../reasoning.js";
 import { mergeConfig, readConfig } from "./config-store.js";
 import { maskKey, modelInfoCache, type GatewayModelInfo } from "./settings-cache.js";
+import { createContextWindowBudget } from "../context-window.js";
 
 // ---------------------------------------------------------------------------
 // 内部数据结构
@@ -323,6 +324,12 @@ export interface PublicModel {
   manualContextWindow: number | null;
   /** 该模型实际生效的上下文窗口（手动 > 网关 > 默认 200k） */
   contextWindow: number;
+  /** 该窗口扣除输出预留与安全余量后，本轮可用于输入的 token 上限。 */
+  contextInputBudget: number;
+  /** 输出预留 token（回答/思考）。 */
+  outputReserveTokens: number;
+  /** tokenizer 误差与协议字段的安全余量。 */
+  safetyMarginTokens: number;
   /** 上下文窗口来源，设置页据此标注“手动 / 网关 / 默认”。 */
   contextWindowSource: "manual" | "gateway" | "default";
   /** 思考等级设置（auto = 自动识别方言） */
@@ -373,6 +380,7 @@ export function toPublicModelForCrud(p: Provider, m: ModelEntry): PublicModel {
   const contextWindowSource = manualContextWindow
     ? "manual"
     : gatewayContextWindow ? "gateway" : "default";
+  const budget = createContextWindowBudget(contextWindow);
   return {
     id: m.id,
     name: m.name,
@@ -380,6 +388,9 @@ export function toPublicModelForCrud(p: Provider, m: ModelEntry): PublicModel {
     modality: m.modality ?? "text",
     manualContextWindow,
     contextWindow,
+    contextInputBudget: budget.inputBudgetTokens,
+    outputReserveTokens: budget.outputReserveTokens,
+    safetyMarginTokens: budget.safetyMarginTokens,
     contextWindowSource,
     reasoning: { ...DEFAULT_REASONING, ...m.reasoning },
     reasoningDialect: resolved.dialect,

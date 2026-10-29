@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   escapeHtml,
+  fmtPercent,
   fmtSize,
   fmtTokens,
   nodeIcon,
@@ -71,6 +72,16 @@ test("safeImageSrc：https 与 data:image 放行，其余拒绝", () => {
   assert.equal(safeImageSrc("javascript:alert(1)"), "");
 });
 
+test("fmtPercent：保留一位小数，未满 100% 不误显示为全命中", () => {
+  assert.equal(fmtPercent(33.333), "33.3%");
+  assert.equal(fmtPercent(99.04), "99.0%");
+  assert.equal(fmtPercent(99.86), "99.9%");
+  assert.equal(fmtPercent(99.95), "99.9%");
+  assert.equal(fmtPercent(100), "100.0%");
+  assert.equal(fmtPercent(101), "100.0%");
+  assert.equal(fmtPercent(-1), "0.0%");
+  assert.equal(fmtPercent(Number.NaN), "0.0%");
+});
 test("fmtTokens / fmtSize / nodeIcon 边界", () => {
   assert.equal(fmtTokens(null), "–");
   assert.equal(fmtTokens(9999), "9,999");

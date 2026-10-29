@@ -14,6 +14,7 @@ import {
 import { bumpConfigVersion } from "../sessions.js";
 import { DEMOS } from "../sessions.js";
 import { writeAudit } from "../audit.js";
+import { createContextWindowBudget } from "../../context-window.js";
 
 /** 配置变更审计：只记 id/动作，不落 Key、baseURL 或模型清单全文 */
 function auditConfig(action: string, detail: Record<string, unknown> = {}): void {
@@ -37,6 +38,7 @@ export async function handleGetApiConfig(res: import("node:http").ServerResponse
     reasoning: getReasoningState(),
     dialects: listDialects(),
     contextWindow: getContextWindowForActive() ?? null,
+    contextBudget: createContextWindowBudget(getContextWindowForActive()),
     demos: DEMOS,
   }));
 }

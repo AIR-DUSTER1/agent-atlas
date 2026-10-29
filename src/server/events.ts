@@ -102,6 +102,12 @@ export type AgentEvent =
       internal?: boolean;
       /** 本次请求的目标上下文窗口容量；切换模型后前端保留 used、更新分母。 */
       contextWindow?: number;
+      /** 输入可用预算：窗口扣除输出预留与安全余量后的 token 上限。 */
+      contextInputBudget?: number;
+      /** 输出预留 token。 */
+      outputReserveTokens?: number;
+      /** 估算/校验误差的安全余量 token。 */
+      safetyMarginTokens?: number;
       /** 服务端权威的任务累计快照（跨审批 continuation 不重置）。 */
       taskInputTokens?: number;
       taskOutputTokens?: number;

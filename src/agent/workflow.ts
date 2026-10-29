@@ -409,6 +409,7 @@ export function createWorkflowGraph(
         permission_mode?: PermissionMode;
         task_ledger?: string;
         task_budget_note?: string;
+        context_window?: number;
       };
     }
   ) {
@@ -434,6 +435,7 @@ export function createWorkflowGraph(
       skillNote: skillNote ?? undefined,
       taskLedger: config?.configurable?.task_ledger,
       budgetNote: config?.configurable?.task_budget_note,
+      contextWindow: config?.configurable?.context_window,
     });
     const response = await invokeModel(agentModel, context.messages, config?.signal, options?.sessionId);
     // 网关回显的 tools/output 与 dataURL 会原样进入 checkpoint；先投影再入状态。

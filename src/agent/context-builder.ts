@@ -9,10 +9,10 @@
 import { SystemMessage, ToolMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentContextPolicy, AgentProfile } from "./profile.js";
+import { createContextWindowBudget, estimateTextTokens, type ContextWindowBudget } from "../context-window.js";
 
-const DEFAULT_MAX_RECENT_MESSAGES = 32;
+const MAX_CONTEXT_MESSAGES = 10_000;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 8_000;
-const DEFAULT_MAX_CONTEXT_CHARS = 48_000;
 const TRUNCATION_MARKER_MIN = 40;
 /** 回炉草稿并入注记的字符上限（草稿过长时截头部，反思反馈会指明要改哪里） */
 const MAX_REVISION_DRAFT_CHARS = 4_000;
@@ -33,19 +33,23 @@ export interface AgentContextInput {
   taskLedger?: string;
   /** 本任务预算使用情况（供模型主动收口，不等待硬超时） */
   budgetNote?: string;
+  /** 当前模型总窗口；未提供时用安全默认 200k。 */
+  contextWindow?: number | null;
 }
 
 export interface AgentContextResult {
   messages: BaseMessage[];
   omittedMessages: number;
   truncatedToolResults: number;
+  budget: ContextWindowBudget;
+  estimatedInputTokens: number;
 }
 
 export function resolveContextPolicy(profile: AgentProfile): AgentContextPolicy {
   return {
-    maxRecentMessages: Math.max(2, profile.contextPolicy?.maxRecentMessages ?? DEFAULT_MAX_RECENT_MESSAGES),
+    maxRecentMessages: Math.max(2, profile.contextPolicy?.maxRecentMessages ?? MAX_CONTEXT_MESSAGES),
     maxToolResultChars: Math.max(256, profile.contextPolicy?.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS),
-    maxContextChars: Math.max(8_000, profile.contextPolicy?.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS),
+    maxContextChars: Math.max(8_000, profile.contextPolicy?.maxContextChars ?? 4_000_000),
   };
 }
 
@@ -109,69 +113,83 @@ function messageText(content: BaseMessage["content"]): string {
     .join("");
 }
 
+/** 被窗口省略的旧消息不是直接消失：按剩余预算压成可用事实摘要，减少“失忆”。 */
+function buildOmittedHistoryDigest(messages: BaseMessage[], maxTokens: number): string {
+  if (!messages.length || maxTokens <= 0) return "";
+  const lines: string[] = [];
+  let used = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    const type = message.getType();
+    if (type !== "human" && type !== "ai") continue;
+    const text = messageText(message.content).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const label = type === "human" ? "用户" : "助手";
+    const candidate = `- ${label}：${text.slice(0, 240)}`;
+    const tokens = estimateTextTokens(candidate);
+    if (used + tokens > maxTokens) break;
+    lines.push(candidate);
+    used += tokens;
+  }
+  if (!lines.length) return "";
+  lines.reverse();
+  return `【较早对话摘要】\n${lines.join("\n")}`;
+}
+
+/** 估算单条消息的 token；工具调用参数也计入，避免大参数漏预算。 */
+function estimateMessageTokens(message: BaseMessage): number {
+  if (typeof message.content === "string") return estimateTextTokens(message.content);
+  if (!Array.isArray(message.content)) return 0;
+  let tokens = 0;
+  for (const part of message.content) {
+    if (typeof part === "string") {
+      tokens += estimateTextTokens(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    if ("text" in part) tokens += estimateTextTokens(String((part as { text?: unknown }).text ?? ""));
+    // 图片不按 base64 字符计费；按供应商普遍使用的单图上限做保守估值。
+    else if ((part as { type?: unknown }).type === "image_url") tokens += 1_024;
+  }
+  const calls = (message as { tool_calls?: unknown }).tool_calls;
+  if (Array.isArray(calls) && calls.length) {
+    try { tokens += estimateTextTokens(JSON.stringify(calls)); } catch { /* 循环引用时忽略参数估算 */ }
+  }
+  return tokens;
+}
+
 /**
  * 构建本轮模型可见消息。
- * - 不把 review/analysis 的 JSON 写入 messages；
- * - 最近消息窗口不会从 ToolMessage 中间切断工具调用；
- * - 只投影工具结果，不改 checkpoint 中的原消息；
- * - 当前轮截屏保留图片块；历史大图投影成文字占位，避免每轮重复吃 base64。
+ * - 预算来自当前模型窗口，不再用固定字符数/固定消息数把上下文卡死；
+ * - 最新用户消息必须保留；更早历史从新到旧装入剩余输入预算；
+ * - ToolMessage 必须和对应 AIMessage tool_call 成对保留；
+ * - 工具结果只投影，不改 checkpoint 原消息；历史大图转文字占位。
  */
 export function buildAgentContext(input: AgentContextInput): AgentContextResult {
   const policy = resolveContextPolicy(input.profile);
-  const total = input.messages.length;
-  const windowStart = Math.max(0, total - policy.maxRecentMessages);
-  let start = windowStart;
-  // 字符预算兜底：消息数不等于 token 数，长工具结果仍可能把 32 条窗口推到几十 K。
-  // 最新消息是当前请求，必须无条件保留；其余旧消息用剩余字符预算从新到旧装。
-  // dataURL 不计文本预算：历史图片会在下面先投影成短占位，当前轮附件也不能
-  // 因 base64 长度把用户刚发的消息整条裁掉。
-  if (total > 0) {
-    let usedChars = messageText(input.messages[total - 1]?.content).length;
-    let boundedStart = total - 1;
-    for (let index = total - 2; index >= windowStart; index -= 1) {
-      usedChars += messageText(input.messages[index]?.content).length;
-      if (usedChars > policy.maxContextChars) {
-        boundedStart = index + 1;
-        break;
-      }
-      boundedStart = index;
-    }
-    start = boundedStart;
-  }
-  // ToolMessage 必须和它对应的 AIMessage tool_call 一起送入模型；宁可多保留一条。
-  while (start > 0 && input.messages[start]?.getType() === "tool") start -= 1;
-
-  const omittedMessages = start;
-  let truncatedToolResults = 0;
-  // 只有最近一条用户消息之后的多模态内容属于「当前轮」；更早的大图必须投影成
-  // 文本占位，否则每次继续都会把历史截图重新塞给模型。这里按消息身份判断，
-  // 避免把用户当前轮刚附加的图片误删。
+  const budget = createContextWindowBudget(input.contextWindow);
   let lastHumanIndex = -1;
-  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
-    if (input.messages[index]?.getType() === "human") { lastHumanIndex = index; break; }
+  for (let cursor = input.messages.length - 1; cursor >= 0; cursor -= 1) {
+    if (input.messages[cursor]?.getType() === "human") { lastHumanIndex = cursor; break; }
   }
-  const projected = input.messages.slice(start).map((message, offset) => {
-    const absoluteIndex = start + offset;
-    const inCurrentTurn = lastHumanIndex >= 0 && absoluteIndex >= lastHumanIndex;
+  const projectedAll = input.messages.map((message, index) => {
+    const inCurrentTurn = lastHumanIndex >= 0 && index >= lastHumanIndex;
     const imageProjection = inCurrentTurn ? { content: message.content, changed: false } : projectImageContent(message.content);
     const withImageProjection = imageProjection.changed
       ? Object.assign(Object.create(Object.getPrototypeOf(message)), message, { content: imageProjection.content })
       : message;
     if (!(withImageProjection instanceof ToolMessage)) return withImageProjection;
-    const next = cloneProjectedToolMessage(withImageProjection, policy.maxToolResultChars);
-    if (next !== withImageProjection) truncatedToolResults += 1;
-    return next;
+    return cloneProjectedToolMessage(withImageProjection, policy.maxToolResultChars);
   });
 
-  // 回炉投影：review 不通过时消息末尾是本轮草稿（可能连续多版：二次回炉后是
-  // v1、v2 两条 AIMessage 排在末尾）。思考型网关（DeepSeek thinking 等）硬校验
-  // 「请求末条 assistant 必带 reasoning_content」，而 @langchain/openai 序列化会
-  // 把它丢弃 → 400（与 multi.ts 的坑同源）。把草稿全部移出消息列表、最新一版
-  // 并入 system 注记，请求以 HumanMessage 结尾，模型仍有完整草稿可修订。
+  // 回炉投影：review 不通过时消息末尾是本轮草稿（可能连续多版）。
+  // 思考型网关要求末条 assistant 自带 reasoning_content，而序列化会丢弃它；
+  // 因此把草稿移出消息列表、并入 system 注记，让请求以 HumanMessage 结尾。
   let revisionNote = "";
-  while (input.reviewFeedback && projected.length && projected[projected.length - 1]?.getType() === "ai") {
-    const draftMsg = projected.pop();
-    if (draftMsg) {
+  if (input.reviewFeedback) {
+    while (projectedAll.length && projectedAll[projectedAll.length - 1]?.getType() === "ai") {
+      const draftMsg = projectedAll.pop();
+      if (!draftMsg) continue;
       const draft = messageText(draftMsg.content).trim();
       if (draft && !revisionNote) {
         revisionNote = `【上一轮草稿（按下面的反思反馈修订后重新回答）】\n${draft.slice(0, MAX_REVISION_DRAFT_CHARS)}`;
@@ -179,7 +197,7 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     }
   }
 
-  const notes = [
+  const fixedNotes = [
     input.requirementBrief ? `【需求理解】${input.requirementBrief}` : "",
     input.clarificationHistory
       ? (input.requirementBrief?.includes(input.clarificationHistory)
@@ -193,16 +211,66 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     input.skillNote || "",
     input.taskLedger || "",
     input.budgetNote || "",
-    omittedMessages ? `【上下文窗口】已省略较早的 ${omittedMessages} 条消息，完整历史仍保存在会话记录中。` : "",
   ].filter(Boolean);
+  const omittedNoteReserveTokens = 64;
+  const fixedTokens = estimateTextTokens(input.profile.systemPrompt)
+    + estimateTextTokens(fixedNotes.join("\n\n"))
+    + omittedNoteReserveTokens;
+  const historyBudget = Math.max(0, budget.inputBudgetTokens - fixedTokens);
+
+  const total = projectedAll.length;
+  const scanFloor = Math.max(0, total - Math.max(2, policy.maxRecentMessages));
+  let start = total;
+  let estimatedHistoryTokens = 0;
+  for (let index = total - 1; index >= scanFloor; index -= 1) {
+    const messageTokens = estimateMessageTokens(projectedAll[index]!);
+    // 当前最新消息即使本身超预算也必须保留；其余消息装不下就停。
+    if (index < total - 1 && estimatedHistoryTokens + messageTokens > historyBudget) break;
+    estimatedHistoryTokens += messageTokens;
+    start = index;
+  }
+  // ToolMessage 不能单独出现；向前补齐对应的 tool_call 消息，宁可略超预算。
+  while (start > 0 && start < total && projectedAll[start]?.getType() === "tool") start -= 1;
+
+  const omittedMessages = start;
+  const omittedTokens = projectedAll.slice(0, start).reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+  const digestBudget = omittedMessages
+    ? Math.min(1_600, Math.max(0, historyBudget - estimatedHistoryTokens))
+    : 0;
+  const historyDigest = buildOmittedHistoryDigest(projectedAll.slice(0, start), digestBudget);
+  const digestTokens = estimateTextTokens(historyDigest);
+  // 摘要也占请求预算：优先从更早历史回退同样大小的空间；最近一段工具调用链
+  // 必须保持完整，不能为了腾摘要空间把 tool_calls 与 ToolMessage 拆开。
+  let trimTokens = digestTokens;
+  while (trimTokens > 0 && start < total - 1) {
+    const headTokens = estimateMessageTokens(projectedAll[start]!);
+    if (headTokens > trimTokens) break;
+    const next = projectedAll[start + 1];
+    if (next?.getType() === "tool") break;
+    trimTokens -= headTokens;
+    start += 1;
+  }
+  const notes = [
+    ...fixedNotes,
+    historyDigest,
+    start > 0 ? `【上下文窗口】已省略较早的 ${start} 条消息（约 ${omittedTokens} tokens），完整历史仍保存在会话记录中。` : "",
+  ].filter(Boolean);
+  const messages: BaseMessage[] = [
+    new SystemMessage(input.profile.systemPrompt),
+    ...(notes.length ? [new SystemMessage(notes.join("\n\n"))] : []),
+    ...projectedAll.slice(start),
+  ];
+  const truncatedToolResults = projectedAll
+    .slice(start)
+    .filter((message, index) => message instanceof ToolMessage && message !== input.messages[start + index])
+    .length;
+  const estimatedInputTokens = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 
   return {
-    messages: [
-      new SystemMessage(input.profile.systemPrompt),
-      ...(notes.length ? [new SystemMessage(notes.join("\n\n"))] : []),
-      ...projected,
-    ],
+    messages,
     omittedMessages,
     truncatedToolResults,
+    budget,
+    estimatedInputTokens,
   };
 }

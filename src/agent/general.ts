@@ -111,7 +111,8 @@ export const generalProfile: AgentProfile = {
     "- 涉及代码修改时，是否说明改了什么、如何验证、还有哪些风险。",
   ].join("\n"),
   contextPolicy: {
-    maxRecentMessages: 32,
+    // 历史条数只做极端防线；实际装多少由当前模型窗口的 token 预算决定。
+    maxRecentMessages: 10_000,
     maxToolResultChars: 8_000,
   },
 };

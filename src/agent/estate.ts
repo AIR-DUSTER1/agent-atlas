@@ -60,7 +60,7 @@ export const estateProfile: AgentProfile = {
     "- 地图未定位、行情口径和统计限制是否如实说明。",
   ].join("\n"),
   contextPolicy: {
-    maxRecentMessages: 24,
+    maxRecentMessages: 10_000,
     maxToolResultChars: 5_000,
   },
 };

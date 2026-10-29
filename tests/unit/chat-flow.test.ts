@@ -125,6 +125,7 @@ test("上下文用量忽略 review 等内部调用，并按每轮峰值恢复容
   assert.match(app, /if \(!sid\) return/);
   assert.match(app, /if \(ev\.internal\) return/);
   assert.match(app, /context >= u\.contextTokens/);
+  assert.match(app, /const context = ev\.inputTokens;/);
   assert.match(app, /const hadLocal = arr\.length > 0/);
   assert.match(app, /applyUsage\(ev as never, undefined, s\.id\)/);
   assert.match(app, /delete state\.usage\[sid\]/);
