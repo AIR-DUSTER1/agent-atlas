@@ -132,7 +132,7 @@ test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
   for (const wrapper of VENDOR_WRAPPER_FILES) assert.ok(!outputs.includes(wrapper));
 });
 
-test("模型重试默认折叠且上下文窗口按会话保存", async () => {
+test("模型重试默认折叠且上下文容量保留历史 used", async () => {
   const parts = await readFile(join(CLIENT, "render", "parts.ts"), "utf8");
   assert.match(parts, /p: "model_retry"/);
   assert.match(parts, /document\.createElement\("details"\)/);
@@ -142,6 +142,17 @@ test("模型重试默认折叠且上下文窗口按会话保存", async () => {
   assert.match(events, /u\.contextWindow = ev\.contextWindow/);
   const composer = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
   assert.match(composer, /u\.contextWindow \?\? state\.config\?\.contextWindow/);
+  assert.match(composer, /usage\.contextWindow = cfg\.contextWindow/);
+  assert.match(composer, /targetChanged = previousProvider\?\.id !== nextProvider\?\.id/);
+  assert.match(composer, /usage\.contextPending = true/);
+  const turn = await readFile(join(CLIENT, "stream", "turn.ts"), "utf8");
+  assert.match(turn, /contextTokens: previousUsage\?\.contextTokens/);
+  assert.match(turn, /contextWindow: state\.config\?\.contextWindow/);
+  assert.match(turn, /contextPending: true/);
+  assert.doesNotMatch(turn, /context-bar.*classList\.add\("hidden"\)/, "发送等待期保留 ZCode 式历史 context meter");
+  const streamEvents = await readFile(join(CLIENT, "stream", "events.ts"), "utf8");
+  assert.match(streamEvents, /u\.contextPending \|\| !u\.contextTokens/);
+  assert.match(streamEvents, /u\.contextPending = false/);
 });
 
 test("客户端错误上报只发送摘要、版本与视图，不发送 stack/密钥/对话", async () => {

@@ -100,7 +100,7 @@ export type AgentEvent =
       node?: string;
       /** 内部辅助模型调用：会计入统计成本，但不得覆盖上下文容量条 */
       internal?: boolean;
-      /** 本次模型请求所属上下文窗口容量；前端按会话保存，供应商切换不回写旧会话。 */
+      /** 本次请求的目标上下文窗口容量；切换模型后前端保留 used、更新分母。 */
       contextWindow?: number;
       /** 服务端权威的任务累计快照（跨审批 continuation 不重置）。 */
       taskInputTokens?: number;

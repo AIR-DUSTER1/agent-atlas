@@ -524,8 +524,9 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   （`usage_metadata`，兼容旧 `tokenUsage` 形状）被翻译成 `usage` 事件 ——
   `input_tokens` ≈ 当时整段对话的上下文大小，`input_token_details.cache_read`
   是提示词缓存命中；前端汇总为输入框上方的「当前会话上下文容量条 + 缓存命中」。
-  服务端在每个 `usage` 事件里携带产生该请求时的窗口容量，前端按会话落盘；后续切换
-  供应商只影响新请求，不会把旧会话的分母改写成新模型容量。窗口长度优先级：手动设置 →
+  服务端在每个 `usage` 事件里携带目标模型窗口容量。前端参考 ZCode 的 context meter：
+  历史主请求的 `input+output` used 按会话保留；切换供应商 / 模型时只同步更新分母，
+  不清空历史，下一轮 usage 到达后再用真实 token 校正。窗口长度优先级：手动设置 →
   网关 `/models` 的 `context_length` → 默认 200k。每个助手回合末尾还展示
   `↑ 输入 · ↓ 输出 · 缓存 N%` 小字。模拟模式下由 `mock.ts`
   合成同协议的假用量（轮次越多上下文越大、命中率递增）；
@@ -956,6 +957,7 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 - `restoreSessions()`：`saver.hasThread(threadId)` 判定 —— 有检查点的会话不再注入
   journal 摘录（同一历史不进两遍上下文），无检查点的（旧数据/demo/mock 轮）维持摘录降级；
 - **改配置不再失忆**：`rebuildIfStale` 重建图共享同一 saver，记忆保留在原线程；
+  同一供应商内切换模型同样 bump 配置版本，旧会话下一条消息换新模型但不换 thread；
   唯一例外是「挂着未决审批时重建」—— 删持久线程（interrupt 残留不可与新输入续用，
   等价旧行为）；
 - 审批中断态跨重启：检查点层已具备恢复数据（checkpoint + writes 都在盘上），

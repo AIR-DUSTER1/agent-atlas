@@ -17,6 +17,7 @@ import { uiAlert } from "../ui/dialog.js";
 import { mountBlock } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { renderAttachChips } from "../views/attachments.js";
+import { updateContextBar } from "../views/composer-bar.js";
 import { renderSessions } from "../views/sessions.js";
 import { renderAll } from "../render/messages.js";
 import { showChatState } from "../views/navigation.js";
@@ -55,11 +56,16 @@ export async function send(): Promise<void> {
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
-  // 当前请求的容量峰值先归零；任务累计字段先保留给「继续」，
-  // 新一轮的首个服务端 usage 会带权威快照并自动校正。
+  // 参考 ZCode：请求耗时期间保留上一轮主模型 context used 与当前模型窗口，
+  // 新一轮的首个服务端 usage 到达后再用权威 token 快照校正。
   const previousUsage = state.usage[sid];
   state.usage[sid] = {
-    lastInput: 0, lastOutput: 0, lastCache: 0,
+    lastInput: previousUsage?.lastInput ?? 0,
+    lastOutput: previousUsage?.lastOutput ?? 0,
+    lastCache: previousUsage?.lastCache ?? 0,
+    contextTokens: previousUsage?.contextTokens,
+    contextWindow: state.config?.contextWindow ?? previousUsage?.contextWindow,
+    contextPending: true,
     taskInput: previousUsage?.taskInput,
     taskOutput: previousUsage?.taskOutput,
     taskTools: previousUsage?.taskTools,
@@ -70,7 +76,7 @@ export async function send(): Promise<void> {
     taskUsagePeaks: previousUsage?.taskUsagePeaks,
     seenToolIds: previousUsage?.seenToolIds,
   };
-  document.getElementById("context-bar")?.classList.add("hidden");
+  updateContextBar();
 
   const pending = state.pendingFiles;
   const fileRefs = fileRefsOf(pending);

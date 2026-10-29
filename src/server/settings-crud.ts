@@ -133,12 +133,16 @@ export async function activate(id: string, modelId?: string): Promise<{
   const p = providersRef().find((x) => x.id === id);
   if (!p) throw new Error("供应商不存在");
   if (!p.models.length) throw new Error(`「${p.name}」还没有添加模型，先编辑补上再启用`);
+  // 先记录旧组合再修改：同供应商内换模型也必须重建图；否则旧会话会继续用旧模型。
+  const previousProviderId = activeIdRef();
+  const previousModelId = activeModelOfForCrud(activeProviderForCrud())?.id;
   if (modelId) {
     const target = p.models.find((m) => m.id === modelId);
     if (!target) throw new Error("模型不存在（可能已被删除）");
     p.activeModelId = target.id;
   }
-  const activeChanged = p.id !== activeIdRef() || !activeModelOfForCrud(p);
+  const nextModelId = activeModelOfForCrud(p)?.id;
+  const activeChanged = previousProviderId !== p.id || previousModelId !== nextModelId;
   setActiveIdRef(p.id);
   applyActiveToConfigForCrud();
   await persistForCrud();

@@ -181,13 +181,15 @@ export function applyUsage(
   if (ev.internal) return;
   const context = ev.inputTokens + ev.outputTokens;
   // 一轮内可能多次调用主 Agent（工具后继续）；容量条取本轮峰值，避免工具调用间隙回跳。
-  if (!u.contextTokens || context >= u.contextTokens) {
+  if (u.contextPending || !u.contextTokens || context >= u.contextTokens) {
     u.lastInput = ev.inputTokens;
     u.lastOutput = ev.outputTokens;
     u.lastCache = ev.cacheReadTokens || 0;
     u.contextTokens = context;
     if (ablock) ablock._usage = { lastInput: ev.inputTokens, lastOutput: ev.outputTokens, lastCache: u.lastCache };
   }
+  // 新模型窗口可能更小，第一份主请求 usage 允许把旧模型的历史峰值下调。
+  u.contextPending = false;
   if (ablock) updateTurnCaption(ablock);
   if (sid === state.currentId) updateContextBar();
   saveLocal();

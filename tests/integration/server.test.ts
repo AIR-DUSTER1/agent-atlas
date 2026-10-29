@@ -80,6 +80,67 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(activeModel?.contextWindowSource, "default");
 });
 
+test("同供应商切换模型会重建配置且保留会话历史", async () => {
+  const created = await json("/api/config/providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "切换验证",
+      baseURL: "https://models.example.test/v1",
+      models: [
+        { name: "model-a", contextWindow: 160_000 },
+        { name: "model-b", contextWindow: 32_000 },
+      ],
+    }),
+  });
+  assert.equal(created.status, 200);
+  const provider = created.body.provider;
+  const modelA = provider.models.find((m: { name: string }) => m.name === "model-a");
+  const modelB = provider.models.find((m: { name: string }) => m.name === "model-b");
+  assert.ok(modelA && modelB);
+
+  const first = await json("/api/config/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: provider.id, modelId: modelA.id }),
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.activeChanged, true, "切到新组合必须 bump 配置版本");
+
+  const session = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent", title: "模型切换历史验证" }),
+  });
+  assert.equal(session.status, 200);
+  const before = await readSse("/api/chat", { sessionId: session.body.id, message: "记住关键词：蓝鲸" });
+  assert.equal(before.status, 200);
+
+  const switched = await json("/api/config/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: provider.id, modelId: modelB.id }),
+  });
+  assert.equal(switched.status, 200);
+  assert.equal(switched.body.activeChanged, true, "同供应商换模型也必须让旧会话下次发消息时重建图");
+
+  const repeated = await json("/api/config/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: provider.id, modelId: modelB.id }),
+  });
+  assert.equal(repeated.body.activeChanged, false, "重复选择同一组合不应无谓重建");
+
+  await new Promise((resolve) => setTimeout(resolve, 1_600));
+  const after = await readSse("/api/chat", { sessionId: session.body.id, message: "继续用刚才的上下文" });
+  assert.equal(after.status, 200);
+  const transcript = await json(`/api/sessions/${session.body.id}/transcript`);
+  assert.equal(transcript.status, 200);
+  assert.equal(transcript.body.records.length, 2, "切换模型不能清空会话历史");
+  assert.equal(transcript.body.records[0].user, "记住关键词：蓝鲸");
+  assert.equal(transcript.body.records[1].user, "继续用刚才的上下文");
+});
+
 test("会话创建 → chat SSE → transcript 回放", async () => {
   const mk = await json("/api/sessions", {
     method: "POST",
@@ -90,13 +151,14 @@ test("会话创建 → chat SSE → transcript 回放", async () => {
   const id = mk.body.id;
   assert.ok(id);
 
+  const currentConfig = await json("/api/config");
   const stream = await readSse("/api/chat", { sessionId: id, message: "帮我算一下 1+1" });
   assert.equal(stream.status, 200);
   assert.ok(stream.events.some((e) => e.type === "token"), "应有 token 事件");
   const lastUsage = stream.events.filter((e) => e.type === "usage").at(-1);
   assert.equal(typeof lastUsage?.taskInputTokens, "number", "usage 应带服务端任务累计快照");
   assert.equal(typeof lastUsage?.taskModelCalls, "number");
-  assert.equal(lastUsage?.contextWindow, 200_000, "usage 应携带当前模型请求的上下文窗口容量");
+  assert.equal(lastUsage?.contextWindow, currentConfig.body.contextWindow, "usage 应携带当前模型请求的上下文窗口容量");
   assert.equal(stream.events.at(-1).type, "done");
 
   const tr = await json(`/api/sessions/${id}/transcript`);

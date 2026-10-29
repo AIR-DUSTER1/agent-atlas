@@ -7,7 +7,8 @@
  *  - 这里是「配置 → 界面文案」的唯一映射处：applyConfigState 一次调用刷新全部；
  *  - 模型菜单按「供应商分组 × 组内全部模型」平铺 —— 同一个网关的第二、第三个
  *    模型必须有入口，不能让用户为了换模型再建一个供应商；
- *  - 容量条分母来自网关 context_length（未知时退化为只显示 token 数）。
+ *  - 容量条参考 ZCode：used 来自主模型 input+output usage，切换模型只更新
+ *    contextWindow 分母，不清空历史上下文；下一轮 usage 再校正真实 token。
  */
 
 import { $ } from "../core/dom.js";
@@ -37,7 +38,21 @@ export function activeModelEntryOf(): ModelEntry | null {
 
 /** 顶栏按钮 / 侧栏 / 徽章 / composer chip 的统一刷新 */
 export function applyConfigState(cfg: AppConfig): void {
+  const previousWindow = state.config?.contextWindow ?? null;
+  const previousProvider = activeProviderOf();
+  const previousModel = activeModelEntryOf();
   state.config = cfg;
+  const nextProvider = activeProviderOf();
+  const nextModel = activeModelEntryOf();
+  const targetChanged = previousProvider?.id !== nextProvider?.id || previousModel?.id !== nextModel?.id;
+  // ZCode 的 context meter 把历史 used 与当前 runtime 的 contextWindow 分离。
+  // 切换模型时保留每会话的 used，立即用新模型窗口重算；下一份主 usage 允许下调。
+  if (cfg.contextWindow && (targetChanged || cfg.contextWindow !== previousWindow)) {
+    for (const usage of Object.values(state.usage)) {
+      usage.contextWindow = cfg.contextWindow;
+      usage.contextPending = true;
+    }
+  }
   const mock = Boolean(cfg.mock);
   $("mode-badge")?.classList.toggle("hidden", !mock);
   const sideModel = $("side-model");
@@ -215,17 +230,18 @@ export function updateContextBar(): void {
   }
   bar.classList.remove("hidden");
 
-  // 分母优先取 usage 落盘时的模型容量：切换供应商后不能把旧会话的容量条改写掉。
+  // 分母跟随当前目标模型；used 保留最近一次主模型请求的历史峰值。
   const win = u.contextWindow ?? state.config?.contextWindow ?? null;
   const fill = $("ctx-fill");
   const text = $("ctx-text");
   if (!fill || !text) return;
-  const requestText = `请求 ↑ ${fmtTokens(u.lastInput)} · ↓ ${fmtTokens(u.lastOutput)}`;
+  const requestText = `${u.contextPending ? "上一请求" : "请求"} ↑ ${fmtTokens(u.lastInput)} · ↓ ${fmtTokens(u.lastOutput)}`;
   if (win) {
     const pct = Math.min(100, (u.contextTokens / win) * 100);
     fill.style.width = Math.max(1.5, pct) + "%";
     fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}%） · ${requestText}`;
+    const warning = u.contextTokens > win ? " · 已超出当前模型窗口，请压缩上下文" : "";
+    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}% · 当前模型窗口） · ${requestText}${warning}`;
   } else {
     fill.style.width = "0%";
     fill.className = "ctx-fill";

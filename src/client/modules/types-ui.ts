@@ -40,8 +40,15 @@ export interface UsageInfo {
   taskActiveMs?: number;
   /** 最近一次模型/工具/重试事件时间，用于前端显示「等待模型响应」。 */
   lastActivityAt?: number;
-  /** 产生当前上下文用量时该模型的窗口容量；按会话保存，避免切换模型后回写旧数据。 */
+  /**
+   * 当前会话的上下文用量峰值。切换模型时保留该历史事实，只更新分母，
+   * 直到新模型返回下一轮权威 usage。
+   */
+  contextTokens?: number;
+  /** 当前目标模型的窗口容量；切换模型后同步更新，已发生的 used 不清零。 */
   contextWindow?: number | null;
+  /** 新请求已发出但还没收到主模型 usage；期间展示上一轮，收到后允许下调。 */
+  contextPending?: boolean;
   /** 每个 callId 的用量峰值（流式快照会递增，不是增量）。 */
   usagePeaks?: Record<string, { input: number; output: number }>;
   /** 每个 callId 已计入任务的峰值；用于历史回放覆盖同一快照时只补差额。 */
@@ -223,7 +230,7 @@ export interface AppState {
   projectView: string;
   currentId: string | null;
   blocks: Record<string, ChatBlock[]>;
-  usage: Record<string, UsageInfo & { contextTokens?: number }>;
+  usage: Record<string, UsageInfo>;
   /** 会话 id → 正在运行的 SSE 回合；允许多个会话并行生成。 */
   streams: Record<string, SessionStreamState>;
   /** 会话 id → 是否正在压缩上下文；只互斥同一会话。 */
