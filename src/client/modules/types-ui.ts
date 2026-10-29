@@ -250,7 +250,9 @@ export interface AppState {
 /** Electron 桌面端注入的桥（浏览器里为 undefined） */
 export interface DesktopBridge {
   isElectron?: boolean;
-  setOverlayTheme?: (dark: boolean) => void;
+  setOverlayTheme?: (dark: boolean) => void | Promise<boolean>;
+  /** Electron 原生目录选择框；浏览器模式没有该桥，服务端接口兜底。 */
+  pickDirectory?: () => Promise<{ canceled: boolean; path?: string; error?: string }>;
 }
 
 /** 页面内对话框（ui-dialog.ts）的选项 */

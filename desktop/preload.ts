@@ -2,8 +2,7 @@
  * ============================================================
  * desktop/preload.ts — 渲染进程最小桥（编译为 .cjs）
  * ============================================================
- * 只暴露两样东西：桌面端标记（前端据此加拖拽区/让位 CSS）+ 设置窗口
- * 控制键主题的 IPC（应用换肤时同步 titleBarOverlay 配色）。
+ * 只暴露少量能力：桌面端标记、窗口控制键主题、系统目录选择框。
  * 为什么必须是 CJS：sandbox:true 下 preload 只能 require 电子白名单模块，
  * 不支持 ESM —— 构建时单独编译成 preload.cjs。
  */
@@ -15,5 +14,13 @@ contextBridge.exposeInMainWorld("desktop", {
   setOverlayTheme: (dark: boolean): Promise<boolean> => {
     try { return ipcRenderer.invoke("desktop:overlay-theme", Boolean(dark)) as Promise<boolean>; }
     catch { return Promise.resolve(false); }
+  },
+  /** 打开 Electron 原生目录选择框；取消时返回 { canceled: true }。 */
+  pickDirectory: (): Promise<{ canceled: boolean; path?: string; error?: string }> => {
+    try {
+      return ipcRenderer.invoke("desktop:pick-directory") as Promise<{ canceled: boolean; path?: string; error?: string }>;
+    } catch {
+      return Promise.resolve({ canceled: true, error: "Electron 原生目录选择桥不可用" });
+    }
   },
 });

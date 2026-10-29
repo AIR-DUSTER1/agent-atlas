@@ -5,7 +5,7 @@
  * 菜单使用统一浮动层与安全 DOM 原语；项目图标来自 Lucide 白名单。
  * 删除项目后由服务端迁移会话，前端只重拉列表，避免本地状态猜测。
  */
-import { $, setSidebarOpen } from "../core/dom.js";
+import { $, desktopBridge, setSidebarOpen } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveLocal, state } from "../core/state.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
@@ -139,7 +139,7 @@ export function renderProjectSwitcher(): void {
         onclick: async (event: MouseEvent) => {
           event.stopPropagation();
           const confirmed = await uiConfirm(
-            `删除项目「${project.name}」？${project.type === "cloud" ? "\n云端缓存副本将一并删除。" : ""}\n其会话会迁移到 learn-agent 项目。`,
+            `删除项目「${project.name}」？${project.type === "cloud" ? "\n云端缓存副本将一并删除。" : ""}\n其会话会归入「未归属」。`,
             { title: "删除项目", okText: "删除", danger: true },
           );
           if (!confirmed) return;
@@ -165,7 +165,7 @@ export function renderProjectSwitcher(): void {
     role: "menuitem",
     class: "pm-item pm-manage",
     onclick: () => { showProjectMenu(false); void addProjectFolder("local"); },
-  }, icon("FolderOpen", { size: 15 }), h("span", null, "添加本地文件夹（服务器路径）")));
+  }, icon("FolderOpen", { size: 15 }), h("span", null, "添加本地文件夹（系统选择）")));
   menu.appendChild(h("button", {
     type: "button",
     role: "menuitem",
@@ -174,6 +174,36 @@ export function renderProjectSwitcher(): void {
   }, icon("Globe", { size: 15 }), h("span", null, "添加云端文件夹（Git 仓库）")));
 }
 
+/** 优先用系统目录选择框取得绝对路径；无桌面环境时显式降级到手动输入。 */
+export async function pickLocalProjectDirectory(): Promise<string | null> {
+  const bridge = desktopBridge();
+  let desktopError = "";
+  if (bridge?.pickDirectory) {
+    const picked = await bridge.pickDirectory();
+    if (picked.path?.trim()) return picked.path.trim();
+    if (picked.canceled && !picked.error) return null;
+    desktopError = picked.error || "桌面端目录选择框没有返回路径";
+  }
+
+  try {
+    const picked = await api<{ canceled?: boolean; path?: string }>("/api/projects/pick-directory", { method: "POST" });
+    if (picked.canceled) return null;
+    if (picked.path?.trim()) return picked.path.trim();
+    throw new Error("系统目录选择框没有返回路径");
+  } catch (err) {
+    const reason = desktopError || (err as Error).message;
+    const manual = await uiConfirm(
+      `无法打开系统目录选择框：${reason}\n\n是否改为手动输入服务器绝对路径？`,
+      { title: "添加本地文件夹", okText: "手动输入", cancelText: "取消" },
+    );
+    if (!manual) return null;
+    const path = await uiPrompt(
+      "输入服务器上的文件夹绝对路径：\n⚠ 这会把该目录暴露给网页端浏览，仅建议本地/可信环境使用",
+      { title: "添加本地文件夹（服务器路径）", placeholder: "例如 E:\\study 或 /home/user/project" },
+    );
+    return typeof path === "string" && path.trim() ? path.trim() : null;
+  }
+}
 export async function addProjectFolder(type: "local" | "cloud"): Promise<void> {
   let body: Record<string, unknown>;
   if (type === "cloud") {
@@ -188,12 +218,9 @@ export async function addProjectFolder(type: "local" | "cloud"): Promise<void> {
     });
     body = { type: "cloud", url: url.trim(), name: typeof name === "string" ? name.trim() || undefined : undefined };
   } else {
-    const path = await uiPrompt(
-      "输入服务器上的文件夹绝对路径：\n⚠ 这会把该目录暴露给网页端浏览，仅建议本地/可信环境使用",
-      { title: "添加本地文件夹（服务器路径）", placeholder: "例如 E:\\study 或 /home/user/project" },
-    );
-    if (typeof path !== "string" || !path.trim()) return;
-    body = { type: "local", path: path.trim() };
+    const path = await pickLocalProjectDirectory();
+    if (!path) return;
+    body = { type: "local", path };
   }
   try {
     const res = await api<{ projects: ProjectEntry[]; project: ProjectEntry }>("/api/projects", {

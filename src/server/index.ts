@@ -70,7 +70,7 @@ import {
 } from "./routes/config.js";
 import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission, handleExportSession, handleCleanupSessions } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
-import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
+import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject, handlePickProjectDirectory } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import { handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories } from "./routes/memories.js";
@@ -329,6 +329,7 @@ const server = createServer(async (req, res) => {
     // 项目文件夹
     if (pathname === "/api/projects" && req.method === "GET") { await handleListProjects(res); return; }
     if (pathname === "/api/projects" && req.method === "POST") { await handleAddProject(res, req); return; }
+    if (pathname === "/api/projects/pick-directory" && req.method === "POST") { await handlePickProjectDirectory(res, req); return; }
     if (pathname === "/api/projects/active" && req.method === "POST") { await handleSetActiveProject(res, req); return; }
     if (projectMatch && req.method === "DELETE") { await handleDeleteProject(res, req, projectMatch[1]); return; }
     if (projectRefresh && req.method === "POST") { await handleRefreshProject(res, req, projectRefresh[1]); return; }

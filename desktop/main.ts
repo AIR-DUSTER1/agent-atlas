@@ -194,6 +194,24 @@ if (!gotLock) {
       return;
     }
     createWindow();
+    // 项目目录选择必须由 Electron 主进程调用原生 dialog；浏览器无法取得绝对路径。
+    ipcMain.handle("desktop:pick-directory", async (): Promise<{ canceled: boolean; path?: string; error?: string }> => {
+      const options = {
+        title: "选择要添加的本地项目文件夹",
+        buttonLabel: "添加文件夹",
+        defaultPath: app.getPath("home"),
+        properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+      };
+      try {
+        const result = win
+          ? await dialog.showOpenDialog(win, options)
+          : await dialog.showOpenDialog(options);
+        const selected = result.filePaths[0];
+        return result.canceled || !selected ? { canceled: true } : { canceled: false, path: selected };
+      } catch (err) {
+        return { canceled: true, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
     // 前端换肤时同步 overlay 控制键颜色（preload 暴露 window.desktop.setOverlayTheme）
     ipcMain.handle("desktop:overlay-theme", (_event, dark: unknown): boolean => {
       if (process.platform !== "win32" || !win || typeof win.setTitleBarOverlay !== "function") return false;
