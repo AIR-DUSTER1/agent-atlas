@@ -16,6 +16,7 @@
 - 模型：错误数、供应商/模型、超时与状态；
 - 工具与审批：审批次数、拒绝/完成；
 - 外部依赖：资源队列、拒绝、熔断状态与失败；
+- 长期记忆：`memory_save_total`、`memory_recall_hit_total`、`memory_injected_total`、`memory_provider_latency_milliseconds`、`memory_provider_degraded_total`、`memory_sensitive_blocked_total`、`memory_provider_health`；
 - 进程：uptime、RSS、heap、event loop lag。
 
 ## 2. Prometheus 抓取
@@ -47,6 +48,8 @@ scrape_configs:
 | 熔断开 | 状态值进入 open | 查看依赖、等待冷却、避免自动烧配额 |
 | 认证风暴 | 429 或 auth fail 突增 | 检查来源 IP、代理日志、边缘限流 |
 | 备份失败 | `data:check` / 备份任务非 0 | 查磁盘、权限、manifest、时间同步 |
+| 记忆检索降级 | `increase(memory_provider_degraded_total[10m]) > 0` | 查 HTTP 记忆 `/health`、认证与超时；聊天可继续，不应触发 ready 摘流 |
+| 记忆敏感拦截异常升高 | `increase(memory_sensitive_blocked_total[1h]) > 20` | 查用户 / Skill 提示是否诱导保存 secret；不要记录正文 |
 
 ## 4. 日志
 

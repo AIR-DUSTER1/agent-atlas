@@ -68,6 +68,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
+    ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
+    ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
     ├── agent/            # profile + 共享工作流 + 通用/房产 Agent + 5 个示例的图定义
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
@@ -82,6 +84,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── projects.ts   # 项目文件夹（本地目录 / 云端 Git 仓库 clone + 会话分组）
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
         ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
+        ├── memory-http.ts # Generic / Hindsight HTTP Memory Provider
+        ├── memory-observability.ts # 记忆指标 sink
         ├── events.ts     # SSE 事件协议定义
         └── public/       # ★ 前端构建产物（tsc 编译 src/client/**.ts，gitignore）
   client/               # 前端源码（TypeScript）：main + core/modules/render/stream/views/actions
@@ -968,28 +972,73 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 文件悄悄写去了 `src/.setting/`（服务照常工作，极难察觉）。相对仓库根定位一律以
 **本文件自身位置**起算。
 
-### 3.26 `src/memory-store.ts` + `src/tools-memory.ts` — 跨会话长期记忆（F1）
+### 3.26 `src/memory/*` + `src/tools-memory.ts` — 可插拔长期记忆（F1 升级）
 
-**问题**：F0 解决了「同一会话跨重启」，但每个**新会话**仍是白纸 —— 用户偏好
-（「回答结论先行」）、项目事实（「测试用 npm test」）每次都要重新交代。
+**问题**：checkpoint 只解决同一会话的连续性；用户偏好、项目事实和纠错仍需要跨会话保存，而且通用 Agent 与租房 Agent 不能互相污染。
 
-**三件套**：
+**分层**：
 
-| 层 | 实现 |
+```text
+Agent / tools / routes
+        │
+        ▼
+memory/slot.ts（统一门面：能力校验、降级、注入预算、指标 sink）
+        │
+        ├── providers/local.ts（默认）
+        │      ├── local-store.ts（schema / 原子写 / 迁移 / 隔离坏文件）
+        │      └── local-search.ts（确定性相关性排序）
+        └── server/memory-http.ts（Generic / Hindsight，可热切换）
+```
+
+| 层 | 关键约束 |
 |---|---|
-| 存储（`memory-store.ts`，src 顶层） | `.setting/memories.json` 小白名单（上限 200 条 × 500 字）：内存权威 + 每次变更**全量原子重写**（temp+rename，config-store 模式）—— 与 journal/checkpoint 的大日志 append 方案刻意不同，规模小不值得 compact 复杂度；同 key 保存 = 覆盖更新（id 稳定）；坏文件降级空记忆不炸服务；测试钩子 `MEMORIES_FILE` |
-| 工具（`tools-memory.ts`） | `memory_save({key, content})`（中文错误文本返回，不 throw 穿透图）/ `memory_recall({query})`（分词 OR 匹配，注入 30 条之外的补充通道）。只写自家记忆文件 → 不登记审批，三档权限全直通 |
-| 注入（workflow agentNode） | `memoryNoteForPrompt()` 每轮动态拼进第二条 system 注记（context-builder 的 notes 机制）——**不落 checkpoint**，长会话不累积重复占预算；新会话 / 重启后第一轮即生效 |
+| `src/memory/provider.ts` | 纯领域接口；不 import server，Provider 差异不泄漏到图 |
+| `src/memory/scope.ts` | `general:local` / `estate:local` 严格隔离；未传 scope 的旧调用只回退 general |
+| `src/memory/providers/local-store.ts` | `.setting/memories.json` schema v2；v1 数组自动迁移；temp + fsync + rename；坏文件改名 `.corrupt-*`；未来版本拒绝写入 |
+| `src/memory/providers/local-search.ts` | key / tag / content / 中文 bigram / 最近使用加权；不使用 embedding |
+| `src/memory/slot.ts` | 默认 local；外部检索失败返回 degraded；最多 8 条 + 2400 字符；指标只写低基数标签 |
+| `src/tools-memory.ts` | 模型仍只看到 `memory_save` / `memory_recall`；scope 由工具工厂闭包注入，模型不能传 scope |
+| `src/agent/workflow.ts` | 每轮按最后一条用户消息检索当前 profile 的记忆，动态生成 system 注记，不写 checkpoint |
 
-**边界**：general 挂两工具 + 系统提示规则（「用户说以后都…时立即 memory_save」）；
-estate 不挂（域纯粹）；**子 Agent 剔除**（`subagentProfileOf` 的排除名单加了
-memory_save/recall —— 后台黑盒任务无权写用户长期记忆，防污染）。
-管理面板：侧栏左下 ⚙ 设置 →「长期记忆」（列表 / 手动添加更新 / 删除），API
-`GET/POST /api/memories`、`DELETE /api/memories/:id`（routes/memories.ts）。
+**写入策略**：
 
-**验收（真实 DeepSeek）**：会话 A 说「以后回答结论先行、简洁」→ 模型真实调用
-memory_save → 新会话 B 问「LangGraph 是什么」→ 第一句即结论、两句话收束；
-长期记忆分区新增 / 删除 / 返回与 Esc 关闭全通过。
+- 同 scope + 同 key 的新内容把旧 active 版本标为 `superseded`，新内容生成 active 版本。
+- 内容完全相同只刷新 `updatedAt`，不制造重复历史。
+- 单条 key ≤ 50 字、content ≤ 500 字、tags ≤ 6 个；active 上限 500，历史上限 1000。
+- 默认拦截 API Key、Bearer token、私钥、password/secret 赋值、手机号和身份证。
+- PII 只有设置页显式允许后才可由用户手动保存；模型工具永远不能绕过。
+- 命中后更新 `lastUsedAt/useCount`，1 秒合并落盘，避免每轮重写。
+
+**HTTP 插槽**：
+
+- Generic：`GET /health`、`POST /memories/search`、`POST /memories`、`GET /memories`、`DELETE /memories/:id`。
+- Hindsight：按 scope 映射不同 bank，分别调用 recall / memories；当前不支持删除。
+- 统一限制：只允许 http(s)、拒绝 URL userinfo、拒绝重定向、超时、512KB 响应上限、白名单字段解析、连续失败熔断与半开恢复。
+- 外部故障不参与 `/readyz`，检索降级为空记忆，保存返回中文错误文本，不拖垮聊天。
+
+**Agent 边界**：
+
+- general 挂 `memory_save` / `memory_recall`，使用 `general` scope。
+- estate 使用独立 `estate` scope；默认不挂长期记忆工具。
+- 子 Agent 继续剔除记忆工具，后台黑盒任务无权写用户长期记忆。
+- 旧 v1 数据迁移时全部归入 `general`，不会被房产 Agent 继承。
+
+**管理与 API**：
+
+- 设置页「长期记忆」支持 Provider 状态、HTTP 配置、连接测试、scope 筛选、搜索、历史版本、手动新增 / 删除、导出 / 导入。
+- `GET/POST /api/memories`、`DELETE /api/memories/:id`、`GET /api/memories/export`、`POST /api/memories/import`。
+- `GET/PUT /api/memory/config`、`POST /api/memory/test`、`GET /api/memory/status`。
+- API Key 只回掩码；空值更新保留旧 Key，显式清除才删除。
+- 导入整批校验后一次原子写入；替换模式只影响当前 scope。
+
+**备份与观测**：
+
+- 备份 manifest 记录 `memories.json` 的 schemaVersion=2；恢复后首次加载自动迁移 v1。
+- 指标：save / save_failed / recall / hit / injected / latency / degraded / sensitive_blocked / health。
+- 指标和日志不记录记忆正文、完整提示词、URL 或 Authorization。
+- `/api/diagnostics` 展示 Provider 与本地文件健康；HTTP 记忆故障只显示 degraded，不影响就绪探针。
+
+详细外部契约见 [`docs/memory-slot.md`](memory-slot.md)。
 
 ### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
 
@@ -1576,6 +1625,12 @@ console.log(result.messages.at(-1).content);
 | 浏览器 E2E 因缺 ffmpeg 全部失败 | 开启 video，但本地只安装了 Chrome | 默认只采集 trace/screenshot；需要 video 的环境单独安装 Playwright ffmpeg |
 | 测试子进程覆盖率显示 0 | Node 原生 test coverage 不合并独立 node:tsx 子进程 | 认证路由用同进程 coverage harness；安全/持久化使用 c8 阈值 |
 | Docker 构建上下文带入 `新对话.md` | `.dockerignore` 曾只排除 README | 排除用户会话、`.setting`、`.zcode`、artifacts 与所有本地密钥文件 |
+| 新会话能看到另一类 Agent 的记忆 | 旧 `memoryNoteForPrompt()` 没有 scope，workflow 直接读全局记忆 | 记忆记录必须有 `scope`；workflow 按 `profile.id` 取 note；estate 默认不挂记忆工具；v1 数据只迁 `general` |
+| 记忆文件坏了后下一次保存把原文覆盖掉 | 只清空内存、没有隔离原文件 | 坏 JSON 先改名 `.corrupt-<timestamp>`，再空记忆启动；未来 schemaVersion fail-closed 不写回 |
+| 外部记忆服务挂掉导致聊天整体失败 | HTTP Provider 的异常穿透到 workflow 或 `/readyz` | Slot 捕获检索失败返回 degraded；保存返回中文错误；HTTP 健康不参与 readyz；连续失败熔断 |
+| Hindsight 两个 Agent 读到同一组记忆 | 两个 profile 共用 bank | `general` / `estate` bank 必填且不同，配置保存时拒绝共用；scope 仍由服务端注入 |
+| 导入到一半留下半批数据 | 导入逐条写文件，后一条校验失败时前面已落盘 | 先整批校验，再通过 `updateLocalRecords` 一次原子写入；替换模式只改当前 scope |
+| 记忆指标里出现用户隐私 | 把记忆正文或查询词当标签 | 指标只允许 provider / profile / operation / result 等低基数标签；日志不记录正文、URL、Authorization |
 ---
 
 ## 8. 概念速查表

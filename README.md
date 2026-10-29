@@ -57,7 +57,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议 |
 | 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
 | 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
-| 记忆 | LangGraph checkpoint、跨会话记忆、上下文压缩 |
+| 记忆 | LangGraph checkpoint、可插拔长期记忆（本地 / HTTP）、Agent scope 隔离、相关性注入、上下文压缩 |
 | 文件与项目 | 附件、项目目录、远程文件夹、文件搜索与读取 |
 | 扩展 | RAG、MCP、技能库、自定义命令、第三方 Agent |
 | 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、使用统计 |
@@ -71,8 +71,8 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 
 | Profile | 入口 | 工具与审批 |
 |---|---|---|
-| 通用 Agent | 新建对话 → 通用 Agent | 开发工具、文件、RAG、MCP、记忆与协作 |
-| 房产 Agent | 新建对话 → 房产 Agent | 贝壳找房工具及对应审批，不加载开发工具 |
+| 通用 Agent | 新建对话 → 通用 Agent | 开发工具、文件、RAG、MCP、`general` scope 记忆与协作 |
+| 房产 Agent | 新建对话 → 房产 Agent | 贝壳找房工具及对应审批，不加载开发工具；记忆使用独立 `estate` scope，默认不挂记忆工具 |
 
 隔离规则由 `src/agent/profile.ts`、各 profile 的工具 allowlist、审批登记和测试共同维护。通用 Agent 不能调用房产工具，房产 Agent 也不能调用终端、写文件等通用工具。
 
@@ -112,7 +112,7 @@ docs/          用户文档与运维参考
 .setting/
   sessions.ndjson       会话 journal
   checkpoints.ndjson    LangGraph 检查点
-  memories.json         长期记忆
+  memories.json         长期记忆（schema v2，可导出 / 导入）
   skills/               技能文档
   audit.ndjson          安全审计
 ```
@@ -157,7 +157,7 @@ CI 还包含覆盖率门禁、SBOM、依赖审查和镜像 smoke。当前自动�
 - API、配置字段、数据 schema 和前端交互仍可能变化。
 - 单实例、单写者，不支持多副本或共享数据卷。
 - 没有多用户账号、RBAC、租户隔离和配额体系。
-- 外部模型、MCP、RAG、贝壳 CLI 的可用性取决于第三方服务。
+- 外部模型、MCP、RAG、HTTP 记忆、贝壳 CLI 的可用性取决于第三方服务；HTTP 记忆故障会降级但不阻断聊天。
 - 真实供应商、复杂长会话、移动端和桌面安装包仍有待持续完善。
 - Electron 桌面壳未完成代码签名、自动更新和崩溃收集。
 - 生产相关脚本和文档是“部署前准备”，不是正式生产支持承诺。
@@ -165,6 +165,7 @@ CI 还包含覆盖率门禁、SBOM、依赖审查和镜像 smoke。当前自动�
 ## 文档
 
 - [Agent Wiki](docs/agent-wiki.md) —— 架构、模块、调用链与踩坑
+- [长期记忆插槽](docs/memory-slot.md) —— 本地 / HTTP Provider、Generic 与 Hindsight 契约、导入导出和故障排查
 - [部署与运维总览](docs/deployment.md) —— 自托管、TLS、监控和运维入口
 - [开发预览验证快照](docs/readiness-snapshot.md) —— 当前自动化与基础设施验证记录
 - [备份与恢复](docs/backup-restore.md)
