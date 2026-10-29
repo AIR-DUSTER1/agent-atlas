@@ -35,6 +35,8 @@ export interface MemorySaveInput {
   content: string;
   tags?: string[];
   source: MemorySource;
+  /** 仅供设置页显式开启；Agent 工具始终不传。 */
+  allowPII?: boolean;
 }
 
 export interface MemorySearchQuery {
@@ -48,6 +50,7 @@ export interface MemorySearchResult {
   total: number;
   degraded: boolean;
   providerId: MemoryProviderId;
+  message?: string;
 }
 
 export interface MemoryProviderHealth {

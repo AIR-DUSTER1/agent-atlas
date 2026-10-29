@@ -24,8 +24,11 @@ import {
   MAX_INJECT_MEMORIES,
   MEMORY_PROMPT_CHAR_BUDGET,
 } from "../../src/memory-store.js";
+import { memorySlot } from "../../src/memory/slot.js";
 import { memorySave, memoryRecall, createMemoryTools } from "../../src/tools-memory.js";
 import { rankMemories } from "../../src/memory/providers/local-search.js";
+import type { MemoryProvider, MemoryRecord } from "../../src/memory/provider.js";
+import { memoryScope } from "../../src/memory/scope.js";
 import { buildAgentContext } from "../../src/agent/context-builder.js";
 import { subagentProfileOf } from "../../src/agent/subagent.js";
 import { generalProfile } from "../../src/agent/general.js";
@@ -272,6 +275,61 @@ test("敏感信息：secret 永远拒绝，PII 默认拒绝但显式 allowPII �
     );
     const saved = await saveMemory("电话", "用户手机号 13800138000", "user", "general", { allowPII: true });
     assert.match(saved.content, /13800138000/);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("Provider Slot：可替换实现、重复注册拒绝、故障检索降级", async () => {
+  const { dir } = await freshStore();
+  try {
+    const records = new Map<string, MemoryRecord>();
+    const fake: MemoryProvider = {
+      id: "http",
+      capabilities: { read: true, write: true, delete: true, search: true, health: true },
+      async health() { return { providerId: "http", status: "ok" }; },
+      async save(input) {
+        const record = {
+          id: `fake-${records.size + 1}`,
+          scope: input.scope,
+          key: input.key,
+          content: input.content,
+          tags: input.tags ?? [],
+          source: input.source,
+          status: "active" as const,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        records.set(record.id, record);
+        return record;
+      },
+      async search(query) {
+        const found = [...records.values()]
+          .filter((item) => item.key.includes(query.text) || item.content.includes(query.text))
+          .slice(0, query.limit)
+          .map((item) => ({ ...item, scope: query.scope }));
+        return { records: found, total: found.length, degraded: false, providerId: "http" };
+      },
+      async list(scope) {
+        return [...records.values()].map((item) => ({ ...item, scope }));
+      },
+      async delete(id) { return records.delete(id); },
+    };
+    memorySlot.register(fake, { replace: true, activate: true });
+    assert.equal(await memorySlot.providerId(), "http");
+    await memorySlot.save({ scope: memoryScope("general"), key: "槽", content: "外部记忆", source: "agent" });
+    const result = await memorySlot.search({ scope: memoryScope("general"), text: "外部", limit: 8 });
+    assert.equal(result.records[0]?.content, "外部记忆");
+    assert.throws(() => memorySlot.register(fake), /已注册/);
+
+    const broken: MemoryProvider = {
+      ...fake,
+      async search() { throw new Error("mock 外部记忆超时"); },
+    };
+    memorySlot.register(broken, { replace: true, activate: true });
+    const degraded = await memorySlot.search({ scope: memoryScope("general"), text: "外部", limit: 8 });
+    assert.equal(degraded.degraded, true);
+    assert.match(degraded.message ?? "", /超时/);
   } finally {
     await dropStore(dir);
   }

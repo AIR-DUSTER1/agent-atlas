@@ -75,3 +75,11 @@ test("架构例外清单为空；新增例外必须先修改本测试并完成�
   const exceptions: Array<{ file: string; reason: string }> = [];
   assert.deepEqual(exceptions, []);
 });
+test("Agent 与工具只依赖 Memory Slot，不直接触碰具体 Provider/旧存储", async () => {
+  const workflow = await readFile(join(SRC, "agent", "workflow.ts"), "utf8");
+  const tools = await readFile(join(SRC, "tools-memory.ts"), "utf8");
+  assert.doesNotMatch(workflow, /memory-store|memory\/providers\//);
+  assert.doesNotMatch(tools, /memory-store|memory\/providers\//);
+  assert.match(workflow, /memory\/slot\.js/);
+  assert.match(tools, /memory\/slot\.js/);
+});

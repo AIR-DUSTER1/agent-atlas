@@ -1,21 +1,16 @@
 /**
- * routes/memories.ts — 长期记忆管理路由（按 Agent scope 隔离）
+ * routes/memories.ts — Memory Slot 管理路由（按 Agent scope 隔离）
  * ============================================================
  * GET    /api/memories?profileId=general|estate&history=1
- * POST   /api/memories   { profileId?, key, content, tags? }
+ * POST   /api/memories   { profileId?, key, content, tags?, allowPII? }
  * DELETE /api/memories/:id?profileId=general|estate
- * 只操作本地记忆文件；写接口继续由全局认证、同源检查保护。
+ * 路由只依赖统一 Slot；本地 / HTTP Provider 的选择由注册表决定。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
 import type { MemoryProfileId } from "../../memory/provider.js";
-import { isMemoryProfileId } from "../../memory/scope.js";
-import {
-  deleteMemory,
-  listMemoriesAsync,
-  loadMemories,
-  memoryStoreStatus,
-  saveMemory,
-} from "../../memory-store.js";
+import { memoryScope, isMemoryProfileId } from "../../memory/scope.js";
+import { memorySlot } from "../../memory/slot.js";
+import { localMemoryStoreStatus } from "../../memory/providers/local-store.js";
 
 function profileIdOf(raw: string | null | undefined): MemoryProfileId | null {
   if (!raw) return "general";
@@ -34,13 +29,14 @@ export async function handleListMemories(
 ): Promise<void> {
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
-  await loadMemories(profileId);
-  const memories = await listMemoriesAsync(profileId, { includeHistory });
+  const memories = await memorySlot.list(memoryScope(profileId), { includeHistory });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({
     memories,
     profileId,
-    store: memoryStoreStatus(),
+    providerId: await memorySlot.providerId(),
+    providers: memorySlot.registered(),
+    store: localMemoryStoreStatus(),
   }));
 }
 
@@ -53,6 +49,7 @@ export async function handleSaveMemory(
     key?: unknown;
     content?: unknown;
     tags?: unknown;
+    allowPII?: unknown;
   };
   const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
   if (!profileId) return respondInvalidScope(res);
@@ -67,7 +64,14 @@ export async function handleSaveMemory(
     return;
   }
   try {
-    const entry = await saveMemory(key, content, "user", profileId, { tags });
+    const entry = await memorySlot.save({
+      scope: memoryScope(profileId),
+      key,
+      content,
+      source: "user",
+      ...(tags ? { tags } : {}),
+      ...(body.allowPII === true ? { allowPII: true } : {}),
+    });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, entry, profileId }));
   } catch (err) {
@@ -82,12 +86,17 @@ export async function handleDeleteMemory(
 ): Promise<void> {
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
-  const gone = await deleteMemory(id, profileId);
-  if (!gone) {
-    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" }));
-    return;
+  try {
+    const gone = await memorySlot.delete(id, memoryScope(profileId));
+    if (!gone) {
+      res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true, profileId }));
+  } catch (err) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
   }
-  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ ok: true, profileId }));
 }

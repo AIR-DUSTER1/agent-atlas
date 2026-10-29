@@ -9,7 +9,8 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { MemoryProfileId } from "./memory/provider.js";
-import { saveMemory, searchMemories } from "./memory-store.js";
+import { memorySlot } from "./memory/slot.js";
+import { memoryScope } from "./memory/scope.js";
 
 const MEMORY_SAVE_DESCRIPTION =
   "把用户表达的长期偏好、项目事实或对既往回答的纠正存入当前 Agent 专属的跨会话长期记忆（例：key=回答风格, content=结论先行少用列表）。" +
@@ -24,7 +25,12 @@ export function createMemoryTools(profileId: MemoryProfileId) {
   const memorySave = tool(
     async ({ key, content }) => {
       try {
-        const entry = await saveMemory(key, content, "agent", profileId);
+        const entry = await memorySlot.save({
+          scope: memoryScope(profileId),
+          key,
+          content,
+          source: "agent",
+        });
         return `已记住（当前 Agent 长期记忆，跨会话生效）：[${entry.key}] ${entry.content}`;
       } catch (err) {
         return err instanceof Error ? err.message : `记忆保存失败：${String(err)}`;
@@ -42,7 +48,9 @@ export function createMemoryTools(profileId: MemoryProfileId) {
 
   const memoryRecall = tool(
     async ({ query }) => {
-      const hits = await searchMemories(query, 10, profileId);
+      const result = await memorySlot.search({ scope: memoryScope(profileId), text: query, limit: 10 });
+      if (result.degraded) return `长期记忆暂时不可用：${result.message || "Provider 降级"}`;
+      const hits = result.records;
       if (!hits.length) return `没有与「${query}」相关的长期记忆。`;
       return hits.map((entry) => `[${entry.key}] ${entry.content}`).join("\n");
     },

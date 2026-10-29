@@ -27,7 +27,8 @@ import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { config } from "../config.js";
 import { getCheckpointSaver } from "../checkpoint.js";
-import { memoryNoteForPrompt } from "../memory-store.js";
+import { memorySlot } from "../memory/slot.js";
+import { memoryScope } from "../memory/scope.js";
 import { skillNoteForMessage } from "../skills.js";
 import { buildAgentContext } from "./context-builder.js";
 import { sanitizeCheckpointMessage } from "./checkpoint-sanitize.js";
@@ -398,8 +399,8 @@ export function createWorkflowGraph(
       clarificationHistory: state.clarificationHistory,
       reviewFeedback: state.reviewFeedback,
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
-      memoryNote: (await memoryNoteForPrompt({
-        profileId: profile.id,
+      memoryNote: (await memorySlot.note({
+        scope: memoryScope(profile.id),
         query: lastUserText,
       })) ?? undefined,
       skillNote: skillNote ?? undefined,
