@@ -14,6 +14,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
+import { prepareModelSwitch } from "../actions/model-switch.js";
 import { uiAlert, uiConfirm } from "../ui/dialog.js";
 import { applyConfigState } from "./composer-bar.js";
 import { isSettingsPageOpen } from "./settings.js";
@@ -190,6 +191,7 @@ export async function removeModel(providerId: string, modelId: string, name: str
 /** 切换「供应商 + 模型」（顶栏下拉、供应商列表的模型 chip、设为启用模型 都走它） */
 export async function activateModel(providerId: string, modelId: string | null): Promise<void> {
   try {
+    if (modelId && !(await prepareModelSwitch(providerId, modelId))) return;
     const res = await api<{
       name: string; model: string; reasoningLabel?: string; mock?: boolean;
     }>("/api/config/activate", {

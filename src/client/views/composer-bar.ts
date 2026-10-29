@@ -17,6 +17,7 @@ import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
 import { fmtTokens } from "../modules/format.js";
 import { activateModel } from "./model-actions.js";
+import { prepareModelSwitch } from "../actions/model-switch.js";
 import { closeCmMenus } from "./navigation.js";
 import type { AppConfig, ModelEntry, ProviderEntry } from "../modules/types.js";
 
@@ -142,6 +143,10 @@ export function renderModelMenu(menu: HTMLElement): void {
         if (isCurrent) { closeCmMenus(); return; }
         item.disabled = true;
         try {
+          if (!(await prepareModelSwitch(p.id, m.id))) {
+            closeCmMenus();
+            return;
+          }
           await api(`/api/config/providers/${p.id}/models/${m.id}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

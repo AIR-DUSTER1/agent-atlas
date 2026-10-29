@@ -71,7 +71,9 @@ registerToolEnhancer((part) => Boolean(part.name?.startsWith("house_")), renderE
 bindProjectsChanged(() => renderSessions());
 bindShellCreate(createSession);
 bindExtCreate(createSession);
-bindCompactAction(compactContext);
+bindCompactAction(async () => {
+  await compactContext();
+});
 
 /* ---------------------------------------------------------------------------
  * 启动

@@ -20,11 +20,11 @@ import { syncComposerState } from "../stream/turn.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import type { NoticeBlock } from "../modules/types.js";
 
-export async function compactContext(): Promise<void> {
+export async function compactContext(): Promise<boolean> {
   const sid = state.currentId;
-  if (!sid || state.streams[sid] || state.compacting[sid]) return;
+  if (!sid || state.streams[sid] || state.compacting[sid]) return false;
   const cur = state.sessions.find((s) => s.id === sid);
-  if (cur?.stale) { uiAlert("历史会话不可压缩，请新建会话", "提示"); return; }
+  if (cur?.stale) { uiAlert("历史会话不可压缩，请新建会话", "提示"); return false; }
 
   const block: NoticeBlock = {
     t: "notice",
@@ -50,11 +50,13 @@ export async function compactContext(): Promise<void> {
     renderNoticeBlock(block);
     delete state.usage[sid];
     if (sid === state.currentId) updateContextBar();
+    return true;
   } catch (err) {
     block.loading = false;
     block.title = "压缩失败";
     block.text = (err as Error).message;
     renderNoticeBlock(block);
+    return false;
   } finally {
     delete state.compacting[sid];
     syncComposerState(sid);

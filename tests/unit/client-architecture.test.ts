@@ -155,6 +155,18 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
   assert.match(streamEvents, /u\.contextPending = false/);
 });
 
+test("切换更小窗口模型前走 ZCode 式压缩守门", async () => {
+  const guard = await readFile(join(CLIENT, "actions", "model-switch.ts"), "utf8");
+  assert.match(guard, /MODEL_SWITCH_OUTPUT_RESERVE_TOKENS/);
+  assert.match(guard, /used <= available/);
+  assert.match(guard, /compactContext\(\)/);
+  assert.match(guard, /完整聊天记录仍保留/);
+  const compact = await readFile(join(CLIENT, "actions", "compact.ts"), "utf8");
+  assert.match(compact, /Promise<boolean>/);
+  const menu = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
+  assert.match(menu, /prepareModelSwitch\(p\.id, m\.id\)/);
+});
+
 test("客户端错误上报只发送摘要、版本与视图，不发送 stack/密钥/对话", async () => {
   const source = await readFile(join(CLIENT, "observability", "client-errors.ts"), "utf8");
   assert.doesNotMatch(source, /\.stack\b|Authorization|AUTH_TOKEN|localStorage|prompt/i);
