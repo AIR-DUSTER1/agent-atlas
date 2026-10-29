@@ -527,9 +527,11 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
 - **用量与容量条 `stream.ts` / `settings.ts`**：网关返回的 `usage`
   （`usage_metadata`，兼容旧 `tokenUsage` 形状）被翻译成 `usage` 事件 ——
   `input_tokens` ≈ 当时整段对话的上下文大小，`input_token_details.cache_read`
-  是提示词缓存命中；前端汇总为输入框上方的「当前会话上下文容量条 + 缓存命中」。
+  是提示词缓存命中；前端汇总为输入框上方的「当前会话上下文容量条 + 缓存命中」，命中率统一保留一位小数。
   服务端在每个 `usage` 事件里携带目标模型窗口容量。前端参考 ZCode 的 context meter：
-  历史主请求的 `input+output` used 按会话保留；切换供应商 / 模型时只同步更新分母，
+  历史主请求的 `input` used 按会话保留（output 只作明细，不重复计入上下文）；
+  分母是窗口扣除输出预留与安全余量后的输入预算；历史投影按 token 预算从新到旧装入，
+  不再受固定 32 条 / 48k 字符限制。切换供应商 / 模型时只同步更新预算，
   不清空历史，下一轮 usage 到达后再用真实 token 校正。目标窗口不足时会参考 ZCode
   的切换守门：先压缩当前上下文并保留完整聊天记录，再切换模型。窗口长度优先级：手动设置 →
   网关 `/models` 的 `context_length` → 默认 200k。每个助手回合末尾还展示
@@ -852,7 +854,8 @@ profile，不判断具体业务名。
 | 能力 | 行为 |
 |---|---|
 | Prompt 分层 | profile system prompt + 需求 brief / 澄清历史 / 反思反馈的内部 system 注记 |
-| 最近窗口 | 每个 profile 配置 `maxRecentMessages`；不会从 ToolMessage 中间切断 tool call/result |
+| 窗口预算 | `src/context-window.ts` 是唯一口径：窗口 → 输出预留 → 安全余量 → 输入预算；不再用固定 48k 字符/32 条消息卡上下文 |
+| 最近窗口 | 从最新消息往前按 token 预算装入；`maxRecentMessages` 仅保留极端防线，不会从 ToolMessage 中间切断 tool call/result |
 | 工具预算 | `maxToolResultChars`；terminal 优先保留尾部错误，其它工具保留头部 |
 | 原文保留 | 只 clone 投影后的 `ToolMessage`，原 checkpoint、transcript 与前端卡片不变 |
 | 轮次观测 | `TurnRecord.turnId` 贯穿 journal / transcript；`agent_turn_started/finished` 记录 profile、状态、耗时，debug 级记录 step/tool 开始与结束 |
@@ -1548,7 +1551,7 @@ console.log(result.messages.at(-1).content);
 | 条件边路由不到 "tools"           | `toolsCondition` 默认找名为 `"tools"` 的节点；改名需自定义路由函数               |
 | interrupt 不生效 / resume 报错 | 检查 `compile({ checkpointer })` 是否配置、resume 时 `thread_id` 是否一致 |
 | 模型不调用工具                   | 检查 `bindTools` 是否执行、工具 `description` 是否清晰（模型靠描述决定何时调用）        |
-| 图不结束死循环                   | 图运行统一使用 1000 超步保护；业务层不设置任务总时长、工具次数或模型次数上限，另用 SSE 停滞超时释放完全无事件的连接 |
+| 图不结束死循环                   | 图运行统一使用 1000 超步保护；业务层不设置任务总时长、工具次数或模型次数上限。审批、澄清与工具等待不设自动超时，只有单次模型供应商请求超时/重试耗尽才报错中断 |
 | 模型网关瞬断导致长任务中途终止 | 408/429/5xx、请求超时与网络错误默认自动重试 10 次；每次失败、最终失败与重试成功都会产出 `model_retry` 事件，前端默认折叠并显示重试次数 / 总请求次数 / 失败原因。400、认证失败和用户取消不重试 |
 | RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
@@ -1590,7 +1593,7 @@ console.log(result.messages.at(-1).content);
 | usage 快照在 journal 中成百上千次重复 | 流式调用每片都落 usage，长工具轮把同一累计快照写满事件上限。现在 journal 投影按 callId 保留终值，旧无 id 数据只消连续重复；SSE 实时容量条不受影响 |
 | 3000 事件截断后上下文突然变小且无从复盘 | 原逻辑直接 `slice(-3000)`。现在保留尾部时写 `storage.eventLimit/droppedEvents/originalEvents`，同时量化 token/reasoning 合并量 |
 | 工具 JSON `ok:false` 仍显示绿色完成 | 工具返回值原先一律标 success。现在统一识别顶层 `ok:false`/非空 `error` 为 `isError`；同参数连续两次确定性失败后第三次熔断，超时/限流/5xx 不熔断 |
-| 上下文容量逐轮单调膨胀 | 仅限制消息条数，不限制总字符；`/compact` 又是手动操作。现在投影增加总字符预算（默认 48k）并对历史大图占位；compact 状态持久化，重启不丢摘要 |
+| 上下文容量卡在固定 20k 左右，换大窗口模型也不增长 | 历史投影曾同时受 32 条消息与 48k 字符硬顶约束，模型窗口只用于 UI 分母。现在统一走 `context-window.ts` 的 token 预算；超出部分压成旧史摘要、历史大图占位，完整历史仍保留；compact 状态持久化，重启不丢摘要 |
 | 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
@@ -1699,8 +1702,8 @@ console.log(result.messages.at(-1).content);
 |---|---|---|
 | 连接与协议 | `mcp.ts` | spawn 子进程、按行收发 JSON-RPC、请求 id 配对 + 超时、stderr 尾部留存、断线重连、进程树清理 |
 | 工具包装 | `mcp-tools.ts` | `mcp__<server>__<tool>` 命名、inputSchema → 宽松 zod、结果文本化、审批文案生成 |
-| HTTP | `routes/mcp.ts` | 列表 / 增删改 / 测试连接 |
-| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：连接状态 + 工具清单 + 测试/删除 |
+| HTTP | `routes/mcp.ts` | 列表 / 增删改 / 全局暂停 / `.mcp.json` 批量导入 / 测试连接 |
+| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：全局暂停、卡片列表、单服务器启停、连接测试、JSON 导入与弹窗编辑 |
 
 **设计要点**：
 
@@ -1712,6 +1715,9 @@ console.log(result.messages.at(-1).content);
   才是参数权威校验者，本地过严会挡掉合法的宽松调用。
 - **失败降级**：单个 server 连不上只记日志并跳过，绝不让整个服务起不来；
   工具调用失败返回模型可读中文错误（AGENTS §5.4），不 throw 穿透图。
+- **管理面**：全局总开关可暂停所有 MCP 连接与工具注入但保留配置；JSON 导入支持
+  `{ "mcpServers": { "<id>": { "command": ..., "args": [...] } } }`，冲突默认不覆盖；
+  网页编辑走局部 PATCH，不会清掉导入配置里的 `env` / `cwd`。
 - **装配**：agent 层禁止 import `server/*`，所以 `general.ts` 提供
   `setExternalTools()` 注入槽，由 `index.ts` 启动/变更时推进去 —— 最小耦合。
 
@@ -1726,7 +1732,7 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 **问题**：「这类任务该怎么做」的领域指南写在系统提示词里，永远占上下文；
 写成文档又没有加载机制。
 
-**设计**：`.setting/skills/*.md` + 极简 frontmatter，**按触发词命中才注入，未配置触发词时用名称兜底**。
+**设计**：`.setting/skills/<id>.md` 或标准 `.setting/skills/<id>/SKILL.md` + 极简 frontmatter，**按触发词命中才注入，未配置触发词时用名称兜底**。新建技能统一使用 `$skill-creator`；设置页只管理和编辑已有技能。
 
 | 机制 | 实现 |
 |---|---|
@@ -1734,7 +1740,7 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 | 匹配 | 只看**最近一条用户消息**；只匹配 `enabled != false` 的技能；无 triggers 时用技能名称/标识兜底；计分 = 命中关键词数 ×5 + 关键词总长度 |
 | 预算 | 每轮最多 2 个技能、单个正文上限 4000 字符；**未命中返回 null = 零 token 开销** |
 | 缓存 | 目录签名（文件数 + 最新 mtime）比较，目录没变就不重读文件 |
-| 管理 | 设置页「技能」分区：搜索、全部/已启用/已禁用筛选、分页卡片、上传 `.md` / `.markdown`、启停、编辑与删除；启停写入 frontmatter，重启和外部编辑器保持一致 |
+| 管理 | 设置页「技能」分区：搜索、全部/已启用/已禁用筛选、分页卡片、上传 `.md` / `.markdown`、启停、编辑与删除；新建走 `$skill-creator`，避免手写 frontmatter 与标准技能目录分叉 |
 | 示例 | `scripts/example-skills/` 两个打样：写提交信息、排查端口占用 |
 
 **为什么技能是安全的**：它只是**文档**，永不执行。这与 MCP（跑外部程序）和
@@ -1833,6 +1839,10 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
   输入框，用户仍可修改后再发送。
 - **面包屑**：顶栏显示「项目 › 会话」，`showChatState()` 从 `projectId` 解析项目名，不把项目归属
   藏在标题里。
+- **会话树折叠**：项目分组是树的一级节点，分组头整行可点（`role="button"` + `aria-expanded`，
+  Enter/Space 同效）；折叠后子项不渲染，折叠状态只存 key 列表（`state.projCollapsed` →
+  `lg-agent-proj-collapsed`），重渲染后由数据还原，未归属组用 `ORPHAN_GROUP_KEY` 独立键；
+  搜索时强制展开（分组头加 `.static` 不可折叠），避免命中结果被收起后看似「搜不到」。
 - **侧栏层级**：项目分组下再按“今天 / 昨天 / 更早”分组；时间显示为今天 HH:mm、昨天 HH:mm、
   N 天前或月/日，减少绝对时间阅读成本。
 - **阅读保护**：`ui/scroll-to-bottom.ts` 不再让新消息强行抢走滚动位置；离开底部时显示未读累计，
