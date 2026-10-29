@@ -1,7 +1,7 @@
 {
-  "name": "agent-tools",
+  "name": "agentatlas",
   "version": "0.9.0-beta.1",
-  "description": "可扩展的 agent-tools：LangGraph.js + TypeScript（CLI + Web + Desktop）",
+  "description": "可扩展的 agentatlas：LangGraph.js + TypeScript（CLI + Web + Desktop）",
   "type": "module",
   "scripts": {
     "models": "tsx scripts/list-models.ts",
@@ -38,7 +38,7 @@
     "langgraph",
     "agent",
     "llm",
-    "agent-tools",
+    "agentatlas",
     "automation"
   ],
   "license": "MIT",

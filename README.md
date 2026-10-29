@@ -1,11 +1,11 @@
-# agent-tools
+# agentatlas
 
 > **当前状态：`0.9.0-beta.1` 开发预览版。**
 > 项目仍有很多功能在完善，接口、数据格式和交互可能继续调整；暂不提供正式版本、Git tag、生产 SLA 或稳定兼容承诺。
 
 一个基于 **LangGraph.js + TypeScript** 的可扩展 Agent 工具集，包含 Web、CLI 和 Electron 桌面壳。当前以通用 Agent 与房产 Agent 为基础，统一承载编程、文件、知识库、电脑操作和后续垂直 Agent。
 
-![agent-tools 主界面](docs/screenshots/main-empty.png)
+![agentatlas 主界面](docs/screenshots/main-empty.png)
 
 ## 快速开始
 
@@ -68,7 +68,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 
 ## 能力路线
 
-agent-tools 后续按“先读后写、先基础设施后业务”的顺序扩展：
+agentatlas 后续按“先读后写、先基础设施后业务”的顺序扩展：
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
@@ -77,7 +77,7 @@ agent-tools 后续按“先读后写、先基础设施后业务”的顺序扩�
 | 获取岗位信息 Agent | 规划中 | 以只读工具聚合岗位来源，保留来源、时间和原始链接，不补造字段 |
 | 投递简历 Agent | 规划中 | 独立管理简历与投递记录；外发前强制确认，提交动作必须审批且幂等 |
 
-四类能力的边界、建议模块和落地顺序见 [agent-tools 能力路线](docs/agent-tools-roadmap.md)。路线中的功能在实现与验收前不会出现在“当前能力”表里。输入框上方的上下文容量条保留当前会话最近一次主模型请求的 input 用量（不重复叠加 output），分母使用当前模型窗口扣除输出预留与安全余量后的输入预算。历史拼接按 token 预算从新到旧装入，不再受固定 32 条 / 48k 字符限制；切换模型不清空历史，下一轮请求返回 usage 后再校正；缓存命中率统一保留一位小数。若旧上下文超过目标模型可用输入，会先压缩当前上下文，完整聊天记录仍保留。
+四类能力的边界、建议模块和落地顺序见 [agentatlas 能力路线](docs/agentatlas-roadmap.md)。路线中的功能在实现与验收前不会出现在“当前能力”表里。输入框上方的上下文容量条保留当前会话最近一次主模型请求的 input 用量（不重复叠加 output），分母使用当前模型窗口扣除输出预留与安全余量后的输入预算。历史拼接按 token 预算从新到旧装入，不再受固定 32 条 / 48k 字符限制；切换模型不清空历史，下一轮请求返回 usage 后再校正；缓存命中率统一保留一位小数。若旧上下文超过目标模型可用输入，会先压缩当前上下文，完整聊天记录仍保留。
 
 ## Agent 隔离
 
@@ -178,7 +178,7 @@ CI 还包含覆盖率门禁、SBOM、依赖审查和镜像 smoke。当前自动�
 ## 文档
 
 - [Agent Wiki](docs/agent-wiki.md) —— 架构、模块、调用链与踩坑
-- [能力路线](docs/agent-tools-roadmap.md) —— Hook、电脑操作、岗位获取与简历投递的规划边界
+- [能力路线](docs/agentatlas-roadmap.md) —— Hook、电脑操作、岗位获取与简历投递的规划边界
 - [长期记忆插槽](docs/memory-slot.md) —— 本地 / HTTP Provider、Generic 与 Hindsight 契约、导入导出和故障排查
 - [部署与运维总览](docs/deployment.md) —— 自托管、TLS、监控和运维入口
 - [开发预览验证快照](docs/readiness-snapshot.md) —— 当前自动化与基础设施验证记录

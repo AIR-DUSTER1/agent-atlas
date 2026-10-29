@@ -46,7 +46,7 @@ export function checkSameOrigin(req: IncomingMessage): string | null {
   if (isIdempotent(req.method)) return null;
   const fetchSite = req.headers["sec-fetch-site"];
   if (typeof fetchSite === "string" && /^cross-site$/i.test(fetchSite.trim())) {
-    return "拒绝跨站请求：该操作必须从 agent-tools 页面自身发起";
+    return "拒绝跨站请求：该操作必须从 agentatlas 页面自身发起";
   }
   const origin = req.headers.origin;
   if (typeof origin === "string" && origin && origin !== "null" && origin !== expectedOrigin(req)) {

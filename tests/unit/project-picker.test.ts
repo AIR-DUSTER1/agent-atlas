@@ -45,7 +45,7 @@ test("Electron 与浏览器两条目录选择链路都已接线", async () => {
   assert.match(projects, /\/api\/projects\/pick-directory/);
   assert.match(projects, /添加本地文件夹（系统选择）/);
   assert.match(projects, /是否改为手动输入服务器绝对路径/);
-  assert.doesNotMatch(serverProjects, /name:\s*"learn-agent"/);
+  assert.doesNotMatch(serverProjects, /name:\s*"agentatlas"/);
   assert.match(serverProjects, /projects = \[\];/);
   assert.match(projects, /其会话会归入「未归属」/);
   assert.match(route, /pickDirectory\(\)/);

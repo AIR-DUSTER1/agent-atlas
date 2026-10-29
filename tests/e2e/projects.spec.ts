@@ -25,7 +25,7 @@ test("添加本地文件夹先打开系统目录选择接口，不再弹出手�
   });
 
   await page.locator("#project-btn").click();
-  await expect(page.locator("#project-menu")).not.toContainText("learn-agent");
+  await expect(page.locator("#project-menu")).not.toContainText("agentatlas");
   await page.getByRole("menuitem", { name: /添加本地文件夹（系统选择）/ }).click();
 
   await expect(page.locator("#project-btn-text")).toHaveText("e2e");

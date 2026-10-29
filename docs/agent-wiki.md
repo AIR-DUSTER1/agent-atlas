@@ -1,6 +1,6 @@
-# 🤖 agent-tools 工程 Wiki
+# 🤖 agentatlas 工程 Wiki
 
-> 基于 `D:\code\agent` 的 agent-tools 项目编写。目标：读完这份文档，你能看懂本项目的 LangGraph.js 编排，
+> 基于 `D:\code\agent` 的 agentatlas 项目编写。目标：读完这份文档，你能看懂本项目的 LangGraph.js 编排，
 > 并能从零搭出自己的 Agent。
 >
 > 配套阅读：代码里每个文件都有详细中文注释，建议「文档 + 源码 + 运行观察」三者对照学习。
@@ -8,7 +8,7 @@
 > 端到端运行时编排（请求 → 选图 → 工具 / 审批 → SSE → 压缩）见
 > [agent-orchestration.md](agent-orchestration.md)。
 
-后续 Hook、电脑操作、岗位获取与简历投递的规划见 [agent-tools-roadmap.md](agent-tools-roadmap.md)。
+后续 Hook、电脑操作、岗位获取与简历投递的规划见 [agentatlas-roadmap.md](agentatlas-roadmap.md)。
 
 ***
 
@@ -597,7 +597,7 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
 
 ### 3.13 `src/server/rag.ts` + `src/tools-rag.ts` — 外部 RAG 知识库
 
-**设计立场**：agent-tools 不内置向量库、不算 embedding —— 检索与入库全部委托一个
+**设计立场**：agentatlas 不内置向量库、不算 embedding —— 检索与入库全部委托一个
 **外部 RAG 服务**（其内部通常是向量库 + OpenAI 兼容 /embeddings）。本侧只有
 一个 HTTP 客户端（`rag.ts`）＋ 一个工具（`tools-rag.ts`）＋ 面板 UI，接入即插即拔。
 
@@ -674,7 +674,7 @@ Header: Authorization: Bearer <key>（可留空）
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；工具永不 throw 穿透图，失败返回 `{error}` 中文说明 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图对比 / 材料前置 / 禁编造 ID / 高风险复述 / 口径声明） |
 
-**关键常量**（city 名尽量存表）：`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agent-tools 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。
+**关键常量**（city 名尽量存表）：`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
 4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）只信任 HTTPS host 白名单，下载
@@ -1414,7 +1414,7 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 
 - **一个供应商 = 一套网关凭据**，下面可以挂任意多个模型；每个模型有自己的
   显示名 / 多模态开关 / 上下文窗口 / 思考等级；
-- 保存供应商成功后返回 agent-tools；模型上下文窗口等参数在模型行「编辑」里配置，留空自动读网关，未知时默认 200k，
+- 保存供应商成功后返回 agentatlas；模型上下文窗口等参数在模型行「编辑」里配置，留空自动读网关，未知时默认 200k，
   点「保存模型」后持久化，重新打开设置仍可继续修改；
 - **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
@@ -1562,7 +1562,7 @@ console.log(result.messages.at(-1).content);
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 | 贝壳工具结果里全是 `{error:"…"}`    | 三排查：① `where beike` 确认 CLI 在 PATH 或 `.setting/beike/` 已解压；② Key 过期（面板重新保存）；③ 用 `beike doctor` 看官方诊断输出 |
-| 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agent-tools 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
+| 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agentatlas 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
 | 房产会话地图空白 / 点位缺              | Nominatim 限流 1 req/s：候选 ≤6 且串行；地址太口语（如「望京那种小区」）解析失败属预期，列为「未定位」；换官方小区名重试 |
 | e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 | 413 客户端只见 ECONNRESET         | 超限响应后直接 destroy socket 会带 RST，把已发出的 413 一起冲掉（客户端拿不到状态码）。对策「丢弃式排水」：继续读完剩余 body 再关 + 攻击流总量上限兜底。**另两个坑（5.6 测试实锤）**：① 响应头别带 `Connection: close` —— node:http 会在「响应结束 + 请求体没读完」时自行 destroy，同样发 RST；② 排水完用 `socket.end()` 发 FIN，不要 `destroy()`（Windows 上带未读数据 destroy 会 RST）。**验收方式**：node:http 客户端在 Windows loopback 上偶发 ECONNRESET（还没读到响应头），curl/浏览器正常；自动化测试用**裸 TCP 先读响应再断开**才稳定 |

@@ -115,7 +115,7 @@ function createWindow(): void {
     height: 850,
     minWidth: 960,
     minHeight: 620,
-    title: "agent-tools · 桌面版",
+    title: "agentatlas · 桌面版",
     backgroundColor: "#101216",
     autoHideMenuBar: true,
     show: false, // ready-to-show 再显示，避免白屏闪烁
@@ -188,7 +188,7 @@ if (!gotLock) {
       stopServer();
       dialog.showErrorBox(
         "桌面端启动失败",
-        String((err as Error)?.message ?? err) + "\n\n也可以继续用浏览器访问 npm run web 的方式使用 agent-tools。"
+        String((err as Error)?.message ?? err) + "\n\n也可以继续用浏览器访问 npm run web 的方式使用 agentatlas。"
       );
       app.quit();
       return;

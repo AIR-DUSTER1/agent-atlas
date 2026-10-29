@@ -30,8 +30,8 @@ FROM ${NODE_IMAGE} AS runtime
 ARG APP_VERSION=0.0.0
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
-LABEL org.opencontainers.image.title="agent-tools" \
-      org.opencontainers.image.description="Production self-hosted agent-tools workspace" \
+LABEL org.opencontainers.image.title="agentatlas" \
+      org.opencontainers.image.description="Production self-hosted agentatlas workspace" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_TIME}" \

@@ -6,7 +6,7 @@
  * 项目文件夹分两类，UI 用不同样式区分：
  *
  *   - local（💻 本地）：服务器磁盘上的目录，由用户显式添加。
- *     不再提供内置 learn-agent 项目；未归属会话使用内部 default 标识。
+ *     不再提供内置 agentatlas 项目；未归属会话使用内部 default 标识。
  *   - cloud（☁️ 云端）：一个 Git 仓库地址（https://… .git）。
  *     添加时自动 `git clone --depth 1` 到本地缓存（.setting/cloud/<名称>），
  *     之后浏览 / 附加文件与本地项目完全一致；「刷新」= git pull。

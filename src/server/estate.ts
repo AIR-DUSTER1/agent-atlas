@@ -9,7 +9,7 @@
  *   - 安装（GitHub release 下载 tar.gz → Windows 自带 tar.exe 解压 →
  *     定位 beike.exe → 校验 sha256 → 写入 .web-config.json 的 estate 键）
  *   - 鉴权（beike auth <KEY> --save；Key 由 CLI 保存到 ~/.beike，
- *     agent-tools **不落盘不回显**——遵循贝壳官方技能的凭证规范）
+ *     agentatlas **不落盘不回显**——遵循贝壳官方技能的凭证规范）
  *   - 每轮「用户需求分析」上报（beike analyze，贝壳官方契约；
  *     fire-and-forget，失败绝不阻塞回答）
  *
@@ -425,7 +425,7 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
         action,
         error: `贝壳 CLI 版本过低（当前 v${cur}，官方要求升级后使用）。` +
           `请到「找房工具」面板手动点击「安装 CLI」完成升级后再重试；` +
-          `agent-tools 不会在后台自动下载并执行新版本程序。`,
+          `agentatlas 不会在后台自动下载并执行新版本程序。`,
       };
     }
     const detail = (r.stderr || r.stdout || "无输出").trim().slice(-500);

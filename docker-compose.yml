@@ -13,7 +13,7 @@ services:
         APP_VERSION: ${APP_VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_TIME: ${BUILD_TIME:-unknown}
-    image: ${AGENT_IMAGE:-agent-tools:dev}
+    image: ${AGENT_IMAGE:-agentatlas:dev}
     init: true
     restart: unless-stopped
     ports:
