@@ -409,28 +409,147 @@
         </section>
 
         <section id="settings-view-memories" class="settings-view hidden" data-settings-panel="memories" role="tabpanel" aria-labelledby="memories-title">
-          <div id="memories-modal" role="region" aria-labelledby="memories-title">
-            <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 跨会话长期记忆</h2>
-      <p class="settings-sub">Agent 在对话中「值得跨会话记住」的事实与偏好（用户说「以后都…」「记住…」时会自动调用 memory_save）。
-        每轮按当前问题检索最相关的 8 条（2400 字符预算），跨会话生效且通用 / 租房 Agent 严格隔离。</p>
+          <div id="memories-modal" class="memory-settings">
+            <div class="settings-section-heading">
+              <div>
+                <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 长期记忆插槽</h2>
+                <p class="settings-sub">默认使用零依赖本地记忆，也可以连接兼容 Generic HTTP 契约或 Hindsight 的外部服务。通用 Agent 与租房 Agent 的 scope 严格隔离。</p>
+              </div>
+              <button id="mem-refresh-btn" type="button" class="ghost-btn small" title="刷新记忆插槽状态">刷新状态</button>
+            </div>
 
-      <label class="field memory-scope-field">
-        <span class="field-label">Agent 范围 <em class="key-state">两个范围严格隔离，不互相注入</em></span>
-        <select id="mem-profile-filter" class="pf-select" aria-label="记忆所属 Agent 范围">
-          <option value="general">通用 Agent</option>
-          <option value="estate">租房 / 房产 Agent</option>
-        </select>
-      </label>
-      <div class="field-label">记忆列表</div>
-      <div id="memories-list" class="memories-list"></div>
+            <div class="memory-provider-grid">
+              <section class="settings-card memory-provider-card" aria-labelledby="memory-provider-title">
+                <div class="memory-card-head">
+                  <div>
+                    <h3 id="memory-provider-title">存储提供方</h3>
+                    <p>当前生效的数据源与健康状态</p>
+                  </div>
+                  <span id="mem-health-badge" class="memory-health-badge">未检查</span>
+                </div>
+                <label class="field">
+                  <span class="field-label">当前 Provider</span>
+                  <select id="mem-active-provider" class="pf-select">
+                    <option value="local">内置本地记忆</option>
+                    <option value="http">HTTP 外部记忆</option>
+                  </select>
+                </label>
+                <div class="memory-stat-grid">
+                  <div><span>active</span><strong id="mem-local-active">0</strong></div>
+                  <div><span>历史版本</span><strong id="mem-local-history">0</strong></div>
+                  <div><span>文件状态</span><strong id="mem-local-state">-</strong></div>
+                </div>
+                <p id="mem-provider-detail" class="settings-note">正在读取记忆插槽状态…</p>
+                <label class="cap-check memory-check">
+                  <input id="mem-allow-pii" type="checkbox" />
+                  <span>允许手动保存明显 PII（手机号 / 身份证；密钥仍永远拒绝）</span>
+                </label>
+              </section>
 
-      <div class="field-label">手动添加 / 更新（同主题再保存 = 覆盖更新）</div>
-      <div class="key-row">
-        <input id="mem-key" aria-label="记忆主题" type="text" spellcheck="false" placeholder="主题，如：回答风格（50 字内）" />
-        <input id="mem-content" aria-label="记忆内容" type="text" spellcheck="false" placeholder="内容，如：结论先行，少用列表（500 字内）" />
-        <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
-      </div>
-      <div id="memories-status" class="settings-status"></div>
+              <section class="settings-card memory-http-card" aria-labelledby="memory-http-title">
+                <div class="memory-card-head">
+                  <div>
+                    <h3 id="memory-http-title">HTTP 外部记忆</h3>
+                    <p>故障时自动降级为“无记忆可注入”，不阻塞聊天与 /readyz</p>
+                  </div>
+                  <label class="cap-check"><input id="mem-http-enabled" type="checkbox" /><span>启用</span></label>
+                </div>
+                <fieldset id="memory-http-fields" class="memory-http-fields" disabled>
+                  <div class="memory-form-grid">
+                    <label class="field">
+                      <span class="field-label">协议预设</span>
+                      <select id="mem-http-preset" class="pf-select">
+                        <option value="generic">Generic HTTP</option>
+                        <option value="hindsight">Hindsight</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">认证方式</span>
+                      <select id="mem-http-auth-mode" class="pf-select">
+                        <option value="bearer">Bearer Token</option>
+                        <option value="none">无认证</option>
+                      </select>
+                    </label>
+                    <label class="field memory-span-2">
+                      <span class="field-label">Base URL</span>
+                      <input id="mem-http-base-url" type="url" spellcheck="false" placeholder="https://memory.example.com" />
+                    </label>
+                    <label class="field memory-span-2">
+                      <span class="field-label">API Key <em id="mem-http-key-state" class="key-state">留空表示保持不变</em></span>
+                      <input id="mem-http-api-key" type="password" spellcheck="false" autocomplete="new-password" placeholder="输入新的 API Key" />
+                    </label>
+                    <label class="cap-check memory-span-2"><input id="mem-http-clear-key" type="checkbox" /><span>清除已保存的 API Key</span></label>
+                    <label class="field">
+                      <span class="field-label">超时（毫秒）</span>
+                      <input id="mem-http-timeout" type="number" min="500" max="30000" step="500" />
+                    </label>
+                    <label class="field">
+                      <span class="field-label">单次召回上限</span>
+                      <input id="mem-http-limit" type="number" min="1" max="20" step="1" />
+                    </label>
+                  </div>
+                  <div id="mem-http-banks" class="memory-form-grid memory-banks hidden">
+                    <label class="field">
+                      <span class="field-label">通用 Agent Bank</span>
+                      <input id="mem-http-bank-general" type="text" spellcheck="false" placeholder="例如 general-local" />
+                    </label>
+                    <label class="field">
+                      <span class="field-label">租房 Agent Bank</span>
+                      <input id="mem-http-bank-estate" type="text" spellcheck="false" placeholder="例如 estate-local" />
+                    </label>
+                  </div>
+                  <label class="cap-check"><input id="mem-http-write" type="checkbox" /><span>允许工具与设置页写入外部记忆</span></label>
+                </fieldset>
+                <div class="settings-actions memory-config-actions">
+                  <button id="mem-test-http-btn" type="button" class="ghost-btn small">测试连接</button>
+                  <button id="mem-save-config-btn" type="button" class="ghost-btn small btn-approve">保存并切换</button>
+                </div>
+                <p id="mem-http-status" class="settings-status" role="status" aria-live="polite"></p>
+              </section>
+            </div>
+
+            <section class="settings-card memory-manage-card" aria-labelledby="memory-manage-title">
+              <div class="memory-card-head memory-manage-head">
+                <div>
+                  <h3 id="memory-manage-title">记忆条目管理</h3>
+                  <p>列表只显示当前 Agent scope；删除前会二次确认</p>
+                </div>
+                <div class="memory-manage-actions">
+                  <button id="mem-export-btn" type="button" class="ghost-btn small">导出本地快照</button>
+                  <label class="ghost-btn small memory-file-btn" for="mem-import-file">导入本地快照</label>
+                  <select id="mem-import-mode" class="pf-select memory-import-mode" aria-label="导入模式">
+                    <option value="merge">合并导入</option>
+                    <option value="replace">替换当前 scope</option>
+                  </select>
+                  <input id="mem-import-file" class="hidden" type="file" accept="application/json,.json" />
+                </div>
+              </div>
+
+              <div class="memory-filter-row">
+                <label class="field">
+                  <span class="field-label">Agent 范围</span>
+                  <select id="mem-profile-filter" class="pf-select" aria-label="记忆所属 Agent 范围">
+                    <option value="general">通用 Agent</option>
+                    <option value="estate">租房 / 房产 Agent</option>
+                  </select>
+                </label>
+                <label class="field memory-search-field">
+                  <span class="field-label">筛选当前列表</span>
+                  <input id="mem-search" type="search" spellcheck="false" placeholder="按主题、内容或标签筛选" />
+                </label>
+                <label class="cap-check memory-history-check"><input id="mem-history-toggle" type="checkbox" /><span>显示历史版本</span></label>
+              </div>
+
+              <div id="memories-list" class="memories-list"></div>
+
+              <div class="field-label memory-add-title">手动添加 / 更新（同主题的新内容会保留旧版本）</div>
+              <div class="key-row memory-add-row">
+                <input id="mem-key" aria-label="记忆主题" type="text" spellcheck="false" placeholder="主题，如：回答风格（50 字内）" />
+                <textarea id="mem-content" aria-label="记忆内容" spellcheck="false" rows="2" placeholder="内容，如：结论先行，少用列表（500 字内）"></textarea>
+                <button id="mem-add-btn" type="button" class="ghost-btn small">＋ 保存</button>
+              </div>
+              <div id="memories-status" class="settings-status" role="status" aria-live="polite"></div>
+            </section>
           </div>
         </section>
 

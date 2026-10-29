@@ -19,7 +19,7 @@ import { closeComposerMenu } from "../composer/menu.js";
 import { h } from "../ui/h.js";
 import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
-import { refreshMemories, memStatus, bindMemorySettings } from "./settings-memories.js";
+import { refreshMemorySettings, memStatus, bindMemorySettings } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
@@ -56,7 +56,7 @@ export function showSettingsView(view: string): void {
   } else if (next === "plugins") {
     void loadPluginStates();
   } else if (next === "memories") {
-    void refreshMemories().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
+    void refreshMemorySettings().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "commands") {
     void refreshCommands().catch((err) => cmdStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "skills") {

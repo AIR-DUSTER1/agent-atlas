@@ -15,7 +15,7 @@ import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-10-29-32";
+export const APP_VERSION = "web-2026-10-29-33";
 
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,

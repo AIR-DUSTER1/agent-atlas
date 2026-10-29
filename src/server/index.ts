@@ -72,7 +72,7 @@ import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalA
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
-import { handleListMemories, handleSaveMemory, handleDeleteMemory } from "./routes/memories.js";
+import { handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories } from "./routes/memories.js";
 import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, handleMemoryStatus } from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
@@ -366,6 +366,11 @@ const server = createServer(async (req, res) => {
     // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
     if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
+    if (pathname === "/api/memories/export" && req.method === "GET") {
+      await handleExportMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1");
+      return;
+    }
+    if (pathname === "/api/memories/import" && req.method === "POST") { await handleImportMemories(res, req); return; }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
     if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1], url.searchParams.get("profileId")); return; }
 

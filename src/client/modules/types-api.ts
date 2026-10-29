@@ -263,6 +263,56 @@ export interface MemoryEntry {
   source: "agent" | "user" | "import";
 }
 
+export interface MemoryHttpSettings {
+  enabled: boolean;
+  preset: "generic" | "hindsight";
+  baseURL: string;
+  authMode: "none" | "bearer";
+  apiKey?: string;
+  hasApiKey?: boolean;
+  keyMasked?: string;
+  timeoutMs: number;
+  searchLimit: number;
+  writeEnabled: boolean;
+  banks: { general: string; estate: string };
+}
+
+export interface MemorySlotConfig {
+  activeProvider: "local" | "http";
+  local: { allowPII: boolean };
+  http: MemoryHttpSettings;
+}
+
+export interface MemoryProviderHealth {
+  providerId: "local" | "http";
+  status: "ok" | "degraded" | "unavailable";
+  latencyMs?: number;
+  message?: string;
+}
+
+export interface MemoryProviderSummary {
+  id: "local" | "http";
+  active: boolean;
+  capabilities: { read: true; write: boolean; delete: boolean; search: true; health: boolean };
+}
+
+export interface MemorySlotStatus {
+  activeProvider: "local" | "http";
+  health: MemoryProviderHealth;
+  providers: MemoryProviderSummary[];
+  config: MemorySlotConfig;
+  localStore: {
+    state: string;
+    file: string;
+    loaded: boolean;
+    migratedFrom?: number;
+    quarantinedTo?: string;
+    message?: string;
+    activeCount: number;
+    historyCount: number;
+  };
+}
+
 export interface StatsTotals {
   turns: number;
   inputTokens: number;

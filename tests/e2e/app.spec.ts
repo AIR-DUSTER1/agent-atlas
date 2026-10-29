@@ -69,9 +69,9 @@ test("新建会话不继承上一会话的上下文用量显示", async ({ page 
   await createChat(page);
   await sendMessage(page, "你好");
   await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
-  // 前端必须同时展示「当前请求上下文」与「任务累计消耗」，避免把 26.9k
-  // 误认为整个任务只消耗了 26.9k；工具次数也应可见。
-  await expect(page.locator("#ctx-text")).toContainText("任务累计");
+  // 容量条显示该会话落盘的当前上下文与最近一次请求量，不能混用任务累计消耗。
+  await expect(page.locator("#ctx-text")).toContainText("当前会话上下文");
+  await expect(page.locator("#ctx-text")).toContainText("请求 ↑");
 
   await createChat(page);
   await expect(page.locator("#context-bar")).toBeHidden();
@@ -157,4 +157,41 @@ test("100KB Markdown 用户消息换行正常且不撑破容器", async ({ page 
   }));
   expect(metrics.width).toBeLessThanOrEqual(metrics.viewport);
   expect(metrics.scrollWidth).toBeLessThanOrEqual(Math.ceil(metrics.width) + 2);
+});
+test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP 失败提示", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await login(page);
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="memories"]').click();
+  await expect(page.locator("#memories-modal")).toBeVisible();
+  await expect(page.locator("#mem-health-badge")).toHaveText("可用", { timeout: 15_000 });
+  await expect(page.locator("#mem-active-provider")).toHaveValue("local");
+
+  await page.locator("#mem-key").fill("E2E 记忆偏好");
+  await page.locator("#mem-content").fill("回答先给结论，再给依据");
+  await page.locator("#mem-add-btn").click();
+  await expect(page.locator("#memories-list")).toContainText("E2E 记忆偏好", { timeout: 10_000 });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#mem-export-btn").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^memories-general-\d{4}-\d{2}-\d{2}\.json$/);
+  const downloadPath = await download.path();
+  expect(downloadPath).toBeTruthy();
+
+  await page.locator("#mem-profile-filter").selectOption("estate");
+  await expect(page.locator("#memories-list")).not.toContainText("E2E 记忆偏好");
+  await page.locator("#mem-import-mode").selectOption("replace");
+  await page.locator("#mem-import-file").setInputFiles(downloadPath!);
+  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
+  await page.locator("#ui-dialog-ok").click();
+  await expect(page.locator("#memories-list")).toContainText("E2E 记忆偏好", { timeout: 10_000 });
+
+  await page.locator("#mem-http-enabled").check();
+  await page.locator("#mem-http-base-url").fill("http://127.0.0.1:1");
+  await page.locator("#mem-http-timeout").fill("500");
+  await page.locator("#mem-test-http-btn").click();
+  await expect(page.locator("#mem-http-status")).toContainText(/连接失败|无法连接|超时/, { timeout: 10_000 });
+  expect(pageErrors).toEqual([]);
 });

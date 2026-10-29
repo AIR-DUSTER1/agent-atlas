@@ -473,7 +473,7 @@ async function init(): Promise<void> {
       e.preventDefault();
       void saveProvider();
     }
-    if (e.key === "Enter" && ["mem-key", "mem-content"].includes(target.id)) {
+    if (e.key === "Enter" && (target.id === "mem-key" || (target.id === "mem-content" && (e.ctrlKey || e.metaKey)))) {
       e.preventDefault();
       void saveMemoryFromForm();
     }

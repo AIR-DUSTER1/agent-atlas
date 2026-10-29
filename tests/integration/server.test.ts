@@ -339,6 +339,30 @@ test("记忆 API：新增/更新/列表/删除全链路，坏请求 400", async 
   assert.equal(recheck.status, 404);
 });
 
+test("记忆导入导出：JSON 快照在 scope 之间迁移且来源标记为 import", async () => {
+  const created = await json("/api/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileId: "general", key: "导出主题", content: "导出内容" }),
+  });
+  assert.equal(created.status, 200);
+  const exported = await json("/api/memories/export?profileId=general&history=1");
+  assert.equal(exported.status, 200);
+  assert.equal(exported.body.schemaVersion, 2);
+  assert.ok(exported.body.memories.some((item: { key: string }) => item.key === "导出主题"));
+
+  const imported = await json("/api/memories/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileId: "estate", mode: "replace", snapshot: exported.body }),
+  });
+  assert.equal(imported.status, 200);
+  const listed = await json("/api/memories?profileId=estate");
+  const found = listed.body.memories.find((item: { key: string }) => item.key === "导出主题");
+  assert.equal(found.source, "import");
+  assert.equal(found.scope.profileId, "estate");
+});
+
 test("记忆插槽 API：默认 local、状态可读、危险 HTTP 切换被拒", async () => {
   const config = await json("/api/memory/config");
   assert.equal(config.status, 200);

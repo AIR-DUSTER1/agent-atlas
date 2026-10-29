@@ -11,6 +11,8 @@ import type { MemoryProfileId } from "../../memory/provider.js";
 import { memoryScope, isMemoryProfileId } from "../../memory/scope.js";
 import { memorySlot } from "../../memory/slot.js";
 import { localMemoryStoreStatus } from "../../memory/providers/local-store.js";
+import { exportLocalMemories, importLocalMemories } from "../../memory/import-export.js";
+import { readMemoryConfig } from "../memory-config.js";
 
 function profileIdOf(raw: string | null | undefined): MemoryProfileId | null {
   if (!raw) return "general";
@@ -49,7 +51,6 @@ export async function handleSaveMemory(
     key?: unknown;
     content?: unknown;
     tags?: unknown;
-    allowPII?: unknown;
   };
   const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
   if (!profileId) return respondInvalidScope(res);
@@ -64,13 +65,14 @@ export async function handleSaveMemory(
     return;
   }
   try {
+    const config = await readMemoryConfig();
     const entry = await memorySlot.save({
       scope: memoryScope(profileId),
       key,
       content,
       source: "user",
       ...(tags ? { tags } : {}),
-      ...(body.allowPII === true ? { allowPII: true } : {}),
+      ...(config.local.allowPII ? { allowPII: true } : {}),
     });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, entry, profileId }));
@@ -98,5 +100,44 @@ export async function handleDeleteMemory(
   } catch (err) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+  }
+}
+export async function handleExportMemories(
+  res: import("node:http").ServerResponse,
+  rawProfileId?: string | null,
+  includeHistory = false
+): Promise<void> {
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  const snapshot = await exportLocalMemories(memoryScope(profileId), { includeHistory });
+  const date = new Date().toISOString().slice(0, 10);
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename="memories-${profileId}-${date}.json"`,
+  });
+  res.end(JSON.stringify(snapshot, null, 2));
+}
+
+export async function handleImportMemories(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  try {
+    const body = JSON.parse((await readBody(req)) || "{}") as {
+      profileId?: unknown;
+      mode?: unknown;
+      snapshot?: unknown;
+    };
+    const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
+    if (!profileId) return respondInvalidScope(res);
+    const config = await readMemoryConfig();
+    const result = await importLocalMemories(memoryScope(profileId), body.snapshot, {
+      mode: body.mode === "replace" ? "replace" : "merge",
+      allowPII: config.local.allowPII,
+    });
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true, profileId, ...result }));
+  } catch (err) {
+    respondBadRequest(res, req, err);
   }
 }

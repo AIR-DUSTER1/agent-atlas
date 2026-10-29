@@ -25,6 +25,7 @@ import {
   MEMORY_PROMPT_CHAR_BUDGET,
 } from "../../src/memory-store.js";
 import { memorySlot } from "../../src/memory/slot.js";
+import { exportLocalMemories, importLocalMemories } from "../../src/memory/import-export.js";
 import { memorySave, memoryRecall, createMemoryTools } from "../../src/tools-memory.js";
 import { rankMemories } from "../../src/memory/providers/local-search.js";
 import type { MemoryProvider, MemoryRecord } from "../../src/memory/provider.js";
@@ -275,6 +276,39 @@ test("敏感信息：secret 永远拒绝，PII 默认拒绝但显式 allowPII �
     );
     const saved = await saveMemory("电话", "用户手机号 13800138000", "user", "general", { allowPII: true });
     assert.match(saved.content, /13800138000/);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("导入导出：scope 隔离、批量原子写入、秘密内容整批拒绝", async () => {
+  const { dir } = await freshStore();
+  try {
+    await saveMemory("通用偏好", "结论先行", "user", "general");
+    await saveMemory("房产偏好", "只看整租", "user", "estate");
+    const snapshot = await exportLocalMemories(memoryScope("general"));
+    assert.equal(snapshot.schemaVersion, 2);
+    assert.equal(snapshot.memories.length, 1);
+    assert.equal(snapshot.memories[0].key, "通用偏好");
+
+    const replaced = await importLocalMemories(memoryScope("estate"), {
+      schemaVersion: 2,
+      memories: [{ key: "新的房产偏好", content: "预算 5000", status: "active" }],
+    }, { mode: "replace" });
+    assert.equal(replaced.imported, 1);
+    assert.equal((await listMemoriesAsync("estate"))[0].content, "预算 5000");
+    assert.equal((await listMemoriesAsync("general"))[0].content, "结论先行", "replace 不能影响另一个 scope");
+
+    await assert.rejects(
+      () => importLocalMemories(memoryScope("general"), {
+        memories: [
+          { key: "正常", content: "可保存" },
+          { key: "坏", content: "token=sk-abcdefghijklmnopqrstuvwxyz" },
+        ],
+      }),
+      /拒绝整批导入/
+    );
+    assert.equal((await listMemoriesAsync("general")).length, 1, "失败导入不得部分落盘");
   } finally {
     await dropStore(dir);
   }
