@@ -50,7 +50,7 @@ import {
   clearSkillForm, deleteSkillFromEditor, filterSkills, importSkillsFromFiles,
   refreshSkills, saveSkillFromForm, setSkillFilter, showSkillStatus,
 } from "./views/settings-skills.js";
-import { saveMcpFromForm } from "./views/settings-mcp.js";
+import { bindMcpSettings, closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
 import { compactContext } from "./actions/compact.js";
@@ -196,6 +196,7 @@ async function init(): Promise<void> {
   on("side-model", "click", () => openSettings("models"));
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
+  bindMcpSettings();
   on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
   on("cmd-add-btn", "click", () => { void saveCommandFromForm(); });
@@ -226,11 +227,7 @@ async function init(): Promise<void> {
     void importSkillsFromFiles(input?.files ?? null);
   });
   on("skill-clear-btn", "click", () => clearSkillForm());
-  on("mcp-add-btn", "click", () => { void saveMcpFromForm(); });
-  on("mcp-command", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") { ke.preventDefault(); void saveMcpFromForm(); }
-  });
+
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
   $("session-search")?.addEventListener("input", () => renderSessions());
@@ -475,6 +472,11 @@ async function init(): Promise<void> {
       if (isProviderFormOpen()) {
         e.preventDefault();
         closeProviderForm();
+        return;
+      }
+      if (isMcpEditorOpen()) {
+        e.preventDefault();
+        closeMcpEditor();
         return;
       }
       cancelActiveDialog(); // 兜底：焦点不在弹窗内时也能 Esc 关闭（未打开时是 no-op）

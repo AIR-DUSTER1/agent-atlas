@@ -148,7 +148,7 @@
       <footer id="composer">
         <!-- 待发送附件 chips -->
         <div id="attach-chips" class="attach-chips hidden"></div>
-        <!-- 上下文容量条：token 用量来自模型返回的 usage（缓存占比 = 提示词缓存命中/输入） -->
+        <!-- 上下文容量条：used 取最近主请求 input，分母取窗口扣除输出预留后的输入预算 -->
         <div id="context-bar" class="context-bar hidden">
           <div class="ctx-track"><div id="ctx-fill" class="ctx-fill"></div></div>
           <div class="ctx-meta">
@@ -655,34 +655,108 @@
         </section>
 
         <section id="settings-view-mcp" class="settings-view hidden" data-settings-panel="mcp" role="tabpanel" aria-labelledby="mcp-title">
-          <div id="mcp-modal" role="region" aria-labelledby="mcp-title">
-            <h2 id="mcp-title"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i> MCP 服务器</h2>
-            <p class="settings-sub">MCP 是本项目接入外部工具生态的方式（自实现 JSON-RPC over stdio，零额外依赖）。
-              工具会以 <code>mcp__服务器__工具</code> 出现在通用 Agent 里，<strong>默认每次调用都需要你审批</strong>。
-              <i class="ui-icon" data-icon="TriangleAlert" aria-hidden="true"></i> 接入 = 在本机运行第三方程序，请只添加可信来源。</p>
+          <div id="mcp-page" class="mcp-page" role="region" aria-labelledby="mcp-title">
+            <div class="mcp-page-head">
+              <div>
+                <h2 id="mcp-title"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i> MCP Servers</h2>
+                <p class="settings-sub">通过标准 MCP server 接入外部工具。工具默认需要审批；接入第三方程序前请确认来源可信。</p>
+              </div>
+              <span id="mcp-summary" class="mcp-summary">共 0 个服务器</span>
+            </div>
 
-            <div class="field-label">已配置的服务器</div>
-            <div id="mcp-list" class="memories-list"></div>
+            <div class="field-label mcp-section-label">导入设置</div>
+            <section class="mcp-import-card" aria-labelledby="mcp-import-title">
+              <div class="mcp-import-copy">
+                <div class="mcp-import-title-row">
+                  <h3 id="mcp-import-title">启用 MCP 工具</h3>
+                  <span id="mcp-global-state" class="mcp-state-pill">已启用</span>
+                </div>
+                <p>关闭后暂停所有 MCP 连接和工具注入，但保留服务器配置，便于故障时快速止损。</p>
+              </div>
+              <div class="mcp-import-actions">
+                <button id="mcp-import-btn" type="button" class="ghost-btn small">
+                  <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 导入 .mcp.json
+                </button>
+                <label class="mcp-switch" title="全局启用或暂停 MCP">
+                  <input id="mcp-global-enabled" type="checkbox" aria-label="启用 MCP 工具" />
+                  <span class="mcp-switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+            </section>
+            <input id="mcp-import-file" class="hidden" type="file" accept=".json,application/json" aria-label="选择 MCP JSON 配置" />
 
-            <div class="field-label">新增 / 更新（同 id 覆盖）</div>
-            <div class="key-row">
-              <input id="mcp-id" aria-label="MCP 服务器标识" type="text" spellcheck="false" placeholder="标识，如 filesystem（字母数字下划线短横线）" />
-              <input id="mcp-name" aria-label="MCP 服务器名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+            <div class="field-label mcp-section-label">已配置的 MCP Servers</div>
+            <section class="mcp-server-panel" aria-labelledby="mcp-servers-title">
+              <div class="mcp-server-head">
+                <div>
+                  <h3 id="mcp-servers-title">MCP Servers 管理</h3>
+                  <p>查看连接状态、测试工具，并为每个服务器单独启停。</p>
+                </div>
+                <div class="mcp-server-actions">
+                  <button id="mcp-refresh-btn" type="button" class="mcp-icon-btn" aria-label="刷新 MCP 服务器" title="刷新 MCP 服务器">
+                    <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i>
+                  </button>
+                  <button id="mcp-add-btn" type="button" class="ghost-btn small mcp-add-btn">
+                    <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 添加
+                  </button>
+                </div>
+              </div>
+              <div id="mcp-list" class="mcp-server-list"></div>
+            </section>
+            <div id="mcp-status" class="settings-status" role="status" aria-live="polite"></div>
+          </div>
+
+          <div id="mcp-editor-mask" class="mcp-editor-mask hidden">
+            <div id="mcp-editor" class="mcp-editor" role="dialog" aria-modal="true" aria-labelledby="mcp-editor-title">
+              <div class="mcp-editor-head">
+                <div>
+                  <h2 id="mcp-editor-title">添加 MCP Server</h2>
+                  <p id="mcp-editor-sub">配置本机 stdio 启动命令；保存后可测试连接并查看远端工具。</p>
+                </div>
+                <button id="mcp-editor-close" type="button" class="mcp-icon-btn" aria-label="关闭 MCP 编辑器" title="关闭">
+                  <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
+                </button>
+              </div>
+
+              <div class="mcp-form-grid">
+                <label class="field">
+                  <span class="field-label">服务器标识</span>
+                  <input id="mcp-id" aria-label="MCP 服务器标识" type="text" spellcheck="false" placeholder="例如 filesystem" />
+                </label>
+                <label class="field">
+                  <span class="field-label">显示名称</span>
+                  <input id="mcp-name" aria-label="MCP 服务器名称" type="text" spellcheck="false" placeholder="留空则使用标识" />
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">启动命令</span>
+                <input id="mcp-command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="例如 npx、node、uvx" />
+              </label>
+              <label class="field">
+                <span class="field-label">启动参数 <em class="key-state">空格分隔；含空格的参数请用双引号包住</em></span>
+                <input id="mcp-args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder='例如 -y @modelcontextprotocol/server-filesystem "D:\data"' />
+              </label>
+              <div id="mcp-cwd-note" class="mcp-advanced-note hidden"></div>
+              <label class="mcp-approval-row">
+                <span>
+                  <strong>调用前需要审批</strong>
+                  <small>推荐开启。关闭后该服务器的工具会直接执行，风险由你承担。</small>
+                </span>
+                <span class="mcp-switch">
+                  <input id="mcp-approval" type="checkbox" aria-label="MCP 调用前需要审批" checked />
+                  <span class="mcp-switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+              <div id="mcp-editor-status" class="settings-status" role="status" aria-live="polite"></div>
+              <div class="mcp-editor-actions">
+                <button id="mcp-editor-delete" type="button" class="ghost-btn small mcp-danger-btn hidden">删除服务器</button>
+                <span class="mcp-editor-spacer"></span>
+                <button id="mcp-editor-cancel" type="button" class="ghost-btn small">取消</button>
+                <button id="mcp-editor-save" type="button" class="ghost-btn small mcp-add-btn">保存服务器</button>
+              </div>
             </div>
-            <div class="key-row">
-              <input id="mcp-command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="启动命令，如 npx" />
-              <input id="mcp-args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem C:\data" />
-            </div>
-            <div class="key-row">
-              <label class="mcp-check"><input id="mcp-approval" type="checkbox" checked /> 调用需审批（推荐保持开启）</label>
-            </div>
-            <div class="key-row">
-              <button id="mcp-add-btn" type="button" class="ghost-btn small">＋ 保存服务器</button>
-            </div>
-            <div id="mcp-status" class="settings-status"></div>
           </div>
         </section>
-
         <section id="settings-view-stats" class="settings-view hidden" data-settings-panel="stats" role="tabpanel" aria-labelledby="stats-title">
           <div id="stats-modal" role="region" aria-labelledby="stats-title">
             <div class="stats-page-head">

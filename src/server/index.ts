@@ -36,7 +36,7 @@
  */
 import { createServer } from "node:http";
 import { config } from "../config.js";
-import { restoreSessions } from "./sessions.js";
+import { bumpConfigVersion, restoreSessions } from "./sessions.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
 import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
@@ -81,7 +81,7 @@ import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./route
 import { handleListCommands, handleSaveCommand, handleDeleteCommand } from "./routes/commands.js";
 import { handleListSkills, handleSaveSkill, handleDeleteSkill, handleImportSkills, handleSetSkillEnabled } from "./routes/skills.js";
 import {
-  handleListMcp, handleSaveMcp, handleDeleteMcp, handleTestMcp,
+  handleListMcp, handleSaveMcp, handleDeleteMcp, handleTestMcp, handleImportMcp, handleSetMcpEnabled, handleUpdateMcp,
 } from "./routes/mcp.js";
 import { disconnectAll } from "./mcp.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
@@ -113,10 +113,11 @@ if (process.argv.includes("--check-production")) {
  * 重新加载 MCP 工具并注入 general profile。
  * 每次增删 MCP server / 配置变更后调用；单个 server 失败不阻断其它 server。
  */
-async function refreshMcpTools(): Promise<void> {
+async function refreshMcpTools(bumpVersion = false): Promise<void> {
   try {
     const [tools, approvals] = await Promise.all([loadMcpTools(), mcpApprovalDescriptions()]);
     setExternalTools(tools, approvals);
+    if (bumpVersion) bumpConfigVersion();
     log("info", "mcp_tools_loaded", { count: tools.length });
   } catch (err) {
     // MCP 是增强能力：加载失败只降级，不影响内置工具
@@ -124,6 +125,7 @@ async function refreshMcpTools(): Promise<void> {
       message: err instanceof Error ? err.message : String(err),
     });
     setExternalTools([], {});
+    if (bumpVersion) bumpConfigVersion();
   }
 }
 
@@ -392,16 +394,34 @@ const server = createServer(async (req, res) => {
 
     // MCP 客户端（JSON-RPC over stdio 自实现；工具默认全登记审批）
     if (pathname === "/api/mcp" && req.method === "GET") { await handleListMcp(res); return; }
-    if (pathname === "/api/mcp" && req.method === "POST") { await handleSaveMcp(res, req); return; }
-    const mcpTestMatch = pathname.match(/^\/api\/mcp\/([\w-]+)\/test$/);
-    if (mcpTestMatch && req.method === "POST") { await handleTestMcp(res, mcpTestMatch[1]); return; }
-    const mcpDelMatch = pathname.match(/^\/api\/mcp\/([\w-]+)$/);
-    if (mcpDelMatch && req.method === "DELETE") {
-      await handleDeleteMcp(res, mcpDelMatch[1]);
-      await refreshMcpTools();
+    if (pathname === "/api/mcp" && req.method === "POST") {
+      await handleSaveMcp(res, req);
+      await refreshMcpTools(true);
       return;
     }
-
+    if (pathname === "/api/mcp" && req.method === "PATCH") {
+      await handleSetMcpEnabled(res, req);
+      await refreshMcpTools(true);
+      return;
+    }
+    if (pathname === "/api/mcp/import" && req.method === "POST") {
+      await handleImportMcp(res, req);
+      await refreshMcpTools(true);
+      return;
+    }
+    const mcpTestMatch = pathname.match(/^\/api\/mcp\/([\w-]+)\/test$/);
+    if (mcpTestMatch && req.method === "POST") { await handleTestMcp(res, mcpTestMatch[1]); return; }
+    const mcpUpdateMatch = pathname.match(/^\/api\/mcp\/([\w-]+)$/);
+    if (mcpUpdateMatch && req.method === "PATCH") {
+      await handleUpdateMcp(res, req, mcpUpdateMatch[1]);
+      await refreshMcpTools(true);
+      return;
+    }
+    if (mcpUpdateMatch && req.method === "DELETE") {
+      await handleDeleteMcp(res, mcpUpdateMatch[1]);
+      await refreshMcpTools(true);
+      return;
+    }
     // 运维诊断（受认证保护；不返回路径、提示词或密钥）
     if (pathname === "/api/diagnostics" && req.method === "GET") { await handleDiagnostics(res); return; }
     if (pathname === "/api/client-errors" && req.method === "POST") { await handleClientError(req, res, requestId); return; }

@@ -128,6 +128,74 @@ async function persistServers(next: McpServerConfig[]): Promise<void> {
   await mergeConfig({ mcpServers: next });
 }
 
+/** 全局总开关：关闭后保留配置，但不再加载任何 MCP 工具或启动新连接。 */
+export async function isMcpEnabled(): Promise<boolean> {
+  const config = await readConfig();
+  return config.mcpEnabled !== false;
+}
+
+export async function setMcpEnabled(enabled: boolean): Promise<void> {
+  await mergeConfig({ mcpEnabled: enabled });
+  if (!enabled) await disconnectAll();
+  void writeAudit("mcp.global_toggled", { enabled });
+}
+
+/** 局部更新，避免网页编辑时覆盖 JSON 导入的 env / cwd 等高级字段。 */
+export async function updateMcpServer(
+  id: string,
+  input: unknown
+): Promise<{ server: McpServerConfig; servers: McpServerConfig[] }> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("MCP server 更新参数必须是对象");
+  }
+  const patch = input as Record<string, unknown>;
+  const all = await listMcpServers();
+  const index = all.findIndex((server) => server.id === id);
+  if (index < 0) throw new Error(`MCP server「${id}」不存在`);
+  const current = all[index];
+  const next: McpServerConfig = { ...current };
+  let changed = false;
+
+  if ("name" in patch) {
+    if (typeof patch.name !== "string") throw new Error("显示名必须是字符串");
+    next.name = patch.name.trim() || id;
+    changed = true;
+  }
+  if ("command" in patch) {
+    if (typeof patch.command !== "string" || !patch.command.trim()) throw new Error("启动命令不能为空");
+    next.command = patch.command.trim();
+    changed = true;
+  }
+  if ("args" in patch) {
+    if (!Array.isArray(patch.args) || patch.args.some((arg) => typeof arg !== "string")) {
+      throw new Error("启动参数必须是字符串数组");
+    }
+    next.args = patch.args as string[];
+    changed = true;
+  }
+  if ("enabled" in patch) {
+    if (typeof patch.enabled !== "boolean") throw new Error("启用状态必须是布尔值");
+    next.enabled = patch.enabled;
+    changed = true;
+  }
+  if ("requireApproval" in patch) {
+    if (typeof patch.requireApproval !== "boolean") throw new Error("审批设置必须是布尔值");
+    next.requireApproval = patch.requireApproval;
+    changed = true;
+  }
+  if (!changed) throw new Error("没有可更新的 MCP server 字段");
+
+  const parsed = normalizeServer(next);
+  if (!parsed) throw new Error("MCP server 配置不完整：id 与 command 必填");
+  all[index] = parsed;
+  await persistServers(all);
+  await disconnect(id);
+  void writeAudit("mcp.server_updated", {
+    id,
+    fields: Object.keys(patch).filter((key) => ["name", "command", "args", "enabled", "requireApproval"].includes(key)),
+  });
+  return { server: parsed, servers: all };
+}
 export async function saveMcpServer(input: unknown): Promise<{ server: McpServerConfig; created: boolean }> {
   const parsed = normalizeServer(input);
   if (!parsed) throw new Error("MCP server 配置不完整：id 与 command 必填，且 id 只能含字母数字下划线短横线");
@@ -371,6 +439,70 @@ export async function disconnectAll(): Promise<void> {
   await Promise.all(ids.map((id) => disconnect(id)));
 }
 
+/**
+ * 兼容常见 `.mcp.json`：既接受 { mcpServers: { id: {...} } }，
+ * 也接受数组或单个服务器条目。先全量校验，再一次性落盘，避免半批写入。
+ */
+function importEntries(raw: unknown): Array<{ label: string; value: unknown }> {
+  if (Array.isArray(raw)) return raw.map((value, index) => ({ label: `第 ${index + 1} 项`, value }));
+  if (!raw || typeof raw !== "object") throw new Error("MCP 导入内容必须是 JSON 对象或数组");
+  const record = raw as Record<string, unknown>;
+  const collection = record.mcpServers ?? record.servers;
+  if (Array.isArray(collection)) return collection.map((value, index) => ({ label: `第 ${index + 1} 项`, value }));
+  if (collection && typeof collection === "object") {
+    return Object.entries(collection as Record<string, unknown>).map(([id, value]) => ({
+      label: id,
+      value: value && typeof value === "object" && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>), id }
+        : value,
+    }));
+  }
+  if (typeof record.id === "string" || typeof record.command === "string") {
+    return [{ label: String(record.id || "当前配置"), value: record }];
+  }
+  throw new Error("未找到 mcpServers 或服务器数组");
+}
+
+export async function importMcpServers(
+  raw: unknown,
+  overwrite = false
+): Promise<{ servers: McpServerConfig[]; imported: string[]; overwritten: string[]; conflicts: string[] }> {
+  const entries = importEntries(raw);
+  if (!entries.length) throw new Error("MCP 导入配置为空");
+  const parsedEntries: McpServerConfig[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const parsed = normalizeServer(entry.value);
+    if (!parsed) throw new Error(`MCP 配置「${entry.label}」不完整：id 与 stdio command 必填`);
+    if (seen.has(parsed.id)) throw new Error(`MCP 导入配置中 id「${parsed.id}」重复`);
+    seen.add(parsed.id);
+    parsedEntries.push(parsed);
+  }
+
+  const all = await listMcpServers();
+  const byId = new Map(all.map((server) => [server.id, server]));
+  const imported: string[] = [];
+  const overwritten: string[] = [];
+  const conflicts = parsedEntries.filter((server) => byId.has(server.id)).map((server) => server.id);
+  if (conflicts.length && !overwrite) {
+    return { servers: all, imported, overwritten, conflicts };
+  }
+  for (const server of parsedEntries) {
+    if (byId.has(server.id)) overwritten.push(server.id);
+    else imported.push(server.id);
+    byId.set(server.id, server);
+  }
+  const next = [...byId.values()];
+  if (next.length > MAX_SERVERS) throw new Error(`MCP server 数量已达上限 ${MAX_SERVERS}`);
+  await persistServers(next);
+  await Promise.all(parsedEntries.map((server) => disconnect(server.id)));
+  void writeAudit("mcp.servers_imported", {
+    imported: imported.length,
+    overwritten: overwritten.length,
+    ids: parsedEntries.map((server) => server.id),
+  });
+  return { servers: next, imported, overwritten, conflicts: [] };
+}
 /* ---------------------------------------------------------------------------
  * 对外状态（设置页用）
  * ------------------------------------------------------------------------- */
@@ -381,6 +513,9 @@ export interface McpServerStatus {
   args: string[];
   enabled: boolean;
   requireApproval: boolean;
+  /** 工作目录；env 值不回传，只暴露键名帮助用户识别高级配置。 */
+  cwd?: string;
+  envKeys: string[];
   /** 当前是否持有活跃连接 */
   connected: boolean;
   /** 已知工具（连接过才会有；未连接返回空数组） */
@@ -388,7 +523,6 @@ export interface McpServerStatus {
   /** 最近一次连接失败的原因（成功则为空） */
   error?: string;
 }
-
 export async function listMcpStatus(): Promise<McpServerStatus[]> {
   const servers = await listMcpServers();
   return servers.map((s) => {
@@ -400,6 +534,8 @@ export async function listMcpStatus(): Promise<McpServerStatus[]> {
       args: s.args ?? [],
       enabled: s.enabled !== false,
       requireApproval: s.requireApproval !== false,
+      cwd: s.cwd,
+      envKeys: Object.keys(s.env ?? {}),
       connected: Boolean(conn && !conn.closed),
       tools: conn?.tools ?? [],
       error: conn?.closed ? "连接已断开" : undefined,
@@ -420,8 +556,10 @@ export async function testMcpServer(id: string): Promise<McpServerStatus> {
       name: server.name ?? server.id,
       command: server.command,
       args: server.args ?? [],
-      enabled: true,
+      enabled: server.enabled !== false,
       requireApproval: server.requireApproval !== false,
+      cwd: server.cwd,
+      envKeys: Object.keys(server.env ?? {}),
       connected: !conn.closed,
       tools: conn.tools,
     };
@@ -431,8 +569,10 @@ export async function testMcpServer(id: string): Promise<McpServerStatus> {
       name: server.name ?? server.id,
       command: server.command,
       args: server.args ?? [],
-      enabled: true,
+      enabled: server.enabled !== false,
       requireApproval: server.requireApproval !== false,
+      cwd: server.cwd,
+      envKeys: Object.keys(server.env ?? {}),
       connected: false,
       tools: [],
       error: err instanceof Error ? err.message : String(err),

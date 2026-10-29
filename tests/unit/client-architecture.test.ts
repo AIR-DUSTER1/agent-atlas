@@ -37,7 +37,7 @@ const INNER_HTML_BUDGET: Record<string, number> = {
   "views/sessions.ts": 2,
   "views/settings-backup.ts": 2,
   "views/settings-commands.ts": 2,
-  "views/settings-mcp.ts": 2,
+  "views/settings-mcp.ts": 0,
   "views/settings-memories.ts": 2,
   "views/settings-skills.ts": 2,
   "views/settings-stats.ts": 10,
@@ -141,7 +141,9 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
   assert.match(events, /case "model_retry": upsertModelRetry/);
   assert.match(events, /u\.contextWindow = ev\.contextWindow/);
   const composer = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
-  assert.match(composer, /u\.contextWindow \?\? state\.config\?\.contextWindow/);
+  assert.match(composer, /const inputBudget = u\.contextInputBudget/);
+  assert.match(composer, /const scale = inputBudget \?\? win/);
+  assert.match(composer, /contextInputBudget = cfg\.contextBudget\?\.inputBudgetTokens/);
   assert.match(composer, /usage\.contextWindow = cfg\.contextWindow/);
   assert.match(composer, /targetChanged = previousProvider\?\.id !== nextProvider\?\.id/);
   assert.match(composer, /usage\.contextPending = true/);
@@ -157,7 +159,8 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
 
 test("切换更小窗口模型前走 ZCode 式压缩守门", async () => {
   const guard = await readFile(join(CLIENT, "actions", "model-switch.ts"), "utf8");
-  assert.match(guard, /MODEL_SWITCH_OUTPUT_RESERVE_TOKENS/);
+  assert.match(guard, /contextInputBudget/);
+  assert.match(guard, /输出预留/);
   assert.match(guard, /used <= available/);
   assert.match(guard, /compactContext\(\)/);
   assert.match(guard, /完整聊天记录仍保留/);

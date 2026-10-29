@@ -86,7 +86,7 @@ const CRASH_LINES = [
 ];
 await writeFile(crashScript, CRASH_LINES.join("\n") + "\n", "utf8");
 
-const { saveMcpServer, deleteMcpServer, listMcpServers, listMcpStatus, testMcpServer, disconnectAll } =
+const { saveMcpServer, deleteMcpServer, listMcpServers, listMcpStatus, testMcpServer, disconnectAll, isMcpEnabled, setMcpEnabled, updateMcpServer, importMcpServers } =
   await import("../../src/server/mcp.js");
 const { loadMcpTools, mcpApprovalDescriptions, mcpToolName } =
   await import("../../src/server/mcp-tools.js");
@@ -187,4 +187,67 @@ test("MCP 子进程死亡：调用返回可读错误且状态转为断开", asyn
   const status = await listMcpStatus();
   assert.equal(status.find((item) => item.id === "crash_srv")?.connected, false);
   await deleteMcpServer("crash_srv");
+});
+
+test("局部更新只改可见字段，保留 JSON 导入的 env / cwd", async () => {
+  await saveMcpServer({
+    id: "advanced_srv",
+    name: "高级配置",
+    command: process.execPath,
+    args: [serverScript],
+    cwd: dir,
+    env: { MCP_TOKEN: "secret-value" },
+  });
+  const updated = await updateMcpServer("advanced_srv", {
+    name: "高级配置（已更新）",
+    enabled: false,
+    requireApproval: false,
+  });
+  assert.equal(updated.server.name, "高级配置（已更新）");
+  assert.equal(updated.server.enabled, false);
+  assert.equal(updated.server.requireApproval, false);
+  assert.equal(updated.server.cwd, dir);
+  assert.deepEqual(updated.server.env, { MCP_TOKEN: "secret-value" });
+  const status = (await listMcpStatus()).find((server) => server.id === "advanced_srv");
+  assert.deepEqual(status?.envKeys, ["MCP_TOKEN"]);
+  assert.equal(status?.cwd, dir);
+  await deleteMcpServer("advanced_srv");
+});
+
+test("导入 .mcp.json：冲突先返回，确认覆盖后一次性写入", async () => {
+  const config = {
+    mcpServers: {
+      import_srv: {
+        command: process.execPath,
+        args: [serverScript],
+        env: { IMPORTED: "1" },
+      },
+    },
+  };
+  const first = await importMcpServers(config, false);
+  assert.deepEqual(first.imported, ["import_srv"]);
+  assert.deepEqual(first.conflicts, []);
+
+  const conflict = await importMcpServers({
+    mcpServers: { import_srv: { command: process.execPath, args: [serverScript], name: "覆盖后的名字" } },
+  }, false);
+  assert.deepEqual(conflict.conflicts, ["import_srv"]);
+  assert.equal(conflict.servers.find((server) => server.id === "import_srv")?.name, "import_srv");
+
+  const overwritten = await importMcpServers({
+    mcpServers: { import_srv: { command: process.execPath, args: [serverScript], name: "覆盖后的名字" } },
+  }, true);
+  assert.deepEqual(overwritten.overwritten, ["import_srv"]);
+  assert.equal(overwritten.servers.find((server) => server.id === "import_srv")?.name, "覆盖后的名字");
+  await deleteMcpServer("import_srv");
+});
+
+test("全局暂停：配置保留，但不再加载工具与审批表", async () => {
+  assert.equal(await isMcpEnabled(), true);
+  await setMcpEnabled(false);
+  assert.equal(await isMcpEnabled(), false);
+  assert.deepEqual(await loadMcpTools(), []);
+  assert.deepEqual(await mcpApprovalDescriptions(), {});
+  assert.ok((await listMcpServers()).some((server) => server.id === "echo_srv"));
+  await setMcpEnabled(true);
 });

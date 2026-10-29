@@ -17,7 +17,7 @@ import type { StructuredToolInterface } from "@langchain/core/tools";
 import { z } from "zod";
 import { log } from "./logging.js";
 import {
-  callMcpTool, ensureServerTools, listMcpServers, listMcpStatus,
+  callMcpTool, ensureServerTools, isMcpEnabled, listMcpServers, listMcpStatus,
   type McpToolInfo,
 } from "./mcp.js";
 
@@ -54,6 +54,7 @@ function schemaFor(inputSchema: unknown): z.ZodType<Record<string, unknown>> {
  * 连不上的 server 静默跳过（记日志）—— 一个 MCP 挂掉不该让整个 Agent 起不来。
  */
 export async function loadMcpTools(): Promise<StructuredToolInterface[]> {
+  if (!(await isMcpEnabled())) return [];
   const servers = (await listMcpServers()).filter((s) => s.enabled !== false);
   const out: StructuredToolInterface[] = [];
   for (const server of servers) {
@@ -100,6 +101,7 @@ ${info.description ?? ""}
  */
 export async function mcpApprovalDescriptions(): Promise<Record<string, (args: Record<string, unknown>) => string>> {
   const out: Record<string, (args: Record<string, unknown>) => string> = {};
+  if (!(await isMcpEnabled())) return out;
   // 与 loadMcpTools 一样主动连接：审批表要覆盖「配置里启用但当前未连接」的 server，
   // 否则服务刚启动时 MCP 工具会被当成「未登记审批」直接执行 —— 这是安全漏洞。
   for (const server of (await listMcpServers()).filter((s) => s.enabled !== false)) {

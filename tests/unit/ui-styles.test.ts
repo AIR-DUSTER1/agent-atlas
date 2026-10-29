@@ -54,7 +54,7 @@ test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const exported = new Set(
     iconsSource
       .replace(/\/\*[\s\S]*?\*\//g, "")
-      .match(/[A-Z][A-Za-z0-9]+/g) ?? [],
+      .match(/[A-Z][A-Za-z0-9]*/g) ?? [],
   );
   const used = new Set([...html.matchAll(/data-icon="([A-Za-z0-9]+)"/g)].map((match) => match[1] ?? ""));
   const missing = [...used].filter((name) => !exported.has(name));
