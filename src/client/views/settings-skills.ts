@@ -4,9 +4,9 @@
  * ============================================================
  * 职责：搜索、筛选、分页、上传、启停、编辑与删除技能。
  * 设计立场：
- *  - 页面以技能卡片为主，上传/创建是主操作，设置表单默认折叠；
- *  - 筛选只使用真实能力（全部 / 已启用 / 已禁用），不伪造项目级技能；
- *  - 启停状态写入 frontmatter，外部编辑和重启后保持一致。
+ *  - 新建技能只走 skill-creator，页面不再维护第二套手写 frontmatter 表单；
+ *  - 编辑器只编辑已有技能，避免“创建”与“编辑”两套路径分叉；
+ *  - 启停状态写入原文件，兼容扁平 <id>.md 与标准 <id>/SKILL.md。
  */
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
@@ -19,6 +19,7 @@ export interface SkillItem {
   triggers: string[];
   enabled: boolean;
   body: string;
+  path?: string;
 }
 
 type SkillFilter = "all" | "enabled" | "disabled";
@@ -204,7 +205,7 @@ function renderSkillCards(): void {
     const hint = document.createElement("p");
     hint.textContent = searchQuery || currentFilter !== "all"
       ? "调整搜索词或切换到「全部」查看其他技能。"
-      : "点击「上传技能」导入 .md 文件，或使用「创建」手动添加。";
+      : "上传现成技能；新建技能请在 Codex 中使用 $skill-creator 完成。";
     empty.append(icon, title, hint);
     list.appendChild(empty);
   } else {
@@ -261,16 +262,7 @@ export function openSkillEditor(skill: SkillItem): void {
   $("skill-delete-btn")?.classList.remove("hidden");
   setEditorSummary(`编辑技能 · ${skill.name}`);
   details?.scrollIntoView({ block: "nearest" });
-  requestAnimationFrame(() => ($("skill-id") as HTMLInputElement | null)?.focus());
-}
-
-export function openNewSkillForm(): void {
-  clearSkillForm();
-  const details = $("skill-editor-details") as HTMLDetailsElement | null;
-  if (details) details.open = true;
-  setEditorSummary("新建技能");
-  details?.scrollIntoView({ block: "nearest" });
-  requestAnimationFrame(() => ($("skill-id") as HTMLInputElement | null)?.focus());
+  requestAnimationFrame(() => ($("skill-body") as HTMLTextAreaElement | null)?.focus());
 }
 
 function setInput(id: string, value: string): void {
@@ -290,7 +282,7 @@ export function clearSkillForm(): void {
   setInput("skill-triggers", "");
   setInput("skill-body", "");
   $("skill-delete-btn")?.classList.add("hidden");
-  setEditorSummary("手动新增 / 编辑技能");
+  setEditorSummary("编辑现有技能");
 }
 
 export function filterSkills(query: string): void {
@@ -377,7 +369,10 @@ export async function importSkillsFromFiles(files: FileList | null): Promise<voi
 export async function saveSkillFromForm(): Promise<void> {
   const id = inputValue("skill-id").trim();
   const body = inputValue("skill-body");
-  if (!id) { showSkillStatus("技能标识（文件名）不能为空", "err"); return; }
+  if (!currentEditingId) {
+    showSkillStatus("新建技能请使用 skill-creator；这里只编辑已有技能", "err");
+    return;
+  }
   if (!body.trim()) { showSkillStatus("技能正文不能为空", "err"); return; }
   try {
     const res = await api<{ skill: SkillItem; created?: boolean; skills?: SkillItem[] }>("/api/skills", {
@@ -395,7 +390,7 @@ export async function saveSkillFromForm(): Promise<void> {
     clearSkillForm();
     const details = $("skill-editor-details") as HTMLDetailsElement | null;
     if (details) details.open = false;
-    showSkillStatus(res.created ? `✓ 已创建技能「${res.skill.name}」` : `✓ 已更新技能「${res.skill.name}」`, "ok");
+    showSkillStatus(`✓ 已更新技能「${res.skill.name}」`, "ok");
   } catch (err) {
     showSkillStatus(`✗ ${(err as Error).message}`, "err");
   }
@@ -404,7 +399,8 @@ export async function saveSkillFromForm(): Promise<void> {
 export async function deleteSkillFromEditor(): Promise<void> {
   const skill = allSkills.find((item) => item.id === currentEditingId);
   if (!skill) { showSkillStatus("请先选择要删除的技能", "err"); return; }
-  if (!(await uiConfirm(`删除技能「${skill.name}」？这会删掉 .setting/skills/${skill.id}.md`, {
+  const target = skill.path || `.setting/skills/${skill.id}/SKILL.md`;
+  if (!(await uiConfirm(`删除技能「${skill.name}」？这会删掉 ${target}`, {
     title: "删除技能", okText: "删除", danger: true,
   }))) return;
   try {

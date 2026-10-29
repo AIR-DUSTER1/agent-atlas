@@ -46,8 +46,10 @@ const MAX_IMPORT_FILES = 20;
 const MAX_IMPORT_BATCH_BYTES = 1_500_000;
 
 export interface Skill {
-  /** 文件基名（不含 .md），也是技能标识 */
+  /** 技能标识：扁平文件是基名，标准技能目录是目录名 */
   id: string;
+  /** SKILL.md 或 <id>.md 的绝对路径；编辑/删除必须写回原文件 */
+  path?: string;
   name: string;
   description: string;
   /** 触发关键词（小写比较）；为空时按技能名称与标识兜底匹配 */
@@ -115,8 +117,7 @@ function parseEnabled(value: string | undefined): boolean {
   return !["false", "0", "off", "no", "disabled", "禁用"].includes(value.trim().toLowerCase());
 }
 
-function toSkill(filename: string, raw: string): Skill | null {
-  const id = basename(filename, ".md");
+function toSkill(id: string, raw: string): Skill | null {
   if (!isValidSkillId(id)) return null;
   const { meta, body } = parseFrontmatter(raw);
   if (!body) return null; // 空正文的技能没有意义
@@ -133,52 +134,93 @@ function toSkill(filename: string, raw: string): Skill | null {
 /* ---------------------------------------------------------------------------
  * 缓存：技能文件不多，但每轮对话都要匹配 —— 缓存目录 mtime，避免每轮扫盘
  * ------------------------------------------------------------------------- */
+interface SkillSource {
+  id: string;
+  path: string;
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try { return (await fsp.stat(path)).isFile(); } catch { return false; }
+}
+
+/** 同时兼容扁平 `<id>.md` 与 skill-creator 标准 `<id>/SKILL.md`。 */
+async function listSkillSources(): Promise<SkillSource[]> {
+  let entries;
+  try {
+    entries = await fsp.readdir(SKILLS_DIR, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const sources: SkillSource[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      const id = basename(entry.name, ".md");
+      if (isValidSkillId(id)) sources.push({ id, path: join(SKILLS_DIR, entry.name) });
+      continue;
+    }
+    if (entry.isDirectory() && isValidSkillId(entry.name)) {
+      const path = join(SKILLS_DIR, entry.name, "SKILL.md");
+      if (await isFile(path)) sources.push({ id: entry.name, path });
+    }
+  }
+  return sources.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function skillFilePath(id: string): Promise<string | null> {
+  const standard = join(SKILLS_DIR, id, "SKILL.md");
+  if (await isFile(standard)) return standard;
+  const flat = join(SKILLS_DIR, `${id}.md`);
+  return await isFile(flat) ? flat : null;
+}
+
+async function writeSkillFile(id: string, content: string): Promise<void> {
+  const existing = await skillFilePath(id);
+  const target = existing ?? join(SKILLS_DIR, `${id}.md`);
+  await fsp.mkdir(dirname(target), { recursive: true });
+  await fsp.writeFile(target, content, "utf8");
+}
+
+async function removeSkillFile(id: string): Promise<boolean> {
+  const existing = await skillFilePath(id);
+  if (!existing) return false;
+  const standard = join(SKILLS_DIR, id, "SKILL.md");
+  if (existing === standard) await fsp.rm(dirname(existing), { recursive: true, force: true });
+  else await fsp.unlink(existing);
+  return true;
+}
+
 let cachedSkills: Skill[] | null = null;
 let cacheStamp = 0;
 
 async function dirSignature(): Promise<number> {
-  try {
-    const names = (await fsp.readdir(SKILLS_DIR)).filter((n) => n.toLowerCase().endsWith(".md")).sort();
-    const stats = await Promise.all(
-      names.map(async (n) => {
-        try { return (await fsp.stat(join(SKILLS_DIR, n))).mtimeMs; } catch { return 0; }
-      })
-    );
-    // 目录签名 = 文件数 + 最新 mtime；改名/增删/编辑都会变
-    return names.length * 1e13 + (stats.length ? Math.max(...stats) : 0);
-  } catch {
-    return 0; // 目录不存在 = 没有技能
-  }
+  const sources = await listSkillSources();
+  if (!sources.length) return 0;
+  const stats = await Promise.all(sources.map(async (source) => {
+    try { return (await fsp.stat(source.path)).mtimeMs; } catch { return 0; }
+  }));
+  // 文件数 + 最新 mtime；增删、改名、编辑都会改变缓存签名。
+  return sources.length * 1e13 + Math.max(...stats);
 }
 
 /** 列出全部技能（带 mtime 缓存，目录没变就不重读文件） */
 export async function listSkills(): Promise<Skill[]> {
   const stamp = await dirSignature();
   if (cachedSkills && stamp === cacheStamp) return cachedSkills;
-
-  let names: string[] = [];
-  try {
-    names = (await fsp.readdir(SKILLS_DIR)).filter((n) => n.toLowerCase().endsWith(".md"));
-  } catch {
-    cachedSkills = [];
-    cacheStamp = stamp;
-    return cachedSkills;
-  }
-
+  const sources = await listSkillSources();
   const skills: Skill[] = [];
-  for (const filename of names.slice(0, MAX_SKILLS)) {
+  for (const source of sources.slice(0, MAX_SKILLS)) {
     try {
-      const full = join(SKILLS_DIR, filename);
-      const stat = await fsp.stat(full);
+      const stat = await fsp.stat(source.path);
       if (stat.size > MAX_SKILL_FILE_BYTES) {
-        log("warn", "skill_too_large", { file: filename, bytes: stat.size });
+        log("warn", "skill_too_large", { file: source.id, bytes: stat.size });
         continue;
       }
-      const skill = toSkill(filename, await fsp.readFile(full, "utf8"));
-      if (skill) skills.push(skill);
+      const skill = toSkill(source.id, await fsp.readFile(source.path, "utf8"));
+      if (skill) skills.push({ ...skill, path: source.path });
     } catch (err) {
       log("warn", "skill_read_failed", {
-        file: filename,
+        file: source.id,
         message: err instanceof Error ? err.message : String(err),
       });
     }
@@ -307,8 +349,13 @@ export async function saveSkill(input: {
   if (!isValidSkillId(id)) {
     throw new Error(`技能标识只能包含字母、数字、下划线、短横线或中文，且不能超过 ${MAX_NAME_CHARS} 个字符`);
   }
-  const existing = await readSkillFileRaw(id);
-  const existingSkill = existing ? toSkill(`${id}.md`, existing) : null;
+  const existingPath = await skillFilePath(id);
+  if (!existingPath) {
+    throw new Error("新建技能请使用 skill-creator；该接口只更新已有技能");
+  }
+  const existing = await fsp.readFile(existingPath, "utf8");
+  const existingSkill = toSkill(id, existing);
+  if (!existingSkill) throw new Error(`技能「${id}」无法解析`);
   const body = typeof input.body === "string" ? input.body.trim() : "";
   if (!body) throw new Error("技能正文不能为空");
   if (Buffer.byteLength(body, "utf8") > MAX_SKILL_FILE_BYTES) throw new Error("技能正文过长");
@@ -332,12 +379,11 @@ export async function saveSkill(input: {
   });
   if (Buffer.byteLength(content, "utf8") > MAX_SKILL_FILE_BYTES) throw new Error("技能文件过长");
 
-  await fsp.mkdir(SKILLS_DIR, { recursive: true });
-  await fsp.writeFile(join(SKILLS_DIR, `${id}.md`), content, "utf8");
+  await writeSkillFile(id, content);
   resetSkillsCache();
   return {
-    skill: { id, name, description, triggers, enabled, body },
-    created: !existing,
+    skill: { id, name, description, triggers, enabled, body, path: existingPath },
+    created: false,
   };
 }
 
@@ -390,14 +436,11 @@ export async function importSkillFiles(files: unknown, overwriteInput: unknown):
     const idKey = id.toLowerCase();
     if (seenIds.has(idKey)) throw new Error(`本次上传中存在重复技能标识「${id}」`);
     seenIds.add(idKey);
-    if (!toSkill(`${id}.md`, content)) throw new Error(`技能「${filename}」没有可加载的正文`);
+    if (!toSkill(id, content)) throw new Error(`技能「${filename}」没有可加载的正文`);
     prepared.push({ id, content, previous: await readSkillFileRaw(id) });
   }
 
-  let currentFiles: string[] = [];
-  try {
-    currentFiles = (await fsp.readdir(SKILLS_DIR)).filter((name) => name.toLowerCase().endsWith(".md"));
-  } catch { /* 目录尚不存在 */ }
+  const currentFiles = await listSkillSources();
   const newFileCount = prepared.filter((file) => file.previous === null).length;
   if (currentFiles.length + newFileCount > MAX_SKILLS) throw new Error(`技能总数不能超过 ${MAX_SKILLS} 个`);
 
@@ -410,14 +453,14 @@ export async function importSkillFiles(files: unknown, overwriteInput: unknown):
   try {
     await fsp.mkdir(SKILLS_DIR, { recursive: true });
     for (const file of prepared) {
-      await fsp.writeFile(join(SKILLS_DIR, `${file.id}.md`), file.content, "utf8");
+      await writeSkillFile(file.id, file.content);
       written.push(file);
     }
   } catch (err) {
     for (const file of written.reverse()) {
       try {
-        if (file.previous === null) await fsp.unlink(join(SKILLS_DIR, `${file.id}.md`));
-        else await fsp.writeFile(join(SKILLS_DIR, `${file.id}.md`), file.previous, "utf8");
+        if (file.previous === null) await removeSkillFile(file.id);
+        else await writeSkillFile(file.id, file.previous);
       } catch { /* 回滚尽力而为，下面仍返回明确错误 */ }
     }
     resetSkillsCache();
@@ -439,8 +482,9 @@ export async function setSkillEnabled(idInput: unknown, enabledInput: unknown): 
   if (typeof enabledInput !== "boolean") throw new Error("enabled 必须是布尔值");
   const raw = await readSkillFileRaw(id);
   if (raw === null) throw new Error(`技能「${id}」不存在`);
-  const skill = toSkill(`${id}.md`, raw);
+  const skill = toSkill(id, raw);
   if (!skill) throw new Error(`技能「${id}」无法解析`);
+  const rawPath = await skillFilePath(id);
 
   const updated = { ...skill, enabled: enabledInput };
   const content = buildSkillFile({
@@ -451,27 +495,20 @@ export async function setSkillEnabled(idInput: unknown, enabledInput: unknown): 
     body: updated.body,
     extraKeys: extraSkillKeys(raw),
   });
-  await fsp.mkdir(SKILLS_DIR, { recursive: true });
-  await fsp.writeFile(join(SKILLS_DIR, `${id}.md`), content, "utf8");
+  await writeSkillFile(id, content);
   resetSkillsCache();
-  return updated;
+  return { ...updated, path: rawPath ?? join(SKILLS_DIR, `${id}.md`) };
 }
 
 async function readSkillFileRaw(id: string): Promise<string | null> {
-  try {
-    return await fsp.readFile(join(SKILLS_DIR, `${id}.md`), "utf8");
-  } catch {
-    return null;
-  }
+  const path = await skillFilePath(id);
+  if (!path) return null;
+  try { return await fsp.readFile(path, "utf8"); } catch { return null; }
 }
 
 export async function deleteSkill(id: string): Promise<{ removed: boolean }> {
   if (!isValidSkillId(id)) throw new Error("技能标识不合法");
-  try {
-    await fsp.unlink(join(SKILLS_DIR, `${id}.md`));
-    resetSkillsCache();
-    return { removed: true };
-  } catch {
-    return { removed: false };
-  }
+  const removed = await removeSkillFile(id);
+  if (removed) resetSkillsCache();
+  return { removed };
 }

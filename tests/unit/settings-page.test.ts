@@ -121,11 +121,32 @@ test("长期记忆插槽：本地 / HTTP 配置、连接测试、scope 与导入
   assert.match(source, /authFetch\(`\/api\/memories\/export/);
   assert.doesNotMatch(source, /innerHTML\s*=\s*`[^`]*\$\{[^}]*apiKey/);
 });
+test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与弹窗编辑", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const source = await readClientFiles(["views/settings-mcp.ts", "main.ts", "views/settings.ts"]);
+  for (const id of [
+    "mcp-summary", "mcp-global-enabled", "mcp-global-state", "mcp-import-btn",
+    "mcp-import-file", "mcp-refresh-btn", "mcp-add-btn", "mcp-list",
+    "mcp-editor-mask", "mcp-editor-title", "mcp-id", "mcp-name", "mcp-command",
+    "mcp-args", "mcp-approval", "mcp-editor-delete", "mcp-editor-save",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.match(html, /accept="\.json,application\/json"/);
+  assert.match(source, /bindMcpSettings/);
+  assert.match(source, /method: "PATCH"/);
+  assert.match(source, /\/api\/mcp\/import/);
+  assert.match(source, /parseArgs/);
+  assert.match(source, /envKeys/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /isMcpEditorOpen/);
+  assert.doesNotMatch(source, /innerHTML/);
+});
 test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   const source = await readClientFiles(["views/settings-skills.ts", "main.ts", "views/settings.ts"]);
   for (const id of [
-    "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-create-btn", "skill-upload-file",
+    "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-upload-file",
     "skills-count", "skills-count-all", "skills-count-enabled", "skills-count-disabled",
     "skills-list", "skills-pagination", "skill-editor-details", "skill-clear-btn", "skill-delete-btn",
   ]) {
@@ -136,6 +157,9 @@ test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
   assert.match(html, /data-skill-filter="enabled"/);
   assert.match(html, /data-skill-filter="disabled"/);
   assert.match(html, /id="skill-editor-details" class="settings-disclosure skill-editor"/);
+  assert.doesNotMatch(html, /id="skill-create-btn"/, "新建技能统一走 skill-creator，设置页不再提供第二入口");
+  assert.match(html, /编辑现有技能/);
+  assert.doesNotMatch(html, /手动新增 \/ 编辑技能/);
   assert.match(source, /importSkillsFromFiles/);
   assert.match(source, /\/api\/skills\/import/);
   assert.match(source, /method: "PATCH"/);
@@ -145,4 +169,6 @@ test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
   assert.match(source, /function filterSkills/);
   assert.match(source, /启用技能 \$\{skill\.name\}/);
   assert.match(source, /function updateSkillEnabled/);
+  assert.match(source, /新建技能请使用 skill-creator/);
+  assert.match(source, /skill\.path/);
 });

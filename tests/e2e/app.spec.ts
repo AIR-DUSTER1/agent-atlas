@@ -72,6 +72,8 @@ test("新建会话不继承上一会话的上下文用量显示", async ({ page 
   // 容量条显示该会话落盘的当前上下文与最近一次请求量，不能混用任务累计消耗。
   await expect(page.locator("#ctx-text")).toContainText("当前会话上下文");
   await expect(page.locator("#ctx-text")).toContainText("请求 ↑");
+  await expect(page.locator("#ctx-text")).toContainText("模型窗口");
+  await expect(page.locator("#ctx-text")).toContainText("输出预留");
 
   await createChat(page);
   await expect(page.locator("#context-bar")).toBeHidden();
@@ -201,15 +203,15 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   await login(page);
   await page.evaluate(async () => {
     for (let i = 0; i < 5; i += 1) {
-      await fetch("/api/skills", {
+      await fetch("/api/skills/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: `seed-skill-${i}`,
-          name: `Z 技能 ${i}`,
-          description: "用于验证技能分页",
-          triggers: `分页${i}`,
-          body: `分页验证正文 ${i}`,
+          files: [{
+            name: `seed-skill-${i}.md`,
+            content: `---\nname: Z 技能 ${i}\ndescription: 用于验证技能分页\ntriggers: 分页${i}\n---\n分页验证正文 ${i}`,
+          }],
+          overwrite: false,
         }),
       });
     }
@@ -217,6 +219,8 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   await page.locator("#settings-btn").click();
   await page.locator('[data-settings-view="skills"]').click();
   await expect(page.locator("#skills-modal")).toBeVisible();
+  await expect(page.locator("#skill-create-btn")).toHaveCount(0);
+  await expect(page.locator("#skill-editor-details summary")).toContainText("编辑现有技能");
   await page.locator("#skills-search").fill("不存在的技能");
   await expect(page.locator("#skills-list")).toContainText("没有匹配的技能");
   await page.locator("#skills-search").fill("");

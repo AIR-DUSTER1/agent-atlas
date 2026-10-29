@@ -602,9 +602,6 @@
                 <button id="skill-upload-btn" type="button" class="ghost-btn small skills-primary-btn">
                   <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传技能
                 </button>
-                <button id="skill-create-btn" type="button" class="ghost-btn small">
-                  <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 创建
-                </button>
               </div>
             </section>
             <input id="skill-upload-file" class="hidden" type="file" accept=".md,.markdown,text/markdown"
@@ -633,10 +630,10 @@
             <nav id="skills-pagination" class="skills-pagination hidden" aria-label="技能分页"></nav>
 
             <details id="skill-editor-details" class="settings-disclosure skill-editor">
-              <summary>手动新增 / 编辑技能</summary>
+              <summary>编辑现有技能</summary>
               <div class="settings-disclosure-body">
                 <div class="key-row">
-                  <input id="skill-id" aria-label="技能标识" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
+                  <input id="skill-id" aria-label="技能标识" type="text" spellcheck="false" placeholder="从下方技能卡片选择后自动填入" readonly />
                   <input id="skill-name" aria-label="技能名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
                 </div>
                 <div class="key-row">
@@ -646,7 +643,7 @@
                 <textarea id="skill-body" aria-label="技能正文" class="cmd-template" spellcheck="false"
                   placeholder="技能正文（markdown）。例如：&#10;# 写提交信息&#10;- 一行中文短句，不加前缀&#10;- 说明原因时用「：」而不是括号"></textarea>
                 <div class="key-row skills-editor-actions">
-                  <button id="skill-add-btn" type="button" class="ghost-btn small skills-primary-btn">保存技能</button>
+                  <button id="skill-add-btn" type="button" class="ghost-btn small skills-primary-btn">保存修改</button>
                   <button id="skill-clear-btn" type="button" class="ghost-btn small">清空表单</button>
                   <button id="skill-delete-btn" type="button" class="ghost-btn small skills-danger-btn hidden">
                     <i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i> 删除当前技能

@@ -47,7 +47,7 @@ import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
 import {
-  clearSkillForm, deleteSkillFromEditor, filterSkills, importSkillsFromFiles, openNewSkillForm,
+  clearSkillForm, deleteSkillFromEditor, filterSkills, importSkillsFromFiles,
   refreshSkills, saveSkillFromForm, setSkillFilter, showSkillStatus,
 } from "./views/settings-skills.js";
 import { saveMcpFromForm } from "./views/settings-mcp.js";
@@ -209,7 +209,6 @@ async function init(): Promise<void> {
   });
   on("skill-add-btn", "click", () => { void saveSkillFromForm(); });
   on("skill-delete-btn", "click", () => { void deleteSkillFromEditor(); });
-  on("skill-create-btn", "click", openNewSkillForm);
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   });
@@ -227,10 +226,6 @@ async function init(): Promise<void> {
     void importSkillsFromFiles(input?.files ?? null);
   });
   on("skill-clear-btn", "click", () => clearSkillForm());
-  on("skill-id", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") { ke.preventDefault(); void saveSkillFromForm(); }
-  });
   on("mcp-add-btn", "click", () => { void saveMcpFromForm(); });
   on("mcp-command", "keydown", (e) => {
     const ke = e as KeyboardEvent;
