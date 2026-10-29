@@ -2,10 +2,10 @@
  * ============================================================
  * views/settings-skills.ts — 设置页「技能」分区
  * ============================================================
- * 职责：搜索、筛选、分页、上传、启停、编辑与删除技能。
+ * 职责：搜索、筛选、分页、上传、启停与删除技能。
  * 设计立场：
- *  - 新建技能只走 skill-creator，页面不再维护第二套手写 frontmatter 表单；
- *  - 编辑器只编辑已有技能，避免“创建”与“编辑”两套路径分叉；
+ *  - 技能的新建和修改统一走 skill-creator，页面不维护手写 frontmatter 表单；
+ *  - 设置页只做列表管理与轻量操作，删除入口直接放在技能卡片上；
  *  - 启停状态写入原文件，兼容扁平 <id>.md 与标准 <id>/SKILL.md。
  */
 import { $ } from "../core/dom.js";
@@ -40,7 +40,6 @@ let allSkills: SkillItem[] = [];
 let currentFilter: SkillFilter = "all";
 let searchQuery = "";
 let currentPage = 1;
-let currentEditingId: string | null = null;
 let skillStatusTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function showSkillStatus(text: string, cls: string): void {
@@ -155,8 +154,8 @@ function createSkillCard(skill: SkillItem): HTMLElement {
         <input class="skill-enabled-toggle" type="checkbox" />
         <span class="skill-switch-track" aria-hidden="true"></span>
       </label>
-      <button class="skill-settings-btn" type="button" title="编辑技能" aria-label="编辑技能">
-        <i class="ui-icon" data-icon="Settings" aria-hidden="true"></i>
+      <button class="skill-delete-btn" type="button" title="删除技能" aria-label="删除技能">
+        <i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i>
       </button>
     </div>`;
 
@@ -176,10 +175,10 @@ function createSkillCard(skill: SkillItem): HTMLElement {
     toggle.setAttribute("aria-label", `启用技能 ${skill.name}`);
     toggle.addEventListener("change", () => { void updateSkillEnabled(skill, toggle); });
   }
-  const settingsButton = card.querySelector<HTMLButtonElement>(".skill-settings-btn");
-  if (settingsButton) {
-    settingsButton.setAttribute("aria-label", `编辑技能 ${skill.name}`);
-    settingsButton.addEventListener("click", () => openSkillEditor(skill));
+  const deleteButton = card.querySelector<HTMLButtonElement>(".skill-delete-btn");
+  if (deleteButton) {
+    deleteButton.setAttribute("aria-label", `删除技能 ${skill.name}`);
+    deleteButton.addEventListener("click", () => { void deleteSkillCard(skill, deleteButton); });
   }
   return card;
 }
@@ -243,46 +242,6 @@ async function updateSkillEnabled(skill: SkillItem, toggle: HTMLInputElement): P
     toggle.disabled = false;
     showSkillStatus(`✗ ${(err as Error).message}`, "err");
   }
-}
-
-function setEditorSummary(text: string): void {
-  const summary = $("skill-editor-details")?.querySelector("summary");
-  if (summary) summary.textContent = text;
-}
-
-export function openSkillEditor(skill: SkillItem): void {
-  currentEditingId = skill.id;
-  const details = $("skill-editor-details") as HTMLDetailsElement | null;
-  if (details) details.open = true;
-  setInput("skill-id", skill.id);
-  setInput("skill-name", skill.name === skill.id ? "" : skill.name);
-  setInput("skill-desc", skill.description);
-  setInput("skill-triggers", skill.triggers.join(", "));
-  setInput("skill-body", skill.body);
-  $("skill-delete-btn")?.classList.remove("hidden");
-  setEditorSummary(`编辑技能 · ${skill.name}`);
-  details?.scrollIntoView({ block: "nearest" });
-  requestAnimationFrame(() => ($("skill-body") as HTMLTextAreaElement | null)?.focus());
-}
-
-function setInput(id: string, value: string): void {
-  const el = $(id) as HTMLInputElement | HTMLTextAreaElement | null;
-  if (el) el.value = value;
-}
-
-function inputValue(id: string): string {
-  return (($(id) as HTMLInputElement | HTMLTextAreaElement | null)?.value || "");
-}
-
-export function clearSkillForm(): void {
-  currentEditingId = null;
-  setInput("skill-id", "");
-  setInput("skill-name", "");
-  setInput("skill-desc", "");
-  setInput("skill-triggers", "");
-  setInput("skill-body", "");
-  $("skill-delete-btn")?.classList.add("hidden");
-  setEditorSummary("编辑现有技能");
 }
 
 export function filterSkills(query: string): void {
@@ -366,51 +325,19 @@ export async function importSkillsFromFiles(files: FileList | null): Promise<voi
   }
 }
 
-export async function saveSkillFromForm(): Promise<void> {
-  const id = inputValue("skill-id").trim();
-  const body = inputValue("skill-body");
-  if (!currentEditingId) {
-    showSkillStatus("新建技能请使用 skill-creator；这里只编辑已有技能", "err");
-    return;
-  }
-  if (!body.trim()) { showSkillStatus("技能正文不能为空", "err"); return; }
-  try {
-    const res = await api<{ skill: SkillItem; created?: boolean; skills?: SkillItem[] }>("/api/skills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        name: inputValue("skill-name").trim() || undefined,
-        description: inputValue("skill-desc").trim() || undefined,
-        triggers: inputValue("skill-triggers"),
-        body,
-      }),
-    });
-    renderSkillList(res.skills || []);
-    clearSkillForm();
-    const details = $("skill-editor-details") as HTMLDetailsElement | null;
-    if (details) details.open = false;
-    showSkillStatus(`✓ 已更新技能「${res.skill.name}」`, "ok");
-  } catch (err) {
-    showSkillStatus(`✗ ${(err as Error).message}`, "err");
-  }
-}
-
-export async function deleteSkillFromEditor(): Promise<void> {
-  const skill = allSkills.find((item) => item.id === currentEditingId);
-  if (!skill) { showSkillStatus("请先选择要删除的技能", "err"); return; }
+async function deleteSkillCard(skill: SkillItem, button: HTMLButtonElement): Promise<void> {
   const target = skill.path || `.setting/skills/${skill.id}/SKILL.md`;
   if (!(await uiConfirm(`删除技能「${skill.name}」？这会删掉 ${target}`, {
     title: "删除技能", okText: "删除", danger: true,
   }))) return;
+  button.disabled = true;
   try {
     const res = await api<SkillListResponse>(`/api/skills/${encodeURIComponent(skill.id)}`, { method: "DELETE" });
-    renderSkillList(res.skills || []);
-    clearSkillForm();
-    const details = $("skill-editor-details") as HTMLDetailsElement | null;
-    if (details) details.open = false;
+    allSkills = res.skills || allSkills.filter((item) => item.id !== skill.id);
+    renderSkillCards();
     showSkillStatus(`已删除技能「${skill.name}」`, "ok");
   } catch (err) {
+    button.disabled = false;
     showSkillStatus(`✗ ${(err as Error).message}`, "err");
   }
 }

@@ -142,13 +142,13 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   assert.match(source, /isMcpEditorOpen/);
   assert.doesNotMatch(source, /innerHTML/);
 });
-test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
+test("技能库支持上传、启停、分页与卡片删除", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   const source = await readClientFiles(["views/settings-skills.ts", "main.ts", "views/settings.ts"]);
   for (const id of [
     "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-upload-file",
     "skills-count", "skills-count-all", "skills-count-enabled", "skills-count-disabled",
-    "skills-list", "skills-pagination", "skill-editor-details", "skill-clear-btn", "skill-delete-btn",
+    "skills-list", "skills-pagination",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
@@ -156,10 +156,9 @@ test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
   assert.match(html, /data-skill-filter="all"/);
   assert.match(html, /data-skill-filter="enabled"/);
   assert.match(html, /data-skill-filter="disabled"/);
-  assert.match(html, /id="skill-editor-details" class="settings-disclosure skill-editor"/);
-  assert.doesNotMatch(html, /id="skill-create-btn"/, "新建技能统一走 skill-creator，设置页不再提供第二入口");
-  assert.match(html, /编辑现有技能/);
-  assert.doesNotMatch(html, /手动新增 \/ 编辑技能/);
+  assert.doesNotMatch(html, /id="skill-create-btn"/, "新建技能统一走 skill-creator");
+  assert.doesNotMatch(html, /id="skill-editor-details"/, "设置页不再提供手写技能编辑表单");
+  assert.doesNotMatch(html, /id="skill-(?:add|clear|delete)-btn"/);
   assert.match(source, /importSkillsFromFiles/);
   assert.match(source, /\/api\/skills\/import/);
   assert.match(source, /method: "PATCH"/);
@@ -169,6 +168,9 @@ test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
   assert.match(source, /function filterSkills/);
   assert.match(source, /启用技能 \$\{skill\.name\}/);
   assert.match(source, /function updateSkillEnabled/);
-  assert.match(source, /新建技能请使用 skill-creator/);
+  assert.match(source, /async function deleteSkillCard/);
+  assert.match(source, /skill-delete-btn/);
+  assert.match(source, /method: "DELETE"/);
   assert.match(source, /skill\.path/);
+  assert.doesNotMatch(source, /openSkillEditor|saveSkillFromForm|currentEditingId/);
 });

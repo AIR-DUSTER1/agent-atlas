@@ -285,14 +285,15 @@
 #skills-modal { width: min(100%, 980px); }
 .skills-page-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .skills-page-head h2 { margin: 0; font-size: 20px; }
-.skills-icon-btn, .skill-settings-btn {
+.skills-icon-btn, .skill-delete-btn {
   display: inline-grid; place-items: center; flex: none;
   width: 30px; height: 30px; padding: 0;
   border: 1px solid var(--border); border-radius: 8px;
   background: transparent; color: var(--text-3); cursor: pointer;
 }
-.skills-icon-btn:hover, .skill-settings-btn:hover { color: var(--text); border-color: var(--accent); }
-.skills-icon-btn:disabled { opacity: .55; cursor: wait; }
+.skills-icon-btn:hover { color: var(--text); border-color: var(--accent); }
+.skill-delete-btn:hover { color: var(--red); border-color: rgba(229,96,79,.55); }
+.skills-icon-btn:disabled, .skill-delete-btn:disabled { opacity: .55; cursor: wait; }
 .skills-search-box {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 14px; padding: 0 11px;
@@ -392,15 +393,6 @@
 .skills-page-btn.active { border-color: var(--accent); background: rgba(91,140,255,.16); color: var(--accent-soft); }
 .skills-page-btn:disabled { opacity: .4; cursor: default; }
 .skills-page-ellipsis { padding: 0 4px; color: var(--text-3); }
-.settings-disclosure { margin-top: 18px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); }
-.settings-disclosure summary { padding: 11px 13px; color: var(--text); cursor: pointer; font-size: 13px; font-weight: 600; }
-.settings-disclosure[open] summary { border-bottom: 1px solid var(--border); }
-.settings-disclosure-body { padding: 13px; }
-.settings-disclosure-body .key-row:first-child { margin-top: 0; }
-.skills-editor-actions { align-items: center; }
-.skills-editor-actions .ghost-btn { display: inline-flex; align-items: center; gap: 5px; }
-.skills-danger-btn { margin-left: auto; color: var(--red) !important; border-color: rgba(229,96,79,.45) !important; }
-
 /* ---------- 统计分区：近 7 天 / 近 30 天 + SVG 图表 ---------- */
 #stats-modal h2 { margin: 0 0 4px; font-size: 18px; }
 .stats-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

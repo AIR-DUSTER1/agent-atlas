@@ -2,8 +2,8 @@
  * ============================================================
  * routes/skills.ts — 技能库 HTTP 接口
  * ============================================================
- * GET    /api/skills              列出全部技能（含正文与 enabled，供设置页编辑）
- * POST   /api/skills              新增或更新（同名覆盖）
+ * GET    /api/skills              列出全部技能（含正文与 enabled，供设置页展示）
+ * POST   /api/skills              更新已有技能（管理界面不提供新建入口）
  * POST   /api/skills/import       批量导入用户上传的 .md / .markdown
  * PATCH  /api/skills/:id          启用或禁用技能
  * DELETE /api/skills/:id          删除

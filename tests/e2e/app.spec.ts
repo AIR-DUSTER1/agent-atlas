@@ -220,7 +220,7 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   await page.locator('[data-settings-view="skills"]').click();
   await expect(page.locator("#skills-modal")).toBeVisible();
   await expect(page.locator("#skill-create-btn")).toHaveCount(0);
-  await expect(page.locator("#skill-editor-details summary")).toContainText("编辑现有技能");
+  await expect(page.locator("#skill-editor-details")).toHaveCount(0);
   await page.locator("#skills-search").fill("不存在的技能");
   await expect(page.locator("#skills-list")).toContainText("没有匹配的技能");
   await page.locator("#skills-search").fill("");
@@ -261,5 +261,9 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   const reloadedRow = page.locator(".skill-card").filter({ hasText: "E2E 上传技能" });
   await expect(reloadedRow).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("checkbox", { name: "启用技能 E2E 上传技能" })).not.toBeChecked();
+  await reloadedRow.getByRole("button", { name: "删除技能 E2E 上传技能" }).click();
+  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
+  await page.locator("#ui-dialog-ok").click();
+  await expect(reloadedRow).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });

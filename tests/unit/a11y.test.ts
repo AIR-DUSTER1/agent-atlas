@@ -32,7 +32,7 @@ test("核心正文与弱化文字满足 WCAG AA 4.5:1", () => {
 test("表单控件具有可访问名称，消息流与状态点使用 live region", async () => {
   const html = await read("index.html");
   for (const id of [
-    "input", "mem-key", "mem-content", "cmd-name", "cmd-template", "skill-id", "skill-body", "skill-upload-file", "skills-search",
+    "input", "mem-key", "mem-content", "cmd-name", "cmd-template", "skill-upload-file", "skills-search",
     "mcp-id", "mcp-command", "kb-query", "ui-dialog-input",
   ]) {
     assert.match(html, new RegExp(`(?:input|textarea) id="${id}"[^>]*aria-label=`), id);

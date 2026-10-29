@@ -47,8 +47,7 @@ import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
 import {
-  clearSkillForm, deleteSkillFromEditor, filterSkills, importSkillsFromFiles,
-  refreshSkills, saveSkillFromForm, setSkillFilter, showSkillStatus,
+  filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
 } from "./views/settings-skills.js";
 import { bindMcpSettings, closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
@@ -208,8 +207,6 @@ async function init(): Promise<void> {
     const ke = e as KeyboardEvent;
     if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
   });
-  on("skill-add-btn", "click", () => { void saveSkillFromForm(); });
-  on("skill-delete-btn", "click", () => { void deleteSkillFromEditor(); });
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   });
@@ -226,7 +223,6 @@ async function init(): Promise<void> {
     const input = e.currentTarget as HTMLInputElement | null;
     void importSkillsFromFiles(input?.files ?? null);
   });
-  on("skill-clear-btn", "click", () => clearSkillForm());
 
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
