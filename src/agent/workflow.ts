@@ -26,6 +26,7 @@ import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { config } from "../config.js";
+import { invokeWithModelRetry } from "../model-retry.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { memorySlot } from "../memory/slot.js";
 import { memoryScope } from "../memory/scope.js";
@@ -278,6 +279,33 @@ function requestSignal(parent?: AbortSignal): AbortSignal {
   return parent ? AbortSignal.any([parent, timeout]) : timeout;
 }
 
+/** 标记默认生产模型：只有它自动重试；测试注入的确定性假模型保持原语义。 */
+const RETRYING_MODEL = Symbol("retrying-model");
+type RetryingChatModel = WorkflowChatModel & { [RETRYING_MODEL]: true };
+
+/** 包装默认生产模型：每次尝试重新生成请求超时，退避只响应父级取消信号。 */
+function withModelRetries(model: WorkflowChatModel, sessionId: string | undefined): WorkflowChatModel {
+  const wrapped: WorkflowChatModel = {
+    invoke: (input, options) => invokeWithModelRetry(
+      (signal) => model.invoke(input, { signal: requestSignal(signal) }),
+      { sessionId, parentSignal: options?.signal }
+    ),
+  };
+  return Object.assign(wrapped, { [RETRYING_MODEL]: true as const });
+}
+
+/** 测试模型沿用原一次性调用；生产包装模型内部负责重试与每次请求的超时。 */
+async function invokeModel(
+  model: WorkflowChatModel,
+  input: unknown,
+  parentSignal: AbortSignal | undefined,
+  sessionId: string | undefined
+): Promise<AIMessage> {
+  if (RETRYING_MODEL in model) return model.invoke(input, { signal: parentSignal });
+  return model.invoke(input, { signal: requestSignal(parentSignal) });
+}
+
+
 /**
  * 构建带需求理解与反思的 ReAct 图。
  * general / estate 只提供 profile（提示词 + 工具 allowlist + 审批策略），
@@ -291,13 +319,13 @@ export function createWorkflowGraph(
   const tools = profile.tools;
   const modelOptions = { sessionId: options?.sessionId };
   const agentModel = models?.agent
-    ?? (createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel);
+    ?? withModelRetries(createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel, options?.sessionId);
   const analystModel = models?.analyst
-    ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
+    ?? withModelRetries(createChatModel(0, modelOptions) as unknown as WorkflowChatModel, options?.sessionId);
   const reviewerModel = models?.reviewer
-    ?? (createChatModel(0, modelOptions) as unknown as WorkflowChatModel);
+    ?? withModelRetries(createChatModel(0, modelOptions) as unknown as WorkflowChatModel, options?.sessionId);
   const riskAssessor = options?.riskAssessor
-    ?? createToolRiskAssessor(createChatModel(0, modelOptions));
+    ?? createToolRiskAssessor(createChatModel(0, modelOptions), options?.sessionId);
   const toolsNode = createApprovalToolsNode({
     tools,
     approvalDescriptions: profile.approvalDescriptions,
@@ -325,7 +353,7 @@ export function createWorkflowGraph(
     if (!userText.trim()) return fallback;
 
     try {
-      const response = await analystModel.invoke([
+      const response = await invokeModel(analystModel, [
         { role: "system", content: analyzePrompt },
         {
           role: "user",
@@ -333,7 +361,7 @@ export function createWorkflowGraph(
             `上一轮澄清（仅在相关时参考）：\n${state.clarificationHistory || "（无）"}\n\n` +
             `最近对话：\n${recentContext(state.messages) || "（无）"}\n\n当前请求：\n${userText}`,
         },
-      ], { signal: requestSignal(nodeConfig?.signal) });
+      ], nodeConfig?.signal, options?.sessionId);
       const analysis = parseRequirementAnalysis(contentText(response.content));
       const brief = (analysis.brief || userText).slice(0, MAX_BRIEF_TEXT);
       if (analysis.understood) {
@@ -407,7 +435,7 @@ export function createWorkflowGraph(
       taskLedger: config?.configurable?.task_ledger,
       budgetNote: config?.configurable?.task_budget_note,
     });
-    const response = await agentModel.invoke(context.messages, { signal: requestSignal(config?.signal) });
+    const response = await invokeModel(agentModel, context.messages, config?.signal, options?.sessionId);
     // 网关回显的 tools/output 与 dataURL 会原样进入 checkpoint；先投影再入状态。
     return { messages: [sanitizeCheckpointMessage(response)] };
   }
@@ -418,7 +446,7 @@ export function createWorkflowGraph(
     const answer = contentText(lastAi?.content).slice(0, MAX_USER_TEXT);
     const attempts = state.reviewAttempts;
     try {
-      const response = await reviewerModel.invoke([
+      const response = await invokeModel(reviewerModel, [
         { role: "system", content: reviewPrompt },
         {
           role: "user",
@@ -428,7 +456,7 @@ export function createWorkflowGraph(
             `最近工具结果：\n${recentToolResults(state.messages) || "（无）"}\n\n` +
             `助手最新回答：\n${answer || "（空回答）"}`,
         },
-      ], { signal: requestSignal(nodeConfig?.signal) });
+      ], nodeConfig?.signal, options?.sessionId);
       const review = parseReviewResult(contentText(response.content));
       if (review.passes || attempts >= MAX_REVIEW_REVISIONS) {
         return { reviewFeedback: "", reviewAttempts: attempts + 1 };

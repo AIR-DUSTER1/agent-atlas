@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { config } from "../config.js";
 import { createChatModel } from "../llm.js";
+import { clearModelRetryRecords, invokeWithModelRetry } from "../model-retry.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { log } from "./logging.js";
 import { buildGraph, currentConfigVersion, type Session, type TurnRecord } from "./sessions.js";
@@ -74,15 +75,23 @@ function contentToText(content: unknown): string {
 
 async function summarizeWithModel(transcript: string, sessionId: string): Promise<string> {
   const model = createChatModel(0, { sessionId });
-  const response = await model.invoke([
-    new SystemMessage(
-      "你是会话上下文压缩器。把用户与助手的对话压缩成一段中文摘要，供后续对话继续使用。" +
-      "必须保留：用户目标、已确认的事实与偏好、涉及的文件/路径、工具执行的关键结论、待办与未决问题。" +
-      "不要编造，不要输出寒暄或 Markdown 标题，直接输出摘要正文。"
-    ),
-    new HumanMessage(transcript),
-  ], { signal: AbortSignal.timeout(COMPACT_TIMEOUT_MS) });
-  return contentToText(response.content).trim();
+  try {
+    // 压缩也走同一重试策略；这里没有 SSE 消费者，结束后必须清空观测队列。
+    const response = await invokeWithModelRetry(
+      () => model.invoke([
+        new SystemMessage(
+          "你是会话上下文压缩器。把用户与助手的对话压缩成一段中文摘要，供后续对话继续使用。" +
+          "必须保留：用户目标、已确认的事实与偏好、涉及的文件/路径、工具执行的关键结论、待办与未决问题。" +
+          "不要编造，不要输出寒暄或 Markdown 标题，直接输出摘要正文。"
+        ),
+        new HumanMessage(transcript),
+      ], { signal: AbortSignal.timeout(COMPACT_TIMEOUT_MS) }),
+      { sessionId }
+    );
+    return contentToText(response.content).trim();
+  } finally {
+    clearModelRetryRecords(sessionId);
+  }
 }
 
 /** 无模型时退回本地摘录：保留最近用户诉求与助手结论，仍能显著缩小注入体积 */

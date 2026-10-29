@@ -16,7 +16,7 @@ import {
   getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord,
   recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
-import { getActiveId, getActiveModality } from "../settings.js";
+import { getActiveId, getActiveModality, getContextWindowForActive } from "../settings.js";
 import { lifecycle } from "../lifecycle.js";
 import { writeAudit } from "../audit.js";
 import { log } from "../logging.js";
@@ -24,6 +24,7 @@ import type { AgentEvent } from "../events.js";
 import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
 import { runWithModelSlot } from "../runtime/model-gate.js";
+import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
 import {
   beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
   renderTaskLedger, taskLimit, taskSnapshot,
@@ -32,17 +33,24 @@ import {
 function friendlyModelError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const status = Number(/(?:HTTP\s*)?\b(408|429|5\d{2})\b/i.exec(message)?.[1] ?? 0);
-  if (status === 408) return "模型供应商请求超时（408）。可稍后重试，系统不会自动重试以免消耗额外配额。";
-  if (status === 429) return "模型供应商触发限流（429）。请稍后重试或切换供应商；系统不会自动重试以免消耗额外配额。";
-  if (status >= 500) return `模型供应商暂时不可用（HTTP ${status}）。请稍后重试或切换供应商；本轮未自动重试。`;
+  if (status === 408) return `模型供应商请求超时（408）。自动重试后仍未成功：${message}`;
+  if (status === 429) return `模型供应商触发限流（429）。自动重试后仍未成功：${message}`;
+  if (status >= 500) return `模型供应商暂时不可用（HTTP ${status}）。自动重试后仍未成功：${message}`;
   if (/timeout|timed out|TimeoutError|请求超过/i.test(message)) {
-    return "模型请求超时，已停止本轮等待；系统不会自动重试以免消耗额外配额。";
+    return `模型请求超时。自动重试后仍未成功：${message}`;
   }
   if (/abort/i.test(message)) return "请求已取消。";
   return message;
 }
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+const MODEL_RETRY_POLL_MS = 250;
+
+/** 把模型重试队列转成 SSE 事件；先观察再发送，停滞看门狗能被重试活动唤醒。 */
+function drainRetryEvents(session: Session): AgentEvent[] {
+  return drainModelRetryRecords(session.id).map((record) => ({ type: "model_retry" as const, ...record }));
 }
 
 /** 自主审批自动放行也属于 hitl 决定：安全日志必须能追溯，不能只留在会话事件里。 */
@@ -110,14 +118,11 @@ async function streamToClient(
   const collected: AgentEvent[] = [];
   let sawInterrupt = false;
   let limitReason: string | undefined;
-  const budgetLimits = {
-    turnTimeoutMs: config.agentTurnTimeoutMs,
-    idleTimeoutMs: config.agentIdleTimeoutMs,
-    maxToolCalls: config.agentMaxToolCalls,
-    maxModelCalls: config.agentMaxModelCalls,
-  };
+  const budgetLimits = { idleTimeoutMs: config.agentIdleTimeoutMs };
+  // 清掉同会话上一条流的残留，避免旧重试状态回放到新请求。
+  clearModelRetryRecords(session.id);
   // 看门狗不能只靠「下一条事件」触发：模型/网关完全卡住时事件永远不会到。
-  // 每 2 秒检查活动时长、停滞与累计预算，命中后主动 abort graph 并给前端明确原因。
+  // 这里只检查停滞，不限制任务总时长、工具次数或模型调用次数。
   let notifyLimit: (() => void) | undefined;
   const limitSignal = new Promise<void>((resolve) => { notifyLimit = resolve; });
   const limitNow = (): string | undefined => {
@@ -146,10 +151,24 @@ async function streamToClient(
       const iterator = produce(controller.signal)[Symbol.asyncIterator]();
       let nextPromise = iterator.next();
       for (;;) {
+        let retryTimer: ReturnType<typeof setTimeout> | undefined;
+        const retrySignal = new Promise<"retry">((resolve) => {
+          retryTimer = setTimeout(() => resolve("retry"), MODEL_RETRY_POLL_MS);
+          retryTimer.unref();
+        });
         const outcome = await Promise.race([
           nextPromise.then((value) => ({ kind: "next" as const, value })),
+          retrySignal.then(() => ({ kind: "retry" as const })),
           limitSignal.then(() => ({ kind: "limit" as const })),
         ]);
+        if (retryTimer) clearTimeout(retryTimer);
+        // 模型退避等待时 graph 不会有下一条事件；重试队列由这里先行推给前端。
+        for (const retryEvent of drainRetryEvents(session)) {
+          observeTaskEvent(session, retryEvent);
+          collected.push(retryEvent);
+          if (!res.writableEnded) writeEvent(res, retryEvent);
+        }
+        if (outcome.kind === "retry") continue;
         if (outcome.kind === "limit") {
           // 生成器可能卡在底层 HTTP；先 abort，不阻塞 return（部分 SDK 的 return
           // 也要等连接关闭）。请求结束后由 finally 落 journal / 清理槽位。
@@ -164,9 +183,11 @@ async function streamToClient(
         observeTaskEvent(session, event);
         if (limitNow()) break;
         const snapshot = event.type === "usage" ? taskSnapshot(session) : null;
+        const contextWindow = event.type === "usage" ? getContextWindowForActive() : undefined;
         const publicEvent: AgentEvent = event.type === "usage" && snapshot
           ? {
               ...event,
+              ...(contextWindow ? { contextWindow } : {}),
               taskInputTokens: snapshot.inputTokens,
               taskOutputTokens: snapshot.outputTokens,
               taskToolCalls: snapshot.toolCalls,
@@ -189,6 +210,12 @@ async function streamToClient(
       }
     }
   } catch (err) {
+    // 最终失败的重试明细可能还没被 250ms 轮询取走；错误帧前必须先补齐。
+    for (const retryEvent of drainRetryEvents(session)) {
+      observeTaskEvent(session, retryEvent);
+      collected.push(retryEvent);
+      if (!res.writableEnded) writeEvent(res, retryEvent);
+    }
     if (!controller.signal.aborted) {
       incCounter("agent_model_errors_total", { model: getActiveModelLabel() || "mock", reason: "stream" });
       const message = friendlyModelError(err);
@@ -196,6 +223,7 @@ async function streamToClient(
       writeEvent(res, { type: "error", message });
     }
   } finally {
+    clearModelRetryRecords(session.id);
     clearInterval(heartbeat);
     clearInterval(watchdog);
     unregisterSse();
@@ -345,12 +373,7 @@ async function handleChatInner(
       turnId: session.turnHistory.at(-1)?.turnId,
       permissionMode: session.permissionMode,
       taskLedger: renderTaskLedger(session.activeTask),
-      budgetNote: renderTaskBudgetNote(session, {
-        turnTimeoutMs: config.agentTurnTimeoutMs,
-        idleTimeoutMs: config.agentIdleTimeoutMs,
-        maxToolCalls: config.agentMaxToolCalls,
-        maxModelCalls: config.agentMaxModelCalls,
-      }),
+      budgetNote: renderTaskBudgetNote(session),
     })
   , (events) => completeTurnRecord(session, events)));
 }
@@ -486,12 +509,7 @@ async function handleResumeInner(
         turnId: session.turnHistory.at(-1)?.turnId,
         permissionMode: session.permissionMode,
         taskLedger: renderTaskLedger(session.activeTask),
-        budgetNote: renderTaskBudgetNote(session, {
-          turnTimeoutMs: config.agentTurnTimeoutMs,
-          idleTimeoutMs: config.agentIdleTimeoutMs,
-          maxToolCalls: config.agentMaxToolCalls,
-          maxModelCalls: config.agentMaxModelCalls,
-        }),
+        budgetNote: renderTaskBudgetNote(session),
       }
     ),
     (events) => {

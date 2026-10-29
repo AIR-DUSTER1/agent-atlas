@@ -16,7 +16,7 @@ import { updateContextBar } from "../views/composer-bar.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
 import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
-  updateThinkingPart, updateToolCard,
+  updateThinkingPart, updateToolCard, upsertModelRetry,
 } from "../render/parts.js";
 import { TOOL_ICONS } from "../modules/format.js";
 import type {
@@ -176,6 +176,7 @@ export function applyUsage(
     u.taskOutput = (u.taskOutput ?? 0) + Math.max(0, taskNext.output - alreadyCounted.output);
   }
   u.lastActivityAt = Date.now();
+  if (typeof ev.contextWindow === "number") u.contextWindow = ev.contextWindow;
   saveLocal();
   if (ev.internal) return;
   const context = ev.inputTokens + ev.outputTokens;
@@ -211,6 +212,7 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
   switch (ev.type) {
     case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text, visible); break;
     case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev, visible); break;
+    case "model_retry": upsertModelRetry(ablock, ev, visible); break;
     case "tool_call": upsertToolCall(ablock, ev, visible); break;
     case "tool_result": sealStreamingParts(ablock); fillToolResult(ablock, ev, sid, visible); break;
     case "node": addNodeChip(ablock, ev.name, visible); break;

@@ -24,8 +24,8 @@ import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
 import { enhanceCodeBlocks } from "./code-enhance.js";
 import type {
-  AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
-  NodePart, TextPart, ThinkingPart, ToolPart,
+  AgentEvent, AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
+  ModelRetryPart, NodePart, TextPart, ThinkingPart, ToolPart,
 } from "../modules/types.js";
 
 /** 「超过两个」才收进 tools；1–2 个保持平铺 */
@@ -75,6 +75,56 @@ export function appendReasoning(ablock: AssistantBlock, ev: { text?: string; nod
   }
   last.text += text;
   scheduleThinkingRender(last);
+  if (visible) scrollBottom();
+}
+
+/* ---------------------------------------------------------------------------
+ * 模型请求重试
+ * ------------------------------------------------------------------------- */
+function modelRetrySummary(part: ModelRetryPart): string {
+  const latest = part.records.at(-1);
+  if (!latest) return "模型请求重试";
+  const maxRetries = Math.max(0, latest.totalAttempts - 1);
+  if (latest.phase === "success") {
+    return `模型重试 ${latest.retries}/${maxRetries} · 第 ${latest.attempt} 次请求成功`;
+  }
+  if (latest.phase === "failed") {
+    return `模型重试 ${latest.retries}/${maxRetries} · ${latest.totalAttempts} 次请求后失败`;
+  }
+  return `模型重试 ${latest.retries}/${maxRetries} · 下次为第 ${latest.attempt + 1}/${latest.totalAttempts} 次请求`;
+}
+
+export function updateModelRetryPart(part: ModelRetryPart): void {
+  const refs = partEls.get(part);
+  if (!refs) return;
+  const title = refs.el.querySelector<HTMLElement>(".model-retry-title");
+  if (title) title.textContent = modelRetrySummary(part);
+  if (refs.textEl) {
+    refs.textEl.replaceChildren(...part.records.map((record) => {
+      const item = document.createElement("div");
+      item.className = "model-retry-item";
+      const state = record.phase === "success"
+        ? "成功"
+        : record.phase === "failed" ? "最终失败" : "将重试";
+      item.textContent = `第 ${record.attempt}/${record.totalAttempts} 次 · ${state} · ${record.reason}`;
+      return item;
+    }));
+  }
+}
+
+export function upsertModelRetry(
+  ablock: AssistantBlock,
+  ev: Extract<AgentEvent, { type: "model_retry" }>,
+  visible = true
+): void {
+  let part = [...ablock.parts].reverse().find((item): item is ModelRetryPart => item.p === "model_retry");
+  if (!part) {
+    part = { p: "model_retry", records: [] };
+    ablock.parts.push(part);
+    mountPart(ablock, part);
+  }
+  part.records.push({ ...ev });
+  updateModelRetryPart(part);
   if (visible) scrollBottom();
 }
 
@@ -385,6 +435,26 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     });
     details.addEventListener("toggle", () => updateThinkingPart(part));
     updateThinkingPart(part);
+    return;
+  }
+
+  if (part.p === "model_retry") {
+    const details = document.createElement("details");
+    details.className = "model-retry-block";
+    details.append(
+      h("summary", { class: "model-retry-summary" },
+        h("span", { class: "model-retry-icon" }, icon("RefreshCw", { size: 13 })),
+        h("span", { class: "model-retry-title" }, "模型请求重试"),
+        h("span", { class: "model-retry-chevron" }, icon("ChevronRight", { size: 11 })),
+      ),
+      h("div", { class: "model-retry-body" }),
+    );
+    body.appendChild(details);
+    partEls.set(part, {
+      el: details,
+      textEl: details.querySelector<HTMLElement>(".model-retry-body") ?? undefined,
+    });
+    updateModelRetryPart(part);
     return;
   }
 

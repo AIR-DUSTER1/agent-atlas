@@ -8,6 +8,7 @@
  * 最终复用人审批 interrupt，而不是 silently 放行。
  */
 import type { BaseMessage } from "@langchain/core/messages";
+import { invokeWithModelRetry } from "../model-retry.js";
 
 const TOOL_RISK_TIMEOUT_MS = 15_000; // 审查调用超时；超时按高风险处理
 const MAX_ARGS_CHARS = 6_000;        // 工具参数进入审查提示词的上限
@@ -160,7 +161,10 @@ export function deterministicReadOnlyRisk(toolName: string, args: Record<string,
   return { highRisk: false, reason: "确定性预判为只读命令，无需调用风险模型" };
 }
 
-export function createToolRiskAssessor(model: ToolRiskJudgeModel): ToolRiskAssessor {
+export function createToolRiskAssessor(
+  model: ToolRiskJudgeModel,
+  sessionId?: string
+): ToolRiskAssessor {
   return async (context) => {
     const deterministic = deterministicReadOnlyRisk(context.toolName, context.args);
     // 确定性预判不产生模型成本；不要伪造 usage，否则会虚增模型调用计数与任务预算。
@@ -178,13 +182,17 @@ export function createToolRiskAssessor(model: ToolRiskJudgeModel): ToolRiskAsses
     ].join("\n\n");
 
     try {
-      const rawResponse = await model.invoke(
+      const request = () => model.invoke(
         [
           { role: "system", content: RISK_SYSTEM_PROMPT },
           { role: "user", content: userPrompt },
         ],
         { signal: AbortSignal.timeout(TOOL_RISK_TIMEOUT_MS) }
       );
+      // sessionId 只在生产默认审查器上传；测试注入的假模型保持一次性失败语义。
+      const rawResponse = sessionId
+        ? await invokeWithModelRetry(request, { sessionId })
+        : await request();
       const response = (rawResponse && typeof rawResponse === "object" ? rawResponse : {}) as {
         content?: BaseMessage["content"];
         usage_metadata?: Parameters<typeof extractRiskUsage>[0]["usage_metadata"];

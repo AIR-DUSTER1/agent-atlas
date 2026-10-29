@@ -13,6 +13,7 @@
  * 每种事件对应 ZCode 聊天界面里的一块 UI：
  *   node        → 节点执行步骤小徽章（agent / tools / researcher/agent …）
  *   reasoning   → 供应商原生思考过程（前端默认折叠）
+ *   model_retry → 模型请求自动重试进度（前端默认折叠）
  *   token       → 助手正文流式文本（打字机效果）
  *   tool_call   → 工具调用卡片（参数随流式增量到达，边收边渲染）
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
@@ -56,6 +57,16 @@ export type AgentEvent =
    * 与 token 分开是为了让前端默认折叠；没有原生思考字段时不会伪造。
    */
   | { type: "reasoning"; text: string; node?: string }
+  /** 模型请求失败后的自动重试进度；前端默认折叠成一张可展开卡。 */
+  | {
+      type: "model_retry";
+      attempt: number;
+      retries: number;
+      totalAttempts: number;
+      phase: "retry" | "success" | "failed";
+      reason: string;
+      at: number;
+    }
   /** 助手文本的流式增量片段 */
   | { type: "token"; text: string; node?: string }
   /**
@@ -89,6 +100,8 @@ export type AgentEvent =
       node?: string;
       /** 内部辅助模型调用：会计入统计成本，但不得覆盖上下文容量条 */
       internal?: boolean;
+      /** 本次模型请求所属上下文窗口容量；前端按会话保存，供应商切换不回写旧会话。 */
+      contextWindow?: number;
       /** 服务端权威的任务累计快照（跨审批 continuation 不重置）。 */
       taskInputTokens?: number;
       taskOutputTokens?: number;

@@ -14,27 +14,19 @@
 import "dotenv/config";
 import { DEFAULT_REASONING, type ReasoningSetting } from "./reasoning.js";
 
-/**
- * LangGraph 的应急超步上限，不是业务层的工具调用次数。
- * 每次工具调用通常消耗「agent → tools → agent」约两个超步；默认值足以覆盖长任务，
- * 同时保留故障保护，避免模型或图路由异常时无限消耗资源。
- */
-const DEFAULT_AGENT_RECURSION_LIMIT = 120;
-const MIN_AGENT_RECURSION_LIMIT = 40;
-const MAX_AGENT_RECURSION_LIMIT = 1_000;
-const DEFAULT_AGENT_TURN_TIMEOUT_MS = 10 * 60_000;
+/** 长任务不再设置业务层执行时长 / 工具 / 模型调用上限；只保留单请求停滞保护。 */
 const DEFAULT_AGENT_IDLE_TIMEOUT_MS = 120_000;
-const DEFAULT_AGENT_MAX_TOOL_CALLS = 30;
-const DEFAULT_AGENT_MAX_MODEL_CALLS = 60;
 const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 90_000;
+const DEFAULT_MODEL_REQUEST_RETRIES = 10;
 
 function resolvePositiveInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
 }
 
-function resolveAgentRecursionLimit(raw: string | undefined): number {
-  return resolvePositiveInt(raw, DEFAULT_AGENT_RECURSION_LIMIT, MIN_AGENT_RECURSION_LIMIT, MAX_AGENT_RECURSION_LIMIT);
+function resolveNonNegativeInt(raw: string | undefined, fallback: number, max: number): number {
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 && value <= max ? value : fallback;
 }
 
 export const config = {
@@ -67,30 +59,21 @@ export const config = {
    */
   reasoning: { ...DEFAULT_REASONING } as ReasoningSetting,
 
-  /** 长任务图的应急超步上限；可通过 AGENT_RECURSION_LIMIT 显式调整（40~1000）。 */
-  agentRecursionLimit: resolveAgentRecursionLimit(process.env.AGENT_RECURSION_LIMIT),
-  /** 一个逻辑任务中实际执行时间的上限（等待人工审批的时间不计入）。 */
-  agentTurnTimeoutMs: resolvePositiveInt(process.env.AGENT_TURN_TIMEOUT_MS, DEFAULT_AGENT_TURN_TIMEOUT_MS, 30_000, 30 * 60_000),
-  /** SSE 连续多久没有模型/工具事件就判定停滞。 */
+  /** SSE 连续多久没有模型/工具/重试事件就判定连接停滞。 */
   agentIdleTimeoutMs: resolvePositiveInt(process.env.AGENT_IDLE_TIMEOUT_MS, DEFAULT_AGENT_IDLE_TIMEOUT_MS, 15_000, 10 * 60_000),
-  /** 一个逻辑任务允许的实际工具调用数（同 id 的流式分片只算一次）。 */
-  agentMaxToolCalls: resolvePositiveInt(process.env.AGENT_MAX_TOOL_CALLS, DEFAULT_AGENT_MAX_TOOL_CALLS, 1, 200),
-  /** 一个逻辑任务允许的主模型 + 内部模型调用数。 */
-  agentMaxModelCalls: resolvePositiveInt(process.env.AGENT_MAX_MODEL_CALLS, DEFAULT_AGENT_MAX_MODEL_CALLS, 1, 500),
   /** 单次模型 HTTP 请求的超时；流式请求也从连接建立开始计时。 */
   modelRequestTimeoutMs: resolvePositiveInt(process.env.MODEL_REQUEST_TIMEOUT_MS, DEFAULT_MODEL_REQUEST_TIMEOUT_MS, 10_000, 10 * 60_000),
+  /** 单次模型调用失败后的自动重试次数；0 表示不重试。 */
+  modelRequestRetries: resolveNonNegativeInt(process.env.MODEL_REQUEST_RETRIES, DEFAULT_MODEL_REQUEST_RETRIES, 20),
 } as {
   baseURL: string;
   apiKey: string;
   model: string;
   protocol: Protocol;
   reasoning: ReasoningSetting;
-  agentRecursionLimit: number;
-  agentTurnTimeoutMs: number;
   agentIdleTimeoutMs: number;
-  agentMaxToolCalls: number;
-  agentMaxModelCalls: number;
   modelRequestTimeoutMs: number;
+  modelRequestRetries: number;
 };
 
 export type Protocol = "openai" | "openai-responses" | "anthropic" | "gemini";

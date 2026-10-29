@@ -96,6 +96,7 @@ test("会话创建 → chat SSE → transcript 回放", async () => {
   const lastUsage = stream.events.filter((e) => e.type === "usage").at(-1);
   assert.equal(typeof lastUsage?.taskInputTokens, "number", "usage 应带服务端任务累计快照");
   assert.equal(typeof lastUsage?.taskModelCalls, "number");
+  assert.equal(lastUsage?.contextWindow, 200_000, "usage 应携带当前模型请求的上下文窗口容量");
   assert.equal(stream.events.at(-1).type, "done");
 
   const tr = await json(`/api/sessions/${id}/transcript`);

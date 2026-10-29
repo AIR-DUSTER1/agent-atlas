@@ -2,7 +2,7 @@
  * task-budget.ts — 逻辑任务的跨审批预算与工作台账
  * ============================================================
  * 职责：把一个「用户目标 + 多次审批/澄清/继续」视为同一个逻辑任务，维护
- * 工具/模型调用预算、活动时长、已读文件与关键结果；只驻留内存，不写 checkpoint。
+ * 工具/模型调用台账、活动时长、已读文件与关键结果；只驻留内存，不写 checkpoint。
  * 设计立场：预算按执行片段累计（等待人审批的时间不算），台账在每次模型调用前
  * 由 graph 通过 configurable 读取最新版本，避免审批后的下一次 ReAct 丢失探索记忆。
  */
@@ -37,10 +37,6 @@ export interface TaskRunState {
   inputTokens: number;
   outputTokens: number;
   interrupted: boolean;
-  /** 用户显式「继续」后开启新的预算窗口；累计成本仍保留。 */
-  budgetBaseActiveMs: number;
-  budgetBaseToolCalls: number;
-  budgetBaseModelCalls: number;
   limited: boolean;
 }
 
@@ -52,7 +48,7 @@ export interface TaskBudgetSnapshot {
   outputTokens: number;
 }
 
-export type TaskLimitReason = "timeout" | "idle" | "tools" | "models";
+export type TaskLimitReason = "idle";
 
 export interface TaskLimit {
   reason: TaskLimitReason;
@@ -86,9 +82,6 @@ function ensureTask(session: Session, preserve: boolean, user: string): TaskRunS
       inputTokens: 0,
       outputTokens: 0,
       interrupted: false,
-      budgetBaseActiveMs: 0,
-      budgetBaseToolCalls: 0,
-      budgetBaseModelCalls: 0,
       limited: false,
     };
     session.taskLedger = "";
@@ -125,9 +118,6 @@ function rebuildTaskFromHistory(session: Session): void {
     inputTokens: 0,
     outputTokens: 0,
     interrupted: false,
-    budgetBaseActiveMs: 0,
-    budgetBaseToolCalls: 0,
-    budgetBaseModelCalls: 0,
     limited: false,
   };
   session.activeTask = task;
@@ -137,12 +127,9 @@ function rebuildTaskFromHistory(session: Session): void {
     task.segmentIndex += 1;
     for (const event of record.events) observeTaskEvent(session, event);
   }
-  // 恢复只用于保留台账；预算窗口从下一次用户动作重新开始。
+  // 恢复只用于保留台账；长任务没有执行 / 调用次数预算，等待时间也不计活动时长。
   task.activeMs = 0;
   task.segmentStartedAt = undefined;
-  task.budgetBaseToolCalls = task.toolCallCount;
-  task.budgetBaseModelCalls = task.modelCallIds.size;
-  task.budgetBaseActiveMs = 0;
   task.interrupted = records.slice(start).some((record) => record.events.some((event) => event.type === "interrupt"));
   session.taskLedger = renderTaskLedger(task);
 }
@@ -150,16 +137,8 @@ function rebuildTaskFromHistory(session: Session): void {
 /** 开始一个执行片段；continuation=true 时继承同一任务。 */
 export function beginTaskSegment(session: Session, continuation: boolean, user = ""): TaskRunState {
   if (!session.activeTask && CONTINUE_INTENT.test(user.trim())) rebuildTaskFromHistory(session);
-  const explicitContinue = !continuation && CONTINUE_INTENT.test(user.trim());
-  const preserve = continuation || explicitContinue;
+  const preserve = continuation || (!continuation && CONTINUE_INTENT.test(user.trim()));
   const task = ensureTask(session, preserve, user || session.taskLedger || "继续当前任务");
-  if (explicitContinue) {
-    // 用户主动「继续」= 新预算窗口，但保留台账和已读工具；累计 token/工具不清零。
-    task.budgetBaseActiveMs = task.activeMs;
-    task.budgetBaseToolCalls = task.toolCallCount;
-    task.budgetBaseModelCalls = task.modelCallIds.size;
-    task.limited = false;
-  }
   if (task.segmentStartedAt === undefined) task.segmentStartedAt = Date.now();
   task.segmentIndex += 1;
   task.lastActivityAt = Date.now();
@@ -183,10 +162,7 @@ export function endTaskSegment(session: Session): void {
 }
 
 export interface TaskBudgetLimits {
-  turnTimeoutMs: number;
   idleTimeoutMs: number;
-  maxToolCalls: number;
-  maxModelCalls: number;
 }
 
 export function taskSnapshot(session: Session): TaskBudgetSnapshot | null {
@@ -248,42 +224,25 @@ export function observeTaskEvent(session: Session, event: AgentEvent): void {
   session.taskLedger = renderTaskLedger(task);
 }
 
-/** 返回本轮是否已越过预算；调用方负责 abort 与产出 turn_limit。 */
-export function renderTaskBudgetNote(session: Session, limits: TaskBudgetLimits): string {
+/** 给模型的执行事实注记：只提醒效率，不施加调用次数 / 总时长限制。 */
+export function renderTaskBudgetNote(session: Session): string {
   const task = session.activeTask;
   const snapshot = taskSnapshot(session);
   if (!task || !snapshot) return "";
-  const windowActiveMs = Math.max(0, snapshot.activeMs - task.budgetBaseActiveMs);
-  const windowToolCalls = Math.max(0, snapshot.toolCalls - task.budgetBaseToolCalls);
-  const windowModelCalls = Math.max(0, snapshot.modelCalls - task.budgetBaseModelCalls);
-  return `本预算窗口已用工具 ${windowToolCalls}/${limits.maxToolCalls} 次、模型 ${windowModelCalls}/${limits.maxModelCalls} 次、活动 ${Math.round(windowActiveMs / 1000)} 秒。信息足够时请直接完成，不要重复探索。`;
+  return `本逻辑任务已累计工具 ${snapshot.toolCalls} 次、模型 ${snapshot.modelCalls} 次、活动 ${Math.round(snapshot.activeMs / 1000)} 秒。系统不限制执行时长和调用次数；请基于台账推进目标，避免重复读取相同内容。`;
 }
 
+/** 唯一保护是停滞超时：模型连接完全无事件时释放 SSE，防止界面永久挂起。 */
 export function taskLimit(session: Session, limits: TaskBudgetLimits): TaskLimit | null {
   const task = session.activeTask;
   if (!task) return null;
-  const snapshot = taskSnapshot(session);
-  if (!snapshot) return null;
-  const windowActiveMs = Math.max(0, snapshot.activeMs - task.budgetBaseActiveMs);
-  const windowToolCalls = Math.max(0, snapshot.toolCalls - task.budgetBaseToolCalls);
-  const windowModelCalls = Math.max(0, snapshot.modelCalls - task.budgetBaseModelCalls);
-  if (windowActiveMs > limits.turnTimeoutMs) {
-    return { reason: "timeout", used: windowActiveMs, limit: limits.turnTimeoutMs,
-      message: `任务执行已超过 ${Math.round(limits.turnTimeoutMs / 60_000)} 分钟，已停止以免继续消耗配额。` };
-  }
-  if (Date.now() - task.lastActivityAt > limits.idleTimeoutMs) {
-    return { reason: "idle", used: Date.now() - task.lastActivityAt, limit: limits.idleTimeoutMs,
-      message: `已连续 ${Math.round(limits.idleTimeoutMs / 1_000)} 秒没有收到模型或工具事件，已停止等待；可稍后重试或换模型。` };
-  }
-  if (windowToolCalls > limits.maxToolCalls) {
-    return { reason: "tools", used: windowToolCalls, limit: limits.maxToolCalls,
-      message: `本任务工具调用已达到 ${limits.maxToolCalls} 次上限，已停止继续探索。请缩小任务范围或直接说明下一步。` };
-  }
-  if (windowModelCalls > limits.maxModelCalls) {
-    return { reason: "models", used: windowModelCalls, limit: limits.maxModelCalls,
-      message: `本任务模型调用已达到 ${limits.maxModelCalls} 次上限，已停止以免继续消耗配额。` };
-  }
-  return null;
+  if (Date.now() - task.lastActivityAt <= limits.idleTimeoutMs) return null;
+  return {
+    reason: "idle",
+    used: Date.now() - task.lastActivityAt,
+    limit: limits.idleTimeoutMs,
+    message: `已连续 ${Math.round(limits.idleTimeoutMs / 1_000)} 秒没有收到模型、工具或重试事件，已停止等待；请检查供应商后重试。`,
+  };
 }
 
 /** 生成给模型的工作台账；不包含原始工具输出，只保留可复用事实。 */

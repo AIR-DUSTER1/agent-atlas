@@ -202,41 +202,34 @@ export function renderThinkingMenu(menu: HTMLElement): void {
 /**
  * 上下文容量条 + 缓存占比。
  * 数据来源：模型响应里的 usage（input ≈ 当时整段对话的上下文，
- * input_token_details.cache_read ≈ 提示词缓存命中）；分母来自网关 /models
- * 返回的 context_length（未知时不显示占比，只显示 token 数）。
+ * input_token_details.cache_read ≈ 提示词缓存命中）；分母来自产生该用量时
+ * 服务端写入的模型 context_length，并按会话落盘（未知时只显示 token 数）。
  */
 export function updateContextBar(): void {
   const bar = $("context-bar");
   const u = state.currentId ? state.usage[state.currentId] : undefined;
   if (!bar) return;
-  if (!u || !u.contextTokens) { bar.classList.add("hidden"); return; }
+  if (!u || !u.contextTokens) {
+    bar.classList.add("hidden");
+    return;
+  }
   bar.classList.remove("hidden");
 
-  const win = state.config?.contextWindow || null;
+  // 分母优先取 usage 落盘时的模型容量：切换供应商后不能把旧会话的容量条改写掉。
+  const win = u.contextWindow ?? state.config?.contextWindow ?? null;
   const fill = $("ctx-fill");
   const text = $("ctx-text");
   if (!fill || !text) return;
+  const requestText = `请求 ↑ ${fmtTokens(u.lastInput)} · ↓ ${fmtTokens(u.lastOutput)}`;
   if (win) {
     const pct = Math.min(100, (u.contextTokens / win) * 100);
     fill.style.width = Math.max(1.5, pct) + "%";
     fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    const cumulative = (u.taskInput ?? 0) + (u.taskOutput ?? 0);
-    const compact = [
-      `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}%）`,
-      cumulative > 0 ? `任务累计 ${fmtTokens(cumulative)} tokens` : "",
-      (u.taskTools ?? 0) > 0 ? `工具 ${u.taskTools} 次` : "",
-      (u.taskModels ?? 0) > 0 ? `模型 ${u.taskModels} 次` : "",
-      (u.taskActiveMs ?? 0) > 0 ? `活动 ${Math.max(1, Math.round((u.taskActiveMs ?? 0) / 1000))} 秒` : "",
-      u.lastActivityAt && Date.now() - u.lastActivityAt > 60_000 && state.streams[state.currentId ?? ""]
-        ? `等待响应 ${Math.floor((Date.now() - u.lastActivityAt) / 60_000)} 分钟`
-        : "",
-    ].filter(Boolean).join(" · ");
-    text.textContent = compact;
+    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}%） · ${requestText}`;
   } else {
     fill.style.width = "0%";
     fill.className = "ctx-fill";
-    const cumulative = (u.taskInput ?? 0) + (u.taskOutput ?? 0);
-    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} tokens${cumulative > 0 ? ` · 任务累计 ${fmtTokens(cumulative)} tokens` : ""}${(u.taskTools ?? 0) > 0 ? ` · 工具 ${u.taskTools} 次` : ""}${(u.taskModels ?? 0) > 0 ? ` · 模型 ${u.taskModels} 次` : ""}${(u.taskActiveMs ?? 0) > 0 ? ` · 活动 ${Math.max(1, Math.round((u.taskActiveMs ?? 0) / 1000))} 秒` : ""} · 容量未知（设置里「获取列表」后显示占比）`;
+    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} tokens · ${requestText} · 容量未知（设置里「获取列表」后显示占比）`;
   }
 
   const cacheEl = $("ctx-cache");
@@ -248,5 +241,3 @@ export function updateContextBar(): void {
     cacheEl.classList.add("hidden");
   }
 }
-
-

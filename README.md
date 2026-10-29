@@ -51,7 +51,8 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 
 | 模块 | 当前状态 |
 |---|---|
-| 通用 Agent | 需求理解、澄清、ReAct 工具循环、结果反思；逻辑任务跨审批/澄清/继续累计预算与工作台账 |
+| 通用 Agent | 需求理解、澄清、ReAct 工具循环、结果反思；逻辑任务跨审批/澄清/继续累计工作台账，不限制任务时长与工具/模型调用次数 |
+| 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因 |
 | 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
 | 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议 |
 | 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
@@ -62,7 +63,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、使用统计 |
 | 桌面端 | 本机便利壳，不是正式桌面发行版 |
 
-这些能力仍有未完成项，尤其是真实供应商兼容、复杂会话恢复、房产 Agent 数据链路和桌面端发行流程。
+这些能力仍有未完成项，尤其是真实供应商兼容、复杂会话恢复、房产 Agent 数据链路和桌面端发行流程。输入框上方的上下文容量条按“当前会话最近一次模型请求的实际用量 / 该请求模型的窗口容量”显示，切换供应商不会改写旧会话的历史容量。
 
 ## Agent 隔离
 
@@ -130,10 +131,9 @@ docs/          用户文档与运维参考
 | `SESSION_SECRET` | 生产模式所需的会话签名密钥 |
 | `DATA_KEY` | 生产模式所需的配置加密主密钥 |
 | `METRICS_TOKEN` | 仅用于 `/metrics` 的只读抓取令牌 |
-| `AGENT_RECURSION_LIMIT` | 长任务图的应急超步上限，默认 `120`，不是工具调用次数 |
-| `AGENT_TURN_TIMEOUT_MS` / `AGENT_IDLE_TIMEOUT_MS` | 单任务活动时长与停滞超时，默认 10 分钟 / 120 秒 |
-| `AGENT_MAX_TOOL_CALLS` / `AGENT_MAX_MODEL_CALLS` | 单任务工具/模型调用预算，默认 30 / 60 |
+| `AGENT_IDLE_TIMEOUT_MS` | SSE 停滞超时，默认 120 秒；不是任务总时长上限 |
 | `MODEL_REQUEST_TIMEOUT_MS` | 单次模型 HTTP 请求超时，默认 90 秒 |
+| `MODEL_REQUEST_RETRIES` | 可重试模型错误（408/429/5xx/超时/网络）自动重试次数，默认 10 |
 
 `.env`、`.web-config.json`、`.setting/` 和 `data/` 已加入 gitignore，不要提交。
 

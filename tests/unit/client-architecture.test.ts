@@ -132,6 +132,18 @@ test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
   for (const wrapper of VENDOR_WRAPPER_FILES) assert.ok(!outputs.includes(wrapper));
 });
 
+test("模型重试默认折叠且上下文窗口按会话保存", async () => {
+  const parts = await readFile(join(CLIENT, "render", "parts.ts"), "utf8");
+  assert.match(parts, /p: "model_retry"/);
+  assert.match(parts, /document\.createElement\("details"\)/);
+  assert.doesNotMatch(parts, /modelRetry[^\n]*\.open\s*=\s*true/);
+  const events = await readFile(join(CLIENT, "stream", "events.ts"), "utf8");
+  assert.match(events, /case "model_retry": upsertModelRetry/);
+  assert.match(events, /u\.contextWindow = ev\.contextWindow/);
+  const composer = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
+  assert.match(composer, /u\.contextWindow \?\? state\.config\?\.contextWindow/);
+});
+
 test("客户端错误上报只发送摘要、版本与视图，不发送 stack/密钥/对话", async () => {
   const source = await readFile(join(CLIENT, "observability", "client-errors.ts"), "utf8");
   assert.doesNotMatch(source, /\.stack\b|Authorization|AUTH_TOKEN|localStorage|prompt/i);

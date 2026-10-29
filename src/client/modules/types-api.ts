@@ -42,6 +42,15 @@ export type InterruptPayload = ApprovalPayload | ClarificationPayload;
 export type AgentEvent =
   | { type: "node"; name: string }
   | { type: "reasoning"; text: string; node?: string }
+  | {
+      type: "model_retry";
+      attempt: number;
+      retries: number;
+      totalAttempts: number;
+      phase: "retry" | "success" | "failed";
+      reason: string;
+      at: number;
+    }
   | { type: "token"; text: string; node?: string }
   | { type: "tool_call"; id: string; name?: string; argsFragment: string }
   | { type: "tool_result"; id: string; content: string; isError?: boolean }
@@ -56,6 +65,7 @@ export type AgentEvent =
       callId?: string;
       node?: string;
       internal?: boolean;
+      contextWindow?: number;
       taskInputTokens?: number;
       taskOutputTokens?: number;
       taskToolCalls?: number;

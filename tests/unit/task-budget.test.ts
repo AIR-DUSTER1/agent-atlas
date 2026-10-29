@@ -1,8 +1,8 @@
 /**
  * task-budget.test.ts — 逻辑任务跨审批预算/台账
  * ============================================================
- * 守：审批/澄清/继续继承同一任务；等待时间不计入活动时长；预算按去重后的
- * 工具/模型调用计算；台账只保留可复用事实，不无限保存原始输出。
+ * 守：审批/澄清/继续继承同一任务；等待时间不计入活动时长；工具/模型按
+ * id 去重统计；长任务没有执行时长与调用次数上限，停滞保护仍要能释放 SSE。
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -22,7 +22,7 @@ function session(): Session {
   };
 }
 
-const limits = { turnTimeoutMs: 10_000, idleTimeoutMs: 5_000, maxToolCalls: 2, maxModelCalls: 2 };
+const limits = { idleTimeoutMs: 5_000 };
 
 test("继续继承任务，工具/模型按 id 去重并写入台账", () => {
   const s = session();
@@ -41,33 +41,33 @@ test("继续继承任务，工具/模型按 id 去重并写入台账", () => {
   assert.match(s.taskLedger, /a\.ts/);
 });
 
-test("预算超限给出明确原因（工具/模型/停滞）", () => {
+test("长任务不因工具/模型次数触发上限，停滞仍会释放", () => {
   const s = session();
   beginTaskSegment(s, false, "任务");
-  observeTaskEvent(s, { type: "tool_call", id: "t1", name: "a", argsFragment: "{}" });
-  observeTaskEvent(s, { type: "tool_call", id: "t2", name: "b", argsFragment: "{}" });
-  observeTaskEvent(s, { type: "tool_call", id: "t3", name: "c", argsFragment: "{}" });
-  assert.equal(taskLimit(s, limits)?.reason, "tools");
+  for (let i = 0; i < 30; i += 1) {
+    observeTaskEvent(s, { type: "tool_call", id: `tool-${i}`, name: "a", argsFragment: "{}" });
+    observeTaskEvent(s, {
+      type: "usage", inputTokens: 10, outputTokens: 1, totalTokens: 11,
+      cacheReadTokens: 0, callId: `model-${i}`,
+    });
+  }
+  assert.equal(taskLimit(s, limits), null, "工具/模型调用次数不是业务上限");
 
-  s.activeTask!.toolCalls.clear();
-  s.activeTask!.toolCallCount = 0;
   s.activeTask!.lastActivityAt = Date.now() - 6_000;
   assert.equal(taskLimit(s, limits)?.reason, "idle");
 });
 
-test("用户显式继续会开启新预算窗口，但保留台账和累计成本", () => {
+test("用户显式继续保留台账和累计成本", () => {
   const s = session();
   beginTaskSegment(s, false, "原始任务");
   for (let i = 0; i < 3; i += 1) {
     observeTaskEvent(s, { type: "tool_call", id: `t-${i}`, name: "read_file", argsFragment: "{}" });
   }
-  s.activeTask!.limited = true;
-  s.activeTask!.budgetBaseToolCalls = 0;
   endTaskSegment(s);
   const before = taskSnapshot(s)!.toolCalls;
   beginTaskSegment(s, false, "继续");
   assert.equal(taskSnapshot(s)!.toolCalls, before, "累计工具数不能清零");
-  assert.equal(taskLimit(s, limits), null, "新窗口不继承旧窗口已用满的工具预算");
+  assert.equal(taskLimit(s, limits), null);
   assert.match(s.taskLedger, /read_file/);
 });
 
@@ -82,7 +82,7 @@ test("结束片段后等待审批的时间不计入活动时长", async () => {
 });
 
 
-test("重启后首次「继续」从 journal 恢复最近任务台账，但预算窗口重新开始", () => {
+test("重启后首次「继续」从 journal 恢复最近任务台账", () => {
   const s = session();
   s.turnHistory = [{
     turnId: "turn-old",
@@ -100,7 +100,7 @@ test("重启后首次「继续」从 journal 恢复最近任务台账，但预�
   assert.match(s.taskLedger, /sessions\.ts/);
   assert.equal(taskSnapshot(s)?.toolCalls, 1);
   assert.equal(taskSnapshot(s)?.modelCalls, 1);
-  assert.equal(taskLimit(s, limits), null, "旧任务计入台账但不耗尽新预算窗口");
+  assert.equal(taskLimit(s, limits), null, "恢复台账不触发执行上限");
 });
 
 test("usage 流式累计快照按峰值计算，不把分片重复相加", () => {

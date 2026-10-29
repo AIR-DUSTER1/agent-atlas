@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { createWorkflowGraph, type WorkflowModels } from "./workflow.js";
+import { clearModelRetryRecords } from "../model-retry.js";
 import type { AgentProfile } from "./profile.js";
 
 /** 子 Agent 整体超时：子图含多轮模型调用与工具执行，给足但不无限等 */
@@ -127,54 +128,59 @@ export async function runSubagent(
 
   let finalState: unknown;
   try {
-    // 任务书作为子图的唯一用户消息：analyze 据此判断需求，agent 据此执行
-    finalState = await graph.invoke(
-      { messages: [new HumanMessage(trimmedTask)] },
-      {
-        configurable: { thread_id: threadId, permission_mode: "readonly" },
-        signal: AbortSignal.timeout(SUBAGENT_TIMEOUT_MS),
-      }
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const timedOut = /timeout|timed out|aborted?/i.test(message);
-    return {
-      ok: false,
-      text: timedOut
-        ? `子 Agent 执行超时（${Math.round(SUBAGENT_TIMEOUT_MS / 1000)}s），已终止。建议把任务拆小后重试，或由你直接完成。`
-        : `子 Agent 执行失败：${message.slice(0, 200)}。请把原因转述给用户，不要盲目重试。`,
-      durationMs: Date.now() - startedAt,
-    };
-  }
+    try {
+      // 任务书作为子图的唯一用户消息：analyze 据此判断需求，agent 据此执行
+      finalState = await graph.invoke(
+        { messages: [new HumanMessage(trimmedTask)] },
+        {
+          configurable: { thread_id: threadId, permission_mode: "readonly" },
+          signal: AbortSignal.timeout(SUBAGENT_TIMEOUT_MS),
+        }
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const timedOut = /timeout|timed out|aborted?/i.test(message);
+      return {
+        ok: false,
+        text: timedOut
+          ? `子 Agent 执行超时（${Math.round(SUBAGENT_TIMEOUT_MS / 1000)}s），已终止。建议把任务拆小后重试，或由你直接完成。`
+          : `子 Agent 执行失败：${message.slice(0, 200)}。请把原因转述给用户，不要盲目重试。`,
+        durationMs: Date.now() - startedAt,
+      };
+    }
 
-  // 黑盒执行中子图仍可能触发澄清 interrupt（模型无视「不要提问」规则）——
+    // 黑盒执行中子图仍可能触发澄清 interrupt（模型无视「不要提问」规则）——
   // 无法向用户冒泡，转为可重试的明确错误，而不是返回半截结果。
-  const state = finalState as { messages?: Array<{ content: unknown; getType?: () => string }>; __interrupt__?: unknown[] };
-  if (state?.__interrupt__?.length) {
+    const state = finalState as { messages?: Array<{ content: unknown; getType?: () => string }>; __interrupt__?: unknown[] };
+    if (state?.__interrupt__?.length) {
+      return {
+        ok: false,
+        text: "子 Agent 中途请求澄清，但后台执行无法交互。请把任务描述得更具体（给足对象/范围/期望格式）后重试，或由你直接回答。",
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    const messages = state?.messages ?? [];
+    const lastAi = [...messages].reverse().find((m) => m.getType?.() === "ai");
+    const answer = contentToText(lastAi?.content).trim();
+    if (!answer) {
+      return {
+        ok: false,
+        text: "子 Agent 没有产出有效结论（可能全是工具调用轮）。请重试一次或由你直接完成。",
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    const clipped = answer.length > MAX_RESULT_CHARS
+      ? `…（前文已省略）${answer.slice(-MAX_RESULT_CHARS)}`
+      : answer;
     return {
-      ok: false,
-      text: "子 Agent 中途请求澄清，但后台执行无法交互。请把任务描述得更具体（给足对象/范围/期望格式）后重试，或由你直接回答。",
+      ok: true,
+      text: `${clipped}\n\n（子 Agent ${profile.displayName} · 耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s）`,
       durationMs: Date.now() - startedAt,
     };
+  } finally {
+    // 子图没有 SSE 消费者；成功与失败路径都不能让重试队列残留。
+    clearModelRetryRecords(threadId);
   }
-
-  const messages = state?.messages ?? [];
-  const lastAi = [...messages].reverse().find((m) => m.getType?.() === "ai");
-  const answer = contentToText(lastAi?.content).trim();
-  if (!answer) {
-    return {
-      ok: false,
-      text: "子 Agent 没有产出有效结论（可能全是工具调用轮）。请重试一次或由你直接完成。",
-      durationMs: Date.now() - startedAt,
-    };
-  }
-
-  const clipped = answer.length > MAX_RESULT_CHARS
-    ? `…（前文已省略）${answer.slice(-MAX_RESULT_CHARS)}`
-    : answer;
-  return {
-    ok: true,
-    text: `${clipped}\n\n（子 Agent ${profile.displayName} · 耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s）`,
-    durationMs: Date.now() - startedAt,
-  };
 }

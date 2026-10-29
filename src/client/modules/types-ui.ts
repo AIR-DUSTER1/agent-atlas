@@ -38,8 +38,10 @@ export interface UsageInfo {
   taskModels?: number;
   /** 活动时长（等待审批的墙钟时间不计入）。 */
   taskActiveMs?: number;
-  /** 最近一次模型/工具事件时间，用于前端显示「等待模型响应」。 */
+  /** 最近一次模型/工具/重试事件时间，用于前端显示「等待模型响应」。 */
   lastActivityAt?: number;
+  /** 产生当前上下文用量时该模型的窗口容量；按会话保存，避免切换模型后回写旧数据。 */
+  contextWindow?: number | null;
   /** 每个 callId 的用量峰值（流式快照会递增，不是增量）。 */
   usagePeaks?: Record<string, { input: number; output: number }>;
   /** 每个 callId 已计入任务的峰值；用于历史回放覆盖同一快照时只补差额。 */
@@ -68,6 +70,18 @@ export interface NodePart {
   name: string;
 }
 
+export interface ModelRetryPart {
+  p: "model_retry";
+  records: Array<{
+    attempt: number;
+    retries: number;
+    totalAttempts: number;
+    phase: "retry" | "success" | "failed";
+    reason: string;
+    at: number;
+  }>;
+}
+
 export interface ToolPart {
   p: "tool";
   id: string;
@@ -94,6 +108,7 @@ export type AssistantPart =
   | TextPart
   | ThinkingPart
   | NodePart
+  | ModelRetryPart
   | ToolPart
   | ApprovalPart
   | ClarificationPart;
