@@ -53,6 +53,10 @@ test("agent 层禁止依赖 server / client，保持 CLI 可独立运行", async
   assert.deepEqual(await violations(join(SRC, "agent"), /(^|\/)(server|client)(\/|$)/), []);
 });
 
+test("memory 领域层禁止依赖 server / client，Provider 契约保持纯本地", async () => {
+  assert.deepEqual(await violations(join(SRC, "memory"), /(^|\/)(server|client)(\/|$)/), []);
+});
+
 test("通用与房产 Agent 的领域工具导入物理隔离", async () => {
   const general = await readFile(join(SRC, "agent", "general.ts"), "utf8");
   const estate = await readFile(join(SRC, "agent", "estate.ts"), "utf8");

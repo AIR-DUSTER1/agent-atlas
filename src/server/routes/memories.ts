@@ -1,37 +1,75 @@
 /**
- * routes/memories.ts — 跨会话长期记忆的管理路由（设置页「记忆」弹窗）
+ * routes/memories.ts — 长期记忆管理路由（按 Agent scope 隔离）
  * ============================================================
- * GET    /api/memories        列出全部记忆（updatedAt 倒序）
- * POST   /api/memories        新增或更新（同 key 覆盖；source 标 user）
- * DELETE /api/memories/:id    删除指定条目
- * 只动本服务的 .setting/memories.json，属低风险操作：不走审批、不进 audit
- * （与 Agent 工具 memory_save 同一存储，见 src/memory-store.ts）。
+ * GET    /api/memories?profileId=general|estate&history=1
+ * POST   /api/memories   { profileId?, key, content, tags? }
+ * DELETE /api/memories/:id?profileId=general|estate
+ * 只操作本地记忆文件；写接口继续由全局认证、同源检查保护。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { deleteMemory, listMemories, loadMemories, saveMemory } from "../../memory-store.js";
+import type { MemoryProfileId } from "../../memory/provider.js";
+import { isMemoryProfileId } from "../../memory/scope.js";
+import {
+  deleteMemory,
+  listMemoriesAsync,
+  loadMemories,
+  memoryStoreStatus,
+  saveMemory,
+} from "../../memory-store.js";
 
-export async function handleListMemories(res: import("node:http").ServerResponse): Promise<void> {
-  await loadMemories();
+function profileIdOf(raw: string | null | undefined): MemoryProfileId | null {
+  if (!raw) return "general";
+  return isMemoryProfileId(raw) ? raw : null;
+}
+
+function respondInvalidScope(res: import("node:http").ServerResponse): void {
+  res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error: "profileId 只能是 general 或 estate" }));
+}
+
+export async function handleListMemories(
+  res: import("node:http").ServerResponse,
+  rawProfileId?: string | null,
+  includeHistory = false
+): Promise<void> {
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  await loadMemories(profileId);
+  const memories = await listMemoriesAsync(profileId, { includeHistory });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ memories: listMemories() }));
+  res.end(JSON.stringify({
+    memories,
+    profileId,
+    store: memoryStoreStatus(),
+  }));
 }
 
 export async function handleSaveMemory(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage
 ): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { key?: unknown; content?: unknown };
+  const body = JSON.parse((await readBody(req)) || "{}") as {
+    profileId?: unknown;
+    key?: unknown;
+    content?: unknown;
+    tags?: unknown;
+  };
+  const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
+  if (!profileId) return respondInvalidScope(res);
   const key = typeof body.key === "string" ? body.key : "";
   const content = typeof body.content === "string" ? body.content : "";
+  const tags = Array.isArray(body.tags)
+    ? body.tags.filter((item): item is string => typeof item === "string")
+    : undefined;
   if (!key.trim() || !content.trim()) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "主题（key）与内容（content）都不能为空" }));
     return;
   }
   try {
-    const entry = await saveMemory(key, content, "user");
+    const entry = await saveMemory(key, content, "user", profileId, { tags });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: true, entry }));
+    res.end(JSON.stringify({ ok: true, entry, profileId }));
   } catch (err) {
     respondBadRequest(res, req, err);
   }
@@ -39,14 +77,17 @@ export async function handleSaveMemory(
 
 export async function handleDeleteMemory(
   res: import("node:http").ServerResponse,
-  id: string
+  id: string,
+  rawProfileId?: string | null
 ): Promise<void> {
-  const gone = await deleteMemory(id);
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  const gone = await deleteMemory(id, profileId);
   if (!gone) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "该记忆不存在（可能已被删除）" }));
+    res.end(JSON.stringify({ error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" }));
     return;
   }
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ ok: true }));
+  res.end(JSON.stringify({ ok: true, profileId }));
 }

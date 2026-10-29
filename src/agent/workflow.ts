@@ -398,7 +398,10 @@ export function createWorkflowGraph(
       clarificationHistory: state.clarificationHistory,
       reviewFeedback: state.reviewFeedback,
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
-      memoryNote: memoryNoteForPrompt() ?? undefined,
+      memoryNote: (await memoryNoteForPrompt({
+        profileId: profile.id,
+        query: lastUserText,
+      })) ?? undefined,
       skillNote: skillNote ?? undefined,
       taskLedger: config?.configurable?.task_ledger,
       budgetNote: config?.configurable?.task_budget_note,

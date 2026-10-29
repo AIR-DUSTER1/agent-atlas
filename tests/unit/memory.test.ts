@@ -1,16 +1,11 @@
 /**
- * memory.test.ts — 跨会话长期记忆（F1）回归
+ * memory.test.ts — 长期记忆作用域、迁移与工具隔离回归
  * ============================================================
- * 守四条语义：
- *   1. 存储核心：同 key 覆盖更新（id 稳定）、上限拒绝、回放容错；
- *   2. 注入：memoryNoteForPrompt 上限 30 条 + 溢出提示，
- *      buildAgentContext 把记忆注记拼进第二条 system；
- *   3. 工具：memory_save 成功/失败都返回中文文本（不 throw 穿透图），
- *      memory_recall 关键词命中与空结果；
- *   4. 子 Agent 隔离：subagentProfileOf 剔除记忆工具。
+ * 守：v1 数组无损升级 v2、坏文件隔离、general/estate 不互读、
+ * workflow 只注入当前 profile 的记忆，以及工具写入不越界。
  */
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -23,11 +18,14 @@ import {
   searchMemories,
   memoryNoteForPrompt,
   listMemories,
+  listMemoriesAsync,
+  memoryStoreStatus,
 } from "../../src/memory-store.js";
-import { memorySave, memoryRecall } from "../../src/tools-memory.js";
+import { memorySave, memoryRecall, createMemoryTools } from "../../src/tools-memory.js";
 import { buildAgentContext } from "../../src/agent/context-builder.js";
 import { subagentProfileOf } from "../../src/agent/subagent.js";
 import { generalProfile } from "../../src/agent/general.js";
+import { estateProfile } from "../../src/agent/estate.js";
 import type { AgentProfile } from "../../src/agent/profile.js";
 
 const testProfile: AgentProfile = {
@@ -38,7 +36,6 @@ const testProfile: AgentProfile = {
   approvalDescriptions: {},
 };
 
-/** 每个用例独立临时文件（env 须在 resetMemoryStore 之前设好） */
 async function freshStore(): Promise<{ dir: string; file: string }> {
   const dir = await mkdtemp(join(tmpdir(), "agent-mem-"));
   const file = join(dir, "memories.json");
@@ -53,122 +50,153 @@ async function dropStore(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-test("存储核心：同 key 覆盖更新，id 稳定、时间刷新", async () => {
+test("v1 数组自动迁移 v2：原字段保留，旧记忆默认归入 general", async () => {
   const { dir, file } = await freshStore();
   try {
-    const first = await saveMemory("回答风格", "结论先行", "agent");
-    await new Promise((r) => setTimeout(r, 5)); // updatedAt 至少可区分
-    const second = await saveMemory("回答风格", "结论先行，少用列表", "user");
-    assert.equal(second.id, first.id, "同 key 更新应保留稳定 id");
-    assert.equal(listMemories().length, 1);
-    assert.equal(listMemories()[0].content, "结论先行，少用列表");
-    assert.equal(listMemories()[0].source, "user");
+    await writeFile(file, JSON.stringify([
+      { id: "m1", key: "测试命令", content: "npm test", createdAt: 1, updatedAt: 2, source: "agent" },
+    ]), "utf8");
+    resetMemoryStore();
+    assert.equal(await loadMemories("general"), 1);
+    assert.equal(memoryStoreStatus().state, "migrated");
+    assert.equal(memoryStoreStatus().migratedFrom, 1);
+    const general = await listMemoriesAsync("general");
+    assert.equal(general[0].id, "m1");
+    assert.deepEqual(general[0].scope, { profileId: "general", userId: "local" });
+    assert.equal(general[0].status, "active");
 
-    // 落盘可读（小白名单全量重写）
-    const persisted = JSON.parse(await readFile(file, "utf8")) as Array<{ key: string }>;
-    assert.equal(persisted.length, 1);
-    assert.equal(persisted[0].key, "回答风格");
+    const persisted = JSON.parse(await readFile(file, "utf8")) as {
+      schemaVersion: number;
+      entries: Array<{ scope: { profileId: string } }>;
+    };
+    assert.equal(persisted.schemaVersion, 2);
+    assert.equal(persisted.entries[0].scope.profileId, "general");
+    assert.equal(await loadMemories("estate"), 0, "旧数据不能被房产 Agent 继承");
   } finally {
     await dropStore(dir);
   }
 });
 
-test("存储核心：空值/超长给中文错误，delete 不存在的 id 返回 false", async () => {
+test("存储核心：同 scope 同 key 更新保留 id，跨 scope 不覆盖", async () => {
+  const { dir, file } = await freshStore();
+  try {
+    const first = await saveMemory("回答风格", "结论先行", "agent", "general");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await saveMemory("回答风格", "结论先行，少用列表", "user", "general");
+    assert.equal(second.id, first.id);
+    const estate = await saveMemory("回答风格", "房产回答要带风险提示", "user", "estate");
+    assert.notEqual(estate.id, first.id);
+    assert.equal(await loadMemories("general"), 1);
+    assert.equal(await loadMemories("estate"), 1);
+    assert.equal(listMemories("general").length, 1);
+    assert.equal(listMemories("estate").length, 1);
+
+    const persisted = JSON.parse(await readFile(file, "utf8")) as { schemaVersion: number; entries: unknown[] };
+    assert.equal(persisted.schemaVersion, 2);
+    assert.equal(persisted.entries.length, 2);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("作用域删除：不能用 general 默认值删除 estate 记忆", async () => {
   const { dir } = await freshStore();
+  try {
+    const estate = await saveMemory("房源偏好", "只看整租", "user", "estate");
+    assert.equal(await deleteMemory(estate.id), false);
+    assert.equal(await deleteMemory(estate.id, "estate"), true);
+    assert.equal(await loadMemories("estate"), 0);
+  } finally {
+    await dropStore(dir);
+  }
+});
+
+test("输入校验与坏文件隔离：坏 JSON 改名 .corrupt，不静默覆盖原文", async () => {
+  const { dir, file } = await freshStore();
   try {
     await assert.rejects(() => saveMemory("  ", "内容", "agent"), /主题/);
     await assert.rejects(() => saveMemory("主题", "", "agent"), /内容/);
     await assert.rejects(() => saveMemory("k".repeat(51), "内容", "agent"), /主题过长/);
-    assert.equal(await deleteMemory("no-such-id"), false);
-  } finally {
-    await dropStore(dir);
-  }
-});
-
-test("回放：坏文件不炸、降级为空记忆；正常文件恢复条目", async () => {
-  const { dir, file } = await freshStore();
-  try {
     await writeFile(file, "{ 不是 JSON", "utf8");
     resetMemoryStore();
     assert.equal(await loadMemories(), 0);
-    assert.equal(memoryNoteForPrompt(), null);
-
-    await writeFile(file, JSON.stringify([
-      { id: "m1", key: "测试命令", content: "npm test", createdAt: 1, updatedAt: 1, source: "agent" },
-      { id: "bad", key: "", content: "坏条目被跳过" },
-    ]), "utf8");
-    resetMemoryStore();
-    assert.equal(await loadMemories(), 1);
-    assert.match(memoryNoteForPrompt() ?? "", /测试命令/);
+    assert.equal(memoryStoreStatus().state, "corrupt");
+    assert.ok(memoryStoreStatus().quarantinedTo);
+    const names = await readdir(dir);
+    assert.ok(names.some((name) => name.includes(".corrupt-")), "原坏文件必须保留为隔离副本");
   } finally {
     await dropStore(dir);
   }
 });
 
-test("注入注记：上限 30 条 + 溢出提示；进入 buildAgentContext 的 system", async () => {
+test("注入只含当前 scope：general 记忆不会进入 estate system 注记", async () => {
   const { dir } = await freshStore();
   try {
-    for (let i = 0; i < 32; i++) {
-      await saveMemory(`主题${i}`, `内容${i}`, "agent");
-    }
-    const note = memoryNoteForPrompt();
-    assert.ok(note);
-    assert.match(note, /主题31/);
-    assert.ok(!note.includes("主题0") || !note.includes("主题1\n"), "最旧的两条不进注入清单");
-    assert.match(note, /另有 2 条较早的记忆未注入/);
+    await saveMemory("回答风格", "结论先行", "agent", "general");
+    await saveMemory("房产口吻", "必须说明数据来源", "user", "estate");
+    const generalNote = await memoryNoteForPrompt({ profileId: "general", query: "回答 风格" });
+    const estateNote = await memoryNoteForPrompt({ profileId: "estate", query: "房产 口吻" });
+    assert.match(generalNote ?? "", /结论先行/);
+    assert.doesNotMatch(generalNote ?? "", /数据来源/);
+    assert.match(estateNote ?? "", /数据来源/);
+    assert.doesNotMatch(estateNote ?? "", /结论先行/);
 
     const context = buildAgentContext({
       profile: testProfile,
-      messages: [new HumanMessage("你好")],
-      memoryNote: note,
+      messages: [new HumanMessage("以后回答先给结论")],
+      memoryNote: generalNote ?? undefined,
     });
-    const systemNotes = context.messages.filter((m) => m.getType() === "system");
-    assert.equal(systemNotes.length, 2, "固定提示 + 注记 system");
+    const systemNotes = context.messages.filter((message) => message.getType() === "system");
+    assert.equal(systemNotes.length, 2);
     assert.match(String(systemNotes[1].content), /跨会话长期记忆/);
   } finally {
     await dropStore(dir);
   }
 });
 
-test("工具：memory_save 成功与失败都是中文文本；memory_recall 命中/空", async () => {
+test("工具：按闭包 scope 读写，成功/失败均返回中文文本", async () => {
   const { dir } = await freshStore();
   try {
     const saved = await memorySave.invoke({ key: "称呼", content: "称呼用户为老李" });
     assert.match(String(saved), /已记住.*称呼/);
-
     const tooLong = await memorySave.invoke({ key: "称呼", content: "x".repeat(600) });
     assert.match(String(tooLong), /内容过长/);
-
     const hit = await memoryRecall.invoke({ query: "称呼" });
     assert.match(String(hit), /老李/);
 
-    const miss = await memoryRecall.invoke({ query: "不存在的关键词" });
-    assert.match(String(miss), /没有/);
+    const estateTools = createMemoryTools("estate");
+    await estateTools.memorySave.invoke({ key: "城市", content: "用户在上海" });
+    assert.match(String(await estateTools.memoryRecall.invoke({ query: "上海" })), /上海/);
+    assert.doesNotMatch(String(await memoryRecall.invoke({ query: "上海" })), /用户在上海/);
   } finally {
     await dropStore(dir);
   }
 });
 
-test("检索：多词 OR 匹配、大小写不敏感", async () => {
+test("轻量检索：多词 OR、大小写不敏感、空查询返回当前 scope 最新条目", async () => {
   const { dir } = await freshStore();
   try {
-    await saveMemory("Editor", "Use VSCode", "agent");
-    await saveMemory("天气", "用户在北京", "agent");
-    const hits = searchMemories("editor 北京");
+    await saveMemory("Editor", "Use VSCode", "agent", "general");
+    await saveMemory("天气", "用户在北京", "agent", "general");
+    const hits = await searchMemories("editor 北京", 10, "general");
     assert.equal(hits.length, 2);
+    assert.equal((await searchMemories("", 1, "general")).length, 1);
   } finally {
     await dropStore(dir);
   }
 });
 
-test("工具挂载与子 Agent 隔离：general 挂记忆工具，子 profile 剔除", async () => {
-  const names = generalProfile.tools.map((item) => item.name);
-  assert.ok(names.includes("memory_save"));
-  assert.ok(names.includes("memory_recall"));
+test("工具挂载隔离：general 挂记忆工具，estate 与子 Agent 均不挂", () => {
+  const generalNames = generalProfile.tools.map((item) => item.name);
+  assert.ok(generalNames.includes("memory_save"));
+  assert.ok(generalNames.includes("memory_recall"));
 
-  const sub = subagentProfileOf(generalProfile);
-  const subNames = sub.tools.map((item) => item.name);
-  assert.ok(!subNames.includes("memory_save"), "子 Agent 不能写用户长期记忆");
+  const estateNames = estateProfile.tools.map((item) => item.name);
+  assert.ok(!estateNames.includes("memory_save"), "租房 Agent 默认不能写长期记忆");
+  assert.ok(!estateNames.includes("memory_recall"), "租房 Agent 默认不能读长期记忆工具");
+
+  const subNames = subagentProfileOf(generalProfile).tools.map((item) => item.name);
+  assert.ok(!subNames.includes("memory_save"));
   assert.ok(!subNames.includes("memory_recall"));
-  assert.ok(!subNames.includes("delegate_agent"), "深度 1 保持不变");
+  assert.ok(!subNames.includes("delegate_agent"));
 });

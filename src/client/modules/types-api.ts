@@ -251,11 +251,16 @@ export interface BackupEntry {
 
 export interface MemoryEntry {
   id: string;
+  scope: { profileId: "general" | "estate"; userId: string };
   key: string;
   content: string;
+  tags: string[];
+  status: "active" | "superseded";
   createdAt: number;
   updatedAt: number;
-  source: "agent" | "manual";
+  lastUsedAt?: number;
+  useCount?: number;
+  source: "agent" | "user" | "import";
 }
 
 export interface StatsTotals {

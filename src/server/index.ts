@@ -355,10 +355,10 @@ const server = createServer(async (req, res) => {
     }
 
     // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧经 memory_save 工具同一存储）
-    if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res); return; }
+    if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
-    if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1]); return; }
+    if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1], url.searchParams.get("profileId")); return; }
 
     // 用户自定义命令（提示词模板；前端斜杠菜单与设置页共用）
     if (pathname === "/api/commands" && req.method === "GET") { await handleListCommands(res); return; }
