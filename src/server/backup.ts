@@ -18,6 +18,7 @@ import { PROJECT_ROOT } from "./files.js";
 import { journalPath, flushJournal, JOURNAL_SCHEMA_VERSION } from "./session-store.js";
 import { checkpointFilePath, flushCheckpointLog, CHECKPOINT_SCHEMA_VERSION } from "../checkpoint.js";
 import { memoriesFilePath } from "../memory-store.js";
+import { MEMORY_SCHEMA_VERSION } from "../memory/providers/local-store.js";
 import { CONFIG_SCHEMA_VERSION, SETTINGS_FILE, configSecretsState } from "./config-store.js";
 import { auditArchivePaths, auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { log } from "./logging.js";
@@ -37,7 +38,7 @@ async function backupTargets(): Promise<Array<{ key: string; path: string; schem
   return [
     { key: "sessions.ndjson", path: journalPath(), schemaVersion: JOURNAL_SCHEMA_VERSION },
     { key: "checkpoints.ndjson", path: checkpointFilePath(), schemaVersion: CHECKPOINT_SCHEMA_VERSION },
-    { key: "memories.json", path: memoriesFilePath(), schemaVersion: null },
+    { key: "memories.json", path: memoriesFilePath(), schemaVersion: MEMORY_SCHEMA_VERSION },
     { key: "web-config.json", path: SETTINGS_FILE, schemaVersion: CONFIG_SCHEMA_VERSION },
     { key: "audit.ndjson", path: auditFilePath(), schemaVersion: null },
     ...archives,

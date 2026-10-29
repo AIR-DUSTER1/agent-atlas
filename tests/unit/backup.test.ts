@@ -63,6 +63,10 @@ test("备份与恢复全链路：创建 → 破坏 → 恢复 → 内容回来",
     assert.ok(restored.restored.includes("sessions.ndjson"));
     assert.ok(restored.autoSnapshot);
     assert.match(await readFile(env.MEMORIES_FILE, "utf8"), /结论先行/);
+    const memoryStore = await import("../../src/memory-store.js");
+    memoryStore.resetMemoryStore();
+    assert.equal(await memoryStore.loadMemories("general"), 1);
+    assert.equal(memoryStore.memoryStoreStatus().state, "migrated", "v1 备份恢复后应自动升级 v2");
     assert.match(await readFile(env.SESSIONS_FILE, "utf8"), /s1/);
 
     const afterRestore = await backup.listBackups();
@@ -89,8 +93,9 @@ test("备份篡改：任意文件字节变化都会被 SHA-256 校验拒绝", as
   try {
     await writeFile(env.SESSIONS_FILE, JSON.stringify({ ev: "schema", schemaVersion: 1 }) + "\n", "utf8");
     const created = await backup.createBackup();
-    const manifest = JSON.parse(await readFile(join(env.BACKUP_DIR, created.name, "manifest.json"), "utf8")) as { version: number };
+    const manifest = JSON.parse(await readFile(join(env.BACKUP_DIR, created.name, "manifest.json"), "utf8")) as { version: number; schemaVersions: Record<string, number | null> };
     assert.equal(manifest.version, 2);
+    assert.equal(manifest.schemaVersions["memories.json"], 2);
     await writeFile(join(env.BACKUP_DIR, created.name, "sessions.ndjson"), "tampered-byte\n", "utf8");
     await assert.rejects(() => backup.restoreBackup(created.name), /校验失败|大小不匹配/);
     const audit = await backup.auditBackups();

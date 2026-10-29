@@ -490,13 +490,18 @@ test("运维指标与诊断接口：受认证边界保护的结构化快照", as
   const text = await metrics.text();
   assert.match(text, /agent_http_requests_total/);
   assert.match(text, /agent_process_resident_memory_bytes/);
+  assert.match(text, /memory_save_total/);
 
   const diagnostics = await json("/api/diagnostics");
   assert.equal(diagnostics.status, 200);
   assert.equal(typeof diagnostics.body.status, "string");
   assert.ok(diagnostics.body.schemaVersions);
+  assert.equal(diagnostics.body.schemaVersions.memory, 2);
   assert.ok(diagnostics.body.data.journal);
   assert.ok(diagnostics.body.data.checkpoint);
+  assert.equal(diagnostics.body.data.memory.state, "ok");
+  assert.equal(diagnostics.body.dependencies.memory.activeProvider, "local");
+  assert.equal(diagnostics.body.dependencies.memory.status, "ok");
   assert.ok(Array.isArray(diagnostics.body.dependencies.mcp));
   const serialized = JSON.stringify(diagnostics.body);
   assert.doesNotMatch(serialized, /apiKey|AUTH_TOKEN|DATA_KEY|SESSION_SECRET/);

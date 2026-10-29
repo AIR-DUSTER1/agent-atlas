@@ -17,6 +17,10 @@ import { listMcpStatus, mcpRuntimeSnapshots, type McpServerStatus } from "../mcp
 import { listDependencyStatuses } from "./dependency-status.js";
 import { isProductionMode } from "../production.js";
 import { modelGateSnapshots } from "../runtime/model-gate.js";
+import { memorySlot } from "../../memory/slot.js";
+import { MEMORY_SCHEMA_VERSION } from "../../memory/providers/local-store.js";
+import { memoryStoreStatus } from "../../memory-store.js";
+import { readMemoryConfig } from "../memory-config.js";
 import type { NdjsonHealthReport } from "../persistence/ndjson-health.js";
 
 function safeNdjson(report: NdjsonHealthReport | null) {
@@ -35,14 +39,17 @@ function safeNdjson(report: NdjsonHealthReport | null) {
 }
 
 export async function buildDiagnostics(): Promise<Record<string, unknown>> {
-  const [ready, secrets, backups, audit, rag, mcp] = await Promise.all([
+  const [ready, secrets, backups, audit, rag, mcp, memoryHealth, memoryConfig] = await Promise.all([
     readinessSnapshot(),
     configSecretsState(),
     auditBackups(),
     auditHealthReport(),
     getRagPublic().catch(() => ({ configured: false })),
     listMcpStatus().catch(() => []),
+    memorySlot.health().catch(() => ({ providerId: "local" as const, status: "unavailable" as const, latencyMs: 0, message: "记忆状态不可用" })),
+    readMemoryConfig().catch(() => null),
   ]);
+  const memoryLocal = memoryStoreStatus();
   const journal = safeNdjson(journalHealthReport());
   const checkpoint = safeNdjson(checkpointHealthReport());
   const dependencies = listDependencyStatuses();
@@ -64,8 +71,19 @@ export async function buildDiagnostics(): Promise<Record<string, unknown>> {
       config: CONFIG_SCHEMA_VERSION,
       journal: JOURNAL_SCHEMA_VERSION,
       checkpoint: CHECKPOINT_SCHEMA_VERSION,
+      memory: MEMORY_SCHEMA_VERSION,
     },
-    data: { journal, checkpoint },
+    data: {
+      journal,
+      checkpoint,
+      memory: {
+        state: memoryLocal.state,
+        activeCount: memoryLocal.activeCount,
+        historyCount: memoryLocal.historyCount,
+        migratedFrom: memoryLocal.migratedFrom ?? null,
+        quarantined: Boolean(memoryLocal.quarantinedTo),
+      },
+    },
     backups: {
       total: backups.total,
       valid: backups.valid,
@@ -75,6 +93,14 @@ export async function buildDiagnostics(): Promise<Record<string, unknown>> {
     secrets,
     dependencies: {
       rag: { configured: Boolean((rag as { configured?: boolean }).configured), last: dependencies.find((d) => d.id === "rag") ?? null, runtime: ragRuntimeSnapshot() },
+      memory: {
+        activeProvider: memoryHealth.providerId,
+        status: memoryHealth.status,
+        latencyMs: memoryHealth.latencyMs ?? null,
+        message: memoryHealth.message ?? "",
+        httpEnabled: memoryConfig?.http.enabled ?? false,
+        preset: memoryConfig?.http.preset ?? "generic",
+      },
       mcp: mcp.map((server) => ({ id: server.id, enabled: server.enabled, connected: server.connected, error: server.error ?? "" })),
       mcpRuntime: mcpRuntimeSnapshots(),
       modelRuntime: modelGateSnapshots(),

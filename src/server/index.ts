@@ -61,6 +61,7 @@ import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics
 import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/observability.js";
 import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { applyMemoryRuntime } from "./memory-http.js";
+import { installMemoryMetricsSink } from "./memory-observability.js";
 import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -155,6 +156,7 @@ try {
   await loadEstate();
   // F1：跨会话长期记忆先预热本地文件，再按配置注册 / 激活本地或 HTTP Provider。
   await loadMemories();
+  installMemoryMetricsSink();
   await applyMemoryRuntime();
   // MCP：启动时连接已配置的 server 并把工具注入 general profile。
   // 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
