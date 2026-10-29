@@ -407,3 +407,22 @@
   font-weight: 600;
 }
 .proj-group-head + .session-time-head { padding-top: 4px; }
+
+/* 会话树分组头：整行可点折叠；caret 只在展开时旋转 90°，收起=子项不渲染 */
+.proj-group-head { cursor: pointer; border-radius: 6px; }
+.proj-group-head:hover { background: var(--bg-hover); color: var(--text); }
+.proj-group-head .g-caret { display: inline-flex; flex: none; color: var(--text-3); transition: transform .12s; }
+.proj-group-head:not(.collapsed) .g-caret { transform: rotate(90deg); }
+.proj-group-head.collapsed { padding-bottom: 6px; }
+/* 搜索态分组头不可折叠：命中结果必须一眼可见 */
+.proj-group-head.static { cursor: default; }
+.proj-group-head.static:hover { background: transparent; color: var(--text-3); }
+.proj-group-head.static .g-caret { visibility: hidden; }
+.proj-group-head .g-count {
+  margin-left: auto; flex: none;
+  font-size: 9.5px; padding: 1px 6px; border-radius: 8px;
+  background: var(--tag-bg); color: var(--text-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .proj-group-head .g-caret { transition: none; }
+}

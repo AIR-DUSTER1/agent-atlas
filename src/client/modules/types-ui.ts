@@ -47,6 +47,11 @@ export interface UsageInfo {
   contextTokens?: number;
   /** 当前目标模型的窗口容量；切换模型后同步更新，已发生的 used 不清零。 */
   contextWindow?: number | null;
+  /** 当前目标模型的输入预算（窗口扣除输出预留与安全余量）。 */
+  contextInputBudget?: number | null;
+  /** 输出预留与安全余量，用于容量条解释为什么未用满窗口。 */
+  outputReserveTokens?: number;
+  safetyMarginTokens?: number;
   /** 新请求已发出但还没收到主模型 usage；期间展示上一轮，收到后允许下调。 */
   contextPending?: boolean;
   /** 每个 callId 的用量峰值（流式快照会递增，不是增量）。 */
@@ -228,6 +233,7 @@ export interface AppState {
   rag: RagState | null;
   estate: EstateState | null;
   projectView: string;
+  projCollapsed: string[];
   currentId: string | null;
   blocks: Record<string, ChatBlock[]>;
   usage: Record<string, UsageInfo>;

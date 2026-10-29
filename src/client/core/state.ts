@@ -15,7 +15,7 @@ import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-10-29-37";
+export const APP_VERSION = "web-2026-10-29-40";
 
 console.log(
   "%c[LangGraph Demo] 前端脚本已加载 " + APP_VERSION,
@@ -26,6 +26,7 @@ export const LS_TRANSCRIPTS = "lg-agent-transcripts";
 export const LS_SESSIONS = "lg-agent-sessions-meta";
 export const LS_USAGE = "lg-agent-usage";
 export const LS_PROJECT_VIEW = "lg-agent-project-view";
+export const LS_PROJ_COLLAPSED = "lg-agent-proj-collapsed";
 export const LS_THEME = "lg-agent-theme";
 
 
@@ -37,6 +38,7 @@ export const state: AppState = {
   rag: null,           // 外部 RAG 状态
   estate: null,        // 贝壳 CLI 状态
   projectView: "all",  // "all" | projectId（侧栏过滤 + 新建会话归属）
+  projCollapsed: [],   // 侧栏分组折叠状态：被折叠的项目 id（ORPHAN_GROUP_KEY = 未归属组）
   currentId: null,
   blocks: {},          // sessionId -> [block]
   usage: {},           // sessionId -> 本轮 usage
@@ -81,6 +83,11 @@ export function loadLocal(): void {
     state.usage = (parsed && typeof parsed === "object" ? parsed : {}) as AppState["usage"];
   } catch { state.usage = {}; }
   state.projectView = localStorage.getItem(LS_PROJECT_VIEW) || "all";
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LS_PROJ_COLLAPSED) || "[]") as unknown;
+    // 折叠只是显示偏好：过滤非字符串脏值，避免分组头判定失效。
+    state.projCollapsed = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch { state.projCollapsed = []; }
 }
 
 export function saveLocal(): void {
@@ -90,6 +97,7 @@ export function saveLocal(): void {
       localStorage.setItem(LS_TRANSCRIPTS, JSON.stringify(state.blocks));
       localStorage.setItem(LS_USAGE, JSON.stringify(state.usage));
       localStorage.setItem(LS_PROJECT_VIEW, state.projectView);
+      localStorage.setItem(LS_PROJ_COLLAPSED, JSON.stringify(state.projCollapsed));
       localStorage.setItem(LS_SESSIONS, JSON.stringify(
         state.sessions.map((s) => ({
           id: s.id, kind: s.kind, agentProfileId: s.agentProfileId,

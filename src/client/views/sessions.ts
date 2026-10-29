@@ -1,12 +1,15 @@
 /**
  * ============================================================
- * views/sessions.ts — 侧栏会话列表（按项目分组 + 搜索 + 单条操作）
+ * views/sessions.ts — 侧栏会话树（按项目折叠 + 搜索 + 单条操作）
  * ============================================================
  * 职责：会话列表的过滤、分组与渲染；单项的导出 / 删除按钮。
  * 设计立场：
  *  - 搜索是纯本地过滤（标题 + 本浏览器缓存的消息文本），零请求；
  *  - 分组顺序跟 projects 定义一致，未归属会话归「未归属」组；
- *  - 会话项骨架 innerHTML + 正文 textContent，标题可能来自用户输入。
+ *  - 项目分组是**树的一级节点**，可展开/收起，折叠状态只存 projectId 列表
+ *    （state.projCollapsed，localStorage 持久化），重渲染后由数据还原 DOM，
+ *    不缓存节点引用 —— 搜索/流式刷新都会整体重建列表；
+ *  - 会话项骨架 h() 构建 + 正文 textContent，标题可能来自用户输入。
  */
 
 import { $ } from "../core/dom.js";
@@ -19,6 +22,9 @@ import { uiAlert } from "../ui/dialog.js";
 import { toast } from "../ui/toast.js";
 import { selectSession, showWelcomeState } from "./navigation.js";
 import type { ProjectEntry, Session } from "../modules/types.js";
+
+/** 未归属项目的会话在折叠状态里用这个键，避免与真实 projectId 冲突。 */
+export const ORPHAN_GROUP_KEY = "__orphan__";
 
 const DEMO_BADGE_TEXT: Record<number, string> = {
   1: "示例 1 · 基础 ReAct", 2: "示例 2 · 对话记忆",
@@ -73,6 +79,62 @@ function sessionDayGroup(ts: number, now = Date.now()): "今天" | "昨天" | "�
   const days = Math.round((startOfDay(now) - startOfDay(ts)) / 86_400_000);
   return days <= 0 ? "今天" : days === 1 ? "昨天" : "更早";
 }
+
+/* ---------------------------------------------------------------------------
+ * 分组折叠（树的一级节点）
+ * ------------------------------------------------------------------------- */
+
+export function isProjectCollapsed(key: string): boolean {
+  return state.projCollapsed.includes(key);
+}
+
+/** 折叠状态切换：只记 id 列表，渲染时据此还原，避免持有 DOM 引用。 */
+export function toggleProjectCollapsed(key: string): void {
+  state.projCollapsed = isProjectCollapsed(key)
+    ? state.projCollapsed.filter((id) => id !== key)
+    : [...state.projCollapsed, key];
+  saveLocal();
+  renderSessions();
+}
+
+/** 分组头：整行可点（键盘 Enter/Space 同效），图标 + 名称 + 会话数 + 类型标签。
+ *  searching 时不可折叠：搜索必须能看到全部命中项，否则「收起」把结果藏起来像搜不到。 */
+function renderProjectGroupHead(
+  project: ProjectEntry | null,
+  key: string,
+  count: number,
+  collapsed: boolean,
+  searching = false,
+): HTMLElement {
+  const cloud = project?.type === "cloud";
+  const interactive = !searching;
+  return h("div", {
+    class: "proj-group-head" + (cloud ? " cloud" : "") + (collapsed ? " collapsed" : "") + (interactive ? "" : " static"),
+    role: interactive ? "button" : undefined,
+    tabindex: interactive ? "0" : undefined,
+    "aria-expanded": interactive ? String(!collapsed) : undefined,
+    "aria-label": interactive
+      ? `${project?.name ?? "未归属"}，${count} 个会话，${collapsed ? "已收起" : "已展开"}`
+      : undefined,
+    title: interactive ? (collapsed ? "展开该项目会话" : "收起该项目会话") : "",
+    onclick: interactive ? () => toggleProjectCollapsed(key) : undefined,
+    onkeydown: interactive
+      ? (event: KeyboardEvent) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggleProjectCollapsed(key);
+        }
+      }
+      : undefined,
+  },
+  h("span", { class: "g-caret" }, icon("ChevronRight", { size: 12 })),
+  h("span", { class: "g-icon" }, icon(cloud ? "Globe" : "Folder", { size: 14 })),
+  h("span", { class: "g-name" }, project?.name ?? "未归属"),
+  h("span", { class: "g-count" }, String(count)),
+  h("span", { class: "p-type-tag" }, project ? (cloud ? "云端" : "本地") : "已移除"),
+  );
+}
+
 export function renderSessions(): void {
   const list = $("session-list");
   if (!list) return;
@@ -82,25 +144,24 @@ export function renderSessions(): void {
   const filtered = state.sessions.filter(
     (session) => (state.projectView === "all" || session.projectId === state.projectView) && sessionMatchesSearch(session, term),
   );
-  const groups: Array<{ project: ProjectEntry | null; sessions: Session[] }> = [];
-  const byId = new Map<string, { project: ProjectEntry | null; sessions: Session[] }>();
+  const groups: Array<{ key: string; project: ProjectEntry | null; sessions: Session[] }> = [];
+  const byId = new Map<string, { key: string; project: ProjectEntry | null; sessions: Session[] }>();
   for (const project of state.projects) {
-    const group = { project: project as ProjectEntry | null, sessions: [] as Session[] };
+    const group = { key: project.id, project: project as ProjectEntry | null, sessions: [] as Session[] };
     groups.push(group);
     byId.set(project.id, group);
   }
-  const other = { project: null as ProjectEntry | null, sessions: [] as Session[] };
+  const other = { key: ORPHAN_GROUP_KEY, project: null as ProjectEntry | null, sessions: [] as Session[] };
   for (const session of filtered) (byId.get(session.projectId) || other).sessions.push(session);
   if (other.sessions.length) groups.push(other);
 
   for (const group of groups) {
     if (!group.sessions.length) continue;
-    const head = h("div", { class: "proj-group-head" + (group.project?.type === "cloud" ? " cloud" : "") },
-      h("span", { class: "g-icon" }, icon(group.project?.type === "cloud" ? "Globe" : "Folder", { size: 14 })),
-      h("span", { class: "g-name" }, group.project?.name ?? "未归属"),
-      h("span", { class: "p-type-tag" }, group.project ? (group.project.type === "cloud" ? "云端" : "本地") : "已移除"),
-    );
-    list.appendChild(head);
+    // 搜索时强制展开：命中结果若被折叠藏起来，看起来就像「没搜到」。
+    const collapsed = !term && isProjectCollapsed(group.key);
+    // 折叠 = children 容器不渲染内容：省 DOM，也让「收起」不依赖 CSS 布局。
+    list.appendChild(renderProjectGroupHead(group.project, group.key, group.sessions.length, collapsed, Boolean(term)));
+    if (collapsed) continue;
     const sorted = [...group.sessions].sort((left, right) => right.createdAt - left.createdAt);
     let day = "";
     for (const session of sorted) {
@@ -209,7 +270,7 @@ function renderSessionItem(session: Session): HTMLElement {
   h("div", { class: "s-actions" }, exportButton, deleteButton),
   );
 }
-/** 重拉服务端会话列表（批量清理后用）：保留 stale 条目与本地标题覆盖 */
+/** 拉取服务端会话列表并重渲染；本地 stale 项目与本地标题不被覆盖 */
 export async function loadSessionList(): Promise<void> {
   const serverSessions = await api<Session[]>("/api/sessions");
   const keepStale = state.sessions.filter((s) => s.stale);
@@ -221,7 +282,7 @@ export async function loadSessionList(): Promise<void> {
   renderSessions();
 }
 
-/** 历史回放中的 interrupt 只代表「当时暂停过」，服务端无 pending 时不再可操作 */
+/** 历史回放中的 interrupt 只代表运行时中断：审批/澄清恢复 pending 时再次可操作 */
 export function markInterruptsResolved(sid: string): void {
   for (const block of transcript(sid)) {
     if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
@@ -232,7 +293,7 @@ export function markInterruptsResolved(sid: string): void {
   }
 }
 
-/** 服务端仍有 pending 时，只有历史里最后一张 interrupt 卡可操作；更早的必须收起。 */
+/** 若存在新的 pending 时，只把历史里最后一个 interrupt 标记成可操作，其余保持历史态 */
 export function markLatestInterruptPending(sid: string): void {
   let latest: { status: string } | null = null;
   for (const block of transcript(sid)) {
