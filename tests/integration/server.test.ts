@@ -74,6 +74,10 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(cfg.body.mock, true, "测试必须跑在 mock 模式");
   assert.ok(Array.isArray(cfg.body.demos));
   assert.equal(cfg.body.contextWindow, 200_000, "未配置或网关未知时默认显示 200k");
+  assert.equal(cfg.body.contextBudget.contextWindow, 200_000);
+  assert.equal(cfg.body.contextBudget.outputReserveTokens, 8_192);
+  assert.equal(cfg.body.contextBudget.safetyMarginTokens, 10_000);
+  assert.equal(cfg.body.contextBudget.inputBudgetTokens, 181_808);
   const activeProvider = cfg.body.providers.find((provider: { active: boolean }) => provider.active);
   const activeModel = activeProvider?.models.find((model: { active: boolean }) => model.active);
   assert.equal(activeModel?.contextWindow, 200_000);
@@ -159,6 +163,9 @@ test("会话创建 → chat SSE → transcript 回放", async () => {
   assert.equal(typeof lastUsage?.taskInputTokens, "number", "usage 应带服务端任务累计快照");
   assert.equal(typeof lastUsage?.taskModelCalls, "number");
   assert.equal(lastUsage?.contextWindow, currentConfig.body.contextWindow, "usage 应携带当前模型请求的上下文窗口容量");
+  assert.equal(lastUsage?.contextInputBudget, currentConfig.body.contextBudget.inputBudgetTokens);
+  assert.equal(lastUsage?.outputReserveTokens, currentConfig.body.contextBudget.outputReserveTokens);
+  assert.equal(lastUsage?.safetyMarginTokens, currentConfig.body.contextBudget.safetyMarginTokens);
   assert.equal(stream.events.at(-1).type, "done");
 
   const tr = await json(`/api/sessions/${id}/transcript`);
