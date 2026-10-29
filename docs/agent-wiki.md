@@ -1597,6 +1597,7 @@ console.log(result.messages.at(-1).content);
 | MCP 测试跑完全部用例却不退出（CI 超时） | 子进程被杀后 Node 侧 `ChildProcess` 仍持有 stdio 的 Socket 句柄。① close 回调必须只删「自己那条」连接（重连竞态下按 id 无条件删会抹掉新连接）；② 等 `close` 事件真正到达；③ `destroy()` stdout/stderr/stdin 三流并 `unref()`。单文件跑正常、全量跑才挂 —— 因为 `node --test` 多文件同进程 |
 | MCP server stdout 打了非 JSON 日志 | MCP 协议规定日志走 stderr、stdout 只走协议流。遇到非 JSON 行只能丢弃并记 `mcp_stdout_non_json` 告警 —— 否则解析器会把日志当成协议消息 |
 | 技能/命令「改了设置页但斜杠菜单没变」 | 前端把命令清单缓存在 composer 模块里。保存/删除后必须重新 `GET /api/commands` 刷新缓存，否则要刷新整页才看得到 |
+| 上传技能后不自动加载 | 先确认技能处于启用状态；无 `triggers` 时用技能名称/标识兜底匹配，仍不命中就在设置页补充触发词（支持逗号或 YAML 列表） |
 | 技能目录写到了 `src/.setting/skills/` | 与 checkpoint 同一个坑：`src/` 顶层文件回退**一层**到仓库根（`join(MODULE_DIR, "..", ".setting", "skills")`）。照抄 `src/server/` 下文件的两层写法会多退一层 |
 | 工具并发后「结果串到别的工具上」 | 并发完成顺序 ≠ 发起顺序。必须按原始 `tool_calls` 下标回填 ToolMessage，否则模型把 A 的结果当成 B 的 |
 | 前端 TS 化后页面白屏、控制台报 `Failed to load module script` | `src/server/public/` 是构建产物且已 gitignore —— 直接 `npm run web` 会读到空目录。`web`/`test`/`desktop` 都挂了 `pre*` 钩子自动构建，但**直接用 `npx tsx src/server/index.ts` 启动**会绕过它，必须先 `npm run build:client` |
@@ -1725,15 +1726,15 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 **问题**：「这类任务该怎么做」的领域指南写在系统提示词里，永远占上下文；
 写成文档又没有加载机制。
 
-**设计**：`.setting/skills/*.md` + 极简 frontmatter，**按关键词命中才注入**。
+**设计**：`.setting/skills/*.md` + 极简 frontmatter，**按触发词命中才注入，未配置触发词时用名称兜底**。
 
 | 机制 | 实现 |
 |---|---|
-| 格式 | `---` 包起来的 `name` / `description` / `triggers`（逗号或顿号分隔）+ markdown 正文；frontmatter 解析只支持这个子集，**坏格式降级为「无元数据的纯正文」而不报错** |
-| 匹配 | 只看**最近一条用户消息**（不看整段历史 —— 否则旧话题关键词每轮都把技能拽回来）；计分 = 命中关键词数 ×5 + 关键词总长度（越长越具体） |
+| 格式 | `---` 包起来的 `name` / `description` / `triggers` / `enabled` + markdown 正文；triggers 支持逗号分隔与 YAML 列表，**坏 frontmatter 降级为「无元数据的纯正文」而不报错** |
+| 匹配 | 只看**最近一条用户消息**；只匹配 `enabled != false` 的技能；无 triggers 时用技能名称/标识兜底；计分 = 命中关键词数 ×5 + 关键词总长度 |
 | 预算 | 每轮最多 2 个技能、单个正文上限 4000 字符；**未命中返回 null = 零 token 开销** |
 | 缓存 | 目录签名（文件数 + 最新 mtime）比较，目录没变就不重读文件 |
-| 管理 | 设置页「技能库」分区：列表 + 编辑 + 删除；面板显示目录路径，用户也可直接改 `.md` |
+| 管理 | 设置页「技能」分区：搜索、全部/已启用/已禁用筛选、分页卡片、上传 `.md` / `.markdown`、启停、编辑与删除；启停写入 frontmatter，重启和外部编辑器保持一致 |
 | 示例 | `scripts/example-skills/` 两个打样：写提交信息、排查端口占用 |
 
 **为什么技能是安全的**：它只是**文档**，永不执行。这与 MCP（跑外部程序）和

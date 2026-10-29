@@ -59,7 +59,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
 | 记忆 | LangGraph checkpoint、可插拔长期记忆（本地 / HTTP）、Agent scope 隔离、相关性注入、上下文压缩 |
 | 文件与项目 | 附件、项目目录、远程文件夹、文件搜索与读取 |
-| 扩展 | RAG、MCP、技能库、自定义命令、第三方 Agent |
+| 扩展 | RAG、MCP、可上传且可启停的技能库、自定义命令、第三方 Agent |
 | 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、使用统计 |
 | 桌面端 | 本机便利壳，不是正式桌面发行版 |
 

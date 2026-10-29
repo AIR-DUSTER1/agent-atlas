@@ -46,7 +46,10 @@ import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
-import { saveSkillFromForm } from "./views/settings-skills.js";
+import {
+  clearSkillForm, deleteSkillFromEditor, filterSkills, importSkillsFromFiles, openNewSkillForm,
+  refreshSkills, saveSkillFromForm, setSkillFilter, showSkillStatus,
+} from "./views/settings-skills.js";
 import { saveMcpFromForm } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
@@ -205,6 +208,25 @@ async function init(): Promise<void> {
     if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
   });
   on("skill-add-btn", "click", () => { void saveSkillFromForm(); });
+  on("skill-delete-btn", "click", () => { void deleteSkillFromEditor(); });
+  on("skill-create-btn", "click", openNewSkillForm);
+  on("skills-refresh-btn", "click", () => {
+    void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
+  });
+  on("skills-search", "input", (e) => {
+    filterSkills((e.currentTarget as HTMLInputElement | null)?.value ?? "");
+  });
+  document.querySelectorAll<HTMLElement>("[data-skill-filter]").forEach((button) => {
+    button.addEventListener("click", () => setSkillFilter(button.dataset.skillFilter ?? "all"));
+  });
+  on("skill-upload-btn", "click", () => {
+    ($("skill-upload-file") as HTMLInputElement | null)?.click();
+  });
+  on("skill-upload-file", "change", (e) => {
+    const input = e.currentTarget as HTMLInputElement | null;
+    void importSkillsFromFiles(input?.files ?? null);
+  });
+  on("skill-clear-btn", "click", () => clearSkillForm());
   on("skill-id", "keydown", (e) => {
     const ke = e as KeyboardEvent;
     if (ke.key === "Enter") { ke.preventDefault(); void saveSkillFromForm(); }

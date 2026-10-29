@@ -580,30 +580,80 @@
         </section>
 
         <section id="settings-view-skills" class="settings-view hidden" data-settings-panel="skills" role="tabpanel" aria-labelledby="skills-title">
-          <div id="skills-modal" role="region" aria-labelledby="skills-title">
-            <h2 id="skills-title"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i> 技能库</h2>
-            <p class="settings-sub">技能是 markdown 写的「这类任务该怎么做」指南，存在
-              <code>.setting/skills/</code>。当你的消息里出现关键词（triggers）时才自动载入，
-              没命中就完全不用（不占上下文）。每轮最多载入 2 个。</p>
+          <div id="skills-modal" class="skills-page" role="region" aria-labelledby="skills-title">
+            <div class="skills-page-head">
+              <h2 id="skills-title">技能</h2>
+              <button id="skills-refresh-btn" type="button" class="skills-icon-btn" aria-label="刷新技能列表" title="刷新技能列表">
+                <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i>
+              </button>
+            </div>
 
-            <div class="field-label">已安装技能 <span id="skills-dir" class="key-state"></span></div>
-            <div id="skills-list" class="memories-list"></div>
+            <label class="skills-search-box">
+              <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+              <input id="skills-search" type="search" aria-label="搜索技能" placeholder="搜索技能" autocomplete="off" />
+            </label>
 
-            <div class="field-label">新增 / 更新（同标识覆盖）</div>
-            <div class="key-row">
-              <input id="skill-id" aria-label="技能标识" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
-              <input id="skill-name" aria-label="技能名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+            <section class="skills-overview-card" aria-labelledby="skills-overview-title">
+              <div class="skills-overview-copy">
+                <h3 id="skills-overview-title">技能</h3>
+                <p>技能是一组基于上下文触发的指令集，用于稳定执行专业任务。启用后仅在消息命中触发词或技能名称时载入，每轮最多 2 个。</p>
+              </div>
+              <div class="skills-overview-actions">
+                <button id="skill-upload-btn" type="button" class="ghost-btn small skills-primary-btn">
+                  <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传技能
+                </button>
+                <button id="skill-create-btn" type="button" class="ghost-btn small">
+                  <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 创建
+                </button>
+              </div>
+            </section>
+            <input id="skill-upload-file" class="hidden" type="file" accept=".md,.markdown,text/markdown"
+              multiple aria-label="选择技能文件" />
+            <div id="skills-status" class="settings-status" role="status" aria-live="polite"></div>
+
+            <div class="skills-list-toolbar">
+              <div class="skills-filter-tabs" role="tablist" aria-label="技能状态筛选">
+                <button type="button" class="skills-filter-tab active" data-skill-filter="all" role="tab" aria-selected="true">
+                  全部 <span id="skills-count-all">0</span>
+                </button>
+                <button type="button" class="skills-filter-tab" data-skill-filter="enabled" role="tab" aria-selected="false">
+                  已启用 <span id="skills-count-enabled">0</span>
+                </button>
+                <button type="button" class="skills-filter-tab" data-skill-filter="disabled" role="tab" aria-selected="false">
+                  已禁用 <span id="skills-count-disabled">0</span>
+                </button>
+              </div>
+              <div class="skills-list-summary">
+                <span id="skills-count">共 0 个技能</span>
+                <span id="skills-dir" class="skills-dir"></span>
+              </div>
             </div>
-            <div class="key-row">
-              <input id="skill-desc" aria-label="技能说明" type="text" spellcheck="false" placeholder="一句话说明" />
-              <input id="skill-triggers" aria-label="技能触发词" type="text" spellcheck="false" placeholder="触发关键词，逗号分隔，如：提交信息, commit" />
-            </div>
-            <textarea id="skill-body" aria-label="技能正文" class="cmd-template" spellcheck="false"
-              placeholder="技能正文（markdown）。例如：&#10;# 写提交信息&#10;- 一行中文短句，不加前缀&#10;- 说明原因时用「：」而不是括号"></textarea>
-            <div class="key-row">
-              <button id="skill-add-btn" type="button" class="ghost-btn small">＋ 保存技能</button>
-            </div>
-            <div id="skills-status" class="settings-status"></div>
+
+            <div id="skills-list" class="skills-list"></div>
+            <nav id="skills-pagination" class="skills-pagination hidden" aria-label="技能分页"></nav>
+
+            <details id="skill-editor-details" class="settings-disclosure skill-editor">
+              <summary>手动新增 / 编辑技能</summary>
+              <div class="settings-disclosure-body">
+                <div class="key-row">
+                  <input id="skill-id" aria-label="技能标识" type="text" spellcheck="false" placeholder="标识（文件名，如 git-commit）" />
+                  <input id="skill-name" aria-label="技能名称" type="text" spellcheck="false" placeholder="显示名（留空 = 用标识）" />
+                </div>
+                <div class="key-row">
+                  <input id="skill-desc" aria-label="技能说明" type="text" spellcheck="false" placeholder="一句话说明" />
+                  <input id="skill-triggers" aria-label="技能触发词" type="text" spellcheck="false" placeholder="触发关键词，逗号分隔，如：提交信息, commit" />
+                </div>
+                <textarea id="skill-body" aria-label="技能正文" class="cmd-template" spellcheck="false"
+                  placeholder="技能正文（markdown）。例如：&#10;# 写提交信息&#10;- 一行中文短句，不加前缀&#10;- 说明原因时用「：」而不是括号"></textarea>
+                <div class="key-row skills-editor-actions">
+                  <button id="skill-add-btn" type="button" class="ghost-btn small skills-primary-btn">保存技能</button>
+                  <button id="skill-clear-btn" type="button" class="ghost-btn small">清空表单</button>
+                  <button id="skill-delete-btn" type="button" class="ghost-btn small skills-danger-btn hidden">
+                    <i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i> 删除当前技能
+                  </button>
+                </div>
+              </div>
+            </details>
           </div>
         </section>
 

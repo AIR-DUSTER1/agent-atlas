@@ -121,3 +121,28 @@ test("长期记忆插槽：本地 / HTTP 配置、连接测试、scope 与导入
   assert.match(source, /authFetch\(`\/api\/memories\/export/);
   assert.doesNotMatch(source, /innerHTML\s*=\s*`[^`]*\$\{[^}]*apiKey/);
 });
+test("技能库支持上传文件、启用/禁用与折叠编辑", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const source = await readClientFiles(["views/settings-skills.ts", "main.ts", "views/settings.ts"]);
+  for (const id of [
+    "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-create-btn", "skill-upload-file",
+    "skills-count", "skills-count-all", "skills-count-enabled", "skills-count-disabled",
+    "skills-list", "skills-pagination", "skill-editor-details", "skill-clear-btn", "skill-delete-btn",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.match(html, /accept="\.md,\.markdown,text\/markdown"/);
+  assert.match(html, /data-skill-filter="all"/);
+  assert.match(html, /data-skill-filter="enabled"/);
+  assert.match(html, /data-skill-filter="disabled"/);
+  assert.match(html, /id="skill-editor-details" class="settings-disclosure skill-editor"/);
+  assert.match(source, /importSkillsFromFiles/);
+  assert.match(source, /\/api\/skills\/import/);
+  assert.match(source, /method: "PATCH"/);
+  assert.match(source, /skill-enabled-toggle/);
+  assert.match(source, /SKILLS_PER_PAGE = 5/);
+  assert.match(source, /function renderPagination/);
+  assert.match(source, /function filterSkills/);
+  assert.match(source, /启用技能 \$\{skill\.name\}/);
+  assert.match(source, /function updateSkillEnabled/);
+});

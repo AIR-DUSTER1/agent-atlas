@@ -21,7 +21,7 @@ import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
 import { refreshMemorySettings, memStatus, bindMemorySettings } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
-import { refreshSkills } from "./settings-skills.js";
+import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
 import { refreshStats } from "./stats/index.js";
 import { destroyStatsCharts } from "./stats/charts.js";
@@ -60,7 +60,7 @@ export function showSettingsView(view: string): void {
   } else if (next === "commands") {
     void refreshCommands().catch((err) => cmdStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "skills") {
-    void refreshSkills().catch(() => {});
+    void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "mcp") {
     void refreshMcp().catch(() => {});
   } else {

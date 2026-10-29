@@ -16,7 +16,7 @@
  */
 
 import { promises as fsp } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./server/logging.js";
 
@@ -40,14 +40,20 @@ const MAX_SKILLS = 100;
 const MAX_NAME_CHARS = 60;
 /** 搜索时扫描的用户消息尾部长度：只看最近这条，不看整段历史 */
 const TRIGGER_SCAN_CHARS = 2_000;
+/** 一次上传最多处理的文件数；前端同样限制，服务端仍做最终校验。 */
+const MAX_IMPORT_FILES = 20;
+/** 一次上传的 JSON 请求体上限，给聊天和附件请求留出共享 2MB 限额的余量。 */
+const MAX_IMPORT_BATCH_BYTES = 1_500_000;
 
 export interface Skill {
   /** 文件基名（不含 .md），也是技能标识 */
   id: string;
   name: string;
   description: string;
-  /** 触发关键词（小写比较）；为空则只能通过显式指定应用 */
+  /** 触发关键词（小写比较）；为空时按技能名称与标识兜底匹配 */
   triggers: string[];
+  /** 是否参与自动匹配；禁用后仍保留文件并可在设置页重新启用 */
+  enabled: boolean;
   /** markdown 正文 */
   body: string;
 }
@@ -58,8 +64,7 @@ interface ParsedFrontmatter {
 }
 
 /**
- * 解析极简 frontmatter：只认 `---` 包起来的 `key: value` 行。
- * value 可以是逗号分隔的多值（triggers: a, b, c）。
+ * 解析极简 frontmatter：支持 `key: value` 与 `key:\n  - item` 两种常见写法。
  * 没有 frontmatter / 格式坏 → meta = {}，整份内容当正文（降级不报错）。
  */
 function parseFrontmatter(raw: string): ParsedFrontmatter {
@@ -67,12 +72,25 @@ function parseFrontmatter(raw: string): ParsedFrontmatter {
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { meta: {}, body: text.trim() };
   const meta: Record<string, string> = {};
+  let listKey: string | null = null;
   for (const line of m[1].split(/\r?\n/)) {
+    const listItem = line.match(/^\s*-\s+(.+)$/);
+    if (listItem && listKey) {
+      const value = listItem[1].trim().replace(/^["']|["']$/g, "");
+      meta[listKey] = meta[listKey] ? `${meta[listKey]}, ${value}` : value;
+      continue;
+    }
     const idx = line.indexOf(":");
-    if (idx <= 0) continue; // 不是 key: value 的行（空行/注释/坏行）跳过
+    if (idx <= 0) {
+      listKey = null; // 空行/注释/坏行结束列表上下文
+      continue;
+    }
     const key = line.slice(0, idx).trim().toLowerCase();
     const value = line.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
-    if (key) meta[key] = value;
+    if (key) {
+      meta[key] = value;
+      listKey = value ? null : key;
+    }
   }
   return { meta, body: m[2].trim() };
 }
@@ -87,9 +105,19 @@ function splitTriggers(value: string | undefined): string[] {
     .slice(0, 20); // 单技能最多 20 个关键词，防误命中面过大
 }
 
+function isValidSkillId(id: string): boolean {
+  return Boolean(id) && id.length <= MAX_NAME_CHARS && /^[\w\u4e00-\u9fa5-]+$/.test(id);
+}
+
+/** 只有明确的否定值才禁用；缺省保持向后兼容，旧技能默认启用。 */
+function parseEnabled(value: string | undefined): boolean {
+  if (!value) return true;
+  return !["false", "0", "off", "no", "disabled", "禁用"].includes(value.trim().toLowerCase());
+}
+
 function toSkill(filename: string, raw: string): Skill | null {
   const id = basename(filename, ".md");
-  if (!id || id.length > MAX_NAME_CHARS) return null;
+  if (!isValidSkillId(id)) return null;
   const { meta, body } = parseFrontmatter(raw);
   if (!body) return null; // 空正文的技能没有意义
   return {
@@ -97,6 +125,7 @@ function toSkill(filename: string, raw: string): Skill | null {
     name: meta.name?.trim() || id,
     description: meta.description?.trim() || "",
     triggers: splitTriggers(meta.triggers ?? meta.trigger),
+    enabled: parseEnabled(meta.enabled),
     body,
   };
 }
@@ -184,7 +213,12 @@ export function matchSkills(skills: Skill[], userText: string): SkillMatch[] {
   if (!haystack) return [];
   const scored: Array<SkillMatch & { score: number }> = [];
   for (const skill of skills) {
-    const hits = skill.triggers.filter((t) => haystack.includes(t));
+    if (!skill.enabled) continue;
+    // 上传的标准 Skill 常常没有 triggers：用名称/标识兜底，避免装上却永远无法命中。
+    const triggers = skill.triggers.length
+      ? skill.triggers
+      : [skill.name.toLowerCase(), skill.id.toLowerCase()].filter(Boolean);
+    const hits = triggers.filter((t) => haystack.includes(t));
     if (!hits.length) continue;
     // 关键词越长越具体，给更高权重；多个命中累加
     const score = hits.reduce((sum, t) => sum + t.length, 0) + hits.length * 5;
@@ -222,50 +256,205 @@ export async function skillNoteForMessage(userText: string): Promise<string | nu
 /* ---------------------------------------------------------------------------
  * 写操作（设置页用）
  * ------------------------------------------------------------------------- */
+const RESERVED_SKILL_KEYS = new Set(["name", "description", "triggers", "trigger", "enabled"]);
+
+function singleLine(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
+/** 保留用户手写的未知 frontmatter 键；已知字段统一由设置页序列化。 */
+function extraSkillKeys(raw: string | null): Record<string, string> {
+  const extra: Record<string, string> = {};
+  if (!raw) return extra;
+  const { meta } = parseFrontmatter(raw);
+  for (const [key, value] of Object.entries(meta)) {
+    if (!RESERVED_SKILL_KEYS.has(key)) extra[key] = singleLine(value);
+  }
+  return extra;
+}
+
+function buildSkillFile(input: {
+  name: string;
+  description: string;
+  triggers: string[];
+  enabled: boolean;
+  body: string;
+  extraKeys?: Record<string, string>;
+}): string {
+  const lines = ["---", `name: ${singleLine(input.name)}`];
+  if (input.description) lines.push(`description: ${singleLine(input.description)}`);
+  if (input.triggers.length) lines.push(`triggers: ${input.triggers.map(singleLine).join(", ")}`);
+  lines.push(`enabled: ${input.enabled}`);
+  for (const [key, value] of Object.entries(input.extraKeys ?? {})) lines.push(`${key}: ${singleLine(value)}`);
+  lines.push("---", "", input.body, "");
+  return lines.join("\n");
+}
+
+function normalizeTriggers(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : typeof value === "string"
+      ? value.split(/[,，、;；]/)
+      : [];
+  return [...new Set(raw.map((item) => singleLine(item).toLowerCase()).filter(Boolean))].slice(0, 20);
+}
+
 export async function saveSkill(input: {
-  id?: unknown; name?: unknown; description?: unknown; triggers?: unknown; body?: unknown;
+  id?: unknown; name?: unknown; description?: unknown; triggers?: unknown; body?: unknown; enabled?: unknown;
 }): Promise<{ skill: Skill; created: boolean }> {
   const id = typeof input.id === "string" ? input.id.trim() : "";
   if (!id) throw new Error("技能标识（文件名）不能为空");
-  if (!/^[\w\u4e00-\u9fa5-]+$/.test(id)) {
-    throw new Error("技能标识只能包含字母、数字、下划线、短横线或中文");
+  if (!isValidSkillId(id)) {
+    throw new Error(`技能标识只能包含字母、数字、下划线、短横线或中文，且不能超过 ${MAX_NAME_CHARS} 个字符`);
   }
-  if (id.length > MAX_NAME_CHARS) throw new Error(`技能标识不能超过 ${MAX_NAME_CHARS} 个字符`);
+  const existing = await readSkillFileRaw(id);
+  const existingSkill = existing ? toSkill(`${id}.md`, existing) : null;
   const body = typeof input.body === "string" ? input.body.trim() : "";
   if (!body) throw new Error("技能正文不能为空");
-  if (body.length > MAX_SKILL_FILE_BYTES) throw new Error("技能正文过长");
+  if (Buffer.byteLength(body, "utf8") > MAX_SKILL_FILE_BYTES) throw new Error("技能正文过长");
 
-  const triggers = Array.isArray(input.triggers)
-    ? input.triggers.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean)
-    : typeof input.triggers === "string"
-      ? input.triggers.split(/[,，、;；]/).map((t) => t.trim()).filter(Boolean)
-      : [];
-  const name = typeof input.name === "string" && input.name.trim() ? input.name.trim() : id;
-  const description = typeof input.description === "string" ? input.description.trim() : "";
-
-  // 保留已有技能里本模块不认识的 frontmatter 键（用户可能手写了别的东西）
-  const existing = await readSkillFileRaw(id);
-  const extraKeys: Record<string, string> = {};
-  if (existing) {
-    const { meta } = parseFrontmatter(existing);
-    for (const [k, v] of Object.entries(meta)) {
-      if (!["name", "description", "triggers", "trigger"].includes(k)) extraKeys[k] = v;
-    }
-  }
-
-  const lines = ["---", `name: ${name}`];
-  if (description) lines.push(`description: ${description}`);
-  if (triggers.length) lines.push(`triggers: ${triggers.join(", ")}`);
-  for (const [k, v] of Object.entries(extraKeys)) lines.push(`${k}: ${v}`);
-  lines.push("---", "", body, "");
+  const triggers = input.triggers === undefined ? existingSkill?.triggers ?? [] : normalizeTriggers(input.triggers);
+  const name = singleLine(typeof input.name === "string" && input.name.trim()
+    ? input.name
+    : existingSkill?.name ?? id);
+  if (name.length > MAX_NAME_CHARS) throw new Error(`技能名称不能超过 ${MAX_NAME_CHARS} 个字符`);
+  const description = singleLine(typeof input.description === "string"
+    ? input.description
+    : existingSkill?.description ?? "");
+  const enabled = typeof input.enabled === "boolean" ? input.enabled : existingSkill?.enabled ?? true;
+  const content = buildSkillFile({
+    name,
+    description,
+    triggers,
+    enabled,
+    body,
+    extraKeys: extraSkillKeys(existing),
+  });
+  if (Buffer.byteLength(content, "utf8") > MAX_SKILL_FILE_BYTES) throw new Error("技能文件过长");
 
   await fsp.mkdir(SKILLS_DIR, { recursive: true });
-  await fsp.writeFile(join(SKILLS_DIR, `${id}.md`), lines.join("\n"), "utf8");
+  await fsp.writeFile(join(SKILLS_DIR, `${id}.md`), content, "utf8");
   resetSkillsCache();
   return {
-    skill: { id, name, description, triggers: triggers.map((t) => t.toLowerCase()), body },
+    skill: { id, name, description, triggers, enabled, body },
     created: !existing,
   };
+}
+
+interface ImportedSkillFile {
+  id: string;
+  content: string;
+  previous: string | null;
+}
+
+export interface SkillImportResult {
+  imported: string[];
+  overwritten: string[];
+  skills: Skill[];
+}
+
+/** 批量导入用户上传的 markdown；先全量校验，再写盘，失败时回滚已写文件。 */
+export async function importSkillFiles(files: unknown, overwriteInput: unknown): Promise<SkillImportResult> {
+  if (!Array.isArray(files) || files.length === 0) throw new Error("请选择至少一个技能文件");
+  if (files.length > MAX_IMPORT_FILES) throw new Error(`一次最多上传 ${MAX_IMPORT_FILES} 个技能文件`);
+
+  const prepared: ImportedSkillFile[] = [];
+  const seenIds = new Set<string>();
+  let totalBytes = 0;
+
+  for (const item of files) {
+    if (!item || typeof item !== "object") throw new Error("技能文件格式不正确");
+    const name = typeof (item as { name?: unknown }).name === "string" ? (item as { name: string }).name.trim() : "";
+    const content = typeof (item as { content?: unknown }).content === "string" ? (item as { content: string }).content : "";
+    if (!name) throw new Error("技能文件名不能为空");
+    if (!content.trim()) throw new Error(`技能「${name}」内容为空`);
+
+    const filename = basename(name.replaceAll("\\", "/"));
+    const extension = extname(filename).toLowerCase();
+    if (extension !== ".md" && extension !== ".markdown") {
+      throw new Error(`技能「${filename}」必须是 .md 或 .markdown 文件`);
+    }
+    const bytes = Buffer.byteLength(content, "utf8");
+    if (bytes > MAX_SKILL_FILE_BYTES) throw new Error(`技能「${filename}」超过 ${MAX_SKILL_FILE_BYTES} 字节`);
+    totalBytes += bytes;
+    if (totalBytes > MAX_IMPORT_BATCH_BYTES) throw new Error("本次上传总大小超过 1.5MB，请分批上传");
+
+    const { meta } = parseFrontmatter(content);
+    const stem = basename(filename, extension);
+    // 兼容标准 skill 目录中统一命名为 SKILL.md 的文件：用 frontmatter.name 作为稳定标识。
+    const frontmatterId = (meta.name ?? "").trim();
+    const id = /^skill$/i.test(stem) && isValidSkillId(frontmatterId) ? frontmatterId : stem;
+    if (!isValidSkillId(id)) {
+      throw new Error(`技能「${filename}」的标识不合法：仅支持字母、数字、下划线、短横线或中文`);
+    }
+    const idKey = id.toLowerCase();
+    if (seenIds.has(idKey)) throw new Error(`本次上传中存在重复技能标识「${id}」`);
+    seenIds.add(idKey);
+    if (!toSkill(`${id}.md`, content)) throw new Error(`技能「${filename}」没有可加载的正文`);
+    prepared.push({ id, content, previous: await readSkillFileRaw(id) });
+  }
+
+  let currentFiles: string[] = [];
+  try {
+    currentFiles = (await fsp.readdir(SKILLS_DIR)).filter((name) => name.toLowerCase().endsWith(".md"));
+  } catch { /* 目录尚不存在 */ }
+  const newFileCount = prepared.filter((file) => file.previous === null).length;
+  if (currentFiles.length + newFileCount > MAX_SKILLS) throw new Error(`技能总数不能超过 ${MAX_SKILLS} 个`);
+
+  const conflicts = prepared.filter((file) => file.previous !== null).map((file) => file.id);
+  if (conflicts.length && overwriteInput !== true) {
+    throw new Error(`技能「${conflicts.join("、")}」已存在；确认覆盖后重试`);
+  }
+
+  const written: ImportedSkillFile[] = [];
+  try {
+    await fsp.mkdir(SKILLS_DIR, { recursive: true });
+    for (const file of prepared) {
+      await fsp.writeFile(join(SKILLS_DIR, `${file.id}.md`), file.content, "utf8");
+      written.push(file);
+    }
+  } catch (err) {
+    for (const file of written.reverse()) {
+      try {
+        if (file.previous === null) await fsp.unlink(join(SKILLS_DIR, `${file.id}.md`));
+        else await fsp.writeFile(join(SKILLS_DIR, `${file.id}.md`), file.previous, "utf8");
+      } catch { /* 回滚尽力而为，下面仍返回明确错误 */ }
+    }
+    resetSkillsCache();
+    throw new Error(`技能导入失败，已回滚：${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  resetSkillsCache();
+  return {
+    imported: prepared.filter((file) => file.previous === null).map((file) => file.id),
+    overwritten: conflicts,
+    skills: await listSkills(),
+  };
+}
+
+/** 切换技能启停；状态写入 frontmatter，重启和外部编辑器都能保持一致。 */
+export async function setSkillEnabled(idInput: unknown, enabledInput: unknown): Promise<Skill> {
+  const id = typeof idInput === "string" ? idInput.trim() : "";
+  if (!isValidSkillId(id)) throw new Error("技能标识不合法");
+  if (typeof enabledInput !== "boolean") throw new Error("enabled 必须是布尔值");
+  const raw = await readSkillFileRaw(id);
+  if (raw === null) throw new Error(`技能「${id}」不存在`);
+  const skill = toSkill(`${id}.md`, raw);
+  if (!skill) throw new Error(`技能「${id}」无法解析`);
+
+  const updated = { ...skill, enabled: enabledInput };
+  const content = buildSkillFile({
+    name: updated.name,
+    description: updated.description,
+    triggers: updated.triggers,
+    enabled: updated.enabled,
+    body: updated.body,
+    extraKeys: extraSkillKeys(raw),
+  });
+  await fsp.mkdir(SKILLS_DIR, { recursive: true });
+  await fsp.writeFile(join(SKILLS_DIR, `${id}.md`), content, "utf8");
+  resetSkillsCache();
+  return updated;
 }
 
 async function readSkillFileRaw(id: string): Promise<string | null> {
@@ -277,7 +466,7 @@ async function readSkillFileRaw(id: string): Promise<string | null> {
 }
 
 export async function deleteSkill(id: string): Promise<{ removed: boolean }> {
-  if (!/^[\w\u4e00-\u9fa5-]+$/.test(id)) throw new Error("技能标识不合法");
+  if (!isValidSkillId(id)) throw new Error("技能标识不合法");
   try {
     await fsp.unlink(join(SKILLS_DIR, `${id}.md`));
     resetSkillsCache();

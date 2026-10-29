@@ -195,3 +195,67 @@ test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP �
   await expect(page.locator("#mem-http-status")).toContainText(/连接失败|无法连接|超时/, { timeout: 10_000 });
   expect(pageErrors).toEqual([]);
 });
+test("技能文件可上传、禁用并在刷新后保持状态", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await login(page);
+  await page.evaluate(async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `seed-skill-${i}`,
+          name: `Z 技能 ${i}`,
+          description: "用于验证技能分页",
+          triggers: `分页${i}`,
+          body: `分页验证正文 ${i}`,
+        }),
+      });
+    }
+  });
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="skills"]').click();
+  await expect(page.locator("#skills-modal")).toBeVisible();
+  await page.locator("#skills-search").fill("不存在的技能");
+  await expect(page.locator("#skills-list")).toContainText("没有匹配的技能");
+  await page.locator("#skills-search").fill("");
+
+  const file = {
+    name: "e2e-upload-skill.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from(`---\nname: E2E 上传技能\ndescription: 浏览器上传回归\ntriggers: e2e技能\n---\n# 执行规则\n上传后应出现在技能列表。\n`),
+  };
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.locator("#skill-upload-btn").click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles(file);
+  const row = page.locator(".skill-card").filter({ hasText: "E2E 上传技能" });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#skills-pagination")).toBeVisible();
+  const toggle = page.getByRole("checkbox", { name: "启用技能 E2E 上传技能" });
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await page.locator('[data-skill-filter="disabled"]').click();
+  await expect(row).toBeVisible();
+  await expect(row).toHaveClass(/disabled/);
+  await expect(row).toContainText("已禁用");
+  await page.locator("#skills-refresh-btn").click();
+  await expect(row).toBeVisible();
+
+  const persisted = await page.evaluate(async () => {
+    const response = await fetch("/api/skills");
+    return await response.json() as { skills?: Array<{ id: string; enabled: boolean }> };
+  });
+  expect(persisted.skills?.find((skill) => skill.id === "e2e-upload-skill")?.enabled).toBe(false);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-app-ready", "true");
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="skills"]').click();
+  await page.locator('[data-skill-filter="disabled"]').click();
+  const reloadedRow = page.locator(".skill-card").filter({ hasText: "E2E 上传技能" });
+  await expect(reloadedRow).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("checkbox", { name: "启用技能 E2E 上传技能" })).not.toBeChecked();
+  expect(pageErrors).toEqual([]);
+});

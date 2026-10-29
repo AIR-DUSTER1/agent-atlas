@@ -79,7 +79,7 @@ import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 import { handleListCommands, handleSaveCommand, handleDeleteCommand } from "./routes/commands.js";
-import { handleListSkills, handleSaveSkill, handleDeleteSkill } from "./routes/skills.js";
+import { handleListSkills, handleSaveSkill, handleDeleteSkill, handleImportSkills, handleSetSkillEnabled } from "./routes/skills.js";
 import {
   handleListMcp, handleSaveMcp, handleDeleteMcp, handleTestMcp,
 } from "./routes/mcp.js";
@@ -385,8 +385,10 @@ const server = createServer(async (req, res) => {
     // 技能库（按关键词命中注入的领域指南；纯文档不执行）
     if (pathname === "/api/skills" && req.method === "GET") { await handleListSkills(res); return; }
     if (pathname === "/api/skills" && req.method === "POST") { await handleSaveSkill(res, req); return; }
-    const skillDelMatch = pathname.match(/^\/api\/skills\/(.+)$/);
-    if (skillDelMatch && req.method === "DELETE") { await handleDeleteSkill(res, skillDelMatch[1]); return; }
+    if (pathname === "/api/skills/import" && req.method === "POST") { await handleImportSkills(res, req); return; }
+    const skillMatch = pathname.match(/^\/api\/skills\/(.+)$/);
+    if (skillMatch && req.method === "PATCH") { await handleSetSkillEnabled(res, req, skillMatch[1]); return; }
+    if (skillMatch && req.method === "DELETE") { await handleDeleteSkill(res, skillMatch[1]); return; }
 
     // MCP 客户端（JSON-RPC over stdio 自实现；工具默认全登记审批）
     if (pathname === "/api/mcp" && req.method === "GET") { await handleListMcp(res); return; }

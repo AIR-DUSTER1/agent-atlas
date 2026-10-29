@@ -21,7 +21,7 @@ await mkdir(skillsDir, { recursive: true });
 
 const {
   listSkills, matchSkills, skillsNoteForPrompt, skillNoteForMessage,
-  saveSkill, deleteSkill, resetSkillsCache, SKILLS_DIR,
+  saveSkill, deleteSkill, resetSkillsCache, SKILLS_DIR, importSkillFiles, setSkillEnabled,
 } = await import("../../src/skills.js");
 
 test.after(async () => {
@@ -61,6 +61,17 @@ triggers: 提交信息, commit, 提交
   assert.equal(s.description, "本仓库的提交信息风格");
   assert.deepEqual(s.triggers.sort(), ["commit", "提交", "提交信息"].sort());
   assert.match(s.body, /一行中文短句/);
+
+  await writeSkill("yaml-list.md", `---
+name: YAML 列表
+triggers:
+  - 列表命中
+  - list-hit
+---
+列表式触发词正文`);
+  const yamlSkill = (await listSkills()).find((item) => item.id === "yaml-list");
+  assert.ok(yamlSkill);
+  assert.deepEqual(yamlSkill.triggers.sort(), ["list-hit", "列表命中"].sort());
 });
 
 test("没有 frontmatter 的文件也能当技能用（整份是正文，无触发词）", async () => {
@@ -85,6 +96,12 @@ test("关键词匹配：命中才返回，按具体度排序，最多 2 个", as
   assert.equal(matchSkills(skills, "今天天气如何").length, 0);
   // 空输入 → 空数组
   assert.equal(matchSkills(skills, "").length, 0);
+
+  // 上传的标准 Skill 可能没有 triggers：名称/标识作为兜底触发词。
+  await writeSkill("name-fallback.md", `---\nname: 名称兜底\n---\n名称匹配正文`);
+  const withFallback = await listSkills();
+  assert.equal(matchSkills(withFallback, "请使用名称兜底技能").length, 1);
+  assert.equal(matchSkills(withFallback, "请使用name-fallback技能").length, 1);
 
   // 造 3 个都能命中的技能，验证上限 2
   resetSkillsCache();
@@ -145,6 +162,90 @@ test("保存技能：非法标识与空正文给中文错误", async () => {
   await assert.rejects(() => saveSkill({ id: "", body: "x" }), /标识/);
   await assert.rejects(() => saveSkill({ id: "带/斜杠", body: "x" }), /只能包含/);
   await assert.rejects(() => saveSkill({ id: "ok", body: "   " }), /正文不能为空/);
+});
+
+test("启用 / 禁用：状态写入 frontmatter，禁用技能不参与匹配与注入", async () => {
+  await saveSkill({
+    id: "toggle-me",
+    name: "启停测试",
+    triggers: "开关测试",
+    body: "启用时应该加载",
+  });
+  let skills = await listSkills();
+  let skill = skills.find((item) => item.id === "toggle-me");
+  assert.equal(skill?.enabled, true, "新建技能默认启用");
+  assert.equal(matchSkills(skills, "执行开关测试").length, 1);
+
+  const disabled = await setSkillEnabled("toggle-me", false);
+  assert.equal(disabled.enabled, false);
+  const raw = await readFile(join(skillsDir, "toggle-me.md"), "utf8");
+  assert.match(raw, /enabled: false/);
+  skills = await listSkills();
+  assert.equal(matchSkills(skills, "执行开关测试").length, 0, "禁用后不得自动匹配");
+  assert.equal(await skillNoteForMessage("执行开关测试"), null, "禁用后不得注入上下文");
+
+  const edited = await saveSkill({ id: "toggle-me", body: "禁用状态下编辑正文" });
+  assert.equal(edited.skill.enabled, false, "编辑禁用技能不得意外重新启用");
+  assert.equal(edited.skill.name, "启停测试", "部分更新应保留原显示名");
+
+  skill = await setSkillEnabled("toggle-me", true);
+  assert.equal(skill.enabled, true);
+  assert.equal(matchSkills(await listSkills(), "执行开关测试").length, 1);
+});
+
+test("上传技能：支持 md / markdown、冲突确认与标准 SKILL.md 标识", async () => {
+  const result = await importSkillFiles([{
+    name: "uploaded-skill.md",
+    content: `---
+name: 上传技能
+description: 来自文件上传
+triggers: 上传测试
+---
+# 上传技能
+按上传内容执行。`,
+  }], false);
+  assert.deepEqual(result.imported, ["uploaded-skill"]);
+  const uploaded = result.skills.find((skill) => skill.id === "uploaded-skill");
+  assert.equal(uploaded?.name, "上传技能");
+  assert.equal(uploaded?.enabled, true);
+
+  await assert.rejects(
+    () => importSkillFiles([{ name: "uploaded-skill.md", content: "新正文" }], false),
+    /已存在/
+  );
+  const overwritten = await importSkillFiles([{
+    name: "uploaded-skill.markdown",
+    content: "覆盖后的正文",
+  }], true);
+  assert.deepEqual(overwritten.overwritten, ["uploaded-skill"]);
+
+  const standard = await importSkillFiles([{
+    name: "SKILL.md",
+    content: `---
+name: standard-upload
+description: 标准目录下的 SKILL.md
+triggers: 标准上传
+enabled: false
+---
+标准技能正文`,
+  }], false);
+  assert.deepEqual(standard.imported, ["standard-upload"]);
+  assert.equal(standard.skills.find((skill) => skill.id === "standard-upload")?.enabled, false);
+});
+
+test("上传技能：拒绝非 markdown、空正文和非法文件名", async () => {
+  await assert.rejects(
+    () => importSkillFiles([{ name: "skill.txt", content: "正文" }], false),
+    /必须.*\.md/
+  );
+  await assert.rejects(
+    () => importSkillFiles([{ name: "empty.md", content: "   " }], false),
+    /内容为空/
+  );
+  await assert.rejects(
+    () => importSkillFiles([{ name: "bad name.md", content: "正文" }], false),
+    /标识不合法/
+  );
 });
 
 test("删除技能：存在则删，不存在返回 removed=false", async () => {
