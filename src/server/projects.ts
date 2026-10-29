@@ -5,8 +5,8 @@
  * 参考 ZCode 的「项目 ▾」：会话按所属项目文件夹分组，新建对话归属当前项目。
  * 项目文件夹分两类，UI 用不同样式区分：
  *
- *   - local（💻 本地）：服务器磁盘上的目录。内置默认项目 = 本仓库根；
- *     也可添加服务器上的其他绝对路径。
+ *   - local（💻 本地）：服务器磁盘上的目录，由用户显式添加。
+ *     不再提供内置 learn-agent 项目；未归属会话使用内部 default 标识。
  *   - cloud（☁️ 云端）：一个 Git 仓库地址（https://… .git）。
  *     添加时自动 `git clone --depth 1` 到本地缓存（.setting/cloud/<名称>），
  *     之后浏览 / 附加文件与本地项目完全一致；「刷新」= git pull。
@@ -34,7 +34,7 @@ export interface Project {
   path: string;
   /** cloud 类型的仓库地址 */
   url?: string;
-  /** 内置默认项目不可删除 */
+  /** 历史内置项目标记，仅用于兼容旧配置 */
   builtin?: boolean;
 }
 
@@ -52,15 +52,6 @@ async function persist(): Promise<void> {
 export async function loadProjects(): Promise<void> {
   const saved = await readConfig();
 
-  const defaultProject: Project = {
-    id: "default",
-    name: "learn-agent",
-    type: "local",
-    path: PROJECT_ROOT,
-    builtin: true,
-  };
-  authorizeRoot(PROJECT_ROOT, defaultProject.name);
-
   const savedList = (Array.isArray(saved?.projects)
     ? (saved!.projects as Array<Partial<Project>>)
     : []
@@ -68,7 +59,7 @@ export async function loadProjects(): Promise<void> {
     Boolean(p && p.id && typeof p.path === "string" && (p.type === "local" || p.type === "cloud"))
   );
 
-  projects = [defaultProject];
+  projects = [];
   for (const p of savedList) {
     if (p.id === "default") continue;
     // 磁盘目录仍在才恢复（云端 clone 缓存可能被手动删除）
@@ -172,7 +163,7 @@ export async function refreshCloudProject(id: string): Promise<Project> {
   return p;
 }
 
-/** 删除项目：内置不可删；云端同时清理 clone 缓存；其会话由调用方迁移到默认项目 */
+/** 删除项目：云端同时清理 clone 缓存；其会话由调用方迁移到未归属（default） */
 export async function deleteProject(id: string): Promise<void> {
   const p = getProjectChecked(id);
   if (p.builtin) throw new Error("内置项目（本仓库）不可删除");

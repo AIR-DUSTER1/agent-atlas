@@ -216,7 +216,7 @@ export function stopStreaming(): void {
 export async function createSession(
   kind?: SessionKind | null, demo?: number | null, prefill?: string | null, agentId?: string
 ): Promise<void> {
-  // 新会话归属当前选中的项目（「全部项目」视图下归到默认项目）
+  // 新会话归属当前选中的项目（「全部项目」视图下归入未归属）
   const projectId = state.projectView !== "all" ? state.projectView : "default";
   const { api } = await import("../core/api.js");
   const data = await api<{ id: string }>("/api/sessions", {
