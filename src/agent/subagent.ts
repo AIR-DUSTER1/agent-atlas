@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
+import { AGENT_RECURSION_LIMIT } from "../config.js";
 import { createWorkflowGraph, type WorkflowModels } from "./workflow.js";
 import { clearModelRetryRecords } from "../model-retry.js";
 import type { AgentProfile } from "./profile.js";
@@ -133,6 +134,7 @@ export async function runSubagent(
       finalState = await graph.invoke(
         { messages: [new HumanMessage(trimmedTask)] },
         {
+          recursionLimit: AGENT_RECURSION_LIMIT,
           configurable: { thread_id: threadId, permission_mode: "readonly" },
           signal: AbortSignal.timeout(SUBAGENT_TIMEOUT_MS),
         }

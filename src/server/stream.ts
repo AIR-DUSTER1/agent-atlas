@@ -26,7 +26,7 @@ import type { AgentEvent, InterruptPayload } from "./events.js";
 import type { PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
 import { getActiveModelLabel } from "./settings.js";
-import { config } from "../config.js";
+import { AGENT_RECURSION_LIMIT, config } from "../config.js";
 import { incCounter } from "./observability/metrics.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
@@ -298,7 +298,8 @@ export async function* runGraphEvents(
   const usageModel = getActiveModelLabel() || undefined;
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
-    // 回到 LangGraph 默认 25 超步保护；业务层不额外设置执行时长 / 调用次数上限。
+    // 业务层不限制任务时长 / 调用次数；图运行用 1000 超步兜底，避免正常长任务触发默认 25 步上限。
+    recursionLimit: AGENT_RECURSION_LIMIT,
     // permission_mode 会被 LangGraph 透传给每个节点函数的 config（不传 = 默认审批行为）
     configurable: {
       thread_id: options.threadId,

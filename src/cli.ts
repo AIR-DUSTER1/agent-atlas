@@ -19,7 +19,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { MessageContent } from "@langchain/core/messages";
 import { HumanMessage, AIMessage, AIMessageChunk, ToolMessage } from "@langchain/core/messages";
-import { assertConfig } from "./config.js";
+import { AGENT_RECURSION_LIMIT, assertConfig } from "./config.js";
 import { createBasicGraph } from "./agent/basic.js";
 import { createMemoryGraph } from "./agent/memory.js";
 import { createHitlGraph, buildResumeCommand } from "./agent/hitl.js";
@@ -193,6 +193,7 @@ async function streamGraph(
   // streamMode 和 configurable 都合并到 options 里传
   const stream = await graph.stream(input, {
     streamMode: opts.streamTokens ? ["updates", "messages"] : "updates",
+    recursionLimit: AGENT_RECURSION_LIMIT,
     configurable: { thread_id: threadId },
   });
   // 每轮对话独立重置打印记录（消息 id 去重用）
@@ -324,6 +325,7 @@ async function demo3(rl: Rl): Promise<void> {
 
       // resume：用 Command 把决定送回被暂停的图，一次性跑完剩余流程
       const result = await graph.invoke(buildResumeCommand(decision), {
+        recursionLimit: AGENT_RECURSION_LIMIT,
         configurable: { thread_id: threadId },
       });
       const last = result.messages.at(-1) as AIMessage | undefined;
@@ -376,7 +378,10 @@ async function demo5(subjectsRaw: string | undefined): Promise<void> {
 
   const startAt = Date.now();
   // 直接按 updates 事件观察：worker 的 results 到一条打印一条，combine 的 summary 最后到
-  const stream = await graph.stream({ subjects }, { streamMode: "updates" });
+  const stream = await graph.stream({ subjects }, {
+    streamMode: "updates",
+    recursionLimit: AGENT_RECURSION_LIMIT,
+  });
   for await (const event of stream) {
     for (const [node, update] of Object.entries(event as Record<string, unknown>)) {
       const u = update as { results?: string[]; summary?: string };

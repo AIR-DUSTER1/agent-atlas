@@ -15,6 +15,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { calculator } from "../../src/tools.js";
+import { AGENT_RECURSION_LIMIT } from "../../src/config.js";
 import { generalProfile } from "../../src/agent/general.js";
 import { estateProfile } from "../../src/agent/estate.js";
 import { createApprovalToolsNode } from "../../src/agent/hitl.js";
@@ -269,7 +270,7 @@ test("长任务可连续执行超过 12 次不同工具调用", async () => {
   const result = await graph.invoke(
     { messages: [new HumanMessage("执行二十步长任务")] },
     {
-      recursionLimit: 1_000,
+      recursionLimit: AGENT_RECURSION_LIMIT,
       configurable: { thread_id: "long-task-no-fixed-cap", permission_mode: "auto" },
     }
   ) as unknown as GraphResult;

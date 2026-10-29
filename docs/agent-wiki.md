@@ -1288,7 +1288,7 @@ flowchart LR
 - 「虚拟工具」路由是 Supervisor 模式的经典实现：不用结构化输出、不用手写分类器，模型天然会用工具调用来表达「把活派给谁」；
 - 子图与父图共享 `MessagesAnnotation` → 员工的工作成果自动出现在主管视野里；
 - 结束条件写在主管的系统提示里（「任务完成就直接回答，不要再调用 delegate」），条件边据此收工；
-- 防死循环：LangGraph 默认有递归上限（25 个超步），超限抛 `GraphRecursionError`。
+- 防死循环：LangGraph 用递归上限保护超步循环；本项目 CLI / Web / 子 Agent 入口统一设为 1000，超限抛 `GraphRecursionError`。
 
 ### 4.5 Demo 5：并行 map-reduce 的调用链
 
@@ -1548,7 +1548,7 @@ console.log(result.messages.at(-1).content);
 | 条件边路由不到 "tools"           | `toolsCondition` 默认找名为 `"tools"` 的节点；改名需自定义路由函数               |
 | interrupt 不生效 / resume 报错 | 检查 `compile({ checkpointer })` 是否配置、resume 时 `thread_id` 是否一致 |
 | 模型不调用工具                   | 检查 `bindTools` 是否执行、工具 `description` 是否清晰（模型靠描述决定何时调用）        |
-| 图不结束死循环                   | 图运行回到 LangGraph 默认 25 超步保护；业务层不设置任务总时长、工具次数或模型次数上限，仅用 SSE 停滞超时释放完全无事件的连接 |
+| 图不结束死循环                   | 图运行统一使用 1000 超步保护；业务层不设置任务总时长、工具次数或模型次数上限，另用 SSE 停滞超时释放完全无事件的连接 |
 | 模型网关瞬断导致长任务中途终止 | 408/429/5xx、请求超时与网络错误默认自动重试 10 次；每次失败、最终失败与重试成功都会产出 `model_retry` 事件，前端默认折叠并显示重试次数 / 总请求次数 / 失败原因。400、认证失败和用户取消不重试 |
 | RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
@@ -1585,7 +1585,7 @@ console.log(result.messages.at(-1).content);
 | 读取历史会话时容量条有时消失 | 本地已有 transcript 时旧逻辑直接跳过服务端回放，也不恢复 usage。现在始终拉 transcript 补 usage；正文已有则只重放 usage，不重建 DOM |
 | 新建空会话仍显示上一会话的上下文与缓存 | 新建会话只重绘消息区，没有刷新容量条，旧 DOM 保持可见。现在会话视图切换统一调用 `updateContextBar()`，没有 usage 的新会话立即隐藏容量条 |
 | Electron 导出会话出现白框 | `window.open('/api/.../export')` 被同源窗口处理器允许后变成一个下载导航窗口。改为 `authFetch` 获取 Blob、`a.download` 下载，不创建新窗口 |
-| 自主审批重复循环 / 页面出现原始风险 JSON | tools 节点里风险审查模型的正文混入 messages 流；且相同工具参数使用不同 call id 会重复评估。现在 tools 节点正文过滤、同类风险 JSON 兜底过滤，完全重复的工具调用复用本轮结果；不再按 12 次固定业务上限截断，长任务可继续执行不同步骤，运行层保留可配置的应急超步保护 |
+| 自主审批重复循环 / 页面出现原始风险 JSON | tools 节点里风险审查模型的正文混入 messages 流；且相同工具参数使用不同 call id 会重复评估。现在 tools 节点正文过滤、同类风险 JSON 兜底过滤，完全重复的工具调用复用本轮结果；不再按 12 次固定业务上限截断，长任务可继续执行不同步骤，运行层保留 1000 超步的应急保护 |
 | 自主模式放行后审计链缺 `hitl.decided` | 风险模型判低风险时原来只执行工具、不写安全日志。现在 ToolMessage 带 `riskDecision=auto`，流翻译层产出 `risk_decision`，服务端统一写 `hitl.decided(decision=auto, source=tool-risk, reason)`；参数不落审计 |
 | usage 快照在 journal 中成百上千次重复 | 流式调用每片都落 usage，长工具轮把同一累计快照写满事件上限。现在 journal 投影按 callId 保留终值，旧无 id 数据只消连续重复；SSE 实时容量条不受影响 |
 | 3000 事件截断后上下文突然变小且无从复盘 | 原逻辑直接 `slice(-3000)`。现在保留尾部时写 `storage.eventLimit/droppedEvents/originalEvents`，同时量化 token/reasoning 合并量 |
@@ -1915,7 +1915,7 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 ## 长任务预算与工作台账
 
 - 一个用户目标 + 后续审批/澄清/「继续」属于同一个逻辑任务；`server/task-budget.ts` 按执行片段累计活动时长，审批等待不耗时。
-- 默认预算：活动 10 分钟、停滞 120 秒、工具 30 次、模型 60 次；超限由 SSE 看门狗 abort 并返回中文错误，不会伪装成正常完成。
+- 运行保护：不限制活动时长、工具次数或模型次数；SSE 连续 120 秒无事件才判定停滞并释放连接，图执行统一保留 1000 超步兜底。
 - 每次模型请求注入任务台账：目标、最近补充、已完成工具与关键结论；历史消息被投影省略时仍能跨审批继续。长任务没有业务层执行/调用次数预算，台账只用于避免重复探索。
 - 等价只读 terminal 命令会做规范化去重；当前轮大图保留，历史大图转文本占位；网关回显的 tools schema / 超大 output 在 checkpoint 前瘦身。
 - checkpoint compact 会按字节复核，并在日志中记录优化前后体积；`/compact` 仍会重建线程并注入摘要。

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AIMessage, AIMessageChunk, ToolMessage } from "@langchain/core/messages";
+import { AGENT_RECURSION_LIMIT } from "../../src/config.js";
 import { runGraphEvents } from "../../src/server/stream.js";
 import type { AgentEvent } from "../../src/server/events.js";
 
-test("stream：回到 LangGraph 默认递归保护", async () => {
+test("stream：长任务递归保护固定为 1000", async () => {
   let seenOptions: Record<string, unknown> | undefined;
   const graph = {
     stream: async (_input: unknown, options: Record<string, unknown>) => {
@@ -15,7 +16,8 @@ test("stream：回到 LangGraph 默认递归保护", async () => {
   for await (const _event of runGraphEvents(graph, {}, { threadId: "long-task-limit-test" })) {
     // 空流也必须正常结束；本用例只校验传给 LangGraph 的运行参数。
   }
-  assert.ok(!("recursionLimit" in (seenOptions ?? {})), "不得覆盖 LangGraph 默认 25 超步保护");
+  assert.equal(seenOptions?.recursionLimit, AGENT_RECURSION_LIMIT);
+  assert.equal(AGENT_RECURSION_LIMIT, 1_000);
 });
 
 test("stream：过滤内部模型节点，保留可见回答与澄清 interrupt", async () => {

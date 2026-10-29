@@ -14,6 +14,9 @@
 import "dotenv/config";
 import { DEFAULT_REASONING, type ReasoningSetting } from "./reasoning.js";
 
+/** LangGraph 超步上限：既给长任务留足执行空间，也保留失控循环的最终防线。 */
+export const AGENT_RECURSION_LIMIT = 1_000;
+
 /** 长任务不再设置业务层执行时长 / 工具 / 模型调用上限；只保留单请求停滞保护。 */
 const DEFAULT_AGENT_IDLE_TIMEOUT_MS = 120_000;
 const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 90_000;
