@@ -182,3 +182,87 @@ test("自主审批重复调用命中去重，不再重复调用风险评估模�
   assert.equal(assessments, 1, "相同意图与参数的重复调用不应重复风险评估");
   assert.match(String((second.messages[0] as ToolMessage).content), /复用本轮上一次/);
 });
+
+test("「继续」不清空工具去重边界，同参数只执行一次", async () => {
+  let runs = 0;
+  const echo = tool(
+    async ({ tag }) => { runs += 1; return `echo:${tag}`; },
+    { name: "echo_tool", description: "跨继续去重测试", schema: z.object({ tag: z.string() }) }
+  );
+  const node = createApprovalToolsNode({ tools: [echo], approvalDescriptions: {}, profileId: "general" });
+  const first = await node(makeState([{ id: "continue-1", name: "echo_tool", args: { tag: "same" } }]) as never);
+  const second = await node({
+    messages: [
+      new HumanMessage("继续"),
+      new HumanMessage("原始任务"),
+      new AIMessage({ content: "", tool_calls: [{ id: "continue-1", name: "echo_tool", args: { tag: "same" }, type: "tool_call" }] }),
+      first.messages[0] as ToolMessage,
+      new AIMessage({ content: "", tool_calls: [{ id: "continue-2", name: "echo_tool", args: { tag: "same" }, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 1, "继续不应重置去重边界");
+  assert.match(String((second.messages[0] as ToolMessage).content), /复用本轮上一次/);
+});
+
+test("等价 PowerShell 只读命令归一后复用，未知命令不误判只读", async () => {
+  let runs = 0;
+  const terminal = tool(
+    async ({ command }) => { runs += 1; return `ran:${command}`; },
+    { name: "terminal", description: "只读命令归一测试", schema: z.object({ command: z.string() }) }
+  );
+  const node = createApprovalToolsNode({ tools: [terminal], approvalDescriptions: {}, profileId: "general" });
+  const first = await node(makeState([
+    { id: "norm-1", name: "terminal", args: { command: "Get-Content src/client/views/sessions.ts -Raw" } },
+  ]) as never);
+  const second = await node({
+    messages: [
+      new HumanMessage("继续"),
+      new HumanMessage("读取目标文件"),
+      new AIMessage({ content: "", tool_calls: [{ id: "norm-1", name: "terminal", args: { command: "Get-Content src/client/views/sessions.ts -Raw" }, type: "tool_call" }] }),
+      first.messages[0] as ToolMessage,
+      new AIMessage({ content: "", tool_calls: [{ id: "norm-2", name: "terminal", args: { command: "powershell -NoProfile -Command \"[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content src/client/views/sessions.ts -Encoding UTF8\"" }, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 1, "等价读取命令不应重复执行");
+  assert.match(String((second.messages[0] as ToolMessage).content), /复用本轮上一次/);
+});
+
+
+test("写文件成功后清空旧读取缓存，随后同路径重读会重新执行", async () => {
+  let reads = 0;
+  let writes = 0;
+  const readFile = tool(
+    async () => { reads += 1; return `content-v${reads}`; },
+    { name: "read_file", description: "读", schema: z.object({ path: z.string() }) }
+  );
+  const writeFile = tool(
+    async () => { writes += 1; return "written"; },
+    { name: "write_file", description: "写", schema: z.object({ path: z.string(), content: z.string() }) }
+  );
+  const node = createApprovalToolsNode({ tools: [readFile, writeFile], approvalDescriptions: {}, profileId: "general" });
+  const readCall = (id: string) => new AIMessage({
+    content: "", tool_calls: [{ id, name: "read_file", args: { path: "a.ts" }, type: "tool_call" as const }],
+  });
+  const writeCall = new AIMessage({
+    content: "", tool_calls: [{ id: "w1", name: "write_file", args: { path: "a.ts", content: "new" }, type: "tool_call" as const }],
+  });
+
+  const first = await node({
+    messages: [new HumanMessage("修改后验证"), readCall("r1")],
+  } as never, { configurable: { permission_mode: "auto", thread_id: "write-invalidate" } });
+  const write = await node({
+    messages: [
+      new HumanMessage("修改后验证"), readCall("r1"), first.messages[0] as ToolMessage, writeCall,
+    ],
+  } as never, { configurable: { permission_mode: "auto", thread_id: "write-invalidate" } });
+  const second = await node({
+    messages: [
+      new HumanMessage("修改后验证"), readCall("r1"), first.messages[0] as ToolMessage,
+      writeCall, write.messages[0] as ToolMessage, readCall("r2"),
+    ],
+  } as never, { configurable: { permission_mode: "auto", thread_id: "write-invalidate" } });
+
+  assert.equal(writes, 1);
+  assert.equal(reads, 2, "写后读取不能复用旧内容");
+  assert.match(String((second.messages[0] as ToolMessage).content), /content-v2/);
+});

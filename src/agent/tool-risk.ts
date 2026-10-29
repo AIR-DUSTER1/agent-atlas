@@ -137,8 +137,34 @@ export function parseToolRiskAssessment(raw: string): ToolRiskAssessment {
   }
 }
 
+/**
+ * 确定性只读预判：能证明「只读」的命令不调用风险模型。
+ * 任何带重定向、删除、安装、网络请求或未知命令都返回 null，继续走高成本审查。
+ */
+export function deterministicReadOnlyRisk(toolName: string, args: Record<string, unknown>): ToolRiskAssessment | null {
+  if (toolName !== "terminal" || typeof args.command !== "string") return null;
+  let command = args.command.trim();
+  const wrapped = command.match(/^powershell(?:\.exe)?\s+(?:-NoProfile\s+)?-Command\s+"?([\s\S]*?)"?$/i);
+  if (wrapped) command = wrapped[1];
+  command = command
+    .replace(/\[\s*Console\s*\]::OutputEncoding\s*=\s*\[[^\]]+\]::UTF8\s*;?\s*/gi, "")
+    .replace(/\s+-Encoding\s+UTF8\b/gi, "")
+    .replace(/\s+-Raw\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!command || /[>|;&]|\.\.\/|--output(?:=|\s)|--pre(?:=|\s)|(?:^|\s)(?:rm|del|erase|rmdir|remove-item|move|move-item|copy|copy-item|rename|rename-item|set-content|add-content|clear-content|out-file|new-item|set-item|mkdir|invoke-webrequest|invoke-restmethod|invoke-expression|start-process|npm\s+(?:install|i)|pnpm\s+(?:install|i)|git\s+(?:push|reset|clean|checkout|switch|commit)|curl|wget|ssh|scp)\b/i.test(command)) {
+    return null;
+  }
+  const readOnly = /^(?:Get-Content|Select-String|Get-ChildItem|Resolve-Path|Test-Path|git status|rg|findstr|dir|pwd|Get-Location)\b/i.test(command);
+  if (!readOnly) return null;
+  return { highRisk: false, reason: "确定性预判为只读命令，无需调用风险模型" };
+}
+
 export function createToolRiskAssessor(model: ToolRiskJudgeModel): ToolRiskAssessor {
   return async (context) => {
+    const deterministic = deterministicReadOnlyRisk(context.toolName, context.args);
+    // 确定性预判不产生模型成本；不要伪造 usage，否则会虚增模型调用计数与任务预算。
+    if (deterministic) return deterministic;
     const argsText = (() => {
       try { return JSON.stringify(context.args, null, 2); }
       catch { return String(context.args); }

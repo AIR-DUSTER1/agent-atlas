@@ -25,10 +25,12 @@ import {
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
+import { config } from "../config.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { memoryNoteForPrompt } from "../memory-store.js";
 import { skillNoteForMessage } from "../skills.js";
 import { buildAgentContext } from "./context-builder.js";
+import { sanitizeCheckpointMessage } from "./checkpoint-sanitize.js";
 import { createApprovalToolsNode } from "./hitl.js";
 import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
@@ -65,7 +67,7 @@ export interface ClarificationRequest {
 
 /** 可注入的模型壳：生产用 createChatModel，测试可用 FakeListChatModel 验证整图流转。 */
 export interface WorkflowChatModel {
-  invoke(input: unknown): Promise<AIMessage>;
+  invoke(input: unknown, options?: { signal?: AbortSignal }): Promise<AIMessage>;
 }
 
 export interface WorkflowModels {
@@ -270,6 +272,11 @@ function recentToolResults(messages: BaseMessage[]): string {
     .join("\n");
 }
 
+function requestSignal(parent?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(config.modelRequestTimeoutMs);
+  return parent ? AbortSignal.any([parent, timeout]) : timeout;
+}
+
 /**
  * 构建带需求理解与反思的 ReAct 图。
  * general / estate 只提供 profile（提示词 + 工具 allowlist + 审批策略），
@@ -303,7 +310,7 @@ export function createWorkflowGraph(
     ? `${REVIEW_PROMPT}\n${profile.reviewerGuidance}`
     : REVIEW_PROMPT;
 
-  async function analyzeNode(state: WorkflowStateType) {
+  async function analyzeNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
     const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
     const history = state.clarificationHistory
       ? `上一轮澄清（仅在相关时参考）：${state.clarificationHistory}`
@@ -325,7 +332,7 @@ export function createWorkflowGraph(
             `上一轮澄清（仅在相关时参考）：\n${state.clarificationHistory || "（无）"}\n\n` +
             `最近对话：\n${recentContext(state.messages) || "（无）"}\n\n当前请求：\n${userText}`,
         },
-      ]);
+      ], { signal: requestSignal(nodeConfig?.signal) });
       const analysis = parseRequirementAnalysis(contentText(response.content));
       const brief = (analysis.brief || userText).slice(0, MAX_BRIEF_TEXT);
       if (analysis.understood) {
@@ -367,7 +374,14 @@ export function createWorkflowGraph(
 
   async function agentNode(
     state: WorkflowStateType,
-    config?: { configurable?: { permission_mode?: PermissionMode } }
+    config?: {
+      signal?: AbortSignal;
+      configurable?: {
+        permission_mode?: PermissionMode;
+        task_ledger?: string;
+        task_budget_note?: string;
+      };
+    }
   ) {
     // 上下文投影 + 内部注记统一走 context-builder：需求 brief / 历史澄清 /
     // 反思反馈 / 权限模式 / 跨会话长期记忆在这里组装成稳定 system，
@@ -386,12 +400,15 @@ export function createWorkflowGraph(
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
       memoryNote: memoryNoteForPrompt() ?? undefined,
       skillNote: skillNote ?? undefined,
+      taskLedger: config?.configurable?.task_ledger,
+      budgetNote: config?.configurable?.task_budget_note,
     });
-    const response = await agentModel.invoke(context.messages);
-    return { messages: [response] };
+    const response = await agentModel.invoke(context.messages, { signal: requestSignal(config?.signal) });
+    // 网关回显的 tools/output 与 dataURL 会原样进入 checkpoint；先投影再入状态。
+    return { messages: [sanitizeCheckpointMessage(response)] };
   }
 
-  async function reviewNode(state: WorkflowStateType) {
+  async function reviewNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
     const last = state.messages.at(-1);
     const lastAi = last?.getType() === "ai" ? (last as AIMessage) : undefined;
     const answer = contentText(lastAi?.content).slice(0, MAX_USER_TEXT);
@@ -407,7 +424,7 @@ export function createWorkflowGraph(
             `最近工具结果：\n${recentToolResults(state.messages) || "（无）"}\n\n` +
             `助手最新回答：\n${answer || "（空回答）"}`,
         },
-      ]);
+      ], { signal: requestSignal(nodeConfig?.signal) });
       const review = parseReviewResult(contentText(response.content));
       if (review.passes || attempts >= MAX_REVIEW_REVISIONS) {
         return { reviewFeedback: "", reviewAttempts: attempts + 1 };

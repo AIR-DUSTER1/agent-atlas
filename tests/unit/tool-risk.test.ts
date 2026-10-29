@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createToolRiskAssessor,
+  deterministicReadOnlyRisk,
   parseToolRiskAssessment,
   type ToolRiskJudgeModel,
 } from "../../src/agent/tool-risk.js";
@@ -72,4 +73,25 @@ test("审查模型异常或返回坏 JSON 时按高风险处理", async () => {
   assert.match(thrown.reason, /gateway timeout/);
   assert.equal(malformed.highRisk, true);
   assert.equal(malformed.failed, true);
+});
+
+test("确定性只读预判放行常见读取命令，危险/未知命令继续交给模型", async () => {
+  assert.equal(deterministicReadOnlyRisk("terminal", { command: "Get-Content src/a.ts -Raw" })?.highRisk, false);
+  assert.equal(deterministicReadOnlyRisk("terminal", { command: "git status --short" })?.highRisk, false);
+  assert.equal(deterministicReadOnlyRisk("terminal", { command: "Get-Content a.ts > b.ts" }), null);
+  assert.equal(deterministicReadOnlyRisk("terminal", { command: "Write-Host hello" }), null);
+
+  let calls = 0;
+  const model: ToolRiskJudgeModel = {
+    async invoke() { calls += 1; return { content: "not-json" }; },
+  };
+  const assess = createToolRiskAssessor(model);
+  const result = await assess({
+    toolName: "terminal",
+    description: "读取文件",
+    args: { command: "Get-Content src/a.ts" },
+    userIntent: "查看实现",
+  });
+  assert.equal(result.highRisk, false);
+  assert.equal(calls, 0, "确定性只读命令不应该调用风险模型");
 });

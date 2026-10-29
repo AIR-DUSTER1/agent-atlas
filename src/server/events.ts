@@ -89,10 +89,26 @@ export type AgentEvent =
       node?: string;
       /** 内部辅助模型调用：会计入统计成本，但不得覆盖上下文容量条 */
       internal?: boolean;
+      /** 服务端权威的任务累计快照（跨审批 continuation 不重置）。 */
+      taskInputTokens?: number;
+      taskOutputTokens?: number;
+      taskToolCalls?: number;
+      taskModelCalls?: number;
+      taskActiveMs?: number;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }
+  /** 自主审批的自动决定：仅供服务端审计，写 SSE 也无害（前端可忽略） */
+  | {
+      type: "risk_decision";
+      decision: "auto";
+      toolName: string;
+      reason: string;
+      callId?: string;
+    }
   /** 优雅退出：由 lifecycle.shutdown 直接写入 SSE，不经过图/翻译层 */
   | { type: "shutdown"; message: string }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export type UsageEvent = Extract<AgentEvent, { type: "usage" }>;

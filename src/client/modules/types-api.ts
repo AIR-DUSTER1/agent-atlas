@@ -56,8 +56,20 @@ export type AgentEvent =
       callId?: string;
       node?: string;
       internal?: boolean;
+      taskInputTokens?: number;
+      taskOutputTokens?: number;
+      taskToolCalls?: number;
+      taskModelCalls?: number;
+      taskActiveMs?: number;
     }
   | { type: "interrupt"; payload: InterruptPayload }
+  | {
+      type: "risk_decision";
+      decision: "auto";
+      toolName: string;
+      reason: string;
+      callId?: string;
+    }
   | { type: "shutdown"; message: string }
   | { type: "error"; message: string }
   | { type: "done" };

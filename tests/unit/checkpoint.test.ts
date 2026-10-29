@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { HumanMessage } from "@langchain/core/messages";
+import { sanitizeCheckpointMessage, sanitizeSerializedCheckpoint } from "../../src/agent/checkpoint-sanitize.js";
 import { AIMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import {
@@ -305,4 +306,65 @@ test("检查点 compact 后重启续聊仍保留完整会话上下文", async ()
     await saverB?.flush();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("checkpoint sanitizer：移掉网关 tools/output 回显，保留 usage 与消息类", () => {
+  const message = new AIMessage({
+    content: "回答",
+    response_metadata: {
+      id: "resp-1",
+      model: "deepseek",
+      usage: { input_tokens: 100, output_tokens: 20 },
+      tools: Array.from({ length: 50 }, (_, i) => ({ name: `tool-${i}`, description: "x".repeat(500) })),
+      output: Array.from({ length: 10 }, (_, i) => ({ id: `out-${i}`, text: "x".repeat(2_000) })),
+      meaningless: "drop",
+    },
+  });
+  const before = JSON.stringify(message);
+  const sanitized = sanitizeCheckpointMessage(message);
+  const after = JSON.stringify(sanitized);
+  assert.ok(after.length < before.length);
+  assert.match(after, /"usage"/);
+  assert.doesNotMatch(after, /"tools"/);
+  assert.doesNotMatch(after, /"output"/);
+  assert.equal(sanitized.getType(), "ai", "必须保留 LangChain 消息实例");
+  assert.equal(String(sanitized.content), "回答");
+});
+
+test("checkpoint sanitizer：当前轮大图保留，历史大图可被投影", () => {
+  const big = "data:image/png;base64," + "A".repeat(10_000);
+  const message = new HumanMessage({ content: [{ type: "image_url", image_url: { url: big } }] });
+  const sanitized = sanitizeCheckpointMessage(message);
+  assert.equal(sanitized, message, "单条消息投影不误删当前轮图片；历史投影由 context-builder 负责");
+});
+
+
+test("旧 checkpoint JSON 在 compact 时可清理网关 tools/output 回显", () => {
+  const payload = {
+    channel_values: {
+      messages: [{
+        lc: 1,
+        type: "constructor",
+        id: ["langchain_core", "messages", "AIMessageChunk"],
+        kwargs: {
+          content: "ok",
+          tool_calls: [{ name: "read_file", args: { path: "a.ts" }, id: "c1" }],
+          response_metadata: {
+            id: "resp-1",
+            model: "deepseek",
+            tools: [{ schema: "x".repeat(5_000) }],
+            output: [{ text: "x".repeat(5_000) }],
+          },
+          additional_kwargs: { reasoning: "保留", output: "删除" },
+        },
+      }],
+    },
+  };
+  const sanitized = sanitizeSerializedCheckpoint(payload);
+  const message = sanitized.channel_values.messages[0];
+  assert.match(JSON.stringify(message), /resp-1/);
+  assert.doesNotMatch(JSON.stringify(message), /"tools"/);
+  assert.doesNotMatch(JSON.stringify(message), /"output"/);
+  assert.match(JSON.stringify(message), /保留/);
+  assert.deepEqual(message.kwargs.tool_calls, payload.channel_values.messages[0].kwargs.tool_calls);
 });

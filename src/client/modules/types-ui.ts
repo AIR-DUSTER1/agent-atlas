@@ -29,6 +29,23 @@ export interface UsageInfo {
   lastInput: number;
   lastOutput: number;
   lastCache: number;
+  /** 一个逻辑任务内所有主/内部模型调用的累计 token（跨审批、跨「继续」）。 */
+  taskInput?: number;
+  taskOutput?: number;
+  /** 实际工具调用数；流式分片不重复计数。 */
+  taskTools?: number;
+  /** 主模型 + 内部模型调用次数。 */
+  taskModels?: number;
+  /** 活动时长（等待审批的墙钟时间不计入）。 */
+  taskActiveMs?: number;
+  /** 最近一次模型/工具事件时间，用于前端显示「等待模型响应」。 */
+  lastActivityAt?: number;
+  /** 每个 callId 的用量峰值（流式快照会递增，不是增量）。 */
+  usagePeaks?: Record<string, { input: number; output: number }>;
+  /** 每个 callId 已计入任务的峰值；用于历史回放覆盖同一快照时只补差额。 */
+  taskUsagePeaks?: Record<string, { input: number; output: number }>;
+  /** 已计数的工具调用 id，避免流式分片重复增加工具次数。 */
+  seenToolIds?: Set<string>;
 }
 
 export interface TextPart {
@@ -124,6 +141,17 @@ export interface TranscriptRecord {
   files?: Array<{ name: string; source: string; image?: boolean }>;
   events?: AgentEvent[];
   continuation?: boolean;
+  /** journal 存储投影：有值时说明该轮发生过 usage 归并/事件上限裁剪 */
+  storage?: {
+    originalEvents: number;
+    storedEvents: number;
+    droppedEvents: number;
+    eventLimit: number;
+    mergedTokenChunks: number;
+    mergedReasoningChunks: number;
+    reasoningCharsDropped: number;
+    dedupedUsageEvents: number;
+  };
 }
 
 /* ---------------------------------------------------------------------------

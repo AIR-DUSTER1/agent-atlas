@@ -12,6 +12,7 @@ import { createChatModel } from "../llm.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { log } from "./logging.js";
 import { buildGraph, currentConfigVersion, type Session, type TurnRecord } from "./sessions.js";
+import { journalCompact } from "./session-store.js";
 
 const MAX_TRANSCRIPT_CHARS = 80_000; // 送进摘要模型的原文上限
 const MAX_SUMMARY_CHARS = 4_000;     // 摘要最终落库上限
@@ -121,6 +122,7 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   // （摘要已接管上下文，旧 thread 留在 checkpoints.ndjson 只会无限增长）；
   // 新线程以注入的摘要为起点，模型不再看到被压缩掉的原始消息。
   const nextThreadId = `web-${randomUUID()}`;
+  const compactedTurnId = session.turnHistory.at(-1)?.turnId ?? null;
   if (session.kind === "agent" || session.kind === "estate") {
     void getCheckpointSaver().deleteThread(session.threadId);
   }
@@ -131,6 +133,13 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   session.resumeUninjected = false;
   session.contextSummary = summary;
   session.contextSummaryInjected = false;
+  session.lastCompactTurnId = compactedTurnId;
+  journalCompact(session.id, nextThreadId, summary, {
+    beforeChars,
+    afterChars: summary.length,
+    usedModel,
+    lastCompactTurnId: compactedTurnId,
+  });
 
   return {
     summary,

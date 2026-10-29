@@ -189,6 +189,16 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
         user?: string;
         files?: Array<{ name: string; source: string; image?: boolean }>;
         events?: unknown[];
+        storage?: {
+          originalEvents?: number;
+          storedEvents?: number;
+          droppedEvents?: number;
+          eventLimit?: number;
+          mergedTokenChunks?: number;
+          mergedReasoningChunks?: number;
+          reasoningCharsDropped?: number;
+          dedupedUsageEvents?: number;
+        };
       }>;
       pendingApproval?: boolean;
     }>(`/api/sessions/${s.id}/transcript`);
@@ -214,6 +224,17 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
         }
         for (const ev of rec.events || []) handleEvent(ev as never, ablock, s.id);
         finalize(ablock, s.id);
+        if ((rec.storage?.droppedEvents ?? 0) > 0) {
+          const original = rec.storage?.originalEvents ?? 0;
+          const kept = rec.storage?.storedEvents ?? rec.events?.length ?? 0;
+          const notice: ChatBlock = {
+            t: "notice",
+            title: "历史记录已截断",
+            text: `该轮原始 ${original} 条事件，仅保留最近 ${kept} 条（上限 ${rec.storage?.eventLimit ?? 3000}）。` +
+              `可查看 turnId 附近的日志与统计；本次截断不会影响新对话。`,
+          };
+          arr.push(notice);
+        }
       }
     } else {
       // 本地已有正文时不再重复重建 DOM，但仍从 journal 恢复本轮 usage；

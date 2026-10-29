@@ -157,6 +157,18 @@ function parseBeikeJson(stdout: string): { ok: boolean; data: unknown; raw: stri
   return { ok: false, data: null, raw: trimmed.slice(0, 4_000) };
 }
 
+/** 识别 CLI exit 0 但业务失败的 JSON；导出供工具层与回归测试共用。 */
+export function beikeBusinessError(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const payload = data as { ok?: unknown; error?: unknown };
+  if (payload.ok === false) {
+    return typeof payload.error === "string" && payload.error.trim()
+      ? payload.error.trim()
+      : "贝壳 CLI 返回业务失败";
+  }
+  return typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : null;
+}
+
 /** 探测可用的 beike 二进制：配置路径优先，其次 PATH 里的 beike */
 async function resolveBeikeBin(): Promise<{ path: string; version: string } | null> {
   const candidates: string[] = [];
@@ -393,7 +405,13 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
     }
     if (r.code === 0) {
       const parsed = parseBeikeJson(r.stdout);
-      if (parsed.ok) return { ok: true, action, data: parsed.data };
+      if (parsed.ok) {
+        // CLI 可能以 exit 0 返回业务失败 JSON（例如后端工具名升级）。
+        // 只看退出码会把这类失败画成绿色「完成」，上层也无法熔断。
+        const businessError = beikeBusinessError(parsed.data);
+        if (businessError) return { ok: false, action, error: businessError };
+        return { ok: true, action, data: parsed.data };
+      }
       // 纯文本输出（非 JSON）：对模型来说文本本身就是可读结果
       return { ok: true, action, data: { text: parsed.raw.slice(0, 6_000) } };
     }

@@ -25,9 +25,12 @@ import { ensureCheckpointsLoaded, getCheckpointSaver } from "../checkpoint.js";
 import { getExternalAgent } from "./external.js";
 import {
   journalSession, journalDelete, journalApproval, journalDecided, journalTurn, journalPermission,
+  journalCompact, journalContextInjected,
   replaySessions, journalSnapshot, maybeCompactJournal, type SessionRecord,
 } from "./session-store.js";
 import type { AgentEvent, InterruptPayload } from "./events.js";
+import { canonicalizeTurnEvents, describeTurnStorage, type TurnStorageSummary } from "./turn-record.js";
+import type { TaskRunState } from "./task-budget.js";
 
 export interface DemoMeta {
   id: 1 | 2 | 3 | 4;
@@ -67,13 +70,14 @@ export interface TurnRecord {
   files?: Array<{ name: string; source: string; image: boolean }>;
   /** 该轮 SSE 推给前端的全部事件（含 usage/error/interrupt，不含 done） */
   events: AgentEvent[];
+  /** journal 投影的归并/裁剪说明；仅在确有压缩时写入，不进入模型上下文。 */
+  storage?: TurnStorageSummary;
   startedAt: number;
   finishedAt?: number;
   durationMs?: number;
 }
 
 const MAX_TURN_RECORDS = 100;   // 每会话最多保留轮数
-const MAX_RECORD_EVENTS = 3000; // 单轮事件数上限（异常防护）
 
 export interface Session {
   id: string;
@@ -107,8 +111,14 @@ export interface Session {
   contextSummary: string | null;
   /** 摘要是否已注入当前线程（注入后不再重复占预算） */
   contextSummaryInjected: boolean;
+  /** 最近一次压缩覆盖到的轮次；自动压缩据此避免同一轮重复摘要。 */
+  lastCompactTurnId: string | null;
   /** 会话级权限模式：只读 / 审批（默认）/ 自主 / 自动 —— 工具执行闸门（permission.ts） */
   permissionMode: PermissionMode;
+  /** 当前逻辑任务的跨审批预算与工具台账；只驻留内存，不写 checkpoint。 */
+  activeTask: TaskRunState | null;
+  /** 最近一次渲染好的任务台账；注入模型 system 注记，帮助跨审批继续。 */
+  taskLedger: string;
 }
 
 const sessions = new Map<string, Session>();
@@ -189,7 +199,10 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     resumeUnavailable: false,
     contextSummary: null,
     contextSummaryInjected: false,
+    lastCompactTurnId: null,
     permissionMode: "approve",
+    activeTask: null,
+    taskLedger: "",
   };
   sessions.set(session.id, session);
   // T2-2：创建即落 journal —— 白名单挑字段（Session 内含编译图/内存结构，严禁整只序列化）
@@ -233,7 +246,10 @@ export function beginTurnRecord(
 export function completeTurnRecord(session: Session, events: AgentEvent[]): void {
   const record = session.turnHistory.at(-1);
   if (!record) return;
-  record.events = events.length > MAX_RECORD_EVENTS ? events.slice(-MAX_RECORD_EVENTS) : events;
+  const canonical = canonicalizeTurnEvents(events);
+  record.events = canonical.events;
+  const storage = describeTurnStorage(canonical.storage);
+  if (storage) record.storage = storage;
   record.finishedAt = Date.now();
   record.durationMs = Math.max(0, record.finishedAt - record.startedAt);
   // T2-2：完整轮次落 journal（含被中止的部分轮；失败自吞，不影响回答流）
@@ -246,7 +262,8 @@ export function completeTurnRecord(session: Session, events: AgentEvent[]): void
     record.user,
     record.files,
     record.events,
-    record.continuation
+    record.continuation,
+    record.storage
   );
   void maybeCompactJournal(); // 后台探 journal 大小，超阈值自动 compact
 }
@@ -351,6 +368,7 @@ export function buildPrehistoryNote(session: Session): string | null {
 export function takeContextSummary(session: Session): string | null {
   if (!session.contextSummary || session.contextSummaryInjected) return null;
   session.contextSummaryInjected = true;
+  journalContextInjected(session.id);
   return `【上下文压缩摘要（此前对话已被压缩，以下内容用于延续上下文）】\n\n${session.contextSummary}`;
 }
 
@@ -394,6 +412,7 @@ export async function restoreSessions(): Promise<number> {
         continuation: t.continuation === true,
         files: t.files,
         events: t.events as AgentEvent[],
+        ...(t.storage && typeof t.storage === "object" ? { storage: t.storage as TurnStorageSummary } : {}),
         startedAt: t.startedAt ?? rec.createdAt,
         finishedAt: t.finishedAt,
         durationMs: t.durationMs,
@@ -403,9 +422,12 @@ export async function restoreSessions(): Promise<number> {
       resumeUnavailable: Boolean(pend && pend.status === "pending"),
       // T2-4：带历史轮且无持久检查点的会话，下一轮真图调用时注入上文
       resumeUninjected: rec.turns > 0 && !hasCheckpoint,
-      contextSummary: null,
-      contextSummaryInjected: false,
+      contextSummary: rec.contextSummary ?? null,
+      contextSummaryInjected: rec.contextSummaryInjected === true,
+      lastCompactTurnId: rec.lastCompactTurnId ?? null,
       permissionMode: rec.permissionMode ?? "approve",
+      activeTask: null,
+      taskLedger: "",
     };
     sessions.set(session.id, session);
     restored += 1;

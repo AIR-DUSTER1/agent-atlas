@@ -389,3 +389,39 @@ test("自主权限：AI 判高风险时生成审批申请且不执行工具", as
     cacheReadTokens: 100,
   });
 });
+
+test("同参数确定性失败两次后熔断，不再第三次执行", async () => {
+  let executed = 0;
+  const failing = tool(async () => {
+    executed += 1;
+    return JSON.stringify({ error: "Unknown tool: 'legacy_name'", ok: false });
+  }, {
+    name: "broken_tool",
+    description: "测试业务失败归一与熔断",
+    schema: z.object({ query: z.string() }),
+  });
+  const profile = {
+    ...generalProfile,
+    tools: [failing],
+    approvalDescriptions: {},
+  };
+  const call = () => new AIMessage({
+    content: "",
+    tool_calls: [{ name: "broken_tool", args: { query: "same" }, id: "same-call" }],
+  });
+  const graph = createWorkflowGraph(
+    profile,
+    models(scriptedAgent([call(), call(), call(), new AIMessage("停止重试")])),
+    { checkpointer: new MemorySaver() }
+  );
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("调用失败工具")] },
+    { configurable: { thread_id: "tool-failure-breaker", permission_mode: "auto" } }
+  ) as unknown as GraphResult;
+  const toolResults = result.messages.filter((message) => message instanceof ToolMessage);
+  assert.equal(executed, 2, "第三次必须由熔断拦截");
+  assert.equal(toolResults[0]?.status, "error", "JSON ok:false 不能标成 success");
+  assert.match(String(toolResults[0]?.content), /Unknown tool/);
+  assert.equal(toolResults.length, 3, "两次执行 + 一次熔断响应");
+  assert.match(String(toolResults[2]?.content), /熔断/);
+});

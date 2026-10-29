@@ -33,13 +33,16 @@ import { MemorySaver, type Checkpoint, type CheckpointMetadata } from "@langchai
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { log } from "./server/logging.js";
 import { ensureNdjsonSchemaHeader, inspectNdjson, latestNdjsonHealth, type NdjsonHealthReport } from "./server/persistence/ndjson-health.js";
+import { sanitizeCheckpointMessage, sanitizeSerializedCheckpoint } from "./agent/checkpoint-sanitize.js";
 
 /** 触发 compact 的文件大小上限（字节）；每线程只留最近 KEEP_PER_THREAD 个检查点 */
 const CHECKPOINT_MAX_BYTES = 24_000_000;
 /** compact 后每 (thread, ns) 保留的检查点数（留余量供 parent 链与回放定位） */
 const KEEP_PER_THREAD = 10;
-/** 每追加多少行探一次文件大小（避免每行 stat） */
-const COMPACT_CHECK_EVERY = 64;
+/** 触发 compact 的追加行数；大行由每次追加后的轻量探测兜住。 */
+const COMPACT_CHECK_EVERY = 16;
+/** 单次 append 后超过该大小时立即 compact（不必等到 16 行）。 */
+const COMPACT_URGENT_BYTES = 2_000_000;
 /** checkpoint 行格式版本：未来版本拒绝回放。 */
 export const CHECKPOINT_SCHEMA_VERSION = 1;
 
@@ -211,6 +214,23 @@ export class PersistentSaver extends MemorySaver {
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata
   ): Promise<RunnableConfig> {
+    // 持久化前做一次有损投影：网关回显的 tools/output、长 dataURL 不参与后续
+    // 请求，却会让每个 checkpoint 成倍膨胀。只投影消息通道，保留协议必需字段。
+    const messages = (checkpoint.channel_values as { messages?: unknown } | undefined)?.messages;
+    if (Array.isArray(messages)) {
+      checkpoint = {
+        ...checkpoint,
+        channel_values: {
+          ...checkpoint.channel_values,
+          messages: messages.map((message) => {
+            const candidate = message as { response_metadata?: unknown };
+            return candidate && typeof candidate === "object" && "content" in candidate
+              ? sanitizeCheckpointMessage(message as never)
+              : message;
+          }),
+        },
+      };
+    }
     // 先自行序列化（super.put 内部会再序列一次；换来不依赖父类内部状态），
     // 再让父类落内存，最后把字节追加进日志 —— 三步顺序即回放顺序。
     const [[ckptType, ckptBytes], [metaType, metaBytes]] = await Promise.all([
@@ -284,6 +304,11 @@ export class PersistentSaver extends MemorySaver {
         await this.dirReady;
         await appendFile(this.filePath, JSON.stringify(line) + "\n", "utf8");
         if (shouldProbe) await this.maybeCompact();
+        else {
+          // 一行 checkpoint 可能因图片/网关卡回显达到数 MB，不能等 16 行才看。
+          const st = await stat(this.filePath).catch(() => null);
+          if (st && st.size >= COMPACT_URGENT_BYTES) await this.maybeCompact();
+        }
       })
       .catch((err) => {
         log("error", "checkpoint_write_failed", {
@@ -308,6 +333,32 @@ export class PersistentSaver extends MemorySaver {
     if (st && st.size >= CHECKPOINT_MAX_BYTES) await this.compactNow();
   }
 
+  /** 旧 log 里已落盘的大元数据也在 compact 时投影一次，不能只等新写入覆盖。 */
+  private sanitizePersistedLine(line: PersistLine): PersistLine {
+    if (line.type === "ckpt" && line.ckptType === "json") {
+      try {
+        const payload = JSON.parse(Buffer.from(line.ckpt, "base64").toString("utf8")) as unknown;
+        return {
+          ...line,
+          ckpt: Buffer.from(JSON.stringify(sanitizeSerializedCheckpoint(payload)), "utf8").toString("base64"),
+        };
+      } catch { return line; }
+    }
+    if (line.type === "write") {
+      return {
+        ...line,
+        entries: line.entries.map((entry) => {
+          if (entry.t !== "json") return entry;
+          try {
+            const payload = JSON.parse(Buffer.from(entry.v, "base64").toString("utf8")) as unknown;
+            return { ...entry, v: Buffer.from(JSON.stringify(sanitizeSerializedCheckpoint(payload)), "utf8").toString("base64") };
+          } catch { return entry; }
+        }),
+      };
+    }
+    return line;
+  }
+
   /**
    * 重写日志：只认本文件的行格式做过滤（不读 MemorySaver 内部结构）。
    *  - 最后操作是 delete 的线程：全部行丢弃（delete 行的使命随之完成）；
@@ -316,7 +367,7 @@ export class PersistentSaver extends MemorySaver {
    *  - write 行保留当且仅当其指向的检查点被保留。
    * 只会在写链内被调用（queuePersist），与追加天然串行，无竞态。
    */
-  async compactNow(): Promise<void> {
+  async compactNow(keepPerThread = KEEP_PER_THREAD): Promise<void> {
     await this.dirReady;
     const raw = await readFile(this.filePath, "utf8").catch(() => "");
     if (!raw) return;
@@ -349,7 +400,7 @@ export class PersistentSaver extends MemorySaver {
     }
     const keepIds = new Set<string>();
     for (const [key, ids] of groups) {
-      const recent = [...ids].sort((a, b) => b.localeCompare(a)).slice(0, KEEP_PER_THREAD);
+      const recent = [...ids].sort((a, b) => b.localeCompare(a)).slice(0, keepPerThread);
       for (const id of recent) keepIds.add(`${key}\u0000${id}`);
     }
     const kept = rows.filter((row) => {
@@ -363,13 +414,30 @@ export class PersistentSaver extends MemorySaver {
       return false; // delete 行：效果已由「整线程丢弃」体现
     });
     const tmp = `${this.filePath}.tmp`;
-    const withSchema = [{ type: "schema", schemaVersion: CHECKPOINT_SCHEMA_VERSION, ts: Date.now() }, ...kept];
+    const sanitized = kept.map((row) => this.sanitizePersistedLine(row));
+    const withSchema = [{ type: "schema", schemaVersion: CHECKPOINT_SCHEMA_VERSION, ts: Date.now() }, ...sanitized];
     await writeFile(tmp, withSchema.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
     await replaceCheckpointFile(tmp, this.filePath);
+    const after = await stat(this.filePath).catch(() => null);
+    if (after && after.size >= CHECKPOINT_MAX_BYTES && keepPerThread > 1) {
+      // 仅按条数保留仍可能超阈值（单个 checkpoint 可能接近 10MB）。
+      // 继续降级为每线程最新快照；最新快照已含完整状态，足以续聊/恢复 interrupt。
+      log("warn", "checkpoint_compact_fallback", {
+        file: this.filePath,
+        bytesAfter: after.size,
+        keepPerThread,
+      });
+      await this.compactNow(1);
+      return;
+    }
     log("info", "checkpoint_compacted", {
       file: this.filePath,
       linesBefore: rows.length,
       linesAfter: kept.length,
+      bytesBefore: Buffer.byteLength(raw, "utf8"),
+      bytesAfter: after?.size ?? 0,
+      keepPerThread,
+      stillOverLimit: Boolean(after && after.size >= CHECKPOINT_MAX_BYTES),
     });
   }
 }

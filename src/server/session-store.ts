@@ -12,6 +12,8 @@
  *   permission 会话权限模式变更（readonly / approve / autonomous / auto）
  *   approval  人工审批 / 需求澄清进入 pending（payload 全量）
  *   decided   用户已做出决定（approve / reject / answered）—— 之后不再改写
+ *   compact   上下文压缩完成：新 threadId + 摘要（重启后仍可复盘/续聊）
+ *   contextInjected 摘要已注入新线程（避免重启后重复占预算）
  *   delete    会话删除（回放时丢弃，同样也允许 compact 时省空间）
  *   turn      一轮对话的完整事件流（user 消息 + events 数组）
  *
@@ -70,6 +72,14 @@ export interface SessionRecord {
   permissionMode?: PermissionMode;
   /** 累计轮数（由回放统计而来，新创建为 0） */
   turns: number;
+  /** 最近一次压缩摘要；旧 journal 没有时为 null */
+  contextSummary?: string | null;
+  /** 摘要是否已注入当前线程 */
+  contextSummaryInjected?: boolean;
+  /** 最近一次压缩覆盖到的轮次 */
+  lastCompactTurnId?: string | null;
+  /** 最近一次压缩的体积口径；compact 快照重写时必须保留 */
+  lastCompact?: { beforeChars: number; afterChars: number; usedModel: boolean } | null;
   /** 回放出的对话轮（user + events），与 sessions.ts 的 TurnRecord 同形 */
   turnHistory: Array<{
     turnId?: string;
@@ -79,6 +89,8 @@ export interface SessionRecord {
     continuation?: boolean;
     files?: Array<{ name: string; source: string; image: boolean }>;
     events: unknown[];
+    /** journal 存储投影说明（归并/截断），旧数据没有 */
+    storage?: unknown;
     startedAt?: number;
     finishedAt?: number;
     durationMs?: number;
@@ -165,6 +177,19 @@ export function journalDecided(id: string, status: "approved" | "rejected" | "an
   journalWrite({ ts: Date.now(), ev: "decided", id, status });
 }
 
+export function journalCompact(
+  id: string,
+  threadId: string,
+  summary: string,
+  details: { beforeChars: number; afterChars: number; usedModel: boolean; lastCompactTurnId: string | null }
+): void {
+  journalWrite({ ts: Date.now(), ev: "compact", id, threadId, summary, ...details });
+}
+
+export function journalContextInjected(id: string): void {
+  journalWrite({ ts: Date.now(), ev: "contextInjected", id });
+}
+
 export function journalTurn(
   id: string,
   kind: SessionKind,
@@ -174,7 +199,8 @@ export function journalTurn(
   user: string,
   files: Array<{ name: string; source: string; image: boolean }> | undefined,
   events: unknown[],
-  continuation?: boolean
+  continuation?: boolean,
+  storage?: unknown
 ): void {
   // 轮次身份同样由 kind 派生，避免 journal 中的伪造字段把执行域改到另一个 Agent。
   journalWrite({
@@ -190,6 +216,7 @@ export function journalTurn(
     ...(continuation ? { continuation: true } : {}),
     files,
     events,
+    ...(storage ? { storage } : {}),
   });
 }
 
@@ -273,6 +300,21 @@ function applyEvent(ev: Record<string, unknown>): void {
       base.pendingApproval.status =
         ev.status === "approved" ? "approved" : ev.status === "rejected" ? "rejected" : "answered";
     }
+  } else if (evName === "compact") {
+    const base = state.get(String(ev.id ?? ""));
+    if (!base) return;
+    if (typeof ev.threadId === "string" && ev.threadId) base.threadId = ev.threadId;
+    base.contextSummary = typeof ev.summary === "string" ? ev.summary : null;
+    base.contextSummaryInjected = false;
+    base.lastCompactTurnId = typeof ev.lastCompactTurnId === "string" ? ev.lastCompactTurnId : null;
+    base.lastCompact = {
+      beforeChars: typeof ev.beforeChars === "number" ? ev.beforeChars : 0,
+      afterChars: typeof ev.afterChars === "number" ? ev.afterChars : 0,
+      usedModel: ev.usedModel === true,
+    };
+  } else if (evName === "contextInjected") {
+    const base = state.get(String(ev.id ?? ""));
+    if (base?.contextSummary) base.contextSummaryInjected = true;
   } else if (evName === "delete") {
     state.delete(String(ev.id ?? ""));
   } else if (evName === "turn") {
@@ -281,14 +323,20 @@ function applyEvent(ev: Record<string, unknown>): void {
     if (!state.has(id)) return;
     const base = findOrMake(id);
     base.turns += 1;
+    const turnIndex = base.turns - 1;
+    const journalTs = typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : base.createdAt;
     base.turnHistory.push({
-      turnId: typeof ev.turnId === "string" ? ev.turnId : undefined,
+      // 旧数据缺身份时用稳定派生值；不能每次 replay 随机 UUID，否则统计与审计无法对账。
+      turnId: typeof ev.turnId === "string" && ev.turnId
+        ? ev.turnId
+        : `legacy-${id}-${turnIndex}`,
       agentProfileId: profileIdForKind(base.kind),
       user: typeof ev.user === "string" ? ev.user : "",
       continuation: ev.continuation === true,
       files: Array.isArray(ev.files) ? (ev.files as SessionRecord["turnHistory"][0]["files"]) : undefined,
       events: Array.isArray(ev.events) ? ev.events : [],
-      startedAt: typeof ev.startedAt === "number" ? ev.startedAt : undefined,
+      storage: ev.storage,
+      startedAt: typeof ev.startedAt === "number" && Number.isFinite(ev.startedAt) ? ev.startedAt : journalTs,
       finishedAt: typeof ev.finishedAt === "number" ? ev.finishedAt : undefined,
       durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
     });
@@ -301,6 +349,7 @@ function findOrMake(id: string): SessionRecord {
     rec = {
       id, kind: "agent", agentProfileId: null, demo: null, agentId: null, projectId: "default",
       title: "", createdAt: Date.now(), threadId: "", pendingApproval: null, turns: 0, turnHistory: [],
+      contextSummary: null, contextSummaryInjected: false, lastCompactTurnId: null, lastCompact: null,
     };
     state.set(id, rec);
   }
@@ -323,6 +372,14 @@ async function compactJournal(): Promise<void> {
   const lines: string[] = [JSON.stringify({ ts: Date.now(), ev: "schema", schemaVersion: JOURNAL_SCHEMA_VERSION })];
   for (const rec of snapshot) {
     lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
+    if (rec.contextSummary) {
+      lines.push(JSON.stringify({
+        ts: Date.now(), ev: "compact", id: rec.id, threadId: rec.threadId,
+        summary: rec.contextSummary, lastCompactTurnId: rec.lastCompactTurnId ?? null,
+        ...(rec.lastCompact ?? {}),
+      }));
+      if (rec.contextSummaryInjected) lines.push(JSON.stringify({ ts: Date.now(), ev: "contextInjected", id: rec.id }));
+    }
     if (rec.pendingApproval && rec.pendingApproval.status === "pending") {
       lines.push(JSON.stringify({ ts: rec.createdAt, ev: "approval", id: rec.id, toolName: rec.pendingApproval.toolName, payload: rec.pendingApproval.payload }));
     }
@@ -331,6 +388,7 @@ async function compactJournal(): Promise<void> {
         ts: Date.now(), ev: "turn", id: rec.id, turnId: t.turnId,
         user: t.user, ...(t.continuation ? { continuation: true } : {}),
         files: t.files, events: t.events,
+        ...(t.storage != null ? { storage: t.storage } : {}),
         agentProfileId: t.agentProfileId ?? rec.agentProfileId,
         startedAt: t.startedAt, finishedAt: t.finishedAt, durationMs: t.durationMs,
       }));

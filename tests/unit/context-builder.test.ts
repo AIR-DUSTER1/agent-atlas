@@ -23,6 +23,33 @@ function profile(policy?: AgentProfile["contextPolicy"]): AgentProfile {
 test("上下文策略有安全默认值，并采用 profile 覆盖", () => {
   assert.equal(resolveContextPolicy(profile()).maxRecentMessages, 32);
   assert.equal(resolveContextPolicy(profile({ maxRecentMessages: 4, maxToolResultChars: 300 })).maxRecentMessages, 4);
+  assert.ok(resolveContextPolicy(profile()).maxContextChars > 0);
+});
+
+test("总字符预算生效：最近消息再长也不能无限膨胀", () => {
+  const built = buildAgentContext({
+    profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 1_000 }),
+    messages: [
+      new HumanMessage("旧消息"),
+      new HumanMessage("x".repeat(9_000)),
+      new HumanMessage("最新消息"),
+    ],
+  });
+  assert.ok(built.omittedMessages >= 1);
+  assert.match(String(built.messages[1].content), /已省略较早的/);
+});
+
+test("超预算的最新用户消息仍必须保留", () => {
+  const built = buildAgentContext({
+    profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 1_000 }),
+    messages: [
+      new HumanMessage("旧消息"),
+      new HumanMessage("当前请求：" + "x".repeat(2_000)),
+    ],
+  });
+  // 当前请求本身就是最新消息，绝不能因体积被裁掉；旧消息是否同级保留由
+  // 上面的“总字符预算”用例负责验证。
+  assert.match(String(built.messages.at(-1)?.content), /当前请求/);
 });
 
 test("超长工具结果按 profile 预算裁剪，原 ToolMessage 不变", () => {
@@ -149,4 +176,43 @@ test("二次回炉：连续多版草稿全部移出消息列表，注记保留�
   const last = built.messages[built.messages.length - 1];
   assert.equal(last.getType(), "human");
   assert.equal(built.messages.filter((m) => m.getType() === "ai").length, 0);
+});
+
+
+test("历史大图投影为文字占位，当前轮刚附加的图片保留", () => {
+  const big = "data:image/png;base64," + "A".repeat(10_000);
+  const history = new HumanMessage({
+    content: [
+      { type: "text", text: "历史图片" },
+      { type: "image_url", image_url: { url: big } },
+    ],
+  });
+  const current = new HumanMessage({
+    content: [
+      { type: "text", text: "当前图片" },
+      { type: "image_url", image_url: { url: big } },
+    ],
+  });
+  const built = buildAgentContext({
+    profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 200_000 }),
+    messages: [history, current],
+  });
+  assert.match(JSON.stringify(history.content), /data:image\/png;base64/);
+  assert.match(JSON.stringify(current.content), /data:image\/png;base64/);
+  const serialized = JSON.stringify(built.messages);
+  assert.match(serialized, /历史图片已省略/);
+  assert.match(serialized, /当前图片/);
+  assert.equal((serialized.match(/data:image\/png;base64/g) ?? []).length, 1, "只保留最近一条 HumanMessage 的图片");
+});
+
+test("任务台账与预算注记进入 system，不混入用户正文", () => {
+  const built = buildAgentContext({
+    profile: profile(),
+    messages: [new HumanMessage("继续")],
+    taskLedger: "【任务台账】已读 sessions.ts",
+    budgetNote: "已用工具 3/30",
+  });
+  const notes = String(built.messages[1].content);
+  assert.match(notes, /已读 sessions\.ts/);
+  assert.match(notes, /已用工具 3\/30/);
 });

@@ -220,11 +220,23 @@ export function updateContextBar(): void {
     const pct = Math.min(100, (u.contextTokens / win) * 100);
     fill.style.width = Math.max(1.5, pct) + "%";
     fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}%）`;
+    const cumulative = (u.taskInput ?? 0) + (u.taskOutput ?? 0);
+    const compact = [
+      `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}%）`,
+      cumulative > 0 ? `任务累计 ${fmtTokens(cumulative)} tokens` : "",
+      (u.taskTools ?? 0) > 0 ? `工具 ${u.taskTools} 次` : "",
+      (u.taskModels ?? 0) > 0 ? `模型 ${u.taskModels} 次` : "",
+      (u.taskActiveMs ?? 0) > 0 ? `活动 ${Math.max(1, Math.round((u.taskActiveMs ?? 0) / 1000))} 秒` : "",
+      u.lastActivityAt && Date.now() - u.lastActivityAt > 60_000 && state.streams[state.currentId ?? ""]
+        ? `等待响应 ${Math.floor((Date.now() - u.lastActivityAt) / 60_000)} 分钟`
+        : "",
+    ].filter(Boolean).join(" · ");
+    text.textContent = compact;
   } else {
     fill.style.width = "0%";
     fill.className = "ctx-fill";
-    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} tokens · 容量未知（设置里「获取列表」后显示占比）`;
+    const cumulative = (u.taskInput ?? 0) + (u.taskOutput ?? 0);
+    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} tokens${cumulative > 0 ? ` · 任务累计 ${fmtTokens(cumulative)} tokens` : ""}${(u.taskTools ?? 0) > 0 ? ` · 工具 ${u.taskTools} 次` : ""}${(u.taskModels ?? 0) > 0 ? ` · 模型 ${u.taskModels} 次` : ""}${(u.taskActiveMs ?? 0) > 0 ? ` · 活动 ${Math.max(1, Math.round((u.taskActiveMs ?? 0) / 1000))} 秒` : ""} · 容量未知（设置里「获取列表」后显示占比）`;
   }
 
   const cacheEl = $("ctx-cache");

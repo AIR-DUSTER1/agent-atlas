@@ -55,8 +55,21 @@ export async function send(): Promise<void> {
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
-  // 新一轮上下文用量必须从空开始，否则上一轮峰值会污染本轮容量条。
-  delete state.usage[sid];
+  // 当前请求的容量峰值先归零；任务累计字段先保留给「继续」，
+  // 新一轮的首个服务端 usage 会带权威快照并自动校正。
+  const previousUsage = state.usage[sid];
+  state.usage[sid] = {
+    lastInput: 0, lastOutput: 0, lastCache: 0,
+    taskInput: previousUsage?.taskInput,
+    taskOutput: previousUsage?.taskOutput,
+    taskTools: previousUsage?.taskTools,
+    taskModels: previousUsage?.taskModels,
+    taskActiveMs: previousUsage?.taskActiveMs,
+    lastActivityAt: Date.now(),
+    usagePeaks: previousUsage?.usagePeaks,
+    taskUsagePeaks: previousUsage?.taskUsagePeaks,
+    seenToolIds: previousUsage?.seenToolIds,
+  };
   document.getElementById("context-bar")?.classList.add("hidden");
 
   const pending = state.pendingFiles;

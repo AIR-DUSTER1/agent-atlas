@@ -189,6 +189,33 @@ test("stream：自主审查 usage 从 ToolMessage 转发并跨双流去重", asy
   assert.equal(events.filter((event) => event.type === "tool_result").length, 2);
 });
 
+test("stream：自主低风险放行产出 risk_decision，跨 messages/updates 只一次", async () => {
+  const toolMessage = new ToolMessage({
+    id: "auto-risk-tool-message",
+    content: "工具完成",
+    tool_call_id: "tool-auto",
+    name: "terminal",
+    additional_kwargs: {
+      riskDecision: "auto",
+      riskReason: "只读取工作区状态，可恢复",
+      riskCallId: "risk:thread-auto:tool-auto",
+    },
+  });
+  const graph = {
+    stream: async () =>
+      (async function* () {
+        yield ["messages", [toolMessage, { langgraph_node: "tools", checkpoint_ns: "tools" }]];
+        yield ["updates", { tools: { messages: [toolMessage] } }];
+      })(),
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of runGraphEvents(graph, {}, { threadId: "risk-decision-test" })) events.push(event);
+  const decisions = events.filter((event) => event.type === "risk_decision");
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].type === "risk_decision" ? decisions[0].toolName : "", "terminal");
+  assert.match(decisions[0].type === "risk_decision" ? decisions[0].reason : "", /可恢复/);
+});
+
 test("stream：tools 节点风险审查 JSON 不进入用户正文，但工具结果仍保留", async () => {
   const graph = {
     stream: async () =>

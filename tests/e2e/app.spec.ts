@@ -69,6 +69,9 @@ test("新建会话不继承上一会话的上下文用量显示", async ({ page 
   await createChat(page);
   await sendMessage(page, "你好");
   await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
+  // 前端必须同时展示「当前请求上下文」与「任务累计消耗」，避免把 26.9k
+  // 误认为整个任务只消耗了 26.9k；工具次数也应可见。
+  await expect(page.locator("#ctx-text")).toContainText("任务累计");
 
   await createChat(page);
   await expect(page.locator("#context-bar")).toBeHidden();

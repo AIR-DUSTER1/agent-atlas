@@ -210,6 +210,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         ...(thinkingEnabled ? {} : { temperature }),
         maxRetries: 0,
         maxTokens,
+        clientOptions: { timeout: config.modelRequestTimeoutMs },
         ...(thinking ? { thinking: thinking as { type: "enabled"; budget_tokens: number } | { type: "disabled" } } : {}),
         ...(outputConfig?.effort ? { outputConfig: { effort: outputConfig.effort as "low" | "medium" | "high" | "xhigh" | "max" } } : {}),
         ...(config.baseURL ? { anthropicApiUrl: config.baseURL } : {}),
@@ -242,6 +243,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
           : {}),
         configuration: {
           baseURL: config.baseURL,
+          timeout: config.modelRequestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
           ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
         },
@@ -260,6 +262,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         configuration: {
           // 关键：指向自定义网关地址（OpenAI 兼容格式）
           baseURL: config.baseURL,
+          timeout: config.modelRequestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
           ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
         },

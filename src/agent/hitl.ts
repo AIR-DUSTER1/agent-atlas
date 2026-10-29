@@ -88,35 +88,84 @@ function toolCallSignature(name: string, args: unknown): string {
   return `${name}:${stableSerialize(args)}`;
 }
 
-interface TurnToolHistory {
-  completedBySignature: Map<string, { content: ToolMessage["content"]; status: string }>;
+/** 只读 terminal 命令归一：等价读取不因 PowerShell 包装、引号和编码选项不同而重复执行。 */
+function canonicalToolSignature(name: string, args: Record<string, unknown>): string {
+  if (name !== "terminal" || typeof args.command !== "string") return toolCallSignature(name, args);
+  let command = args.command.trim().replace(/\r/g, "");
+  const wrapped = command.match(/^powershell(?:\.exe)?\s+(?:-NoProfile\s+)?-Command\s+"?([\s\S]*?)"?$/i);
+  if (wrapped) command = wrapped[1];
+  command = command
+    .replace(/\[\s*Console\s*\]::OutputEncoding\s*=\s*\[[^\]]+\]::UTF8\s*;?\s*/gi, "")
+    .replace(/\s+-Encoding\s+UTF8\b/gi, "")
+    .replace(/\s+-Raw\b/gi, "")
+    .replace(/Get-Content\s+([^|;]+?)\s+\|\s+Out-String\s+-Width\s+\d+/gi, "Get-Content $1")
+    .replace(/\s+/g, " ")
+    .trim();
+  // 仅缓存明显只读的读取/搜索/状态命令；未知命令保持完整签名，避免误复用写入结果。
+  const readOnly = /^(?:Get-Content|Select-String|Get-ChildItem|Resolve-Path|Test-Path|git status|rg|findstr|dir)\b/i.test(command);
+  if (!readOnly) return toolCallSignature(name, args);
+  return `${name}:readonly:${command}`;
 }
 
-/** 只收集最近一条 HumanMessage 之后已成功的工具结果，用于识别完全重复的调用。 */
+interface TurnToolHistory {
+  completedBySignature: Map<string, { content: ToolMessage["content"]; status: string }>;
+  /** 同参数确定性失败次数：达到上限后直接熔断，不再让模型重放同一调用。 */
+  failedBySignature: Map<string, number>;
+}
+
+/** 写操作一旦落地，之前的读取结果可能已经过期，必须让缓存失效。 */
+function isMutatingSignature(signature: string): boolean {
+  return signature.startsWith("write_file:") ||
+    (signature.startsWith("terminal:") && !signature.startsWith("terminal:readonly:"));
+}
+
+const CONTINUE_INTENT = /^(继续|继续吧|继续执行|接着|接着做|continue)[。.!！]?$/i;
+
+/** 可跨「继续」保留去重边界；审批/澄清本身不会插入 HumanMessage。 */
+function isContinuationText(message: BaseMessage): boolean {
+  const text = messageText(message.content).replace(/\s+/g, " ").trim();
+  return CONTINUE_INTENT.test(text);
+}
+
+/** 只收集当前逻辑任务里已成功的工具结果，用于识别完全重复的调用。 */
 function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
   let start = 0;
+  let latestHuman = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].getType() === "human") { start = index + 1; break; }
+    if (messages[index].getType() !== "human") continue;
+    if (latestHuman < 0) latestHuman = index;
+    // 「继续」不是新任务边界：向前找到真正的原始请求，保留上一次去重结果。
+    if (!isContinuationText(messages[index])) { start = index + 1; break; }
   }
+  if (start === 0 && latestHuman >= 0) start = latestHuman + 1;
   const calls = new Map<string, string>();
   const completedBySignature = new Map<string, { content: ToolMessage["content"]; status: string }>();
+  const failedBySignature = new Map<string, number>();
   for (const message of messages.slice(start)) {
     const ai = message as AIMessage;
     if (Array.isArray(ai.tool_calls)) {
       for (const call of ai.tool_calls) {
         if (!call.id) continue;
-        const signature = toolCallSignature(call.name, call.args);
+        const signature = canonicalToolSignature(call.name, call.args);
         calls.set(call.id, signature);
       }
     }
     if (message instanceof ToolMessageCls) {
       const signature = calls.get(message.tool_call_id);
-      if (signature && message.status !== "error") {
+      if (!signature) continue;
+      // 写操作一旦落地（即使报错也可能部分写入），之前的读取结果立即失效。
+      if (isMutatingSignature(signature)) {
+        completedBySignature.clear();
+        failedBySignature.clear();
+      }
+      if (message.status !== "error") {
         completedBySignature.set(signature, { content: message.content, status: message.status ?? "success" });
+      } else if (!isTransientToolFailure(toolResultText(message.content))) {
+        failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
       }
     }
   }
-  return { completedBySignature };
+  return { completedBySignature, failedBySignature };
 }
 function lastHumanIntent(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -142,15 +191,40 @@ interface ToolInvocationResult {
   status: "success" | "error";
 }
 
+const MAX_IDENTICAL_TOOL_FAILURES = 2;
+
+/** JSON 工具约定：顶层 ok:false 或非空 error 是业务失败，不能伪装成成功。 */
+function toolBusinessError(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { ok?: unknown; error?: unknown };
+    if (parsed.ok === false) {
+      return typeof parsed.error === "string" && parsed.error.trim()
+        ? parsed.error.trim()
+        : "工具返回 ok:false，未给出具体原因";
+    }
+    if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error.trim();
+  } catch { /* 非 JSON 文本按正常结果处理 */ }
+  return null;
+}
+
+/** 瞬时故障不进入同参数熔断：超时/限流/5xx 可能下一次就会恢复。 */
+function isTransientToolFailure(text: string): boolean {
+  return /(?:timeout|timed out|超时|429|rate limit|限流|HTTP\s*5\d{2}|ECONN|EAI_AGAIN)/i.test(text);
+}
+
 async function invokeTool(
   toolFn: StructuredToolInterface,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ToolInvocationResult> {
   try {
-    const value = await toolFn.invoke(args);
+    const value = await toolFn.invoke(args, { signal });
     // 多模态工具（如 computer_screenshot）覆写 invoke 直接返回内容块数组，原样透传
     if (Array.isArray(value)) return { content: value as ToolMessage["content"], status: "success" };
-    return { content: toolResultText(value), status: "success" };
+    const text = toolResultText(value);
+    return { content: text, status: toolBusinessError(text) ? "error" : "success" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -167,6 +241,7 @@ async function invokeTool(
 // ---------------------------------------------------------------------------
 /** LangGraph 注入节点的 config 子集：只取我们关心的 configurable 权限字段 */
 interface NodeConfig {
+  signal?: AbortSignal;
   configurable?: { permission_mode?: PermissionMode; thread_id?: string };
 }
 
@@ -205,7 +280,17 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
     }> = [];
 
     for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
-      const signature = toolCallSignature(call.name, call.args);
+      const signature = canonicalToolSignature(call.name, call.args);
+      if ((history.failedBySignature.get(signature) ?? 0) >= MAX_IDENTICAL_TOOL_FAILURES) {
+        toolResults.push(new ToolMessageCls({
+          content: `工具「${call.name}」使用相同参数已连续失败 ${MAX_IDENTICAL_TOOL_FAILURES} 次，已熔断本次调用。` +
+            `请停止原样重试，改用其它工具/参数或向用户说明失败原因。`,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: "error",
+        }));
+        continue;
+      }
       const prior = history.completedBySignature.get(signature);
       if (prior) {
         toolResults.push(new ToolMessageCls({
@@ -239,6 +324,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         || `执行工具 ${call.name}`;
       let shouldInterrupt = action === "interrupt";
       let riskReason: string | undefined;
+      let riskDecision: "auto" | undefined;
       let riskUsage: ToolRiskAssessment["usage"];
       let riskCallId: string | undefined;
       if (action === "assess") {
@@ -267,6 +353,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         const assessment = await pendingAssessment;
         shouldInterrupt = assessment.highRisk;
         riskReason = assessment.reason;
+        if (!assessment.highRisk) riskDecision = "auto";
         riskUsage = assessment.usage;
         riskCallId = `risk:${threadId}:${call.id || callIndex}`;
       }
@@ -284,7 +371,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           ...(riskReason ? { riskReason } : {}),
         });
         if (decision === "approve") {
-          const result = await invokeTool(toolFn, call.args);
+          const result = await invokeTool(toolFn, call.args, config?.signal);
           content = result.content;
           status = result.status;
         } else {
@@ -292,7 +379,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         }
       } else {
         // 自主模式判定为低风险：直接执行（其余「可直接执行」的已在批处理里）
-        const result = await invokeTool(toolFn, call.args);
+        const result = await invokeTool(toolFn, call.args, config?.signal);
         content = result.content;
         status = result.status;
       }
@@ -301,10 +388,11 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         tool_call_id: call.id ?? "",
         name: call.name,
         status,
-        ...(riskUsage ? {
+        ...((riskUsage || riskDecision) ? {
           additional_kwargs: {
-            riskUsage,
-            riskCallId,
+            ...(riskUsage ? { riskUsage } : {}),
+            ...(riskDecision ? { riskDecision, riskReason } : {}),
+            ...(riskCallId ? { riskCallId } : {}),
           },
         } : {}),
       }));
@@ -320,7 +408,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
             // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
             return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
           }
-          const result = await invokeTool(item.toolFn, item.call.args);
+          const result = await invokeTool(item.toolFn, item.call.args, config?.signal);
           return { item, content: result.content, status: result.status };
         })
       );
@@ -332,7 +420,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           status: entry.status,
         }));
         if (entry.status === "success") {
-          history.completedBySignature.set(toolCallSignature(entry.item.call.name, entry.item.call.args), { content: entry.content, status: entry.status });
+          history.completedBySignature.set(canonicalToolSignature(entry.item.call.name, entry.item.call.args), { content: entry.content, status: entry.status });
         }
       }
     }

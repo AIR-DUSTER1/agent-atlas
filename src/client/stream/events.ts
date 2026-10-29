@@ -21,7 +21,7 @@ import {
 import { TOOL_ICONS } from "../modules/format.js";
 import type {
   AgentEvent, AssistantBlock, AssistantPart, InterruptPayload,
-  TextPart, ToolPart,
+  TextPart, ToolPart, UsageInfo,
 } from "../modules/types.js";
 
 /* ---------------------------------------------------------------------------
@@ -55,6 +55,7 @@ export function upsertToolCall(
   ablock: AssistantBlock, ev: { id: string; name?: string; argsFragment?: string }, visible = true
 ): void {
   sealStreamingParts(ablock);
+
   let part = [...ablock.parts].reverse().find(
     (p): p is ToolPart => p.p === "tool" && p.id === ev.id
   );
@@ -147,9 +148,36 @@ export function applyUsage(
   ablock?: AssistantBlock,
   sid: string | null = state.currentId,
 ): void {
-  // 内部 review/analyze 调用只计入统计成本，不能覆盖主循环的上下文占用与缓存口径。
-  if (ev.internal || !sid) return;
+  if (!sid) return;
   const u = state.usage[sid] || (state.usage[sid] = { lastInput: 0, lastOutput: 0, lastCache: 0 });
+  // 新服务端事件直接携带任务快照；旧 journal 没有这些字段时才走下面的本地峰值推算。
+  if (typeof ev.taskInputTokens === "number" && typeof ev.taskOutputTokens === "number") {
+    u.taskInput = ev.taskInputTokens;
+    u.taskOutput = ev.taskOutputTokens;
+    u.taskTools = ev.taskToolCalls ?? u.taskTools;
+    u.taskModels = ev.taskModelCalls ?? u.taskModels;
+    u.taskActiveMs = ev.taskActiveMs ?? u.taskActiveMs;
+  } else {
+    // 旧 journal 没有服务端任务快照时的兼容推算：内部 analyze/review/tool-risk
+    // 也是真实成本；只有主循环 usage 才可覆盖当前请求上下文与缓存口径。
+    const usageKey = ev.callId ?? `${ev.node ?? ""}|${ev.inputTokens}|${ev.outputTokens}|${ev.internal ? 1 : 0}`;
+    const peaks = (u.usagePeaks ??= {});
+    const previous = peaks[usageKey] ?? { input: 0, output: 0 };
+    const next = { input: Math.max(previous.input, ev.inputTokens), output: Math.max(previous.output, ev.outputTokens) };
+    peaks[usageKey] = next;
+    const taskPeaks = (u.taskUsagePeaks ??= {});
+    const alreadyCounted = taskPeaks[usageKey] ?? { input: 0, output: 0 };
+    const taskNext = {
+      input: Math.max(alreadyCounted.input, next.input),
+      output: Math.max(alreadyCounted.output, next.output),
+    };
+    taskPeaks[usageKey] = taskNext;
+    u.taskInput = (u.taskInput ?? 0) + Math.max(0, taskNext.input - alreadyCounted.input);
+    u.taskOutput = (u.taskOutput ?? 0) + Math.max(0, taskNext.output - alreadyCounted.output);
+  }
+  u.lastActivityAt = Date.now();
+  saveLocal();
+  if (ev.internal) return;
   const context = ev.inputTokens + ev.outputTokens;
   // 一轮内可能多次调用主 Agent（工具后继续）；容量条取本轮峰值，避免工具调用间隙回跳。
   if (!u.contextTokens || context >= u.contextTokens) {
@@ -165,6 +193,21 @@ export function applyUsage(
 }
 export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string | null = state.currentId): void {
   const visible = sid === state.currentId;
+  if (sid) {
+    const u = state.usage[sid] || (state.usage[sid] = { lastInput: 0, lastOutput: 0, lastCache: 0 });
+    u.lastActivityAt = Date.now();
+    if (ev.type === "tool_call") {
+      const seenTools = (u.seenToolIds ??= new Set<string>());
+      if (!seenTools.has(ev.id)) {
+        seenTools.add(ev.id);
+        u.taskTools = (u.taskTools ?? 0) + 1;
+      }
+    }
+    if (ev.type === "token" || ev.type === "tool_call" || ev.type === "tool_result") {
+      // 仅用于让容量条也能跟随活动；真正任务耗时由服务端 SSE 结束后重新拉取。
+      u.taskActiveMs = (u.taskActiveMs ?? 0);
+    }
+  }
   switch (ev.type) {
     case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text, visible); break;
     case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev, visible); break;
@@ -182,6 +225,8 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
       break;
     }
     case "interrupt": addInterrupt(ablock, ev.payload, sid, visible); break;
+    // 自动放行只写安全审计，不额外占用聊天正文；保留 case 以维持协议穷尽检查。
+    case "risk_decision": break;
     case "usage": applyUsage(ev, ablock, sid); break;
     case "shutdown": {
       // 服务端优雅退出的最后一帧：常驻顶部提示；刷新时若服务已恢复则自然消失

@@ -18,6 +18,8 @@ export interface AgentContextPolicy {
   maxRecentMessages: number;
   /** 单条 ToolMessage 进入模型上下文前的字符上限。 */
   maxToolResultChars: number;
+  /** 最近窗口的总字符预算，防止消息条数不变但内容持续膨胀。 */
+  maxContextChars: number;
 }
 
 export interface AgentProfile {

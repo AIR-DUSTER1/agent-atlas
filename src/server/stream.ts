@@ -68,6 +68,9 @@ interface NormalizeOptions {
   turnId?: string;
   /** 会话权限模式：经 configurable 传进图，工具执行节点（hitl.ts）按它裁决 */
   permissionMode?: PermissionMode;
+  /** 跨审批任务台账与预算注记：只进入模型 system 注记，不写 checkpoint。 */
+  taskLedger?: string;
+  budgetNote?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +211,20 @@ function extractRiskUsage(msg: ToolMessage): { inputTokens: number; outputTokens
   };
 }
 
+/** 自主模式低风险放行的审计元数据：来源是同一条 ToolMessage，跨双流按 callId 去重。 */
+function extractAutoRiskDecision(msg: ToolMessage): { reason: string; callId?: string } | null {
+  const kwargs = msg.additional_kwargs as {
+    riskDecision?: unknown;
+    riskReason?: unknown;
+    riskCallId?: unknown;
+  } | undefined;
+  if (kwargs?.riskDecision !== "auto") return null;
+  return {
+    reason: typeof kwargs.riskReason === "string" ? kwargs.riskReason : "审查模型判定为低风险操作",
+    callId: typeof kwargs.riskCallId === "string" ? kwargs.riskCallId : undefined,
+  };
+}
+
 /** 用量分片合并：分片里的 0 值 / 缺失字段不覆盖已有值（Anthropic 末片 input=0、首片 output=0） */
 function mergeUsage(
   acc: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null,
@@ -288,6 +305,8 @@ export async function* runGraphEvents(
     configurable: {
       thread_id: options.threadId,
       ...(options.permissionMode ? { permission_mode: options.permissionMode } : {}),
+      ...(options.taskLedger ? { task_ledger: options.taskLedger } : {}),
+      ...(options.budgetNote ? { task_budget_note: options.budgetNote } : {}),
     },
     signal: options.signal,
   });
@@ -295,6 +314,7 @@ export async function* runGraphEvents(
   const streamedIds = new Set<string>();          // messages 模式已流式输出过的正文消息 id
   const streamedReasoningIds = new Set<string>(); // messages 模式已流式输出过的思考消息 id
   const emittedRiskUsageIds = new Set<string>();  // 审查模型 usage 在 messages/updates 双流中的去重
+  const emittedRiskDecisionIds = new Set<string>();
   let streamedSinceBoundary = false;              // 距上个「边界消息」（工具结果等）是否已有流式正文
   let toolSeq = 0;                       // 网关不给 tool_call id 时兜底编号
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
@@ -436,6 +456,18 @@ export async function* runGraphEvents(
           observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
           yield { type: "usage", ...riskUsage, model: usageModel, node: "tools", internal: true };
         }
+        const autoDecision = extractAutoRiskDecision(msg);
+        const autoDecisionKey = autoDecision?.callId || msg.id || resultId;
+        if (autoDecision && !emittedRiskDecisionIds.has(autoDecisionKey)) {
+          emittedRiskDecisionIds.add(autoDecisionKey);
+          yield {
+            type: "risk_decision",
+            decision: "auto",
+            toolName: msg.name ?? "unknown",
+            reason: autoDecision.reason,
+            ...(autoDecision.callId ? { callId: autoDecision.callId } : {}),
+          };
+        }
         yield {
           type: "tool_result",
           id: resultId,
@@ -487,6 +519,18 @@ export async function* runGraphEvents(
               emittedRiskUsageIds.add(riskUsageKey);
               observeUsageMetrics(riskUsageKey, riskUsage, usageModel);
           yield { type: "usage", ...riskUsage, model: usageModel, node: "tools", internal: true };
+            }
+            const autoDecision = extractAutoRiskDecision(msg);
+            const autoDecisionKey = autoDecision?.callId || msg.id || msg.tool_call_id || "risk-decision";
+            if (autoDecision && !emittedRiskDecisionIds.has(autoDecisionKey)) {
+              emittedRiskDecisionIds.add(autoDecisionKey);
+              yield {
+                type: "risk_decision",
+                decision: "auto",
+                toolName: msg.name ?? "unknown",
+                reason: autoDecision.reason,
+                ...(autoDecision.callId ? { callId: autoDecision.callId } : {}),
+              };
             }
             yield {
               type: "tool_result",

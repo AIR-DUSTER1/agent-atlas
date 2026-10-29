@@ -122,7 +122,8 @@ test("工具/节点边界立即封口流式内容，ai_message 兜底不再留�
 
 test("上下文用量忽略 review 等内部调用，并按每轮峰值恢复容量与缓存", async () => {
   const app = await readClientSource();
-  assert.match(app, /if \(ev\.internal \|\| !sid\) return/);
+  assert.match(app, /if \(!sid\) return/);
+  assert.match(app, /if \(ev\.internal\) return/);
   assert.match(app, /context >= u\.contextTokens/);
   assert.match(app, /const hadLocal = arr\.length > 0/);
   assert.match(app, /applyUsage\(ev as never, undefined, s\.id\)/);

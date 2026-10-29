@@ -93,6 +93,9 @@ test("会话创建 → chat SSE → transcript 回放", async () => {
   const stream = await readSse("/api/chat", { sessionId: id, message: "帮我算一下 1+1" });
   assert.equal(stream.status, 200);
   assert.ok(stream.events.some((e) => e.type === "token"), "应有 token 事件");
+  const lastUsage = stream.events.filter((e) => e.type === "usage").at(-1);
+  assert.equal(typeof lastUsage?.taskInputTokens, "number", "usage 应带服务端任务累计快照");
+  assert.equal(typeof lastUsage?.taskModelCalls, "number");
   assert.equal(stream.events.at(-1).type, "done");
 
   const tr = await json(`/api/sessions/${id}/transcript`);

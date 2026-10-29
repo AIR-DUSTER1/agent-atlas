@@ -24,6 +24,10 @@ import type { AgentEvent } from "../events.js";
 import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
 import { runWithModelSlot } from "../runtime/model-gate.js";
+import {
+  beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
+  renderTaskLedger, taskLimit, taskSnapshot,
+} from "../task-budget.js";
 
 function friendlyModelError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
@@ -31,10 +35,30 @@ function friendlyModelError(err: unknown): string {
   if (status === 408) return "模型供应商请求超时（408）。可稍后重试，系统不会自动重试以免消耗额外配额。";
   if (status === 429) return "模型供应商触发限流（429）。请稍后重试或切换供应商；系统不会自动重试以免消耗额外配额。";
   if (status >= 500) return `模型供应商暂时不可用（HTTP ${status}）。请稍后重试或切换供应商；本轮未自动重试。`;
+  if (/timeout|timed out|TimeoutError|请求超过/i.test(message)) {
+    return "模型请求超时，已停止本轮等待；系统不会自动重试以免消耗额外配额。";
+  }
+  if (/abort/i.test(message)) return "请求已取消。";
   return message;
 }
 function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+/** 自主审批自动放行也属于 hitl 决定：安全日志必须能追溯，不能只留在会话事件里。 */
+export function recordAutoApprovalAudit(
+  session: Session,
+  event: Extract<AgentEvent, { type: "risk_decision" }>
+): void {
+  writeAudit("hitl.decided", {
+    sessionId: session.id,
+    agentProfileId: session.agentProfileId,
+    toolName: event.toolName,
+    decision: "auto",
+    source: "tool-risk",
+    reason: event.reason,
+    ...(event.callId ? { callId: event.callId } : {}),
+  });
 }
 
 /** 统一的流式执行器：真实图 or 模拟模型，都吐 AgentEvent。
@@ -85,18 +109,84 @@ async function streamToClient(
   incGauge("agent_sse_active_streams", { kind: session.kind });
   const collected: AgentEvent[] = [];
   let sawInterrupt = false;
+  let limitReason: string | undefined;
+  const budgetLimits = {
+    turnTimeoutMs: config.agentTurnTimeoutMs,
+    idleTimeoutMs: config.agentIdleTimeoutMs,
+    maxToolCalls: config.agentMaxToolCalls,
+    maxModelCalls: config.agentMaxModelCalls,
+  };
+  // 看门狗不能只靠「下一条事件」触发：模型/网关完全卡住时事件永远不会到。
+  // 每 2 秒检查活动时长、停滞与累计预算，命中后主动 abort graph 并给前端明确原因。
+  let notifyLimit: (() => void) | undefined;
+  const limitSignal = new Promise<void>((resolve) => { notifyLimit = resolve; });
+  const limitNow = (): string | undefined => {
+    if (limitReason) return limitReason;
+    const exceeded = taskLimit(session, budgetLimits);
+    if (!exceeded) return undefined;
+    limitReason = exceeded.reason;
+    if (session.activeTask) session.activeTask.limited = true;
+    incCounter("agent_task_limits_total", { reason: exceeded.reason, kind: session.kind });
+    const limitEvent: AgentEvent = { type: "error", message: exceeded.message };
+    collected.push(limitEvent);
+    if (!res.writableEnded) writeEvent(res, limitEvent);
+    controller.abort(new DOMException(exceeded.message, "TaskLimitError"));
+    notifyLimit?.();
+    return exceeded.reason;
+  };
+  const watchdog = setInterval(() => { limitNow(); }, 2_000);
+  watchdog.unref();
   try {
-    for await (const event of produce(controller.signal)) {
-      if (controller.signal.aborted) break;
-      collected.push(event);
-      writeEvent(res, event);
-      if (event.type === "interrupt") {
-        recordApproval(session, event.payload);
-        sawInterrupt = true;
+    // 续跑前先查一次累计预算；已经超限时不再启动新的图/模型请求。
+    if (limitNow()) {
+      // limitNow 已写出错误帧并 abort，直接进入统一收尾。
+    } else {
+      // 用 Promise.race 而不是裸 for-await：网关可能连「下一条事件」都不返回，
+      // 这时只有看门狗能把 streamToClient 从 await 中释放出来，finally 才能收尾。
+      const iterator = produce(controller.signal)[Symbol.asyncIterator]();
+      let nextPromise = iterator.next();
+      for (;;) {
+        const outcome = await Promise.race([
+          nextPromise.then((value) => ({ kind: "next" as const, value })),
+          limitSignal.then(() => ({ kind: "limit" as const })),
+        ]);
+        if (outcome.kind === "limit") {
+          // 生成器可能卡在底层 HTTP；先 abort，不阻塞 return（部分 SDK 的 return
+          // 也要等连接关闭）。请求结束后由 finally 落 journal / 清理槽位。
+          void iterator.return?.(undefined);
+          break;
+        }
+        if (outcome.value.done) break;
+        const event = outcome.value.value;
+        // 处理完当前帧后提前取下一帧，让下一轮 race 不再复用已完成 Promise。
+        nextPromise = iterator.next();
+        if (controller.signal.aborted) break;
+        observeTaskEvent(session, event);
+        if (limitNow()) break;
+        const snapshot = event.type === "usage" ? taskSnapshot(session) : null;
+        const publicEvent: AgentEvent = event.type === "usage" && snapshot
+          ? {
+              ...event,
+              taskInputTokens: snapshot.inputTokens,
+              taskOutputTokens: snapshot.outputTokens,
+              taskToolCalls: snapshot.toolCalls,
+              taskModelCalls: snapshot.modelCalls,
+              taskActiveMs: snapshot.activeMs,
+            }
+          : event;
+        collected.push(publicEvent);
+        writeEvent(res, publicEvent);
+        if (event.type === "interrupt") {
+          recordApproval(session, event.payload);
+          sawInterrupt = true;
+        }
+        if (event.type === "risk_decision") {
+          recordAutoApprovalAudit(session, event);
+        }
+        // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
+        // 只有正常走完、没有新 interrupt 的流才清空（resume 的 onDone 在无新 interrupt 时也会再清一次）。
+        if (event.type === "done" && !sawInterrupt) session.pendingApproval = null;
       }
-      // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
-      // 只有正常走完、没有新 interrupt 的流才清空（resume 的 onDone 在无新 interrupt 时也会再清一次）。
-      if (event.type === "done" && !sawInterrupt) session.pendingApproval = null;
     }
   } catch (err) {
     if (!controller.signal.aborted) {
@@ -107,13 +197,17 @@ async function streamToClient(
     }
   } finally {
     clearInterval(heartbeat);
+    clearInterval(watchdog);
     unregisterSse();
     incGauge("agent_sse_active_streams", { kind: session.kind }, -1);
-    const turnStatus = controller.signal.aborted
-      ? "aborted"
-      : collected.some((event) => event.type === "error")
-        ? "error"
-        : sawInterrupt ? "waiting" : "completed";
+    endTaskSegment(session);
+    const turnStatus = limitReason
+      ? `limited:${limitReason}`
+      : controller.signal.aborted
+        ? "aborted"
+        : collected.some((event) => event.type === "error")
+          ? "error"
+          : sawInterrupt ? "waiting" : "completed";
     incCounter("agent_sse_streams_total", {
       kind: session.kind,
       agentProfileId: session.agentProfileId ?? "none",
@@ -132,6 +226,7 @@ async function streamToClient(
       status: turnStatus,
       events: collected.length,
       durationMs: Math.max(0, Date.now() - turnStartedAt),
+      taskLimited: limitReason,
     });
     if (!clientGone) {
       writeEvent(res, { type: "done" });
@@ -197,6 +292,7 @@ async function handleChatInner(
   // 登记本轮对话记录（流结束后由 streamToClient 回填事件 → 任意浏览器可回放历史）
   const recordFiles = fileRefs.map((f) => ({ name: f.name ?? f.path ?? "附件", source: f.kind === "upload" ? "上传" : "项目文件", image: false }));
   beginTurnRecord(session, message, recordFiles.length ? recordFiles : undefined);
+  beginTaskSegment(session, false, message);
 
   // ── 外部 Agent 会话：不走 LangGraph / mock，直接启动第三方工具子进程 ──
   if (session.kind === "external") {
@@ -248,6 +344,13 @@ async function handleChatInner(
       agentProfileId: session.agentProfileId,
       turnId: session.turnHistory.at(-1)?.turnId,
       permissionMode: session.permissionMode,
+      taskLedger: renderTaskLedger(session.activeTask),
+      budgetNote: renderTaskBudgetNote(session, {
+        turnTimeoutMs: config.agentTurnTimeoutMs,
+        idleTimeoutMs: config.agentIdleTimeoutMs,
+        maxToolCalls: config.agentMaxToolCalls,
+        maxModelCalls: config.agentMaxModelCalls,
+      }),
     })
   , (events) => completeTurnRecord(session, events)));
 }
@@ -345,6 +448,7 @@ async function handleResumeInner(
     ? `（需求澄清：${resumeValue.slice(0, 60)}）`
     : `（人工审批：${resumeValue === "approve" ? "批准" : "拒绝"} ${approval?.type === "approval" ? approval.toolName : "操作"}）`;
   beginTurnRecord(session, recordUser, undefined, true);
+  beginTaskSegment(session, true, recordUser);
 
   if (!config.apiKey) {
     const approved = approval?.type === "approval" ? approval : undefined;
@@ -381,6 +485,13 @@ async function handleResumeInner(
         agentProfileId: session.agentProfileId,
         turnId: session.turnHistory.at(-1)?.turnId,
         permissionMode: session.permissionMode,
+        taskLedger: renderTaskLedger(session.activeTask),
+        budgetNote: renderTaskBudgetNote(session, {
+          turnTimeoutMs: config.agentTurnTimeoutMs,
+          idleTimeoutMs: config.agentIdleTimeoutMs,
+          maxToolCalls: config.agentMaxToolCalls,
+          maxModelCalls: config.agentMaxModelCalls,
+        }),
       }
     ),
     (events) => {

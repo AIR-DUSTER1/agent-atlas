@@ -547,6 +547,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   80k 字符送模型摘要（无 Key / 失败时退回本地摘录），成功后重建图并换新 `threadId`，
   下一轮由 `takeContextSummary()` 一次性注入摘要。外部 Agent、待审批会话拒绝压缩；
   旧 transcript 仍保留用于回放，所以 UI 会额外显示一张“压缩摘要”提示卡。
+  compact 结果同时写 journal（新 `threadId`、摘要、前后字符数、最后覆盖轮次）；摘要注入后
+  写 `contextInjected`，重启恢复不会重复注入，也不会退回已删除的旧线程。
 - **项目文件夹 `projects.ts`**：参考 ZCode 的「项目 ▾」—— 侧栏可选项目，
   会话按项目分组、新建对话归属当前项目。项目分两类并用样式区分：
   **💻 本地**（服务器磁盘目录）与 **☁️ 云端**（Git 仓库地址，添加时
@@ -1003,6 +1005,11 @@ turnHistory（journal 回放后同样在内存，重启不丢统计）→ 前端
 事件条数计。同一次流式调用会重复产出累计 usage 快照，新事件用稳定的 `usage.callId`
 归并并取各 token 字段最终值；旧 journal 没有 callId，则按连续 `model/input/output/cache`
 签名去重。`byDay.cacheReadTokens` 单列缓存读取量；`delegate_agent` 的 tool_call 计委派次数。
+**落盘口径（P0）**：SSE 仍可逐片推送 usage 以保持界面实时，但 `completeTurnRecord()`
+在写 journal 前会按 `callId` 只保留最终快照（旧数据按连续签名）；internal 调用保留用于
+成本统计，只从前端上下文容量条排除。轮次的 token/reasoning 相邻分片在 journal 内合并，
+reasoning 单轮最多落 20k 字符；超过 3000 事件上限时写 `storage`（原始数、丢弃数、上限、
+合并数），不再静默 `slice(-3000)`。
 
 **前端图表**：`views/stats/{index,kpi,charts,tables}.ts` 四模块分工；Chart.js 由
 `import("../../vendor/chart.js")` 动态加载，主设置页与核心会话不进入其启动闭包。六张图分别为
@@ -1526,6 +1533,11 @@ console.log(result.messages.at(-1).content);
 | 新建空会话仍显示上一会话的上下文与缓存 | 新建会话只重绘消息区，没有刷新容量条，旧 DOM 保持可见。现在会话视图切换统一调用 `updateContextBar()`，没有 usage 的新会话立即隐藏容量条 |
 | Electron 导出会话出现白框 | `window.open('/api/.../export')` 被同源窗口处理器允许后变成一个下载导航窗口。改为 `authFetch` 获取 Blob、`a.download` 下载，不创建新窗口 |
 | 自主审批重复循环 / 页面出现原始风险 JSON | tools 节点里风险审查模型的正文混入 messages 流；且相同工具参数使用不同 call id 会重复评估。现在 tools 节点正文过滤、同类风险 JSON 兜底过滤，完全重复的工具调用复用本轮结果；不再按 12 次固定业务上限截断，长任务可继续执行不同步骤，运行层保留可配置的应急超步保护 |
+| 自主模式放行后审计链缺 `hitl.decided` | 风险模型判低风险时原来只执行工具、不写安全日志。现在 ToolMessage 带 `riskDecision=auto`，流翻译层产出 `risk_decision`，服务端统一写 `hitl.decided(decision=auto, source=tool-risk, reason)`；参数不落审计 |
+| usage 快照在 journal 中成百上千次重复 | 流式调用每片都落 usage，长工具轮把同一累计快照写满事件上限。现在 journal 投影按 callId 保留终值，旧无 id 数据只消连续重复；SSE 实时容量条不受影响 |
+| 3000 事件截断后上下文突然变小且无从复盘 | 原逻辑直接 `slice(-3000)`。现在保留尾部时写 `storage.eventLimit/droppedEvents/originalEvents`，同时量化 token/reasoning 合并量 |
+| 工具 JSON `ok:false` 仍显示绿色完成 | 工具返回值原先一律标 success。现在统一识别顶层 `ok:false`/非空 `error` 为 `isError`；同参数连续两次确定性失败后第三次熔断，超时/限流/5xx 不熔断 |
+| 上下文容量逐轮单调膨胀 | 仅限制消息条数，不限制总字符；`/compact` 又是手动操作。现在投影增加总字符预算（默认 48k）并对历史大图占位；compact 状态持久化，重启不丢摘要 |
 | 会话项右侧导出与删除按钮重叠成一个图标 | 两个按钮都继承同一个 `.s-del` 绝对定位（`right:8px`）。改为 `.s-actions` flex 容器只定位一次，按钮用 `.s-action` 常态参与布局；回归测试断言按钮本体不得再各自绝对定位 |
 | Windows 下测不到优雅退出 | Windows 上 `process.kill(pid, "SIGTERM")` 会直接终止进程，`taskkill /F` 也不触发 JS 处理器；桌面端退出正因如此不走 flush。验收用 lifecycle 单测 + Linux 容器 `docker stop` 观察 `server_stopped` 日志 |
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
@@ -1839,3 +1851,12 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 **生产启动顺序**：读生产环境 → 配置迁移 → 设置/扩展加载 → 真实模型与目录门禁 → journal 回放 → HTTP 监听。任何硬门失败只输出结构化错误并退出 1，不进入半可用状态。
 
 **发布镜像顺序**：builder 安装完整依赖并执行 typecheck + client build → production-deps 执行 `npm ci --omit=dev` → runtime 只复制源码、静态产物、生产依赖和 `scripts/data-cli.ts`。运行层不包含 Electron、TypeScript、tests、docs、`.env` 或本地数据。
+
+
+## 长任务预算与工作台账
+
+- 一个用户目标 + 后续审批/澄清/「继续」属于同一个逻辑任务；`server/task-budget.ts` 按执行片段累计活动时长，审批等待不耗时。
+- 默认预算：活动 10 分钟、停滞 120 秒、工具 30 次、模型 60 次；超限由 SSE 看门狗 abort 并返回中文错误，不会伪装成正常完成。
+- 每次模型请求注入任务台账：目标、最近补充、已完成工具、关键结论与剩余预算；历史消息被投影省略时仍能跨审批继续。
+- 等价只读 terminal 命令会做规范化去重；当前轮大图保留，历史大图转文本占位；网关回显的 tools schema / 超大 output 在 checkpoint 前瘦身。
+- checkpoint compact 会按字节复核，并在日志中记录优化前后体积；`/compact` 仍会重建线程并注入摘要。

@@ -63,6 +63,10 @@ test("restoreSessions：只恢复 status=pending 的审批/澄清", async () => 
       projectId: "default", title: "非法会话", createdAt: 6, threadId: "th-invalid",
     },
   };
+  const legacyId = {
+    ev: "turn", id: "answered", ts: 123_456,
+    user: "旧轮次", events: [],
+  };
 
   await writeFile(file, [
     session("answered", 1),
@@ -75,6 +79,7 @@ test("restoreSessions：只恢复 status=pending 的审批/澄清", async () => 
     spoofedTurn,
     spoofedEstate,
     invalidKind,
+    legacyId,
   ].map((line) => JSON.stringify(line)).join("\n") + "\n");
 
   process.env.SESSIONS_FILE = file;
@@ -88,6 +93,8 @@ test("restoreSessions：只恢复 status=pending 的审批/澄清", async () => 
     assert.equal(answered?.pendingApproval, null);
     assert.equal(answered?.resumeUnavailable, false);
     assert.equal(answered?.agentProfileId, "general", "旧 journal 按 kind 派生 profile");
+    assert.equal(answered?.turnHistory[0]?.turnId, "legacy-answered-0", "旧轮次要稳定回填 turnId");
+    assert.equal(answered?.turnHistory[0]?.startedAt, 123_456, "旧轮次用 journal ts 回填 startedAt");
 
     const pending = getSession("pending");
     assert.equal(pending?.pendingApproval?.type, "clarification");
@@ -180,5 +187,52 @@ test("restoreSessions：有持久检查点的会话不再注入 journal 摘录",
     resetCheckpointSaver();
     const { resetJournalStore } = await import("../../src/server/session-store.js");
     resetJournalStore(); // 同上：重置回默认绑定，后续文件拿到干净空态
+  }
+});
+
+test("restoreSessions：压缩后的 threadId、摘要与注入状态从 journal 恢复", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agent-restore-compact-"));
+  const journalFile = join(dir, "sessions.ndjson");
+  process.env.CHECKPOINT_FILE = join(dir, "checkpoints.ndjson");
+  process.env.SESSIONS_FILE = journalFile;
+  process.env.WEB_CONFIG_FILE = join(dir, "web-config.json");
+  process.env.API_KEY = "";
+  try {
+    const rows = [
+      {
+        ev: "session",
+        session: {
+          id: "compact-restore", kind: "agent", demo: null, agentId: null,
+          projectId: "default", title: "压缩恢复", createdAt: 1, threadId: "th-old",
+        },
+      },
+      {
+        ts: 10, ev: "compact", id: "compact-restore", threadId: "th-new",
+        summary: "保留暗号蓝鲸", beforeChars: 50_000, afterChars: 7,
+        lastCompactTurnId: "turn-old",
+      },
+      { ts: 11, ev: "contextInjected", id: "compact-restore" },
+    ];
+    await writeFile(journalFile, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const { resetJournalStore } = await import("../../src/server/session-store.js");
+    resetJournalStore();
+    resetCheckpointSaver();
+    const { restoreSessions, getSession, takeContextSummary } = await import("../../src/server/sessions.js");
+    await restoreSessions();
+    const session = getSession("compact-restore");
+    assert.equal(session?.threadId, "th-new");
+    assert.equal(session?.contextSummary, "保留暗号蓝鲸");
+    assert.equal(session?.contextSummaryInjected, true);
+    assert.equal(session?.lastCompactTurnId, "turn-old");
+    assert.equal(takeContextSummary(session!), null, "已注入过的摘要重启后不能重复占用预算");
+  } finally {
+    delete process.env.CHECKPOINT_FILE;
+    delete process.env.SESSIONS_FILE;
+    delete process.env.WEB_CONFIG_FILE;
+    delete process.env.API_KEY;
+    await rm(dir, { recursive: true, force: true });
+    resetCheckpointSaver();
+    const { resetJournalStore } = await import("../../src/server/session-store.js");
+    resetJournalStore();
   }
 });

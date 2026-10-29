@@ -12,6 +12,7 @@ import type { AgentContextPolicy, AgentProfile } from "./profile.js";
 
 const DEFAULT_MAX_RECENT_MESSAGES = 32;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 8_000;
+const DEFAULT_MAX_CONTEXT_CHARS = 48_000;
 const TRUNCATION_MARKER_MIN = 40;
 /** 回炉草稿并入注记的字符上限（草稿过长时截头部，反思反馈会指明要改哪里） */
 const MAX_REVISION_DRAFT_CHARS = 4_000;
@@ -28,6 +29,10 @@ export interface AgentContextInput {
   memoryNote?: string;
   /** 技能注记（skills.ts 按用户消息关键词命中生成；未命中为 undefined，零开销） */
   skillNote?: string;
+  /** 跨审批/澄清仍保留的任务台账（server/task-budget.ts 生成） */
+  taskLedger?: string;
+  /** 本任务预算使用情况（供模型主动收口，不等待硬超时） */
+  budgetNote?: string;
 }
 
 export interface AgentContextResult {
@@ -40,6 +45,7 @@ export function resolveContextPolicy(profile: AgentProfile): AgentContextPolicy 
   return {
     maxRecentMessages: Math.max(2, profile.contextPolicy?.maxRecentMessages ?? DEFAULT_MAX_RECENT_MESSAGES),
     maxToolResultChars: Math.max(256, profile.contextPolicy?.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS),
+    maxContextChars: Math.max(8_000, profile.contextPolicy?.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS),
   };
 }
 
@@ -77,11 +83,21 @@ function cloneProjectedToolMessage(message: ToolMessage, maxChars: number): Tool
   });
 }
 
-/** 图片内容块判定：多模态工具结果（computer_screenshot）整体保留，不做字符截断 */
-function hasImageContent(content: BaseMessage["content"]): boolean {
-  return Array.isArray(content) && content.some(
-    (part) => typeof part === "object" && part !== null && "type" in part && (part as { type: unknown }).type === "image_url"
-  );
+const MAX_PROJECTED_IMAGE_URL_CHARS = 2_000;
+
+/** 多模态图片块只在当前轮有价值；历史截图转成文字占位，避免每轮重新吃几十万字符。 */
+function projectImageContent(content: BaseMessage["content"]): { content: BaseMessage["content"]; changed: boolean } {
+  if (!Array.isArray(content)) return { content, changed: false };
+  let changed = false;
+  const projected = content.map((part) => {
+    if (!part || typeof part !== "object" || !("type" in part)) return part;
+    const block = part as { type?: unknown; image_url?: { url?: unknown } };
+    if (block.type !== "image_url" || typeof block.image_url?.url !== "string") return part;
+    if (block.image_url.url.length <= MAX_PROJECTED_IMAGE_URL_CHARS) return part;
+    changed = true;
+    return { type: "text", text: "【历史图片已省略；如需查看请重新附加】" } as BaseMessage["content"][number];
+  });
+  return { content: projected as BaseMessage["content"], changed };
 }
 
 /** 消息 content（string 或内容块数组）拍平成纯文本 */
@@ -98,22 +114,52 @@ function messageText(content: BaseMessage["content"]): string {
  * - 不把 review/analysis 的 JSON 写入 messages；
  * - 最近消息窗口不会从 ToolMessage 中间切断工具调用；
  * - 只投影工具结果，不改 checkpoint 中的原消息；
- * - 截屏等多模态工具结果保留图片块（截断 base64 等于毁掉整张图）。
+ * - 当前轮截屏保留图片块；历史大图投影成文字占位，避免每轮重复吃 base64。
  */
 export function buildAgentContext(input: AgentContextInput): AgentContextResult {
   const policy = resolveContextPolicy(input.profile);
   const total = input.messages.length;
-  let start = Math.max(0, total - policy.maxRecentMessages);
+  const windowStart = Math.max(0, total - policy.maxRecentMessages);
+  let start = windowStart;
+  // 字符预算兜底：消息数不等于 token 数，长工具结果仍可能把 32 条窗口推到几十 K。
+  // 最新消息是当前请求，必须无条件保留；其余旧消息用剩余字符预算从新到旧装。
+  // dataURL 不计文本预算：历史图片会在下面先投影成短占位，当前轮附件也不能
+  // 因 base64 长度把用户刚发的消息整条裁掉。
+  if (total > 0) {
+    let usedChars = messageText(input.messages[total - 1]?.content).length;
+    let boundedStart = total - 1;
+    for (let index = total - 2; index >= windowStart; index -= 1) {
+      usedChars += messageText(input.messages[index]?.content).length;
+      if (usedChars > policy.maxContextChars) {
+        boundedStart = index + 1;
+        break;
+      }
+      boundedStart = index;
+    }
+    start = boundedStart;
+  }
   // ToolMessage 必须和它对应的 AIMessage tool_call 一起送入模型；宁可多保留一条。
   while (start > 0 && input.messages[start]?.getType() === "tool") start -= 1;
 
   const omittedMessages = start;
   let truncatedToolResults = 0;
-  const projected = input.messages.slice(start).map((message) => {
-    if (!(message instanceof ToolMessage)) return message;
-    if (hasImageContent(message.content)) return message;
-    const next = cloneProjectedToolMessage(message, policy.maxToolResultChars);
-    if (next !== message) truncatedToolResults += 1;
+  // 只有最近一条用户消息之后的多模态内容属于「当前轮」；更早的大图必须投影成
+  // 文本占位，否则每次继续都会把历史截图重新塞给模型。这里按消息身份判断，
+  // 避免把用户当前轮刚附加的图片误删。
+  let lastHumanIndex = -1;
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    if (input.messages[index]?.getType() === "human") { lastHumanIndex = index; break; }
+  }
+  const projected = input.messages.slice(start).map((message, offset) => {
+    const absoluteIndex = start + offset;
+    const inCurrentTurn = lastHumanIndex >= 0 && absoluteIndex >= lastHumanIndex;
+    const imageProjection = inCurrentTurn ? { content: message.content, changed: false } : projectImageContent(message.content);
+    const withImageProjection = imageProjection.changed
+      ? Object.assign(Object.create(Object.getPrototypeOf(message)), message, { content: imageProjection.content })
+      : message;
+    if (!(withImageProjection instanceof ToolMessage)) return withImageProjection;
+    const next = cloneProjectedToolMessage(withImageProjection, policy.maxToolResultChars);
+    if (next !== withImageProjection) truncatedToolResults += 1;
     return next;
   });
 
@@ -145,6 +191,8 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     input.permissionNote || "",
     input.memoryNote || "",
     input.skillNote || "",
+    input.taskLedger || "",
+    input.budgetNote || "",
     omittedMessages ? `【上下文窗口】已省略较早的 ${omittedMessages} 条消息，完整历史仍保存在会话记录中。` : "",
   ].filter(Boolean);
 

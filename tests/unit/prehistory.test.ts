@@ -29,7 +29,10 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     resumeUnavailable: false,
     contextSummary: null,
     contextSummaryInjected: false,
+    lastCompactTurnId: null,
     permissionMode: "approve",
+    activeTask: null,
+    taskLedger: "",
     ...overrides,
   };
 }
