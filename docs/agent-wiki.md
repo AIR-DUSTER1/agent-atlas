@@ -1649,6 +1649,7 @@ console.log(result.messages.at(-1).content);
 |---|---|---|
 | 页面一直“加载中”，探针却 200 | 新构建的 `observability/` 未加入静态目录白名单，模块图在首个 import 404 | 静态目录与构建清单同步；集成测试逐个请求构建子目录；E2E 监听 `pageerror` |
 | 镜像里 `npm run backup` 找不到脚本 | runtime 只复制 `src/`，漏了运维 CLI | release-check 将 `scripts/data-cli.ts` 列为必需运行资产 |
+| Docker smoke 报 `Cannot find module /app/src/memory/slot.js` | runtime 只复制了 `src/agent` 与 `src/server`，漏掉新增的 `src/memory/` | runtime 显式复制每个非 client 的顶层源码目录；release-check 单测枚举目录并在漏拷时失败 |
 | Prometheus 无法在 PRODUCTION 抓 `/metrics` | 生产关闭通用 Bearer，而浏览器 Cookie 不能作为 scrape 凭据 | 独立 `METRICS_TOKEN` 只授权 `/metrics`，不能访问 `/api/*` |
 | 前端初始化完成前 E2E 点击按钮无效 | `new-chat` 等控件在首屏就可见，事件绑定要等配置/项目/RAG 加载 | 初始化根节点维护 `data-app-ready=loading/true/error`，E2E 只等 ready 后操作 |
 | 浏览器 E2E 因缺 ffmpeg 全部失败 | 开启 video，但本地只安装了 Chrome | 默认只采集 trace/screenshot；需要 video 的环境单独安装 Playwright ffmpeg |
@@ -1727,7 +1728,7 @@ console.log(result.messages.at(-1).content);
 | 连接与协议 | `mcp.ts` | spawn 子进程、按行收发 JSON-RPC、请求 id 配对 + 超时、stderr 尾部留存、断线重连、进程树清理 |
 | 工具包装 | `mcp-tools.ts` | `mcp__<server>__<tool>` 命名、inputSchema → 宽松 zod、结果文本化、审批文案生成 |
 | HTTP | `routes/mcp.ts` | 列表 / 增删改 / 全局暂停 / `.mcp.json` 批量导入 / 测试连接 |
-| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：全局暂停、卡片列表、单服务器启停、连接测试、JSON 导入与弹窗编辑 |
+| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：完整命令粘贴解析、全局暂停、卡片列表、单服务器启停、连接测试、JSON 导入与弹窗编辑 |
 
 **设计要点**：
 
@@ -1739,6 +1740,7 @@ console.log(result.messages.at(-1).content);
   才是参数权威校验者，本地过严会挡掉合法的宽松调用。
 - **失败降级**：单个 server 连不上只记日志并跳过，绝不让整个服务起不来；
   工具调用失败返回模型可读中文错误（AGENTS §5.4），不 throw 穿透图。
+- **启动命令**：设置页优先接收完整命令（兼容 `$` 提示符和引号），自动拆成 command/args 并推导 id；Windows 下 `npx/npm/pnpm/yarn` 等 `.cmd` shim 通过受控命令解释器启动，避免 `spawn npx ENOENT`。
 - **管理面**：全局总开关可暂停所有 MCP 连接与工具注入但保留配置；JSON 导入支持
   `{ "mcpServers": { "<id>": { "command": ..., "args": [...] } } }`，冲突默认不覆盖；
   网页编辑走局部 PATCH，不会清掉导入配置里的 `env` / `cwd`。
@@ -1756,13 +1758,13 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 **问题**：「这类任务该怎么做」的领域指南写在系统提示词里，永远占上下文；
 写成文档又没有加载机制。
 
-**设计**：`.setting/skills/<id>.md` 或标准 `.setting/skills/<id>/SKILL.md` + 极简 frontmatter，**按触发词命中才注入，未配置触发词时用名称兜底**。新建和修改技能统一使用 `$skill-creator`；设置页只做上传、启停与删除管理。
+**设计**：`.setting/skills/<id>.md` 或标准 `.setting/skills/<id>/SKILL.md` + 极简 frontmatter，**触发词、技能名称与标识命中任一即注入**。新建和修改技能统一使用 `$skill-creator`；设置页只做上传、启停与删除管理。
 
 | 机制 | 实现 |
 |---|---|
 | 格式 | `---` 包起来的 `name` / `description` / `triggers` / `enabled` + markdown 正文；triggers 支持逗号分隔与 YAML 列表，**坏 frontmatter 降级为「无元数据的纯正文」而不报错** |
-| 匹配 | 只看**最近一条用户消息**；只匹配 `enabled != false` 的技能；无 triggers 时用技能名称/标识兜底；计分 = 命中关键词数 ×5 + 关键词总长度 |
-| 预算 | 每轮最多 2 个技能、单个正文上限 4000 字符；**未命中返回 null = 零 token 开销** |
+| 匹配 | 扫描当前用户消息全文；只匹配 `enabled != false` 的技能；triggers、名称与标识始终参与；计分 = 命中短语数 ×5 + 短语总长度 |
+| 预算 | 每轮最多 2 个技能、单个正文上限 4000 字符；不限制技能目录总数和单技能触发词数量；**未命中返回 null = 零 token 开销** |
 | 缓存 | 目录签名（文件数 + 最新 mtime）比较，目录没变就不重读文件 |
 | 管理 | 设置页「技能」分区：搜索、全部/已启用/已禁用筛选、分页卡片、上传 `.md` / `.markdown`、启停与卡片删除；新建和修改走 `$skill-creator`，避免手写 frontmatter 与标准技能目录分叉 |
 | 示例 | `scripts/example-skills/` 两个打样：写提交信息、排查端口占用 |
