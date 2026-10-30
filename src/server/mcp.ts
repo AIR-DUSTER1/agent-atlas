@@ -37,6 +37,37 @@ import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { writeAudit } from "./audit.js";
 import { PRODUCT_MCP_CLIENT_VERSION, PRODUCT_NAME } from "../product.js";
 
+/** Windows 的 npm 系命令通常是 .cmd shim，必须经命令解释器启动。 */
+const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "pnpm", "yarn", "bunx", "corepack", "tsx"]);
+
+export function requiresWindowsCommandShell(command: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== "win32") return false;
+  const file = command.trim().replaceAll("/", "\\").split("\\").pop()?.toLowerCase() ?? "";
+  return /\.(?:cmd|bat)$/.test(file) || WINDOWS_SHELL_COMMANDS.has(file);
+}
+
+function quoteWindowsShellToken(value: string): string {
+  if (!value) return '""';
+  if (!/[\s"&|<>^()%!]/u.test(value)) return value;
+  const escaped = value
+    .replace(/\\+$/g, (slashes) => `${slashes}${slashes}`)
+    .replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
+export function windowsShellCommandLine(command: string, args: readonly string[]): string {
+  return [command, ...args].map(quoteWindowsShellToken).join(" ");
+}
+
+function mcpSpawnError(server: McpServerConfig, err: NodeJS.ErrnoException): Error {
+  if (err.code === "ENOENT") {
+    return new Error(
+      `无法启动 MCP server「${server.id}」：找不到可执行命令「${server.command}」。` +
+      "请确认命令已安装并位于 PATH；Windows 下 npx/npm/pnpm 会自动通过 cmd.exe 启动，也可填写 .cmd 的绝对路径。"
+    );
+  }
+  return new Error(`无法启动 MCP server「${server.id}」：${err.message}`);
+}
 /** 单次 JSON-RPC 请求超时（initialize 可能慢，工具调用给足时间） */
 const REQUEST_TIMEOUT_MS = 60_000;
 /** tools/list 的额外宽限（有的 server 启动时要加载索引） */
@@ -236,14 +267,21 @@ export async function deleteMcpServer(id: string): Promise<{ removed: boolean; s
  * 失败时抛中文错误（调用方负责转成模型可读文本）。
  */
 async function connect(server: McpServerConfig): Promise<McpConnection> {
-  const child = spawn(server.command, server.args ?? [], {
-    cwd: server.cwd,
-    env: { ...process.env, ...(server.env ?? {}) },
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    // 非 Windows 建独立进程组，便于整组强杀
-    detached: process.platform !== "win32",
-  });
+  const args = server.args ?? [];
+  const useWindowsShell = requiresWindowsCommandShell(server.command);
+  const child = spawn(
+    useWindowsShell ? windowsShellCommandLine(server.command, args) : server.command,
+    useWindowsShell ? [] : args,
+    {
+      cwd: server.cwd,
+      env: { ...process.env, ...(server.env ?? {}) },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      shell: useWindowsShell,
+      // 非 Windows 建独立进程组，便于整组强杀
+      detached: process.platform !== "win32",
+    },
+  );
 
   const conn: McpConnection = {
     server,
@@ -298,7 +336,7 @@ async function connect(server: McpServerConfig): Promise<McpConnection> {
   child.on("error", (err) => {
     conn.closed = true;
     if (connections.get(server.id) === conn) connections.delete(server.id);
-    failAll(conn, new Error(`无法启动 MCP server「${server.id}」：${err.message}`));
+    failAll(conn, mcpSpawnError(server, err));
   });
 
   connections.set(server.id, conn);

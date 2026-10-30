@@ -15,6 +15,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+  formatMcpCommandLine,
+  inferMcpServerId,
+  parseMcpCommandLine,
+} from "../../src/client/modules/mcp-command.js";
 
 const dir = await mkdtemp(join(tmpdir(), "agent-mcp-"));
 const configFile = join(dir, "web-config.json");
@@ -86,7 +91,7 @@ const CRASH_LINES = [
 ];
 await writeFile(crashScript, CRASH_LINES.join("\n") + "\n", "utf8");
 
-const { saveMcpServer, deleteMcpServer, listMcpServers, listMcpStatus, testMcpServer, disconnectAll, isMcpEnabled, setMcpEnabled, updateMcpServer, importMcpServers } =
+const { saveMcpServer, deleteMcpServer, listMcpServers, listMcpStatus, testMcpServer, disconnectAll, isMcpEnabled, setMcpEnabled, updateMcpServer, importMcpServers, requiresWindowsCommandShell, windowsShellCommandLine } =
   await import("../../src/server/mcp.js");
 const { loadMcpTools, mcpApprovalDescriptions, mcpToolName } =
   await import("../../src/server/mcp-tools.js");
@@ -250,4 +255,40 @@ test("全局暂停：配置保留，但不再加载工具与审批表", async ()
   assert.deepEqual(await mcpApprovalDescriptions(), {});
   assert.ok((await listMcpServers()).some((server) => server.id === "echo_srv"));
   await setMcpEnabled(true);
+});
+test("MCP 完整启动命令解析：提示符、引号、路径与 server id 推导", () => {
+  const parsed = parseMcpCommandLine(
+    '$ npx -y @modelcontextprotocol/server-postgres "postgresql://user:pass@host:5432/vessel_db"'
+  );
+  assert.deepEqual(parsed, {
+    command: "npx",
+    args: [
+      "-y",
+      "@modelcontextprotocol/server-postgres",
+      "postgresql://user:pass@host:5432/vessel_db",
+    ],
+  });
+  assert.equal(inferMcpServerId(parsed.command, parsed.args), "server-postgres");
+  assert.deepEqual(parseMcpCommandLine(formatMcpCommandLine(parsed.command, parsed.args)), parsed);
+
+  const windows = parseMcpCommandLine(String.raw`& "C:\Program Files\node.exe" "D:\My Tools\server.js" --port 4310`);
+  assert.deepEqual(windows, {
+    command: String.raw`C:\Program Files\node.exe`,
+    args: [String.raw`D:\My Tools\server.js`, "--port", "4310"],
+  });
+  assert.equal(inferMcpServerId(windows.command, windows.args), "server");
+  assert.deepEqual(parseMcpCommandLine(formatMcpCommandLine(windows.command, windows.args)), windows);
+  assert.throws(() => parseMcpCommandLine('node "unclosed'), /引号没有闭合/);
+});
+
+test("Windows 下 npx/npm/pnpm 等命令自动经命令解释器启动", () => {
+  assert.equal(requiresWindowsCommandShell("npx", "win32"), true);
+  assert.equal(requiresWindowsCommandShell("npm.cmd", "win32"), true);
+  assert.equal(requiresWindowsCommandShell(String.raw`C:\Program Files\nodejs\pnpm.cmd`, "win32"), true);
+  assert.equal(requiresWindowsCommandShell("node", "win32"), false);
+  assert.equal(requiresWindowsCommandShell("npx", "linux"), false);
+  assert.equal(
+    windowsShellCommandLine(String.raw`C:\Program Files\nodejs\npx.cmd`, ["-y", "package with space"]),
+    String.raw`"C:\Program Files\nodejs\npx.cmd" -y "package with space"`,
+  );
 });

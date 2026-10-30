@@ -49,10 +49,14 @@ test("MCP 页面：列表、全局暂停、编辑弹窗、添加与导入", asyn
   await expect(page.locator("#mcp-editor")).toBeHidden();
 
   await page.locator("#mcp-add-btn").click();
+  await page.locator("#mcp-command-line").fill("$ node --version");
+  await page.locator("#mcp-command-parse").click();
+  await expect(page.locator("#mcp-id")).toHaveValue("node");
+  await expect(page.locator("#mcp-command")).toHaveValue("node");
+  await expect(page.locator("#mcp-args")).toHaveValue("--version");
+  await expect(page.locator("#mcp-command-preview")).toContainText("$ node --version");
   await page.locator("#mcp-id").fill("chrome-devtools");
   await page.locator("#mcp-name").fill("Chrome DevTools MCP");
-  await page.locator("#mcp-command").fill("node");
-  await page.locator("#mcp-args").fill("--version");
   await page.locator("#mcp-editor-save").click();
   await expect(page.locator(".mcp-server-row").filter({ hasText: "Chrome DevTools MCP" })).toBeVisible();
 

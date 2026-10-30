@@ -13,6 +13,12 @@ import { api } from "../core/api.js";
 import { uiConfirm } from "../ui/dialog.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
+import {
+  formatMcpCommandLine,
+  inferMcpServerId,
+  parseMcpCommandLine,
+  quoteMcpArg,
+} from "../modules/mcp-command.js";
 
 interface McpToolInfo {
   name: string;
@@ -340,6 +346,59 @@ function parseArgs(raw: string): string[] {
   return args;
 }
 
+function updateCommandPreview(command: string, args: readonly string[]): void {
+  const preview = $("mcp-command-preview");
+  const text = $("mcp-command-preview-text");
+  if (!preview || !text) return;
+  const normalized = formatMcpCommandLine(command.trim(), args).trim();
+  preview.classList.toggle("hidden", !normalized);
+  text.textContent = normalized ? `$ ${normalized}` : "";
+}
+
+function syncCommandPreviewFromFields(): void {
+  const command = inputValue("mcp-command").trim();
+  try {
+    updateCommandPreview(command, parseArgs(inputValue("mcp-args").trim()));
+  } catch {
+    updateCommandPreview("", []);
+  }
+}
+
+function applyQuickCommandLine(raw: string, quiet = false): boolean {
+  if (!raw.trim()) {
+    if (!quiet) showMcpStatus("请先粘贴完整启动命令", "err", true);
+    return false;
+  }
+  try {
+    const parsed = parseMcpCommandLine(raw);
+    setInput("mcp-command", parsed.command);
+    setInput("mcp-args", parsed.args.map(quoteMcpArg).join(" "));
+    const inferredId = inferMcpServerId(parsed.command, parsed.args);
+    if (!editingId && !inputValue("mcp-id").trim()) setInput("mcp-id", inferredId);
+    if (!inputValue("mcp-name").trim()) setInput("mcp-name", inputValue("mcp-id").trim() || inferredId);
+    updateCommandPreview(parsed.command, parsed.args);
+    const line = $("mcp-command-line") as HTMLInputElement | null;
+    if (line) requestAnimationFrame(() => { line.scrollLeft = 0; });
+    if (!quiet) showMcpStatus(`已解析：${parsed.command} · ${parsed.args.length} 个参数`, "ok", true);
+    return true;
+  } catch (err) {
+    if (!quiet) showMcpStatus(`解析失败：${(err as Error).message}`, "err", true);
+    return false;
+  }
+}
+
+function syncCommandLineFromFields(): void {
+  const command = inputValue("mcp-command").trim();
+  if (!command) return;
+  try {
+    const args = parseArgs(inputValue("mcp-args").trim());
+    setInput("mcp-command-line", formatMcpCommandLine(command, args));
+    updateCommandPreview(command, args);
+  } catch {
+    updateCommandPreview("", []);
+  }
+}
+
 export function openMcpEditor(server: McpServerStatus | null = null): void {
   editorReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   editingId = server?.id ?? null;
@@ -347,6 +406,8 @@ export function openMcpEditor(server: McpServerStatus | null = null): void {
   setInput("mcp-name", server && server.name !== server.id ? server.name : "");
   setInput("mcp-command", server?.command ?? "");
   setInput("mcp-args", server?.args.join(" ") ?? "");
+  setInput("mcp-command-line", server ? `$ ${formatMcpCommandLine(server.command, server.args)}` : "");
+  updateCommandPreview(server?.command ?? "", server?.args ?? []);
   const idInput = $("mcp-id") as HTMLInputElement | null;
   if (idInput) idInput.readOnly = Boolean(server);
   const approval = $("mcp-approval") as HTMLInputElement | null;
@@ -357,7 +418,7 @@ export function openMcpEditor(server: McpServerStatus | null = null): void {
   if (sub) {
     sub.textContent = server
       ? "只更新当前可见字段；通过 JSON 导入的 env / cwd 会原样保留。"
-      : "配置本机 stdio 启动命令；保存后可展开服务器测试连接并查看远端工具。";
+      : "优先粘贴完整启动命令，自动拆分后保存；也可在下方手动调整。";
   }
   const note = $("mcp-cwd-note");
   if (note) {
@@ -370,7 +431,7 @@ export function openMcpEditor(server: McpServerStatus | null = null): void {
   $("mcp-editor-delete")?.classList.toggle("hidden", !server);
   showMcpStatus("", "", true);
   $("mcp-editor-mask")?.classList.remove("hidden");
-  requestAnimationFrame(() => (server ? $("mcp-name") : $("mcp-id"))?.focus());
+  requestAnimationFrame(() => (server ? $("mcp-name") : $("mcp-command-line"))?.focus());
 }
 
 export function closeMcpEditor(): void {
@@ -407,6 +468,9 @@ export function isMcpEditorOpen(): boolean {
 
 export async function saveMcpFromForm(): Promise<void> {
   const wasEditing = Boolean(editingId);
+  if (inputValue("mcp-command-line").trim()) {
+    if (!applyQuickCommandLine(inputValue("mcp-command-line"), false)) return;
+  }
   const id = inputValue("mcp-id").trim();
   const command = inputValue("mcp-command").trim();
   if (!id) { showMcpStatus("服务器标识不能为空", "err", true); return; }
@@ -499,6 +563,27 @@ export function bindMcpSettings(): void {
   const globalToggle = $("mcp-global-enabled") as HTMLInputElement | null;
   globalToggle?.addEventListener("change", () => { void toggleGlobal(globalToggle); });
   $("mcp-add-btn")?.addEventListener("click", () => openMcpEditor());
+  $("mcp-command-parse")?.addEventListener("click", () => {
+    applyQuickCommandLine(inputValue("mcp-command-line"), false);
+  });
+  const commandLine = $("mcp-command-line") as HTMLInputElement | null;
+  commandLine?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    applyQuickCommandLine(commandLine.value, false);
+  });
+  commandLine?.addEventListener("paste", () => {
+    setTimeout(() => { applyQuickCommandLine(commandLine.value, true); }, 0);
+  });
+  commandLine?.addEventListener("blur", () => {
+    if (commandLine.value.trim() && !inputValue("mcp-command").trim()) {
+      applyQuickCommandLine(commandLine.value, true);
+    }
+  });
+  for (const id of ["mcp-command", "mcp-args"]) {
+    $(id)?.addEventListener("input", syncCommandPreviewFromFields);
+    $(id)?.addEventListener("change", syncCommandLineFromFields);
+  }
   $("mcp-import-btn")?.addEventListener("click", () => ($("mcp-import-file") as HTMLInputElement | null)?.click());
   $("mcp-import-file")?.addEventListener("change", (event) => {
     void importMcpFromFile((event.currentTarget as HTMLInputElement | null)?.files ?? null);

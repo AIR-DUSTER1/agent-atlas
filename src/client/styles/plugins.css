@@ -239,6 +239,27 @@
 .mcp-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .mcp-editor-head h2 { margin: 0 0 5px; font-size: 18px; }
 .mcp-editor-head p { margin: 0; color: var(--text-3); font-size: 12px; line-height: 1.55; }
+.mcp-quick-command {
+  margin-bottom: 12px; padding: 12px;
+  border: 1px solid rgba(91,140,255,.22); border-radius: 11px;
+  background: linear-gradient(135deg, rgba(91,140,255,.075), rgba(139,92,246,.035));
+}
+.mcp-quick-command .field { margin: 0; }
+.mcp-command-parse-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.mcp-command-parse-row .ghost-btn { min-height: 36px; margin: 0; white-space: nowrap; }
+.mcp-command-hint { display: block; margin-top: 6px; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
+.mcp-command-preview {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 9px;
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-input);
+}
+.mcp-command-preview > span { flex: none; color: var(--text-3); font-size: 10px; line-height: 1.55; }
+.mcp-command-preview code {
+  min-width: 0; color: var(--accent-soft); font-family: var(--mono); font-size: 10.5px;
+  line-height: 1.55; overflow-wrap: anywhere;
+}
+.mcp-form-divider { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; color: var(--text-3); font-size: 10px; }
+.mcp-form-divider::before, .mcp-form-divider::after { height: 1px; flex: 1; background: var(--border-soft); content: ""; }
 .mcp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .mcp-editor .field { margin-bottom: 13px; }
 .mcp-editor .field input { font-family: var(--mono); }
@@ -268,7 +289,8 @@
   .mcp-server-row { grid-template-columns: 22px 34px minmax(0, 1fr) auto; padding: 10px; }
   .mcp-server-icon { width: 32px; height: 32px; }
   .mcp-server-row .mcp-server-actions { gap: 7px; }
-  .mcp-detail-grid, .mcp-form-grid { grid-template-columns: 1fr; }
+  .mcp-detail-grid, .mcp-form-grid, .mcp-command-parse-row { grid-template-columns: 1fr; }
+  .mcp-command-parse-row .ghost-btn { width: 100%; }
   .mcp-editor-mask { padding: 12px; }
 }
 .field { display: block; margin-bottom: 14px; }
@@ -453,4 +475,3 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 /* 一键安装引导卡（CLI 未装时出现在工具卡里） */
 .estate-setup { border: 1px solid rgba(229,96,79,.35); border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; }
 .estate-setup a { color: var(--accent); }
-

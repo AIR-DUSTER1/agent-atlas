@@ -912,6 +912,22 @@
                 </button>
               </div>
 
+              <section class="mcp-quick-command" aria-labelledby="mcp-quick-command-label">
+                <label class="field">
+                  <span id="mcp-quick-command-label" class="field-label">完整启动命令 <em class="key-state">粘贴后自动拆分，支持 $ 前缀与引号</em></span>
+                  <div class="mcp-command-parse-row">
+                    <input id="mcp-command-line" aria-label="完整 MCP 启动命令" type="text" spellcheck="false" autocomplete="off" placeholder="$ npx -y @modelcontextprotocol/server-postgres postgresql://user:pass@host:5432/db" />
+                    <button id="mcp-command-parse" type="button" class="ghost-btn small">解析</button>
+                  </div>
+                  <small class="mcp-command-hint">只做命令与参数拆分，不执行命令；Windows 下 npx/npm/pnpm 会自动兼容 .cmd。</small>
+                </label>
+                <div id="mcp-command-preview" class="mcp-command-preview hidden">
+                  <span>解析结果</span>
+                  <code id="mcp-command-preview-text"></code>
+                </div>
+              </section>
+              <div class="mcp-form-divider"><span>或手动编辑</span></div>
+
               <div class="mcp-form-grid">
                 <label class="field">
                   <span class="field-label">服务器标识</span>
@@ -923,11 +939,11 @@
                 </label>
               </div>
               <label class="field">
-                <span class="field-label">启动命令</span>
+                <span class="field-label">可执行命令</span>
                 <input id="mcp-command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="例如 npx、node、uvx" />
               </label>
               <label class="field">
-                <span class="field-label">启动参数 <em class="key-state">空格分隔；含空格的参数请用双引号包住</em></span>
+                <span class="field-label">命令参数 <em class="key-state">空格分隔；含空格的参数请用双引号包住</em></span>
                 <input id="mcp-args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder='例如 -y @modelcontextprotocol/server-filesystem "D:\data"' />
               </label>
               <div id="mcp-cwd-note" class="mcp-advanced-note hidden"></div>

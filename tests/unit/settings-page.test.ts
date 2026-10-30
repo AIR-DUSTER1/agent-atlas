@@ -128,7 +128,8 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   for (const id of [
     "mcp-summary", "mcp-global-enabled", "mcp-global-state", "mcp-import-btn",
     "mcp-import-file", "mcp-refresh-btn", "mcp-add-btn", "mcp-list",
-    "mcp-editor-mask", "mcp-editor-title", "mcp-id", "mcp-name", "mcp-command",
+    "mcp-editor-mask", "mcp-editor-title", "mcp-command-line", "mcp-command-parse",
+    "mcp-command-preview", "mcp-command-preview-text", "mcp-id", "mcp-name", "mcp-command",
     "mcp-args", "mcp-approval", "mcp-editor-delete", "mcp-editor-save",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
@@ -141,6 +142,9 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   assert.match(source, /envKeys/);
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /isMcpEditorOpen/);
+  assert.match(source, /parseMcpCommandLine/);
+  assert.match(source, /applyQuickCommandLine/);
+  assert.match(source, /mcp-command-preview/);
 
   assert.doesNotMatch(source, /innerHTML/);
 });
