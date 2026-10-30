@@ -38,7 +38,7 @@ import { writeAudit } from "./audit.js";
 import { PRODUCT_MCP_CLIENT_VERSION, PRODUCT_NAME } from "../product.js";
 
 /** Windows 的 npm 系命令通常是 .cmd shim，必须经命令解释器启动。 */
-const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "pnpm", "yarn", "bunx", "corepack", "tsx"]);
+const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "pnpm", "pnpx", "yarn", "bunx", "corepack", "tsx", "tsc"]);
 
 export function requiresWindowsCommandShell(command: string, platform: NodeJS.Platform = process.platform): boolean {
   if (platform !== "win32") return false;

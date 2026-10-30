@@ -285,6 +285,7 @@ test("Windows 下 npx/npm/pnpm 等命令自动经命令解释器启动", () => {
   assert.equal(requiresWindowsCommandShell("npx", "win32"), true);
   assert.equal(requiresWindowsCommandShell("npm.cmd", "win32"), true);
   assert.equal(requiresWindowsCommandShell(String.raw`C:\Program Files\nodejs\pnpm.cmd`, "win32"), true);
+  assert.equal(requiresWindowsCommandShell("pnpx", "win32"), true);
   assert.equal(requiresWindowsCommandShell("node", "win32"), false);
   assert.equal(requiresWindowsCommandShell("npx", "linux"), false);
   assert.equal(
