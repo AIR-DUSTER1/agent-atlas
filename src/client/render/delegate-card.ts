@@ -19,7 +19,12 @@ interface DelegatePayload {
   text?: string;
   durationMs?: number;
   toolsUsed?: string[];
+  assignedTools?: string[];
+  agent?: string;
+  agentName?: string;
+  model?: string;
   profile?: string;
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; cacheReadTokens?: number };
 }
 
 const PROFILE_LABELS: Record<string, string> = {
@@ -62,24 +67,31 @@ export function renderDelegateInToolCard(part: ToolPart, card: HTMLElement): boo
 
   const titleEl = wrap.querySelector(".delegate-title");
   if (titleEl) {
-    const label = PROFILE_LABELS[payload.profile ?? ""] ?? "子 Agent";
+    const id = payload.agent ?? payload.profile ?? "";
+    const label = payload.agentName ?? PROFILE_LABELS[id] ?? id ?? "子 Agent";
     titleEl.textContent = payload.ok === false ? `委派到${label} · 未成功` : `委派到${label}`;
   }
   const metaEl = wrap.querySelector(".delegate-meta");
   if (metaEl) {
     const secs = typeof payload.durationMs === "number" ? (payload.durationMs / 1000).toFixed(1) : "?";
-    metaEl.textContent = `耗时 ${secs}s`;
+    const tokens = typeof payload.usage?.totalTokens === "number" && payload.usage.totalTokens > 0
+      ? ` · ${payload.usage.totalTokens.toLocaleString("zh-CN")} tokens`
+      : "";
+    metaEl.textContent = `${payload.model ? `${payload.model} · ` : ""}耗时 ${secs}s${tokens}`;
   }
 
   const toolsEl = wrap.querySelector(".delegate-tools");
   if (toolsEl) {
     const tools = Array.isArray(payload.toolsUsed) ? payload.toolsUsed : [];
-    if (tools.length) {
+    const assigned = Array.isArray(payload.assignedTools) ? payload.assignedTools : [];
+    if (tools.length || assigned.length) {
       const label = document.createElement("span");
       label.className = "delegate-tools-label";
-      label.textContent = `用了 ${tools.length} 个工具：`;
+      label.textContent = tools.length
+        ? `用了 ${tools.length} 个工具：`
+        : `已分配 ${assigned.length} 个工具（本次未调用）：`;
       toolsEl.appendChild(label);
-      for (const name of tools) {
+      for (const name of (tools.length ? tools : assigned)) {
         const chip = document.createElement("span");
         chip.className = "delegate-tool-chip";
         chip.textContent = name;

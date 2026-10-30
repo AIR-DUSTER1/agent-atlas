@@ -188,10 +188,10 @@ flowchart LR
 | 执行核心 | LangGraph 图（analyze / clarify / agent / tools / review） | AgentRuntime 状态机 | agent-loop + 插件 | 图 / 状态机 / harness 三种范式 |
 | 模型调用 | LangChain 模型 | `streamText` / `generateText` | `agent/request` + LLM adapter | 都支持流式；ZCode/DSH 有更细的失败记录 |
 | 工具循环 | `agent ⇄ tools` | `SchedulingTools → ExecutingTools → AggregatingResults` | `tool/call → 管线 → tool/result` | 当前顺序执行；ZCode/DSH 有调度与并发策略 |
-| 工具并发 | 无全局调度器 | scheduler 默认 10 | 仅显式并发安全工具，默认最多 10 | DSH 的并发判定最保守、最可审计 |
+| 工具并发 | 同轮直通调用 `Promise.all`，审批类串行 | scheduler 默认 10 | 仅显式并发安全工具，默认最多 10 | 当前无全局调度器，但已避免同轮无审批工具串行等待 |
 | 工具注册 | `tools-*.ts` + zod | registry + riskLevel / capability | `ctx.tools` + `ToolDefinition` | DSH 是插件注册表；ZCode 是工具注册表 |
 | 工具审批 | `APPROVAL_TOOLS` + `interrupt()` | PermissionService + Broker | `tools/pre-execute` + approval + sandbox | 当前按工具名；ZCode 按策略；DSH 是分层强制 |
-| 子代理 | Demo 4；子图在进程内；外部 Agent 独立子进程 | `Task` 派生独立 AgentRuntime | `subagent` / `subagent_fork` + 控制面 | ZCode/DSH 是产品能力；当前多 Agent 是 Demo |
+| 子代理 | 产品化一级委派；独立 threadId，子图同进程；提示词/工具由主 Agent 赋权 | `Task` 派生独立 AgentRuntime | `subagent` / `subagent_fork` + 控制面 | 当前已有生产级一级委派，但无递归团队、实时子事件和控制面 |
 | 流式事件 | `AgentEvent` → SSE | v4 event → TopicPublisher | Session 事件 + 投影 | 当前单页消费；ZCode/DSH 面向多客户端和重放 |
 | 会话记忆 | MemorySaver + `threadId` | SqliteSessionStore | append-only Session 日志 | 当前进程内；DSH 是事件溯源 |
 | 重启恢复 | journal + 一次性文本摘录 | SQLite + execution_state | JSONL 恢复 + 中断 turn 收口 | 当前不能恢复原图状态 |
@@ -282,7 +282,8 @@ ZCode 和 DSH 都把工具当作平台能力：注册、权限、并发、事件
 
 关键区别：
 
-- **当前 Demo 4** 是「一张图里调另一张图」，教学上很清楚，但不是独立 runtime；
+- **当前产品子代理** 是「主 Agent 动态赋权 + 同进程子图」，有独立上下文、模型快照、工具子集和取消链路，但仍是批式返回；
+- **Demo 4** 只是 Supervisor 教学图，不代表当前产品编排；
 - **ZCode Task** 是独立 `AgentRuntime`，有独立的权限、事件和父子会话路由；
 - **DSH subagent** 是工具化能力，spawn 与 fork 语义明确，还带控制面和实验性 Agent Teams。
 
@@ -348,7 +349,7 @@ agentatlas主要依赖「工具名单 + 人工审批 + 文件授权」，适合�
 4. **会话隔离**：每个会话有自己的上下文和执行状态；
 5. **上下文压缩**：长会话需要摘要，避免无限增长；
 6. **扩展工具**：都支持新增工具，只是注册与治理方式不同；
-7. **子进程/子执行单元**：当前用于外部 Agent，ZCode/DSH 用于子代理或隔离执行。
+7. **子代理/子执行单元**：当前产品通过同进程子图实现一级委派，外部 Agent 走子进程；ZCode/DSH 用于独立子代理或隔离执行。
 
 ## 13. 关键差异总结
 
@@ -361,7 +362,7 @@ agentatlas主要依赖「工具名单 + 人工审批 + 文件授权」，适合�
 3. **事实来源**：当前是内存图 + journal；ZCode 是 SQLite；DSH 是 append-only 事件日志。
 4. **并发与取消**：当前只有单会话流闸；ZCode 有前台租约；DSH 有协作式取消与静止语义。
 5. **工具管线**：当前是节点内顺序执行；ZCode 有 scheduler；DSH 有 pre/guards/execute/post 全管线。
-6. **多 Agent**：当前是 Demo；ZCode/DSH 是产品级子代理。
+6. **多 Agent**：当前已有配置化一级父子委派；ZCode/DSH 具备更完整的独立 runtime 与控制面。
 7. **上下文治理**：当前手动压缩；ZCode 自动 + 微压缩；DSH 压缩 + 裁剪 + spill + image offload。
 8. **安全强制**：当前 HITL + 文件授权；ZCode 权限模式；DSH sandbox + approval 分层。
 
@@ -391,6 +392,6 @@ agentatlas主要依赖「工具名单 + 人工审批 + 文件授权」，适合�
 | `/api/resume` | 审批回写 | approval outcome 继续 |
 | `MemorySaver` | SqliteSessionStore | Session 日志 + projection |
 | `/compact` | autoCompact / microcompact | compaction / pruner / spill |
-| Demo 4 子图 | Task 子代理 | `subagent` / `subagent_fork` |
+| `delegate_agent` 子图（Demo 4 仅教学） | Task 子代理 | `subagent` / `subagent_fork` |
 | 外部 Agent | 远程 agent | 外部 provider |
 | SSE `AgentEvent` | v4 event | Session 事件 + 投影 |

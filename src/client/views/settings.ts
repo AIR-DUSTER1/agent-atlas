@@ -24,11 +24,12 @@ import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
 import { refreshPluginPanel } from "./settings-plugins.js";
+import { refreshSubagents } from "./settings-subagents.js";
 import { refreshStats } from "./stats/index.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "mcp", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "memories", "commands", "skills", "mcp", "stats"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -56,6 +57,8 @@ export function showSettingsView(view: string): void {
     void refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
   } else if (next === "plugins") {
     void refreshPluginPanel().catch((err) => setPluginPanelError(err));
+  } else if (next === "subagents") {
+    void refreshSubagents().catch((err) => setSubagentPanelError(err));
   } else if (next === "memories") {
     void refreshMemorySettings().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "commands") {
@@ -86,6 +89,13 @@ function filterSettingsNav(query: string): void {
 
 function setPluginPanelError(err: unknown): void {
   const el = $("plugin-status");
+  if (!el) return;
+  el.textContent = "✗ " + (err instanceof Error ? err.message : String(err));
+  el.className = "settings-status err";
+}
+
+function setSubagentPanelError(err: unknown): void {
+  const el = $("subagent-status");
   if (!el) return;
   el.textContent = "✗ " + (err instanceof Error ? err.message : String(err));
   el.className = "settings-status err";

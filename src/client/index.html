@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/styles/modals.css" />
   <link rel="stylesheet" href="/styles/settings.css" />
   <link rel="stylesheet" href="/styles/plugins.css" />
+  <link rel="stylesheet" href="/styles/subagents.css" />
   <link rel="stylesheet" href="/styles/responsive.css" />
   <link rel="stylesheet" href="/styles/desktop.css" />
   <link rel="stylesheet" href="/styles/commands.css" />
@@ -77,7 +78,7 @@
       <nav id="session-list" aria-label="会话列表"></nav>
 
       <div class="side-footer">
-        <button id="settings-btn" class="side-settings-btn" title="打开设置页（模型 / 记忆 / 统计）">
+        <button id="settings-btn" class="side-settings-btn" title="打开设置页（模型 / 子代理 / 插件 / 记忆 / 统计）">
           <span class="side-settings-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
           <span class="side-settings-copy">
             <strong>设置</strong>
@@ -220,7 +221,7 @@
       </button>
       <div class="settings-page-heading">
         <h1 id="settings-title">设置</h1>
-        <p>模型、插件、长期记忆与使用统计集中管理</p>
+        <p>模型、插件、子代理、长期记忆与使用统计集中管理</p>
       </div>
       <button id="settings-logout-btn" class="settings-logout-btn hidden" type="button" title="退出当前访问会话">退出登录</button>
     </header>
@@ -242,6 +243,10 @@
             <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
               <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
               <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与 Computer Use</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="subagents" role="tab" aria-selected="false" aria-controls="settings-view-subagents">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>子代理</strong><small>模型、启停与动态委派能力</small></span>
             </button>
           </div>
           <div class="settings-nav-group" data-settings-group="extensions">
@@ -408,6 +413,95 @@
             <div id="plugin-list" class="plugin-list"></div>
             <div id="plugin-status" class="settings-status" role="status" aria-live="polite"></div>
             <p class="settings-note">开关只改变 Agent 可调用的插件工具，不会删除 RAG / CLI 的已有配置。MCP 是独立扩展类型，请到左侧「MCP 服务器」统一启停。</p>
+          </div>
+        </section>
+
+        <section id="settings-view-subagents" class="settings-view hidden" data-settings-panel="subagents" role="tabpanel" aria-labelledby="subagents-title">
+          <div id="subagents-panel" class="subagents-page" role="region" aria-labelledby="subagents-title">
+            <div class="subagents-head">
+              <div>
+                <h2 id="subagents-title"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i> 子代理</h2>
+                <p class="settings-sub">主 Agent 在委派时负责赋予每个子代理的专项提示词与工具子集。这里管理可被委派的身份、用途说明、启停和模型。</p>
+              </div>
+              <button id="subagent-add-btn" type="button" class="ui-button ui-button-primary">
+                <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 添加子代理
+              </button>
+            </div>
+
+            <section class="subagents-overview" aria-label="子代理运行规则">
+              <div class="subagents-overview-icon"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i></div>
+              <div>
+                <strong>默认继承当前主对话模型</strong>
+                <p>也可固定到其他供应商模型。工具和提示词不写死在这里：每次委派由主 Agent 按任务选择，且只能使用当前安全工具目录。</p>
+              </div>
+            </section>
+
+            <div id="subagent-status" class="settings-status" role="status" aria-live="polite"></div>
+            <div id="subagents-list" class="subagents-list" aria-live="polite"></div>
+            <div id="subagents-empty" class="subagents-empty hidden">
+              <span class="subagents-empty-icon"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i></span>
+              <h3>还没有可用子代理</h3>
+              <p>添加后，主 Agent 才能通过 delegate_agent 委派任务。</p>
+            </div>
+
+            <div id="subagent-editor-mask" class="subagent-editor-mask hidden">
+              <form id="subagent-editor" class="subagent-editor" role="dialog" aria-modal="true" aria-labelledby="subagent-editor-title">
+                <div class="subagent-editor-head">
+                  <div>
+                    <span id="subagent-editor-eyebrow" class="subagent-editor-eyebrow">新建子代理</span>
+                    <h3 id="subagent-editor-title">子代理配置</h3>
+                  </div>
+                  <button id="subagent-editor-close" type="button" class="subagent-icon-btn" aria-label="关闭子代理编辑器" title="关闭">
+                    <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
+                  </button>
+                </div>
+
+                <label class="field">
+                  <span class="field-label">名称 <em class="key-state">主 Agent 用它识别子代理</em></span>
+                  <input id="subagent-name" type="text" maxlength="60" autocomplete="off" placeholder="例如 代码审查员" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">用途说明 <em class="key-state">写清何时应该委派</em></span>
+                  <textarea id="subagent-description" rows="4" maxlength="500" placeholder="例如：适合审查改动、定位回归风险并给出可验证的修复建议。"></textarea>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">模型</span>
+                  <select id="subagent-model-mode">
+                    <option value="inherit">继承当前主对话模型（推荐）</option>
+                    <option value="fixed">固定供应商与模型</option>
+                  </select>
+                </label>
+
+                <div id="subagent-model-picker" class="subagent-model-picker hidden">
+                  <label class="field">
+                    <span class="field-label">供应商</span>
+                    <select id="subagent-provider"></select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">模型</span>
+                    <select id="subagent-model"></select>
+                  </label>
+                </div>
+
+                <label class="subagent-enable-row">
+                  <span><strong>启用</strong><small>停用后主 Agent 不再看到该子代理</small></span>
+                  <span class="subagent-switch">
+                    <input id="subagent-enabled" type="checkbox" checked />
+                    <span class="subagent-switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+
+                <div id="subagent-editor-status" class="settings-status" role="status" aria-live="polite"></div>
+                <div class="subagent-editor-actions">
+                  <button id="subagent-delete-btn" type="button" class="ghost-btn small danger-text hidden">删除子代理</button>
+                  <span class="subagent-editor-spacer"></span>
+                  <button id="subagent-cancel-btn" type="button" class="ghost-btn small">取消</button>
+                  <button id="subagent-save-btn" type="submit" class="ui-button ui-button-primary">保存</button>
+                </div>
+              </form>
+            </div>
           </div>
         </section>
 

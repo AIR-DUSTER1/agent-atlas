@@ -43,6 +43,7 @@ import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { loadPluginState } from "./views/settings-plugins.js";
+import { bindSubagentSettings, closeSubagentEditor, isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
@@ -211,6 +212,7 @@ async function init(): Promise<void> {
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
   bindMcpSettings();
+  bindSubagentSettings();
   bindCommandSettings();
   on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
@@ -471,6 +473,10 @@ async function init(): Promise<void> {
   document.addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement;
     if (e.key === "Escape") {
+      if (isSubagentEditorOpen()) {
+        e.preventDefault();
+        return;
+      }
       // 供应商弹窗是第一层：只关它，不要把背后的设置页一起关掉。
       if (isProviderFormOpen()) {
         e.preventDefault();

@@ -472,7 +472,7 @@
 }
 .delegate-icon { flex: none; }
 .delegate-title { font-weight: 600; color: var(--text); }
-.delegate-meta { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.delegate-meta { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .delegate-tools {
   display: flex;
   flex-wrap: wrap;

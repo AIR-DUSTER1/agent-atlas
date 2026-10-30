@@ -261,6 +261,28 @@ export interface PluginSettingsState {
   platform: string;
 }
 
+/** 子代理模型：默认继承主对话，也可固定到已配置的供应商 × 模型。 */
+export type SubagentModelSelection =
+  | { mode: "inherit" }
+  | { mode: "fixed"; providerId: string; modelId: string };
+
+export interface SubagentEntry {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  model: SubagentModelSelection;
+  builtIn: boolean;
+  createdAt: number;
+  updatedAt: number;
+  modelLabel: string;
+  modelAvailable: boolean;
+}
+
+export interface SubagentSettingsState {
+  agents: SubagentEntry[];
+}
+
 export interface EstateState {
   installed: boolean;
   version?: string;

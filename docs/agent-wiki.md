@@ -913,34 +913,47 @@ profile，不判断具体业务名。
   base64 不进前端不进 journal。
 
 **插件启停边界（`src/plugin-state.ts` + `server/plugin-settings.ts`）**：设置 → 插件页的三个开关统一写入 `.web-config.json` 的 `plugins.enabled`，`GET /api/plugins` 返回状态、`PATCH /api/plugins/:id` 切换单项。写入失败不改内存状态；切换成功后 `bumpConfigVersion()`，已有会话下一条消息重建图，确保工具 allowlist 与审批表同步收敛。RAG / 贝壳默认开启以兼容旧配置，Computer Use 默认关闭；非 Windows 平台会直接拒绝启用 Computer Use。关闭后旧图即使仍持有工具引用，工具入口也会 fail-closed，不会触达外部服务或 PowerShell。
-### 3.24 `src/agent/subagent.ts` + `src/tools-team.ts` — 多智能体协同（委派子 Agent）
+### 3.24 生产级多 Agent：配置化身份 + 主 Agent 动态赋权
 
-**形态**：子 Agent = 工具。主 Agent（general）调 `delegate_agent({ profile, task })`，
-内部用目标 profile 的 workflow 子图后台跑完任务书，结果文本截断 4000 字符作为 ToolMessage
-回填 —— 是 Demo 4（supervisor）/ Demo 5（并行 map-reduce）概念的产品化。
+**形态**：子 Agent = 主 Agent 的一次有界委派工具。设置页只管理子代理身份、用途说明、启停和模型；
+每次调用 `delegate_agent({ agent, task, prompt, tools })` 时，主 Agent 必须显式赋予专项提示词和工具子集。
 
-阶段 1 的三条安全默认：
+```text
+设置 → 子代理
+  ├─ id / 名称 / 用途说明 / 启停
+  └─ 模型：inherit 当前主对话 或 fixed(providerId, modelId)
 
-| 默认 | 实现 |
+主 Agent workflow
+  └─ delegate_agent
+       ├─ 权限四档裁决（委派本身是审批项）
+       ├─ 校验启停、模型可用性、工具是否在安全目录
+       ├─ 组装一次性子 Profile：prompt + selected tools + approvals
+       ├─ 独立 threadId / MemorySaver 跑同一 workflow 子图
+       └─ 返回 text / model / durationMs / toolsUsed / usage，ToolMessage 回填主会话
+```
+
+| 约束 | 实现 |
 |---|---|
-| 子 Agent 强制只读 | `runSubagent` 固定 `permission_mode:"readonly"` 传子图 configurable，写操作全部被权限闸门拒绝（§3.23）；写需求由主 Agent 自己走完整审批链 |
-| 深度 = 1 | `subagentProfileOf` 剔除子 profile 的 `delegate_agent` 工具，子 Agent 无法再委派，防递归套娃与配额失控 |
-| 黑盒交互 | 子图在工具函数内运行，`interrupt` 无法冒泡：澄清 interrupt / 超时（180s）/ 空产出 一律转「模型可读中文错误」，主 Agent 重试或接手，绝不静默挂死 |
+| 模型 | 默认继承当前主对话「供应商 × 模型」；固定模型必须真实存在，失效时 fail-closed |
+| 提示词 | 不写死在配置页；由主 Agent 每次传入 `prompt` |
+| 工具 | 由主 Agent 从 `delegation-catalog.ts` 选择；未知、停用或不安全工具拒绝 |
+| 深度 | `delegate_agent` 永不进入工具目录，子 Profile 再剔除一次，最大深度固定 1 |
+| 记忆 | `memory_save` / `memory_recall` 不可委派，长期记忆由主 Agent 收口 |
+| 审批 | 默认模式先展示子代理、任务、工具列表和提示词摘要；批准后子代理在独立上下文自动执行已授权工具 |
+| 取消 | 父请求 `AbortSignal` 透传到子图模型与工具调用，没有 180s 等业务级硬超时 |
+| 隔离 | 子图消息、threadId、MemorySaver 全部独立；父子对话历史不互相灌入 |
+| 观测 | 委派卡展示实际模型、耗时、toolsUsed、可用 usage；子 Agent 内部 token 仍不实时流向主 SSE |
 
-上下文隔离：每次委派独立 `threadId` + 全新 MemorySaver，子 Agent 只看到任务书（外加追加的
-「不要请求澄清、按合理假设继续」分析规则），主会话只看到结果文本 —— 双向不污染。
+配置持久化在 `.web-config.json` 的 `subagents`；CRUD 由 `server/subagent-settings.ts` 串行写盘并写审计。
+`GET /api/subagents`、`POST /api/subagents`、`PATCH/DELETE /api/subagents/:id` 驱动设置页。
+配置变更后 `bumpConfigVersion()`，已有会话下一条消息重建图，主 Agent 看到的子代理目录与工具目录同步更新。
 
-实现坑：
+实现注意：
 
-- **import 环**：general.ts 挂载 delegate 工具（import tools-team），而 tools-team 要按
-  profileId 取 generalProfile / estateProfile —— 静态 import 会成环。工具函数内用
-  **动态 `await import()`**（模块缓存无性能损耗）在运行时取 profile；
-- 委派本身登记审批（`delegate_agent` → 「委派 xx 子 Agent 执行：…（一次委派 = 多轮模型调用）」），
-  复用 §3.23 权限四档：readonly 拒 / approve 卡 / autonomous AI 判风险后放行或审批 / auto 直通；
-- estate 不挂 delegate（域纯粹，不反向委派）—— 工具隔离测试断言。
-
-阶段边界（后续）：同轮多委派并行（tools 节点 Promise.all）、子 Agent token 流转发前端、
-审批冒泡（需图节点式改造）、子 Agent usage 并入主会话容量条。
+- 模型工厂使用冻结快照（`model-runtime.ts`），并发子代理固定不同供应商时不会改写全局 `config`；
+- 设置页只允许 `inherit` / `fixed` 两种模式，固定模型在供应商/模型被删除后显示「不可用」；
+- 同一轮多个可直通委派仍由 tools 节点 `Promise.all` 并发，审批类保持一次一张卡；
+- 子代理没有实时人工交互，澄清请求会转成可重试错误，不能静默挂死。
 
 ### 3.25 `src/checkpoint.ts` — 持久化检查点（重启不丢模型记忆）
 
@@ -1537,7 +1550,7 @@ console.log(result.messages.at(-1).content);
 | 现象                                 | 原因                               | 解决                                    |
 | ---------------------------------- | -------------------------------- | ------------------------------------- |
 | `HTTP 400` 且无响应体                   | 模型名不在网关支持列表（如 `gpt-4o-mini`）     | `npm run models` 看列表，改 `.env` 的 MODEL |
-| `HTTP 503 SERVICE_BUSY`            | 网关并发过高（本项目网关很频繁）                 | 重试即可；`llm.ts` 已配 `maxRetries: 2`      |
+| `HTTP 503 SERVICE_BUSY`            | 网关并发过高（本项目网关很频繁）                 | 工作流层默认自动重试 10 次；持续失败时检查网关负载 |
 | 输出夹杂 `<｜begin▁of▁sentence｜>` 等特殊标记 | deepseek 系模型的 tokenizer 特殊 token | 换 `glm-5` / `kimi-k2.5` 等模型           |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
@@ -1561,6 +1574,10 @@ console.log(result.messages.at(-1).content);
 | 图不结束死循环                   | 图运行统一使用 1000 超步保护；业务层不设置任务总时长、工具次数或模型次数上限。审批、澄清与工具等待不设自动超时，只有单次模型供应商请求超时/重试耗尽才报错中断 |
 | 模型网关瞬断导致长任务中途终止 | 408/429/5xx、请求超时与网络错误默认自动重试 10 次；每次失败、最终失败与重试成功都会产出 `model_retry` 事件，前端默认折叠并显示重试次数 / 总请求次数 / 失败原因。400、认证失败和用户取消不重试 |
 | RAG 登记「翻倍 / 凭空消失」         | `getRagPublic` 为 async 后路由忘 `await`，`JSON.stringify(Promise)` 得 `{}`（§3.13 实战坑） |
+| 子代理报「工具不在当前可分配目录」 | 主 Agent 给了未知、已停用或被禁止递归/记忆写入的工具名；到设置 → 插件确认能力已启用，并让主 Agent 只从委派工具描述里的目录选择 |
+| 子代理固定模型显示「不可用」 | 原供应商或模型已删除/改名；编辑子代理重新选择，或改回「继承当前主对话模型」 |
+| 子代理继承了错误模型 | 继承绑定的是创建父图时冻结的当前模型；切换模型后需等该会话下一条消息重建图，再发起委派 |
+| 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 | 贝壳工具结果里全是 `{error:"…"}`    | 三排查：① `where beike` 确认 CLI 在 PATH 或 `.setting/beike/` 已解压；② Key 过期（面板重新保存）；③ 用 `beike doctor` 看官方诊断输出 |
@@ -1784,9 +1801,9 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 **结果保序**：并发完成后按原始 `tool_calls` 下标回填 —— 模型读到的顺序与它发起的
 一致（否则「第一个工具的结果」会被标成第二个，模型会张冠李戴）。
 
-**过程可见**：`delegate_agent` 返回结构化 JSON（`durationMs` / `toolsUsed`），
-前端委派卡渲染「委派到哪个 Agent · 耗时 · 用了哪几个工具」。子 Agent 的完整
-对话仍是黑盒，但这两项足以让用户判断结论可信度。
+**过程可见**：`delegate_agent` 返回结构化 JSON（`agent` / `model` / `durationMs` /
+`toolsUsed` / `usage`），前端委派卡渲染目标子代理、实际模型、耗时与工具轨迹。子 Agent
+的完整对话仍是黑盒，但关键执行事实足以让用户判断结论可信度。
 
 ### 3.34 `scripts/build-vendor.ts` + `src/client/vendor/*` — 前端依赖隔离与 CSP hash
 

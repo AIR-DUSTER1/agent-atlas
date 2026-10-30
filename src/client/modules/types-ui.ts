@@ -217,7 +217,7 @@ export interface ComposerTrigger {
  * 全局状态
  * ------------------------------------------------------------------------- */
 
-import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent, PluginSettingsState } from "./types-api.js";
+import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent, PluginSettingsState, SubagentSettingsState } from "./types-api.js";
 
 export interface SessionStreamState {
   ctrl: AbortController;
@@ -233,6 +233,7 @@ export interface AppState {
   rag: RagState | null;
   estate: EstateState | null;
   plugins: PluginSettingsState | null;
+  subagents: SubagentSettingsState | null;
   projectView: string;
   projCollapsed: string[];
   currentId: string | null;

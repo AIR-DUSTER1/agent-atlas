@@ -3,9 +3,10 @@
 > 本文描述当前工作区的实际实现：从浏览器发出消息，到 LangGraph 执行、工具调用、
 > 人工审批、SSE 回传、会话持久化与上下文压缩的完整链路。
 >
-> 结论先说：**默认产品路径是「单 Agent ReAct + 需求理解 / 澄清 / 反思」，
-> 不是自动多 Agent 规划。**
-> Supervisor 多 Agent 和并行 map-reduce 目前是 Demo；外部 Agent 则完全不走 LangGraph。
+> 结论先说：**默认主执行者仍是「单 Agent ReAct + 需求理解 / 澄清 / 反思」。
+> 通用 Agent 可以按需调用配置化的生产子代理，但不会自动生成团队或常驻调度器。**
+> 生产子代理采用「主 Agent 动态赋权」；Demo 4 Supervisor 和 Demo 5 map-reduce 仍然只是教学实现，
+> 外部 Agent 则完全不走 LangGraph。
 >
 > 与 ZCode、DeepSeek Harness 的逐阶段对比见
 > [`agent-orchestration-vs-zcode.md`](agent-orchestration-vs-zcode.md)。
@@ -227,6 +228,8 @@ flowchart LR
 - `read_file` / `list_dir` / `grep_search` 直接执行；
 - `terminal` / `write_file` / `send_email` 由系统自动发起人工审批；
 - 用户附加文件时，以附件内容为准；
+- 只有独立、可并行或需要隔离上下文的任务才调用 `delegate_agent`；
+- 委派时必须指定子代理、完整任务书、专项提示词和最小工具子集；
 - 回答简洁，代码使用 Markdown 代码块。
 
 ### 4.5 记忆
@@ -262,6 +265,36 @@ START → analyze → (clarify?) → agent → (toolsCondition) → tools → ag
 | `house_agents` | 经纪人检索 / 详情 | 低 |
 | `house_appoint` | 提交带看预约 | 高，需审批 |
 | `house_contact` | 经纪人加微 | 高，需审批 |
+
+## 5.1 生产级子代理委派
+
+子代理不是写死在 profile 里的固定角色，而是「设置页管理身份与模型 + 主 Agent 每次赋予提示词与工具」：
+
+```mermaid
+flowchart TD
+  A["通用 Agent"] --> D{"delegate_agent"}
+  D -->|"审批 / 自主判定"| V["校验子代理、模型、工具目录"]
+  V --> P["组装一次性子 Profile<br/>专项提示词 + 工具子集"]
+  P --> S["独立 threadId + MemorySaver<br/>同一 workflow 图"]
+  S --> R["结构化结果<br/>text / toolsUsed / usage / duration"]
+  R --> T["ToolMessage 回填主 Agent"]
+```
+
+| 维度 | 当前实现 |
+|---|---|
+| 配置 | 设置 → 子代理：名称、用途说明、启停、模型；持久化到 `.web-config.json` 的 `subagents` |
+| 模型 | 默认 `inherit` 当前主对话的供应商 × 模型；也可固定到任意已配置模型 |
+| 提示词 | 每次由主 Agent 通过 `prompt` 参数赋予，不写死在配置里 |
+| 工具 | 每次由主 Agent 通过 `tools` 参数选取当前安全目录中的子集；未知/停用工具拒绝 |
+| 审批 | `delegate_agent` 本身登记审批；卡片展示任务、工具列表与提示词摘要，批准后子代理自动执行所选工具 |
+| 隔离 | 独立 threadId / 临时 MemorySaver；不继承主会话消息；不能再次委派；记忆工具由主 Agent 收口 |
+| 取消 | 父请求 `AbortSignal` 透传到子图模型与工具调用；不设固定业务时长 |
+| 结果 | 完整结论 + 模型名 + 耗时 + toolsUsed + 可观测 usage；前端委派卡展示 |
+| 并发 | 同一轮多个可直通委派由 tools 节点 `Promise.all` 并发；审批类仍一次一张卡 |
+
+工具目录由 `delegation-catalog.ts` 生成：当前通用工具 + 已启用插件工具 + 已启用 MCP 工具 + 找房插件工具，
+并永久排除 `delegate_agent`、`memory_save`、`memory_recall`。因此「主 Agent 赋权」不是任意代码执行，
+而是在当前运行时的可委派能力集合内做最小授权。
 
 ## 6. Demo 图的编排
 
@@ -537,6 +570,12 @@ clone 仓库
 | `src/server/limits.ts` | 同会话流闸、发送节流、资源桶 |
 | `src/agent/workflow.ts` | 需求理解 / 澄清 / ReAct / 反思的共享图，消费 profile |
 | `src/agent/profile.ts` | Agent profile 类型、工具 allowlist、kind → profile 派生 |
+| `src/subagent-state.ts` | 设置页子代理配置的运行时只读状态 |
+| `src/server/subagent-settings.ts` | 子代理 CRUD、校验、持久化与审计 |
+| `src/server/routes/subagents.ts` | `/api/subagents` 设置页接口 |
+| `src/delegation-catalog.ts` | 主 Agent 可安全分配给子代理的工具目录 |
+| `src/tools-team.ts` | `delegate_agent` 动态赋权与子 Profile 组装 |
+| `src/agent/subagent.ts` | 子图执行、取消透传、usage / 工具轨迹回收 |
 | `src/agent/approvals.ts` | 按 profile 拆分的审批策略 |
 | `src/agent/general.ts` | 默认通用 Agent profile：工具集 + 系统提示词 |
 | `src/agent/estate.ts` | 房产 Agent profile：工具集 + 系统提示词 |
@@ -549,9 +588,9 @@ clone 仓库
 
 ## 14. 当前实现边界
 
-- 默认路径是**单 Agent ReAct + 需求理解 / 澄清 / 反思**，没有自动任务分解 / 动态规划器；
-- 多 Agent 协作只存在于 Demo 4，并行 map-reduce 只存在于 Demo 5（CLI）；
-- `MemorySaver` 是进程内存储，不是生产级持久化 Checkpointer；
-- 服务是单实例内存会话模型，没有任务队列 / 分布式 worker；
-- 外部 Agent 是「每条消息一个子进程」，不是常驻 Agent 服务；
-- `/compact` 会重建图并清空当前线程记忆，只保留摘要与历史回放。
+- 默认路径仍是**单 Agent ReAct + 需求理解 / 澄清 / 反思**，没有自动团队生成 / 动态规划器；
+- 生产子代理是一级委派能力，但只支持一级父子委派；Demo 4 Supervisor 和 CLI map-reduce 不参与产品编排；
+- 子代理完成后一次性回填，不实时转发子代理内部 token 流，也不支持中途向父请求插话；
+- 服务仍是单实例内存会话模型，没有分布式任务队列 / worker 集群；
+- 外部 Agent 是「每条消息一个子进程」，不能被主 Agent 通过 `delegate_agent` 调用；
+- `/compact` 会重建当前线程并只保留摘要与历史回放。

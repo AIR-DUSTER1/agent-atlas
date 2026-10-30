@@ -16,7 +16,7 @@ import type { AppState, ChatBlock } from "../modules/types.js";
 import { PRODUCT_NAME } from "../modules/product.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-10-30-5";
+export const APP_VERSION = "web-2026-10-30-6";
 
 console.log(
   `%c[${PRODUCT_NAME}] 前端脚本已加载 ` + APP_VERSION,
@@ -39,6 +39,7 @@ export const state: AppState = {
   rag: null,           // 外部 RAG 状态
   estate: null,        // 贝壳 CLI 状态
   plugins: null,       // 内置插件启停状态（RAG / 找房 / Computer Use）
+  subagents: null,     // 设置页管理的运行时子代理
   projectView: "all",  // "all" | projectId（侧栏过滤 + 新建会话归属）
   projCollapsed: [],   // 侧栏分组折叠状态：被折叠的项目 id（ORPHAN_GROUP_KEY = 未归属组）
   currentId: null,

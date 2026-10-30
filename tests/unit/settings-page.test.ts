@@ -30,7 +30,7 @@ test("设置页包含返回按钮、全部分区与集中面板", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   assert.match(html, /id="settings-page"/);
   assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('class="settings-nav-item active"'));
-  for (const view of ["models", "plugins", "memories", "stats"]) {
+  for (const view of ["models", "plugins", "subagents", "memories", "stats"]) {
     assert.match(html, new RegExp(`data-settings-panel="${view}"`));
   }
   assert.doesNotMatch(html, /id="(settings|memories|stats)-mask"/);
@@ -173,4 +173,25 @@ test("技能库支持上传、启停、分页与卡片删除", async () => {
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /skill\.path/);
   assert.doesNotMatch(source, /openSkillEditor|saveSkillFromForm|currentEditingId/);
+});
+
+
+test("子代理设置页支持列表、启停、新增编辑删除与继承/固定模型", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const source = await readClientFiles(["views/settings-subagents.ts", "views/settings.ts", "main.ts"]);
+  for (const id of [
+    "subagents-list", "subagents-empty", "subagent-add-btn", "subagent-status",
+    "subagent-editor-mask", "subagent-editor", "subagent-name", "subagent-description",
+    "subagent-model-mode", "subagent-provider", "subagent-model", "subagent-enabled",
+    "subagent-delete-btn", "subagent-save-btn",
+  ]) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /data-settings-view="subagents"/);
+  assert.match(html, /value="inherit"/);
+  assert.match(html, /value="fixed"/);
+  assert.match(source, /\/api\/subagents/);
+  assert.match(source, /method: "PATCH"/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /mode: "inherit"/);
+  assert.match(source, /mode: "fixed", providerId, modelId/);
+  assert.doesNotMatch(source, /innerHTML/);
 });
