@@ -4,7 +4,7 @@
  * 守五条：
  *   1. frontmatter 解析：name/description/triggers（含中文顿号分隔）；
  *   2. 坏数据降级：没有 frontmatter / 格式坏 → 整份当正文，不报错；
- *   3. 关键词匹配：命中才返回、按具体度排序、每轮最多 2 个；
+ *   3. 触发词、技能名称或 ID 命中即返回，按具体度排序，每轮最多 2 个；
  *   4. 注入文本：命中带关键词说明，未命中返回 null（零开销）；
  *   5. 写操作：校验标识白名单、同名覆盖、删除。
  */
@@ -84,7 +84,7 @@ test("没有 frontmatter 的文件也能当技能用（整份是正文，无触�
   assert.equal(s.body, "只是正文，没有元数据");
 });
 
-test("关键词匹配：命中才返回，按具体度排序，最多 2 个", async () => {
+test("触发词、名称与 ID 命中：按具体度排序，每轮最多 2 个且不限制技能总数", async () => {
   resetSkillsCache();
   const skills = await listSkills();
   const matched = matchSkills(skills, "帮我写个提交信息");
@@ -92,27 +92,41 @@ test("关键词匹配：命中才返回，按具体度排序，最多 2 个", as
   assert.equal(matched[0].skill.id, "git-commit");
   assert.ok(matched[0].hits.includes("提交信息"));
 
-  // 未命中 → 空数组
   assert.equal(matchSkills(skills, "今天天气如何").length, 0);
-  // 空输入 → 空数组
   assert.equal(matchSkills(skills, "").length, 0);
 
-  // 上传的标准 Skill 可能没有 triggers：名称/标识作为兜底触发词。
-  await writeSkill("name-fallback.md", `---\nname: 名称兜底\n---\n名称匹配正文`);
+  // 名称和 ID 始终参与匹配，即使技能已经配置了其他 triggers。
+  await writeSkill("name-fallback.md", `---\nname: 名称始终触发\ntriggers: 仅关键词触发\n---\n名称匹配正文`);
   const withFallback = await listSkills();
-  assert.equal(matchSkills(withFallback, "请使用名称兜底技能").length, 1);
+  assert.equal(matchSkills(withFallback, "请使用名称始终触发技能").length, 1);
   assert.equal(matchSkills(withFallback, "请使用name-fallback技能").length, 1);
 
-  // 造 3 个都能命中的技能，验证上限 2
+  // 用户消息不再只扫描尾部 2000 字：长消息开头的触发词也必须生效。
+  await writeSkill("long-message.md", `---\ntriggers: 长消息开头触发\n---\n长消息匹配正文`);
+  const longMessage = `长消息开头触发${"x".repeat(2_500)}`;
+  assert.equal(matchSkills(await listSkills(), longMessage)[0]?.skill.id, "long-message");
+
+  // 单个技能的触发词不再被任意截断为 20 个。
+  const triggers = Array.from({ length: 25 }, (_, index) => `批量触发词${index + 1}`);
+  await writeSkill("many-triggers.md", `---\ntriggers: ${triggers.join(", ")}\n---\n多触发词正文`);
+  assert.equal(matchSkills(await listSkills(), "请匹配批量触发词25")[0]?.skill.id, "many-triggers");
+
+  // 造 3 个都能命中的技能，验证每轮上限仍为 2。
   resetSkillsCache();
   for (const n of [1, 2, 3]) {
-    await writeSkill(`multi-${n}.md`, `---\ntriggers: 关键词\n---\n正文 ${n}`);
+    await writeSkill(`multi-${n}.md`, `---\ntriggers: 每轮上限关键词\n---\n正文 ${n}`);
   }
-  const all = await listSkills();
-  const many = matchSkills(all, "关键词 关键词");
-  assert.ok(many.length <= 2, `每轮最多 2 个，实际 ${many.length}`);
-});
+  const many = matchSkills(await listSkills(), "每轮上限关键词");
+  assert.equal(many.length, 2, `每轮最多 2 个，实际 ${many.length}`);
 
+  // 技能目录总数不再被 100 个的硬上限截断。
+  const beforeBulk = (await listSkills()).length;
+  for (let index = 0; index < 101; index += 1) {
+    await writeSkill(`bulk-${index}.md`, `---\nname: 批量技能 ${index}\ntriggers: never-hit-${index}\n---\n批量正文 ${index}`);
+  }
+  resetSkillsCache();
+  assert.ok((await listSkills()).length >= beforeBulk + 101);
+});
 test("注入文本：命中带关键词说明，未命中返回 null（零开销）", async () => {
   resetSkillsCache();
   const skills = await listSkills();
@@ -121,7 +135,7 @@ test("注入文本：命中带关键词说明，未命中返回 null（零开销
   const note = skillsNoteForPrompt(matchSkills(skills, "写提交信息"));
   assert.ok(note);
   assert.match(String(note), /【已加载技能】/);
-  assert.match(String(note), /命中关键词/);
+  assert.match(String(note), /命中：/);
   assert.match(String(note), /一行中文短句/);
 });
 
