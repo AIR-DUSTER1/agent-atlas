@@ -23,7 +23,7 @@
 
 ```yaml
 scrape_configs:
-  - job_name: agent-tools
+  - job_name: agentatlas
     scheme: https
     metrics_path: /metrics
     authorization:

@@ -19,7 +19,7 @@ const GEOCODE_CACHE_MAX = 200;            // 地址 → 坐标缓存上限
 const GEOCODE_MAX_ITEMS = 6;              // 单次地图对比最多同时定位几个点
 
 /** Nominatim 要求带可识别的 UA，否则可能被拒 */
-const NOMINATIM_UA = `${PRODUCT_USER_AGENT} (local agent tools)`;
+const NOMINATIM_UA = `${PRODUCT_USER_AGENT} (local agentatlas)`;
 
 // ---------------------------------------------------------------------------
 // 区位 geocode：Nominatim（无 key）+ 串行限速 + 内存缓存

@@ -158,7 +158,7 @@ async function fetchWithRedirects(start: URL, allowLocalhost: boolean): Promise<
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
         // 有些站点直接拒绝空 UA
-        "User-Agent": `${PRODUCT_USER_AGENT} (+local agent tools)`,
+        "User-Agent": `${PRODUCT_USER_AGENT} (+local agentatlas)`,
         Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
       },
     });

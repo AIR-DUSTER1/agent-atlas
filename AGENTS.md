@@ -8,12 +8,12 @@
 
 ## 1. 项目定位一句话
 
-agent-tools：LangGraph.js（TypeScript）+ 零框架实现的 Agent 工具集：`node:http` + SSE 后端、
+agentatlas：LangGraph.js（TypeScript）+ 零框架实现的 Agent 工具集：`node:http` + SSE 后端、
 TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、外加 Electron 桌面端壳
 与「外部 RAG 知识库」HTTP 客户端。**保留学习示例，同时作为可正常使用的本地产品维护**。
 
 后续能力路线：Hook、独立电脑操作 Agent、岗位获取 Agent、简历投递 Agent。规划与实现边界见
-`docs/agent-tools-roadmap.md`；未完成能力不得在 README「当前能力」中冒充已交付。
+`docs/agentatlas-roadmap.md`；未完成能力不得在 README「当前能力」中冒充已交付。
 
 ## 2. 技术栈红线（不许随意突破）
 

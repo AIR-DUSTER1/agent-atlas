@@ -26,7 +26,7 @@ Browser
 Nginx / Caddy（TLS、限流、SSE 不缓冲）
   │ HTTP 127.0.0.1:3000
   ▼
-agent-tools 容器（非 root、只读根文件系统、PRODUCTION=1）
+agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
   │
   └── /data
       ├── web-config.json          # 敏感字段 AES-256-GCM 加密
