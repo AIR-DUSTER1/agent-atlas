@@ -37,6 +37,7 @@ import { createApprovalToolsNode } from "./hitl.js";
 import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
 import type { AgentProfile } from "./profile.js";
+import type { ModelRuntimeConfig } from "../model-runtime.js";
 
 const MAX_USER_TEXT = 8_000;
 const MAX_BRIEF_TEXT = 1_200;
@@ -314,10 +315,18 @@ async function invokeModel(
 export function createWorkflowGraph(
   profile: AgentProfile,
   models?: WorkflowModels,
-  options?: { checkpointer?: MemorySaver; sessionId?: string; riskAssessor?: ToolRiskAssessor }
+  options?: {
+    checkpointer?: MemorySaver;
+    sessionId?: string;
+    riskAssessor?: ToolRiskAssessor;
+    /** 子代理可使用独立「供应商 × 模型」快照；主图不传时走全局当前模型。 */
+    modelRuntime?: ModelRuntimeConfig;
+    /** 观测每次模型响应；回调异常不得影响主图。 */
+    onModelUsage?: (node: "analyze" | "agent" | "review", response: AIMessage) => void;
+  }
 ) {
   const tools = profile.tools;
-  const modelOptions = { sessionId: options?.sessionId };
+  const modelOptions = { sessionId: options?.sessionId, runtime: options?.modelRuntime };
   const agentModel = models?.agent
     ?? withModelRetries(createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel, options?.sessionId);
   const analystModel = models?.analyst
@@ -338,6 +347,12 @@ export function createWorkflowGraph(
   const reviewPrompt = profile.reviewerGuidance
     ? `${REVIEW_PROMPT}\n${profile.reviewerGuidance}`
     : REVIEW_PROMPT;
+
+  function observeModel(node: "analyze" | "agent" | "review", response: AIMessage): void {
+    try {
+      options?.onModelUsage?.(node, response);
+    } catch { /* usage 观测失败不能中断业务 */ }
+  }
 
   async function analyzeNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
     const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
@@ -362,6 +377,7 @@ export function createWorkflowGraph(
             `最近对话：\n${recentContext(state.messages) || "（无）"}\n\n当前请求：\n${userText}`,
         },
       ], nodeConfig?.signal, options?.sessionId);
+      observeModel("analyze", response);
       const analysis = parseRequirementAnalysis(contentText(response.content));
       const brief = (analysis.brief || userText).slice(0, MAX_BRIEF_TEXT);
       if (analysis.understood) {
@@ -438,6 +454,7 @@ export function createWorkflowGraph(
       contextWindow: config?.configurable?.context_window,
     });
     const response = await invokeModel(agentModel, context.messages, config?.signal, options?.sessionId);
+    observeModel("agent", response);
     // 网关回显的 tools/output 与 dataURL 会原样进入 checkpoint；先投影再入状态。
     return { messages: [sanitizeCheckpointMessage(response)] };
   }
@@ -459,6 +476,7 @@ export function createWorkflowGraph(
             `助手最新回答：\n${answer || "（空回答）"}`,
         },
       ], nodeConfig?.signal, options?.sessionId);
+      observeModel("review", response);
       const review = parseReviewResult(contentText(response.content));
       if (review.passes || attempts >= MAX_REVIEW_REVISIONS) {
         return { reviewFeedback: "", reviewAttempts: attempts + 1 };

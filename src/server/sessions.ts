@@ -20,6 +20,7 @@ import { createMultiAgentGraph } from "../agent/multi.js";
 import { createAgentGraph } from "../agent/general.js";
 import { createEstateGraph } from "../agent/estate.js";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
+import { resolveModelRuntime } from "../model-runtime.js";
 import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
 import { ensureCheckpointsLoaded, getCheckpointSaver } from "../checkpoint.js";
 import { getExternalAgent } from "./external.js";
@@ -137,9 +138,11 @@ export function buildGraph(
   demo: 1 | 2 | 3 | 4 | null,
   sessionId?: string
 ): unknown {
-  if (kind === "agent") return createAgentGraph(sessionId);
+  // 建图时冻结当前「供应商 × 模型」快照：主图和 inherit 子代理必须使用同一模型，
+  // 不能被另一个并发会话随后的切换悄悄改掉。
+  if (kind === "agent") return createAgentGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
-  if (kind === "estate") return createEstateGraph(sessionId);
+  if (kind === "estate") return createEstateGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   switch (demo) {
     case 1: return createBasicGraph(sessionId);
     case 2: return createMemoryGraph(sessionId);

@@ -14,6 +14,7 @@ import { estateApprovals } from "./approvals.js";
 import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 import { isPluginEnabled } from "../plugin-state.js";
+import type { ModelRuntimeConfig } from "../model-runtime.js";
 
 const tools = [
   // 贝壳找房工具（检索/详情/户型图/对比地图/行情/经纪人）；约看与加微走人工审批
@@ -77,7 +78,7 @@ export function estateProfileWithPlugins(): AgentProfile {
   };
 }
 
-export function createEstateGraph(sessionId?: string) {
+export function createEstateGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig) {
   // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(estateProfileWithPlugins(), undefined, { sessionId });
+  return createWorkflowGraph(estateProfileWithPlugins(), undefined, { sessionId, modelRuntime });
 }
