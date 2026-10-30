@@ -49,6 +49,12 @@ import {
 import { mergeConfig, readConfig } from "./config-store.js";
 import { maskKey, modelInfoCache, type GatewayModelInfo } from "./settings-cache.js";
 import { createContextWindowBudget } from "../context-window.js";
+import {
+  configureModelRuntimeResolver,
+  defaultModelRuntime,
+  type ModelRuntimeConfig,
+  type SubagentModelSelection,
+} from "../model-runtime.js";
 
 // ---------------------------------------------------------------------------
 // 内部数据结构
@@ -502,3 +508,38 @@ export {
   addProvider, updateProvider, deleteProvider, activate,
   addModel, updateModel, deleteModel, setReasoning,
 } from "./settings-crud.js";
+
+/**
+ * 子代理模型解析：固定模型必须仍存在于供应商配置中；inherit 使用当前
+ * 主对话的「供应商 × 模型」实时快照。返回 null 时委派工具 fail-closed。
+ */
+function resolveSubagentModelRuntime(selection: SubagentModelSelection): ModelRuntimeConfig | null {
+  if (selection.mode === "inherit") {
+    const provider = activeProviderForCrud();
+    const model = activeModelOfForCrud(provider);
+    if (!provider || !model) return defaultModelRuntime();
+    return runtimeFromProviderModel(provider, model);
+  }
+
+  const provider = providers.find((item) => item.id === selection.providerId);
+  const model = provider?.models.find((item) => item.id === selection.modelId);
+  return provider && model ? runtimeFromProviderModel(provider, model) : null;
+}
+
+function runtimeFromProviderModel(provider: Provider, model: ModelEntry): ModelRuntimeConfig {
+  const visible = toPublicModelForCrud(provider, model);
+  return {
+    providerId: provider.id,
+    modelId: model.id,
+    label: visible.displayName,
+    baseURL: provider.baseURL,
+    apiKey: provider.apiKey,
+    protocol: provider.protocol ?? "openai",
+    model: model.name,
+    reasoning: { ...DEFAULT_REASONING, ...model.reasoning },
+    contextWindow: visible.contextWindow,
+    requestTimeoutMs: config.modelRequestTimeoutMs,
+  };
+}
+
+configureModelRuntimeResolver(resolveSubagentModelRuntime);

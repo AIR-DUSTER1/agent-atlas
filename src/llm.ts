@@ -29,6 +29,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { config } from "./config.js";
 import { resolveReasoning } from "./reasoning.js";
+import { defaultModelRuntime, type ModelRuntimeConfig } from "./model-runtime.js";
 import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "./product.js";
 
 /** 各协议客户端的统一视图：保证 bindTools 一定存在（图的代码都依赖它） */
@@ -42,6 +43,8 @@ export interface ChatModelOptions {
   sessionId?: string;
   /** 测试或嵌入调用可替换底层 fetch；生产路径保持默认。 */
   fetch?: typeof fetch;
+  /** 显式模型快照：主图与并发子代理各自持有，禁止靠修改全局 config 切换模型。 */
+  runtime?: ModelRuntimeConfig;
 }
 
 const MODEL_USER_AGENT = PRODUCT_USER_AGENT;
@@ -103,11 +106,11 @@ function createGatewayFetch(
 }
 
 /** 本次请求要用的思考参数（未设置 / 供应商默认时为 null） */
-function currentReasoning() {
-  return resolveReasoning(config.reasoning, {
-    baseURL: config.baseURL,
-    model: config.model,
-    protocol: config.protocol,
+function resolveRuntimeReasoning(runtime: ModelRuntimeConfig) {
+  return resolveReasoning(runtime.reasoning, {
+    baseURL: runtime.baseURL,
+    model: runtime.model,
+    protocol: runtime.protocol,
   });
 }
 
@@ -181,15 +184,17 @@ function fallbackGeminiConfig(params: Record<string, unknown>): { thinkingBudget
  * @param temperature 采样温度：0 表示尽量确定性输出（适合工具调用 demo）
  */
 export function createChatModel(temperature = 0, options: ChatModelOptions = {}): ChatModelLike {
+  const runtime = options.runtime ?? defaultModelRuntime();
   // 各客户端都要求 Key 非空；留空时给占位符，让网关给出真实的鉴权错误
-  const apiKey = config.apiKey || "missing-key";
-  const reasoning = currentReasoning();
-  const defaultHeaders = buildGatewayTransportHeaders(config.baseURL, options.sessionId);
-  const gatewayFetch = createGatewayFetch(config.baseURL, options.sessionId, options.fetch);
+  const apiKey = runtime.apiKey || "missing-key";
+  const reasoning = resolveRuntimeReasoning(runtime);
+  const defaultHeaders = buildGatewayTransportHeaders(runtime.baseURL, options.sessionId);
+  const gatewayFetch = createGatewayFetch(runtime.baseURL, options.sessionId, options.fetch);
+  const requestTimeoutMs = runtime.requestTimeoutMs ?? config.modelRequestTimeoutMs;
   const params = reasoning.params ?? {};
   const { reasoning_effort: reasoningEffort, ...rest } = params as { reasoning_effort?: unknown } & Record<string, unknown>;
 
-  switch (config.protocol) {
+  switch (runtime.protocol) {
     case "anthropic": {
       // Anthropic：thinking（扩展思考）/ output_config.effort 是客户端的构造参数，不走请求体透传
       const thinkingRaw = asRecord(params.thinking);
@@ -206,15 +211,15 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
       // Anthropic 要求「开启思考时 temperature 必须为 1」，且 budget_tokens < max_tokens
       const maxTokens = budget ? Math.max(8192, budget + 4096) : 8192;
       return new ChatAnthropic({
-        model: config.model,
+        model: runtime.model,
         apiKey,
         ...(thinkingEnabled ? {} : { temperature }),
         maxRetries: 0,
         maxTokens,
-        clientOptions: { timeout: config.modelRequestTimeoutMs },
+        clientOptions: { timeout: requestTimeoutMs },
         ...(thinking ? { thinking: thinking as { type: "enabled"; budget_tokens: number } | { type: "disabled" } } : {}),
         ...(outputConfig?.effort ? { outputConfig: { effort: outputConfig.effort as "low" | "medium" | "high" | "xhigh" | "max" } } : {}),
-        ...(config.baseURL ? { anthropicApiUrl: config.baseURL } : {}),
+        ...(runtime.baseURL ? { anthropicApiUrl: runtime.baseURL } : {}),
       }) as unknown as ChatModelLike;
     }
 
@@ -222,18 +227,18 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
       // 原生 thinking_config 直接用；其它方言（OpenAI / 智谱…）按近似换算成 thinkingLevel/thinkingBudget
       const thinkingConfig = toGeminiThinkingConfig(params.thinking_config) ?? fallbackGeminiConfig(params);
       return new ChatGoogleGenerativeAI({
-        model: config.model,
+        model: runtime.model,
         apiKey,
         temperature,
         maxRetries: 0,
         ...(thinkingConfig ? { thinkingConfig } : {}),
-        ...(config.baseURL ? { baseUrl: config.baseURL } : {}),
+        ...(runtime.baseURL ? { baseUrl: runtime.baseURL } : {}),
       }) as unknown as ChatModelLike;
     }
 
     case "openai-responses":
       return new ChatOpenAI({
-        model: config.model,
+        model: runtime.model,
         apiKey,
         temperature,
         maxRetries: 0,
@@ -243,8 +248,8 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
           ? { modelKwargs: { ...rest, ...(reasoningEffort !== undefined ? { reasoning: { effort: reasoningEffort } } : {}) } }
           : {}),
         configuration: {
-          baseURL: config.baseURL,
-          timeout: config.modelRequestTimeoutMs,
+          baseURL: runtime.baseURL,
+          timeout: requestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
           ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
         },
@@ -253,8 +258,8 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
     case "openai":
     default:
       return new ChatOpenAI({
-        model: config.model,
-        apiKey: config.apiKey,
+        model: runtime.model,
+        apiKey,
         temperature,
         maxRetries: 0,
         // 归一化参数原样进请求体：reasoning_effort / thinking / enable_thinking …
@@ -262,8 +267,8 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
         ...(params && Object.keys(params).length ? { modelKwargs: params } : {}),
         configuration: {
           // 关键：指向自定义网关地址（OpenAI 兼容格式）
-          baseURL: config.baseURL,
-          timeout: config.modelRequestTimeoutMs,
+          baseURL: runtime.baseURL,
+          timeout: requestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
           ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
         },

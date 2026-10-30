@@ -44,6 +44,7 @@ import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
 import { loadEstate } from "./estate.js";
 import { loadPluginSettings } from "./plugin-settings.js";
+import { loadSubagentSettings } from "./subagent-settings.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
@@ -81,6 +82,12 @@ import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
+import {
+  handleCreateSubagent,
+  handleDeleteSubagent,
+  handleListSubagents,
+  handleUpdateSubagent,
+} from "./routes/subagents.js";
 import { handleListCommands, handleSaveCommand, handleUpdateCommand, handleDeleteCommand } from "./routes/commands.js";
 import { handleListSkills, handleSaveSkill, handleDeleteSkill, handleImportSkills, handleSetSkillEnabled } from "./routes/skills.js";
 import {
@@ -151,6 +158,7 @@ try {
 try {
   await runPersistenceMigrations();
   await loadSettings();
+  await loadSubagentSettings();
   await assertProductionRuntimeReady({
     apiKey: config.apiKey,
     dataFiles: [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoriesFilePath(), auditFilePath()],
@@ -301,6 +309,7 @@ const server = createServer(async (req, res) => {
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
     const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
+    const subagentMatch = pathname.match(/^\/api\/subagents\/([\w-]+)$/);
 
     // 供应商 / 模型 / 思考等级 / 网关探测
     if (pathname === "/api/config" && req.method === "GET") { await handleGetApiConfig(res); return; }
@@ -317,6 +326,12 @@ const server = createServer(async (req, res) => {
     // 内置插件启停（RAG / 找房数据源 / Computer Use）
     if (pathname === "/api/plugins" && req.method === "GET") { handleListPlugins(res); return; }
     if (pluginMatch && req.method === "PATCH") { await handleSetPluginEnabled(res, req, pluginMatch[1]); return; }
+
+    // 子代理配置（身份 / 启停 / 模型；提示词与工具由主 Agent 运行时赋予）
+    if (pathname === "/api/subagents" && req.method === "GET") { handleListSubagents(res); return; }
+    if (pathname === "/api/subagents" && req.method === "POST") { await handleCreateSubagent(res, req); return; }
+    if (subagentMatch && req.method === "PATCH") { await handleUpdateSubagent(res, req, subagentMatch[1]); return; }
+    if (subagentMatch && req.method === "DELETE") { await handleDeleteSubagent(res, subagentMatch[1]); return; }
 
     // 会话
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }

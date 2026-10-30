@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { config } from "../../src/config.js";
 import { buildGatewayTransportHeaders, createChatModel } from "../../src/llm.js";
 import { PRODUCT_USER_AGENT } from "../../src/product.js";
+import { DEFAULT_REASONING } from "../../src/reasoning.js";
 
 test("仅 OpenCode 网关生成专用会话头", () => {
   const headers = buildGatewayTransportHeaders(
@@ -76,5 +77,66 @@ test("Responses 请求实际携带稳定的 OpenCode 会话头", async () => {
     config.model = original.model;
     config.protocol = original.protocol;
     config.reasoning = original.reasoning;
+  }
+});
+
+test("并发模型快照互不串线，且不修改全局 config", async () => {
+  const before = {
+    baseURL: config.baseURL,
+    apiKey: config.apiKey,
+    model: config.model,
+    protocol: config.protocol,
+  };
+  const makeFetch = (captured: { url: string; model: string }): typeof fetch => async (input, init) => {
+    captured.url = input instanceof Request ? input.url : String(input);
+    const payload = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+    captured.model = payload.model ?? "";
+    return new Response(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: 1,
+      model: captured.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const firstCapture = { url: "", model: "" };
+  const secondCapture = { url: "", model: "" };
+  const runtime = (baseURL: string, model: string, capture: typeof firstCapture) => ({
+    label: model,
+    baseURL,
+    apiKey: "snapshot-key",
+    protocol: "openai" as const,
+    model,
+    reasoning: { ...DEFAULT_REASONING },
+    requestTimeoutMs: 5_000,
+  });
+
+  try {
+    const first = createChatModel(0, {
+      sessionId: "subagent-first",
+      fetch: makeFetch(firstCapture),
+      runtime: runtime("https://first.example/v1", "model-first", firstCapture),
+    });
+    const second = createChatModel(0, {
+      sessionId: "subagent-second",
+      fetch: makeFetch(secondCapture),
+      runtime: runtime("https://second.example/v1", "model-second", secondCapture),
+    });
+    await Promise.all([first.invoke("ping"), second.invoke("ping")]);
+    assert.match(firstCapture.url, /^https:\/\/first\.example\/v1\/chat\/completions/);
+    assert.match(secondCapture.url, /^https:\/\/second\.example\/v1\/chat\/completions/);
+    assert.equal(firstCapture.model, "model-first");
+    assert.equal(secondCapture.model, "model-second");
+    assert.deepEqual(
+      { baseURL: config.baseURL, apiKey: config.apiKey, model: config.model, protocol: config.protocol },
+      before,
+    );
+  } finally {
+    config.baseURL = before.baseURL;
+    config.apiKey = before.apiKey;
+    config.model = before.model;
+    config.protocol = before.protocol;
   }
 });
