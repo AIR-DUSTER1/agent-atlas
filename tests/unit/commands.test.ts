@@ -2,7 +2,7 @@
  * commands.test.ts — 用户自定义命令回归
  * ============================================================
  * 守四条：
- *   1. 增删改查与同名覆盖；坏数据（缺字段 / 非法名）给中文错误；
+ *   1. 增删改查、同名覆盖与显式编辑（含改名）；坏数据（缺字段 / 非法名）给中文错误；
  *   2. 命令名白名单：非法字符、内置命令名（compact）一律拒；
  *   3. 上限：条数与模板长度都有硬上限，超了明确报错；
  *   4. 占位符展开：{{selection}} / {{date}}。
@@ -19,7 +19,7 @@ const dir = await mkdtemp(join(tmpdir(), "agent-cmd-"));
 const configFile = join(dir, "web-config.json");
 process.env.WEB_CONFIG_FILE = configFile;
 
-const { listCommands, saveCommand, deleteCommand, expandTemplate } = await import("../../src/server/commands.js");
+const { listCommands, saveCommand, createCommand, updateCommand, deleteCommand, expandTemplate } = await import("../../src/server/commands.js");
 
 test.after(async () => {
   delete process.env.WEB_CONFIG_FILE;
@@ -78,6 +78,38 @@ test("删除命令：存在则移除，不存在返回 removed=false", async () 
 
   const again = await deleteCommand("deploy");
   assert.equal(again.removed, false, "重复删除不应报错，只是没删到");
+});
+
+test("编辑命令支持改名；与已有命令重名或原命令不存在时明确处理", async () => {
+  await saveCommand({ name: "edit-source", title: "旧标题", template: "旧模板" });
+  const updated = await updateCommand("edit-source", {
+    name: "edit-target",
+    title: "新标题",
+    description: "改名后的命令",
+    template: "新模板 {{date}}",
+  });
+  assert.ok(updated);
+  assert.equal(updated.name, "edit-target");
+  const all = await listCommands();
+  assert.ok(!all.some((command) => command.name === "edit-source"));
+  assert.equal(all.find((command) => command.name === "edit-target")?.template, "新模板 {{date}}");
+
+  await saveCommand({ name: "edit-conflict", template: "另一个命令" });
+  await assert.rejects(
+    () => updateCommand("edit-target", { name: "edit-conflict", template: "冲突" }),
+    /已存在/
+  );
+  assert.equal(await updateCommand("missing-command", { name: "never", template: "x" }), null);
+});
+
+test("显式创建拒绝重名，避免静默覆盖已有命令", async () => {
+  await createCommand({ name: "create-once", title: "第一次", template: "模板一" });
+  await assert.rejects(
+    () => createCommand({ name: "create-once", title: "第二次", template: "模板二" }),
+    /已存在/
+  );
+  const all = await listCommands();
+  assert.equal(all.find((command) => command.name === "create-once")?.title, "第一次");
 });
 
 test("占位符展开：{{selection}} 与 {{date}}", () => {

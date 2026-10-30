@@ -22,7 +22,7 @@ const OUT = join(ROOT, "src", "server", "public");
 const STATIC_ASSETS = ["index.html"];
 const STYLE_ASSETS = [
   "tokens.css", "reset.css", "layout.css", "typography.css", "chat.css", "composer.css",
-  "modals.css", "settings.css", "plugins.css", "responsive.css", "desktop.css", "ui.css",
+  "modals.css", "settings.css", "plugins.css", "responsive.css", "desktop.css", "commands.css", "ui.css",
 ];
 
 async function main(): Promise<void> {

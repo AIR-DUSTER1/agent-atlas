@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/styles/plugins.css" />
   <link rel="stylesheet" href="/styles/responsive.css" />
   <link rel="stylesheet" href="/styles/desktop.css" />
+  <link rel="stylesheet" href="/styles/commands.css" />
   <link rel="stylesheet" href="/styles/ui.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
   <script>
@@ -554,28 +555,90 @@
         </section>
 
         <section id="settings-view-commands" class="settings-view hidden" data-settings-panel="commands" role="tabpanel" aria-labelledby="commands-title">
-          <div id="commands-modal" role="region" aria-labelledby="commands-title">
-            <h2 id="commands-title"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i> 自定义命令</h2>
-            <p class="settings-sub">在输入框敲 <code>/</code> 打开菜单，选中命令只会把模板填进输入框（不自动发送），
-              你可以先改再发。模板支持 <code>{{selection}}</code>（当前输入框已有内容）与 <code>{{date}}</code>（今天日期）。</p>
+          <div id="commands-modal" class="commands-page" role="region" aria-labelledby="commands-title">
+            <div class="commands-page-head">
+              <div class="commands-page-copy">
+                <h2 id="commands-title"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i> 自定义命令</h2>
+                <p class="settings-sub">在输入框敲 <code>/</code> 选择命令。选中后只填充提示词模板，不会自动发送；模板支持
+                  <code>{{selection}}</code> 与 <code>{{date}}</code>。</p>
+              </div>
+              <button id="cmd-new-btn" type="button" class="ui-button ui-button-primary commands-new-btn">
+                <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 新建命令
+              </button>
+            </div>
 
-            <div class="field-label">命令列表</div>
-            <div id="commands-list" class="memories-list"></div>
+            <div id="commands-status" class="settings-status" role="status" aria-live="polite"></div>
 
-            <div class="field-label">新增 / 更新（同名覆盖）</div>
-            <div class="key-row">
-              <input id="cmd-name" aria-label="命令名" type="text" spellcheck="false" placeholder="命令名，如 review（字母数字下划线短横线）" />
-              <input id="cmd-title" aria-label="命令标题" type="text" spellcheck="false" placeholder="菜单显示名（留空 = 用命令名）" />
+            <div class="commands-workspace">
+              <aside class="commands-list-panel" aria-label="命令列表">
+                <div class="commands-list-head">
+                  <label class="commands-search-box">
+                    <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+                    <input id="commands-search" type="search" aria-label="搜索命令" placeholder="搜索命令、标题或说明" autocomplete="off" />
+                  </label>
+                  <span id="commands-count" class="commands-count">0 个命令</span>
+                </div>
+                <div id="commands-list" class="commands-list" aria-live="polite"></div>
+              </aside>
+
+              <section id="commands-editor" class="commands-editor-card" aria-label="命令编辑器">
+                <div id="commands-editor-empty" class="commands-editor-empty">
+                  <span class="commands-empty-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
+                  <h3>管理你的斜杠命令</h3>
+                  <p>从左侧选择一条命令进行编辑，或创建一个新的提示词模板。</p>
+                  <button id="cmd-empty-new-btn" type="button" class="ghost-btn small">新建命令</button>
+                </div>
+
+                <form id="command-form" class="command-form hidden" novalidate>
+                  <div class="command-editor-head">
+                    <div>
+                      <div id="cmd-editor-mode" class="command-editor-eyebrow">新建命令</div>
+                      <h3 id="cmd-editor-title">命令详情</h3>
+                    </div>
+                    <button id="cmd-editor-close" type="button" class="commands-icon-btn" aria-label="关闭命令编辑器" title="关闭编辑器">
+                      <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
+                    </button>
+                  </div>
+
+                  <div class="command-form-grid">
+                    <label class="field">
+                      <span class="field-label">命令名 <em class="key-state">必填</em></span>
+                      <input id="cmd-name" type="text" spellcheck="false" maxlength="40" autocomplete="off" aria-label="命令名"
+                        placeholder="例如 review" aria-describedby="cmd-name-hint" />
+                      <span id="cmd-name-hint" class="command-field-hint">用于输入框 / 菜单，只能包含字母、数字、_ 和 -。</span>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">菜单显示名</span>
+                      <input id="cmd-title" type="text" spellcheck="false" maxlength="80" autocomplete="off" aria-label="菜单显示名"
+                        placeholder="例如 审查改动（留空则显示命令名）" />
+                    </label>
+                  </div>
+
+                  <label class="field">
+                    <span class="field-label">一句话说明</span>
+                    <input id="cmd-desc" type="text" spellcheck="false" maxlength="200" autocomplete="off"
+                      placeholder="告诉用户这条命令适合什么场景，例如：审查本次改动并指出风险" />
+                  </label>
+
+                  <label class="field command-template-field">
+                    <span class="field-label">提示词模板 <em class="key-state">必填</em></span>
+                    <textarea id="cmd-template" spellcheck="false" maxlength="8000" rows="9" aria-label="命令模板"
+                      placeholder="例如：请审查以下改动并指出风险：&#10;{{selection}}"></textarea>
+                  </label>
+                  <div class="command-template-footer">
+                    <span class="command-token-label">插入变量</span>
+                    <button type="button" class="command-token-btn" data-command-token="selection">{{selection}} · 当前输入</button>
+                    <button type="button" class="command-token-btn" data-command-token="date">{{date}} · 今天日期</button>
+                    <span id="cmd-template-count" class="command-template-count">0 / 8000</span>
+                  </div>
+
+                  <div class="command-editor-actions">
+                    <button id="cmd-editor-cancel" type="button" class="ui-button ui-button-ghost">取消</button>
+                    <button id="cmd-save-btn" type="submit" class="ui-button ui-button-primary">创建命令</button>
+                  </div>
+                </form>
+              </section>
             </div>
-            <div class="key-row">
-              <input id="cmd-desc" aria-label="命令说明" type="text" spellcheck="false" placeholder="一句话说明，如：审查本次改动" />
-            </div>
-            <textarea id="cmd-template" aria-label="提示词模板" class="cmd-template" spellcheck="false"
-              placeholder="提示词模板，例如：请审查以下改动并指出风险：&#10;{{selection}}"></textarea>
-            <div class="key-row">
-              <button id="cmd-add-btn" type="button" class="ghost-btn small">＋ 保存命令</button>
-            </div>
-            <div id="commands-status" class="settings-status"></div>
           </div>
         </section>
 

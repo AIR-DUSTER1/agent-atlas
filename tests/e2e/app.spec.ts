@@ -50,6 +50,9 @@ test("会话发送、刷新恢复、人工审批折叠且只出现一个助手�
 
   await page.reload();
   await expect(page.locator("#ui-dialog-input")).toBeHidden();
+  // 无项目时刷新会先进入 Agent 选择页；旧会话仍保留在侧栏，点击后应完整恢复。
+  await expect(page.locator("#welcome-title")).toHaveText("选择一个 Agent 开始新会话");
+  await page.locator("#session-list .session-item").first().click();
   await expect(page.locator(".msg-assistant").last()).toContainText("模拟模式", { timeout: 20_000 });
 
   await createChat(page);
@@ -197,6 +200,85 @@ test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP �
   await expect(page.locator("#mem-http-status")).toContainText(/连接失败|无法连接|超时/, { timeout: 10_000 });
   expect(pageErrors).toEqual([]);
 });
+
+test("自定义命令可创建、搜索、改名并从斜杠菜单同步", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await login(page);
+
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="commands"]').click();
+  await expect(page.locator("#commands-modal")).toBeVisible();
+  await expect(page.locator("#commands-count")).toContainText("0 个命令");
+
+  await page.locator("#cmd-new-btn").click();
+  await expect(page.locator("#command-form")).toBeVisible();
+  await page.locator("#cmd-name").fill("e2e-command");
+  await page.locator("#cmd-title").fill("E2E 命令标题");
+  await page.locator("#cmd-desc").fill("验证命令管理流程");
+  await page.locator("#cmd-template").fill("请检查以下内容：");
+  await page.getByRole("button", { name: "{{selection}} · 当前输入" }).click();
+  await expect(page.locator("#cmd-template")).toHaveValue("请检查以下内容：{{selection}}");
+  await page.locator("#cmd-save-btn").click();
+
+  const commandCard = page.locator(".command-card").filter({
+    has: page.getByRole("button", { name: "打开命令 /e2e-command", exact: true }),
+  });
+  await expect(commandCard).toBeVisible({ timeout: 10_000 });
+  await expect(commandCard).toContainText("E2E 命令标题");
+  await expect(page.locator("#commands-status")).toContainText("已创建 /e2e-command");
+
+  await page.locator("#commands-search").fill("不存在的命令");
+  await expect(page.locator("#commands-list")).toContainText("没有匹配的命令");
+  await page.locator("#commands-search").fill("e2e-command");
+  await expect(commandCard).toBeVisible();
+
+  await page.getByRole("button", { name: "编辑命令 /e2e-command" }).click();
+  await page.locator("#cmd-name").fill("e2e-command-renamed");
+  await page.locator("#cmd-title").fill("尚未保存的标题");
+  await page.locator("#cmd-template").fill("请按新模板审查：{{date}}");
+
+  await page.locator("#cmd-new-btn").click();
+  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
+  await page.locator("#ui-dialog-cancel").click();
+  await expect(page.locator("#cmd-title")).toHaveValue("尚未保存的标题");
+
+  await page.locator("#cmd-title").fill("E2E 改名后命令");
+  await page.locator("#cmd-save-btn").click();
+
+  const renamedCard = page.locator(".command-card").filter({
+    has: page.getByRole("button", { name: "打开命令 /e2e-command-renamed", exact: true }),
+  });
+  await expect(renamedCard).toBeVisible({ timeout: 10_000 });
+  await expect(renamedCard).toContainText("E2E 改名后命令");
+  await expect(page.getByRole("button", { name: "打开命令 /e2e-command", exact: true })).toHaveCount(0);
+
+  await page.locator("#settings-back-btn").click();
+  await createChat(page);
+  await page.locator("#input").fill("/");
+  await expect(page.locator("#composer-menu")).toContainText("E2E 改名后命令");
+  await page.keyboard.press("Escape");
+
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="commands"]').click();
+  const reloadedCard = page.locator(".command-card").filter({
+    has: page.getByRole("button", { name: "打开命令 /e2e-command-renamed", exact: true }),
+  });
+  await expect(reloadedCard).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "删除命令 /e2e-command-renamed" }).click();
+  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
+  await page.locator("#ui-dialog-ok").click();
+  await expect(reloadedCard).toHaveCount(0);
+  await expect(page.locator("#commands-count")).toContainText("0 个命令");
+
+  const persisted = await page.evaluate(async () => {
+    const response = await fetch("/api/commands");
+    return await response.json() as { commands?: Array<{ name: string }> };
+  });
+  expect(persisted.commands?.some((command) => command.name.includes("e2e-command"))).toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
 test("技能文件可上传、禁用并在刷新后保持状态", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));

@@ -36,7 +36,7 @@ const INNER_HTML_BUDGET: Record<string, number> = {
   "views/rag.ts": 11,
   "views/sessions.ts": 2,
   "views/settings-backup.ts": 2,
-  "views/settings-commands.ts": 2,
+  "views/settings-commands.ts": 0,
   "views/settings-mcp.ts": 0,
   "views/settings-memories.ts": 2,
   "views/settings-skills.ts": 2,

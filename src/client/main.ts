@@ -45,7 +45,7 @@ import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
-import { saveCommandFromForm, refreshCommands } from "./views/settings-commands.js";
+import { bindCommandSettings, refreshCommands } from "./views/settings-commands.js";
 import {
   filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
 } from "./views/settings-skills.js";
@@ -209,17 +209,9 @@ async function init(): Promise<void> {
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
   bindMcpSettings();
+  bindCommandSettings();
   on("stats-refresh", "click", refreshStats);
   on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
-  on("cmd-add-btn", "click", () => { void saveCommandFromForm(); });
-  on("cmd-name", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
-  });
-  on("cmd-title", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") { ke.preventDefault(); void saveCommandFromForm(); }
-  });
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   });

@@ -94,7 +94,7 @@ function validate(input: unknown): UserCommand {
   };
 }
 
-/** 新增或更新（同名覆盖） */
+/** 兼容旧调用方的新增或更新（同名覆盖）；HTTP 创建接口改用 createCommand。 */
 export async function saveCommand(input: unknown): Promise<{ command: UserCommand; created: boolean }> {
   const command = validate(input);
   const all = await listCommands();
@@ -109,6 +109,36 @@ export async function saveCommand(input: unknown): Promise<{ command: UserComman
   }
   await persist(all);
   return { command, created };
+}
+
+/** 显式创建：重名必须报错，避免管理页在列表过期时静默覆盖已有命令。 */
+export async function createCommand(input: unknown): Promise<UserCommand> {
+  const command = validate(input);
+  const all = await listCommands();
+  if (all.some((item) => item.name === command.name)) {
+    throw new Error(`命令「${command.name}」已存在，请直接编辑现有命令或换一个名字`);
+  }
+  if (all.length >= MAX_COMMANDS) throw new Error(`命令数量已达上限 ${MAX_COMMANDS} 条，请先删除一些`);
+  all.push(command);
+  await persist(all);
+  return command;
+}
+
+/**
+ * 按原命令名更新一条命令；允许改名，但不允许与另一条已有命令重名。
+ * 找不到原命令时返回 null，让 HTTP 层返回 404，而不是把旧客户端误判成保存成功。
+ */
+export async function updateCommand(originalName: string, input: unknown): Promise<UserCommand | null> {
+  const command = validate(input);
+  const all = await listCommands();
+  const idx = all.findIndex((item) => item.name === originalName);
+  if (idx < 0) return null;
+  if (all.some((item, itemIndex) => itemIndex !== idx && item.name === command.name)) {
+    throw new Error(`命令「${command.name}」已存在，请换一个命令名`);
+  }
+  all[idx] = command;
+  await persist(all);
+  return command;
 }
 
 export async function deleteCommand(name: string): Promise<{ removed: boolean; commands: UserCommand[] }> {

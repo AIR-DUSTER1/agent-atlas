@@ -79,7 +79,7 @@ import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, hand
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
-import { handleListCommands, handleSaveCommand, handleDeleteCommand } from "./routes/commands.js";
+import { handleListCommands, handleSaveCommand, handleUpdateCommand, handleDeleteCommand } from "./routes/commands.js";
 import { handleListSkills, handleSaveSkill, handleDeleteSkill, handleImportSkills, handleSetSkillEnabled } from "./routes/skills.js";
 import {
   handleListMcp, handleSaveMcp, handleDeleteMcp, handleTestMcp, handleImportMcp, handleSetMcpEnabled, handleUpdateMcp,
@@ -383,8 +383,9 @@ const server = createServer(async (req, res) => {
     // 用户自定义命令（提示词模板；前端斜杠菜单与设置页共用）
     if (pathname === "/api/commands" && req.method === "GET") { await handleListCommands(res); return; }
     if (pathname === "/api/commands" && req.method === "POST") { await handleSaveCommand(res, req); return; }
-    const commandDelMatch = pathname.match(/^\/api\/commands\/([\w-]+)$/);
-    if (commandDelMatch && req.method === "DELETE") { await handleDeleteCommand(res, commandDelMatch[1]); return; }
+    const commandMatch = pathname.match(/^\/api\/commands\/([\w-]+)$/);
+    if (commandMatch && req.method === "PUT") { await handleUpdateCommand(res, req, commandMatch[1]); return; }
+    if (commandMatch && req.method === "DELETE") { await handleDeleteCommand(res, commandMatch[1]); return; }
 
     // 技能库（按关键词命中注入的领域指南；纯文档不执行）
     if (pathname === "/api/skills" && req.method === "GET") { await handleListSkills(res); return; }

@@ -1,0 +1,204 @@
+/* ============================================================
+   commands.css — 自定义命令的双栏管理与编辑器
+   ------------------------------------------------------------
+   commands.css
+   左侧负责检索和选择，右侧只编辑当前命令；所有内容均来自用户输入，
+   DOM 用 textContent 填充，样式不能假设命令名或模板是可信 HTML。
+   ============================================================ */
+
+#commands-modal { width: min(100%, 1000px); }
+.commands-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.commands-page-copy { min-width: 0; }
+.commands-page-copy h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 18px; }
+.commands-page-copy .settings-sub { max-width: 760px; margin-bottom: 0; line-height: 1.6; }
+.commands-new-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+#commands-status { min-height: 20px; margin: 8px 0 4px; }
+
+.commands-workspace {
+  display: grid;
+  grid-template-columns: minmax(250px, .78fr) minmax(430px, 1.22fr);
+  gap: 14px;
+  align-items: stretch;
+  min-height: 500px;
+}
+.commands-list-panel,
+.commands-editor-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+.commands-list-panel { display: flex; flex-direction: column; overflow: hidden; }
+.commands-list-head { padding: 12px; border-bottom: 1px solid var(--border); }
+.commands-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--text-3);
+}
+.commands-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,140,255,.12); }
+.commands-search-box input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.commands-search-box input::placeholder { color: var(--text-3); }
+.commands-count {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.commands-list {
+  flex: 1;
+  max-height: min(62vh, 620px);
+  overflow-y: auto;
+  padding: 8px;
+}
+.command-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  transition: border-color .15s, background .15s;
+}
+.command-card:hover { border-color: rgba(91,140,255,.48); background: var(--bg-hover); }
+.command-card.active { border-color: var(--accent); background: rgba(91,140,255,.11); box-shadow: inset 3px 0 0 var(--accent); }
+.command-card-main {
+  min-width: 0;
+  padding: 10px 8px 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.command-card-syntax { display: block; color: var(--accent-soft); font-family: var(--mono); font-size: 12.5px; font-weight: 650; }
+.command-card-title { display: block; margin-top: 2px; overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.command-card-desc { display: block; margin-top: 3px; overflow: hidden; color: var(--text-2); font-size: 11.5px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.command-card-meta { display: block; margin-top: 5px; color: var(--text-3); font-size: 10px; }
+.command-card-actions { display: flex; align-items: center; gap: 3px; padding-right: 7px; opacity: .62; }
+.command-card:hover .command-card-actions, .command-card.active .command-card-actions { opacity: 1; }
+.commands-icon-btn,
+.command-card-action {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.commands-icon-btn { border-color: var(--border); }
+.commands-icon-btn:hover,
+.command-card-action:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text); }
+.command-card-action.delete:hover { border-color: rgba(229,96,79,.52); color: var(--red); }
+.commands-icon-btn:disabled,
+.command-card-action:disabled { cursor: wait; opacity: .45; }
+.commands-empty-state,
+.commands-editor-empty {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.commands-empty-state { min-height: 260px; }
+.commands-empty-state .ui-icon,
+.commands-empty-icon {
+  color: var(--accent-soft);
+}
+.commands-empty-state .ui-icon { font-size: 24px; }
+.commands-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(91,140,255,.28);
+  border-radius: 11px;
+  background: rgba(91,140,255,.1);
+  font-size: 20px;
+}
+.commands-empty-state h3,
+.commands-editor-empty h3 { margin: 2px 0 0; color: var(--text); font-size: 14px; }
+.commands-empty-state p,
+.commands-editor-empty p { max-width: 340px; margin: 0; color: var(--text-3); font-size: 11.5px; line-height: 1.55; }
+.commands-editor-card { padding: 18px; }
+.commands-editor-empty { min-height: 100%; height: 100%; }
+.command-form { display: flex; flex-direction: column; gap: 12px; }
+.command-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.command-editor-eyebrow { color: var(--accent-soft); font-family: var(--mono); font-size: 10px; letter-spacing: .04em; }
+.command-editor-head h3 { margin: 3px 0 0; color: var(--text); font-size: 16px; }
+.command-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.command-form .field { min-width: 0; margin-bottom: 0; }
+.command-form .field-label { margin-bottom: 1px; }
+.command-form .field input { min-width: 0; }
+.command-field-hint { color: var(--text-3); font-size: 10.5px; line-height: 1.45; }
+.command-template-field textarea {
+  width: 100%;
+  min-height: 168px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  transition: border-color .15s, box-shadow .15s;
+}
+.command-template-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,140,255,.12); }
+.command-template-field textarea::placeholder { color: var(--text-3); }
+.command-template-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -4px; }
+.command-token-label { margin-right: 2px; color: var(--text-3); font-size: 10.5px; }
+.command-token-btn {
+  padding: 4px 7px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.command-token-btn:hover { border-color: var(--accent); background: rgba(91,140,255,.08); }
+.command-template-count { margin-left: auto; color: var(--text-3); font-family: var(--mono); font-size: 10px; }
+.command-editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+@media (max-width: 900px) {
+  .commands-workspace { grid-template-columns: 1fr; min-height: 0; }
+  .commands-list { max-height: 320px; }
+  .commands-editor-empty { min-height: 250px; }
+}
+@media (max-width: 620px) {
+  .commands-page-head { align-items: stretch; flex-direction: column; gap: 12px; }
+  .commands-new-btn { justify-content: center; }
+  .command-form-grid { grid-template-columns: 1fr; }
+  .commands-editor-card { padding: 14px; }
+  .command-card-actions { opacity: 1; }
+  .command-template-count { margin-left: 0; }
+}
