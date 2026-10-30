@@ -66,6 +66,16 @@ export function buildDemoCards(container: HTMLElement | null): void {
     onClick: () => createSessionFn("agent", null, null),
   }));
 
+  // 两个正式 Agent 固定在示例前面，避免找房 Agent 被教学示例淹没。
+  const estate = AGENT_PROFILES.estate;
+  container.appendChild(agentCard({
+    icon: estate.icon,
+    name: estate.label,
+    description: estate.description,
+    example: estate.example,
+    onClick: () => createSessionFn("estate"),
+  }));
+
   for (const demo of state.config?.demos || []) {
     container.appendChild(agentCard({
       icon: String(demo.id),
@@ -75,15 +85,6 @@ export function buildDemoCards(container: HTMLElement | null): void {
       onClick: () => createSessionFn("demo", demo.id, demo.example),
     }));
   }
-
-  const estate = AGENT_PROFILES.estate;
-  container.appendChild(agentCard({
-    icon: estate.icon,
-    name: estate.label,
-    description: estate.description,
-    example: estate.example,
-    onClick: () => createSessionFn("estate"),
-  }));
 }
 
 export function buildExampleChips(): void {

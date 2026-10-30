@@ -267,3 +267,22 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   await expect(reloadedRow).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
+
+test("没有项目时首屏与新建对话直接展示 Agent 选择页", async ({ page }) => {
+  await login(page);
+
+  await expect(page.locator("#welcome")).toBeVisible();
+  await expect(page.locator("#welcome-title")).toHaveText("选择一个 Agent 开始新会话");
+  await expect(page.locator("#welcome-subtitle")).toContainText("当前还没有添加项目");
+  await expect(page.locator("#example-chips")).toBeHidden();
+  await expect(page.locator("#modal-mask")).toBeHidden();
+  await expect(page.locator("#demo-cards .demo-card").nth(1)).toContainText("租房 / 房产 Agent");
+
+  await page.locator("#new-chat-btn").click();
+  await expect(page.locator("#welcome-title")).toHaveText("选择一个 Agent 开始新会话");
+  await expect(page.locator("#modal-mask")).toBeHidden();
+
+  await page.locator("#demo-cards .demo-card").nth(1).click();
+  await expect(page.locator("#demo-badge")).toContainText("租房 / 房产 Agent");
+  await expect(page.locator("#input")).toBeEnabled();
+});

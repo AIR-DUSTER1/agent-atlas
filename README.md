@@ -90,6 +90,8 @@ agentatlas 后续按“先读后写、先基础设施后业务”的顺序扩展
 | 通用 Agent | 新建对话 → 通用 Agent | 开发工具、文件、RAG、MCP、`general` scope 记忆与协作 |
 | 房产 Agent | 新建对话 → 房产 Agent | 贝壳找房工具及对应审批，不加载开发工具；记忆使用独立 `estate` scope，默认不挂记忆工具 |
 
+未添加任何项目时，打开应用或点击「新建对话」会直接进入 Agent 选择页，通用与房产 Agent 固定排在示例前面；已有的未归属会话仍可从侧栏打开。
+
 隔离规则由 `src/agent/profile.ts`、各 profile 的工具 allowlist、审批登记和测试共同维护。通用 Agent 不能调用房产工具，房产 Agent 也不能调用终端、写文件等通用工具。后续电脑操作、岗位获取和简历投递也各自使用独立 profile，不能把新工具直接并入通用 Agent。
 
 ## 技术栈与结构

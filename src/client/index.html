@@ -54,7 +54,7 @@
             <span>可扩展 Agent 工具集 · 内置学习示例</span>
           </div>
         </div>
-        <button id="new-chat-btn" title="新建对话（默认通用 Agent，归属当前项目）">＋ 新建对话</button>
+        <button id="new-chat-btn" title="新建对话（选择 Agent，归属当前项目）">＋ 新建对话</button>
         <div class="project-switch" id="project-switch">
           <button id="project-btn" class="project-btn" title="选择项目文件夹（本地 / 云端）">
             <span id="project-btn-icon"><i class="ui-icon" data-icon="FolderTree" aria-hidden="true"></i></span>
@@ -125,12 +125,12 @@
         <div id="welcome" class="welcome">
           <div class="welcome-hero">
             <div class="welcome-logo"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></div>
-            <h1>agentatlas</h1>
-            <p>可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认</p>
+            <h1 id="welcome-title">agentatlas</h1>
+            <p id="welcome-subtitle">可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认</p>
           </div>
-          <div class="examples-label">试试这些</div>
+          <div id="welcome-examples-label" class="examples-label">试试这些</div>
           <div id="example-chips" class="example-chips"></div>
-          <div class="examples-label">内置示例（学习示例）</div>
+          <div id="welcome-cards-label" class="examples-label">选择 Agent 或内置示例</div>
           <div id="demo-cards" class="demo-cards"></div>
         </div>
         <section id="empty-session" class="empty-session hidden" aria-labelledby="empty-session-title">

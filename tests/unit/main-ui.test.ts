@@ -67,3 +67,16 @@ test("消息流有回到底部按钮与未读累计", async () => {
   assert.match(source, /条新消息/);
   assert.match(source, /prefers-reduced-motion: reduce/);
 });
+
+test("没有项目时首屏和新建对话直接进入 Agent 选择页", async () => {
+  const main = await readClientFiles(["main.ts"]);
+  const navigation = await readClientFiles(["views/navigation.ts"]);
+  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  assert.match(main, /state\.projects\.length === 0/);
+  assert.match(main, /showWelcomeState\("agent-picker"\)/);
+  assert.match(navigation, /WelcomeMode = "default" \| "agent-picker"/);
+  assert.match(navigation, /选择一个 Agent 开始新会话/);
+  assert.match(navigation, /请选择 Agent 开始新会话/);
+  assert.match(html, /id="welcome-title"/);
+  assert.match(html, /id="welcome-cards-label"/);
+});

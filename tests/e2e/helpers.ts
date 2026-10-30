@@ -15,9 +15,18 @@ export async function login(page: Page): Promise<void> {
 
 export async function createChat(page: Page): Promise<void> {
   await page.locator("#new-chat-btn").click();
-  await expect(page.locator("#modal-cards .demo-card").first()).toBeVisible();
-  await page.locator("#modal-cards .demo-card").first().click();
-  await expect(page.locator("#modal-mask")).toBeHidden();
+  const modal = page.locator("#modal-mask");
+  const modalCard = page.locator("#modal-cards .demo-card").first();
+  const pageCard = page.locator("#demo-cards .demo-card").first();
+  if (await modal.isVisible()) {
+    await expect(modalCard).toBeVisible();
+    await modalCard.click();
+  } else {
+    // 没有项目时首屏直接显示 Agent 选择页；这不是错误降级，也无需再套一层弹窗。
+    await expect(pageCard).toBeVisible();
+    await pageCard.click();
+  }
+  await expect(modal).toBeHidden();
   await expect(page.locator("#input")).toBeVisible();
   await expect(page.locator("#input")).toBeEnabled();
 }

@@ -65,6 +65,19 @@ function toggleSecretInput(buttonId: string, inputId: string): void {
   button.replaceChildren(icon(reveal ? "EyeOff" : "Eye", { size: 15 }));
   button.setAttribute("aria-label", reveal ? "隐藏密钥" : "显示密钥");
 }
+
+/** 无项目时用主区 Agent 选择页代替新建弹窗，避免先落到无上下文的空会话。 */
+function openNewSessionChooser(): void {
+  setSidebarOpen(false);
+  if (state.projects.length === 0) {
+    state.currentId = null;
+    renderSessions();
+    showWelcomeState("agent-picker");
+    chatScroll.scrollTop = 0;
+    return;
+  }
+  openModal();
+}
 /* ---------------------------------------------------------------------------
  * 接线：视图层互相需要的回调统一在这里注入
  * ------------------------------------------------------------------------- */
@@ -155,7 +168,7 @@ async function init(): Promise<void> {
     else console.warn("[init] 未找到元素 #" + id + "，已跳过绑定");
   };
 
-  on("new-chat-btn", "click", () => { setSidebarOpen(false); openModal(); });
+  on("new-chat-btn", "click", openNewSessionChooser);
   on("add-external-btn", "click", () => { void addExternalFlow(); });
   on("modal-close", "click", closeModal);
   on("modal-mask", "click", (e) => { if (e.target === $("modal-mask")) closeModal(); });
@@ -504,9 +517,11 @@ async function init(): Promise<void> {
     }
   });
 
+  state.currentId = null;
   renderSessions();
   const first = state.sessions[0];
-  if (first) selectSession(first.id);
+  if (state.projects.length === 0) showWelcomeState("agent-picker");
+  else if (first) selectSession(first.id);
   else showWelcomeState();
   document.documentElement.dataset.appReady = "true";
 

@@ -17,7 +17,7 @@ import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
 import { renderAll } from "../render/messages.js";
 import { applyUsage, handleEvent } from "../stream/events.js";
-import { finalize, syncComposerState } from "../stream/turn.js";
+import { finalize, setStatus, syncComposerState } from "../stream/turn.js";
 import { markInterruptsResolved, markLatestInterruptPending, renderSessions } from "./sessions.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
@@ -48,12 +48,34 @@ export const PERMISSION_MODES: PermissionMode[] = [
   { id: "auto", label: "自动", desc: "全部工具直接执行，不再逐项审批（信任当前会话时使用）" },
 ];
 
-export function showWelcomeState(): void {
+export type WelcomeMode = "default" | "agent-picker";
+
+/** 无项目时把欢迎页提升为明确的 Agent 选择页；普通欢迎态仍保留示例起步。 */
+export function showWelcomeState(mode: WelcomeMode = "default"): void {
   closeComposerMenu();
+  const pickingAgent = mode === "agent-picker";
   const title = $("session-title");
-  if (title) title.textContent = "选择会话";
+  if (title) title.textContent = pickingAgent ? "选择 Agent" : "选择会话";
   const breadcrumb = $("breadcrumb-project");
-  if (breadcrumb) breadcrumb.textContent = projectById(state.projectView)?.name ?? PRODUCT_NAME;
+  if (breadcrumb) {
+    breadcrumb.textContent = pickingAgent
+      ? "新会话"
+      : projectById(state.projectView)?.name ?? PRODUCT_NAME;
+  }
+  const welcomeTitle = $("welcome-title");
+  if (welcomeTitle) {
+    welcomeTitle.textContent = pickingAgent ? "选择一个 Agent 开始新会话" : PRODUCT_NAME;
+  }
+  const welcomeSubtitle = $("welcome-subtitle");
+  if (welcomeSubtitle) {
+    welcomeSubtitle.textContent = pickingAgent
+      ? "当前还没有添加项目。先选择通用 Agent 或租房 / 房产 Agent，直接开始即可；需要文件上下文时再到左上角添加项目。"
+      : "可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认";
+  }
+  $("welcome-examples-label")?.classList.toggle("hidden", pickingAgent);
+  $("example-chips")?.classList.toggle("hidden", pickingAgent);
+  const cardsLabel = $("welcome-cards-label");
+  if (cardsLabel) cardsLabel.textContent = pickingAgent ? "选择 Agent" : "选择 Agent 或内置示例";
   $("demo-badge")?.classList.add("hidden");
   welcomeEl.classList.remove("hidden");
   $("empty-session")?.classList.add("hidden");
@@ -63,7 +85,8 @@ export function showWelcomeState(): void {
   sendBtn.disabled = true;
   sendBtn.classList.remove("hidden");
   $("stop-btn")?.classList.add("hidden");
-  inputEl.placeholder = "先选择一个 Demo 新建会话…";
+  inputEl.placeholder = pickingAgent ? "请选择 Agent 开始新会话…" : "先选择一个 Agent 或示例新建会话…";
+  setStatus("idle");
 }
 
 export function showChatState(session: Session): void {

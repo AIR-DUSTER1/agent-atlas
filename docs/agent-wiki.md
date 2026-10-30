@@ -568,7 +568,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   本地目录通过系统目录选择框取得绝对路径：Electron 走主进程 `dialog.showOpenDialog`，
   Web 模式走本机服务端 `POST /api/projects/pick-directory`；无桌面会话时才显式降级为手动路径。
   列表持久化在 `.web-config.json` 的 `projects/activeProjectId` 字段，
-  启动时校验目录仍在才恢复；
+  启动时校验目录仍在才恢复；项目列表为空时，首屏与「新建对话」直接进入主区
+  Agent 选择页，通用 / 房产 Agent 固定排在示例前，旧未归属会话仍可从侧栏恢复；
 - **审批 / 澄清交互**：`interrupt` 事件（`approval` 或 `clarification` 载荷）→
   前端渲染批准/拒绝或选项/自定义输入 → `POST /api/resume`（`{decision}` 或 `{choice}`）→
   服务端 `Command({ resume })` 继续被暂停的图（与 CLI 的 Demo 3 同一条路径）。

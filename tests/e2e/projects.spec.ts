@@ -31,6 +31,12 @@ test("添加本地文件夹先打开系统目录选择接口，不再弹出手�
   await expect(page.locator("#project-btn-text")).toHaveText("e2e");
   await expect(page.locator("#ui-dialog-input")).toBeHidden();
   expect(pickerCalls).toBe(1);
+
+  // 已添加项目后恢复原有弹窗流程，不能继续停留在无项目 Agent 选择页。
+  await page.locator("#new-chat-btn").click();
+  await expect(page.locator("#modal-mask")).toBeVisible();
+  await page.locator("#modal-close").click();
+  await expect(page.locator("#modal-mask")).toBeHidden();
   expect(pageErrors).toEqual([]);
 });
 test("目录选择框已经打开时提示切回系统窗口，不降级成手动路径", async ({ page }) => {

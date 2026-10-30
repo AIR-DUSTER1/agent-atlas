@@ -35,7 +35,7 @@ test("Web、桌面端与容器入口使用同一产品名", async () => {
   const desktop = await read("desktop/main.ts");
   const dockerfile = await read("Dockerfile");
   assert.match(html, /<title>agentatlas<\/title>/);
-  assert.match(html, /<h1>agentatlas<\/h1>/);
+  assert.match(html, /<h1[^>]*>agentatlas<\/h1>/);
   assert.match(desktop, /title: "agentatlas · 桌面版"/);
   assert.match(dockerfile, /org\.opencontainers\.image\.title="agentatlas"/);
   assert.doesNotMatch(`${html}\n${desktop}\n${dockerfile}`, /langgraph-agent-(demo|workbench)/);
