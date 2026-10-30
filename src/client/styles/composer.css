@@ -40,6 +40,26 @@
   z-index: 80;
   animation: slideIn .15s ease;
 }
+/* 思考档位是短标签菜单：按内容收紧宽度，避免沿用模型菜单的 430px 大面积空白。 */
+#cm-thinking-menu {
+  width: max-content;
+  min-width: 228px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(42vh, 320px);
+  padding: 5px;
+}
+#cm-thinking-menu .cm-sec {
+  padding: 5px 9px 3px;
+  font-size: 10px;
+}
+#cm-thinking-menu .cm-item {
+  min-height: 29px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+#cm-thinking-menu .cm-desc {
+  padding: 4px 9px;
+}
 .cm-sec {
   padding: 6px 10px 4px;
   font-size: 10.5px; color: var(--text-3);
@@ -305,4 +325,3 @@
 }
 .ext-card .ext-del:hover { color: var(--red); background: rgba(229,96,79,.12); }
 .ext-card.ext-incomplete { border-style: dashed; opacity: .85; }
-

@@ -382,3 +382,25 @@ test("没有项目时首屏与新建对话直接展示 Agent 选择页", async (
   await expect(page.locator("#demo-badge")).toContainText("租房 / 房产 Agent");
   await expect(page.locator("#input")).toBeEnabled();
 });
+
+test("思考档位菜单按内容收紧且不超出视口", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await page.locator("#cm-thinking").click();
+  const menu = page.locator("#cm-thinking-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.locator(".cm-item").first()).toBeVisible();
+  const box = await menu.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThanOrEqual(228);
+  expect(box!.width).toBeLessThanOrEqual(321);
+  expect(box!.height).toBeLessThanOrEqual(321);
+  const overflow = await menu.evaluate((element) => ({
+    width: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+    right: element.getBoundingClientRect().right,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width + 1);
+  expect(overflow.right).toBeLessThanOrEqual(overflow.viewport);
+});
