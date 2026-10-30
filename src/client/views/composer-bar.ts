@@ -90,6 +90,11 @@ export function renderComposerBar(): void {
   const modelText = document.querySelector("#cm-model .cm-text");
   if (modelText) modelText.textContent = cfg.mock ? `模拟模式 · ${cfg.model}` : (m?.displayName || cfg.model);
   const r = cfg.reasoning || {};
+  const levels = visibleQuickReasoningLevels(r.levels, r.dialect);
+  // 没有可切换档位时不显示入口：点开只有「无需设置」，属于死路菜单
+  // （无供应商 / 通用兼容方言的 levels 只有被隐藏的 default）
+  const thinkGroup = document.querySelector<HTMLElement>("#cm-thinking")?.closest(".cm-group");
+  thinkGroup?.classList.toggle("hidden", levels.length === 0);
   const thinkText = document.querySelector("#cm-thinking .cm-text");
   if (thinkText) {
     const lvl = (r.levels || []).find((l) => l.id === r.level);

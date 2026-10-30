@@ -386,6 +386,22 @@ test("没有项目时首屏与新建对话直接展示 Agent 选择页", async (
 test("思考档位菜单按内容收紧且不超出视口", async ({ page }) => {
   await login(page);
   await createChat(page);
+
+  // mock 默认走「不设置（通用兼容）」方言，只有被隐藏的 default 档 → 入口应隐藏，
+  // 绝不能是「点开只有一句无需设置」的死路菜单。
+  const thinkGroup = page.locator("#cm-thinking").locator("xpath=..");
+  await expect(thinkGroup).toBeHidden();
+
+  // 给当前模型切换成带真实档位的方言后，入口出现且菜单可选项落在视口内。
+  const setReasoning = await page.request.post("/api/config/reasoning", {
+    data: { dialect: "openai-effort", level: "medium" },
+  });
+  expect(setReasoning.ok()).toBeTruthy();
+  // 已登录过，reload 直接带 cookie 恢复；再走 login() 会等一个不会出现的登录框
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-app-ready", "true");
+  await page.locator("#session-list .session-item").first().click();
+
   await page.locator("#cm-thinking").click();
   const menu = page.locator("#cm-thinking-menu");
   await expect(menu).toBeVisible();
