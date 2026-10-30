@@ -54,6 +54,7 @@ COPY --from=production-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/package.json /app/tsconfig.json ./
 COPY --from=builder --chown=node:node /app/src/*.ts ./src/
 COPY --from=builder --chown=node:node /app/src/agent ./src/agent
+COPY --from=builder --chown=node:node /app/src/memory ./src/memory
 COPY --from=builder --chown=node:node /app/src/server ./src/server
 COPY --from=builder --chown=node:node /app/scripts/data-cli.ts ./scripts/data-cli.ts
 RUN mkdir -p /data && chown node:node /data

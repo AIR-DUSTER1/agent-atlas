@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -115,6 +115,15 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(runtime, /CHECKPOINT_FILE=\/data\/checkpoints\.ndjson/);
   assert.match(runtime, /MEMORIES_FILE=\/data\/memories\.json/);
   assert.match(runtime, /scripts\/data-cli\.ts/);
+  // 运行层只选择性复制 src/ 子目录；任何新增的顶层运行目录都必须显式进入镜像。
+  for (const entry of await readdir("src", { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "client") continue;
+    assert.match(
+      runtime,
+      new RegExp(`COPY[^\\n]*\\/app\\/src\\/${entry.name} \\.\\/src\\/${entry.name}`),
+      `Docker runtime 未复制 src/${entry.name}`,
+    );
+  }
 
   const productionCompose = await readFile("docker-compose.production.yml", "utf8");
   assert.match(productionCompose, /\$\{AGENT_IMAGE:\?/);
