@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { readClientFiles, readClientSource } from "../helpers/client-source.js";
+import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../../src/client/modules/reasoning-display.js";
 
 const root = new URL("../../src/client/", import.meta.url);
 
@@ -194,4 +195,26 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   assert.match(source, /mode: "inherit"/);
   assert.match(source, /mode: "fixed", providerId, modelId/);
   assert.doesNotMatch(source, /innerHTML/);
+});
+
+
+test("思考快捷菜单隐藏冗余默认项并简化档位文案", () => {
+  const levels = [
+    { id: "default", label: "供应商默认", desc: "" },
+    { id: "disabled", label: "关闭思考", desc: "" },
+    { id: "enabled", label: "开启思考（默认强度）", desc: "" },
+    { id: "minimal", label: "强度·极低 (minimal)", desc: "" },
+    { id: "max", label: "强度·最高 (max)", desc: "" },
+  ];
+  assert.deepEqual(
+    visibleQuickReasoningLevels(levels, "deepseek-thinking").map((level) => level.id),
+    ["disabled", "minimal", "max"],
+  );
+  assert.deepEqual(
+    visibleQuickReasoningLevels(levels, "openai-effort").map((level) => level.id),
+    ["disabled", "enabled", "minimal", "max"],
+  );
+  assert.equal(quickReasoningDisplayLabel(levels[3]), "极低 (minimal)");
+  assert.equal(quickReasoningDisplayLabel(levels[4]), "最高 (max)");
+  assert.equal(quickReasoningDisplayLabel(levels[2]), "默认强度");
 });

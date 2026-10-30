@@ -140,11 +140,11 @@ export const DIALECTS: ReasoningDialect[] = [
       NOOP_LEVEL,
       { id: "disabled", label: "关闭思考", desc: "thinking.type = disabled，直接给答案（实测 reasoning_content 为空）", params: { thinking: { type: "disabled" } } },
       { id: "enabled", label: "开启思考（默认强度）", desc: "thinking.type = enabled，显式打开思考模式", params: { thinking: { type: "enabled" } } },
-      { id: "minimal", label: "强度·极低 (minimal)", desc: "reasoning_effort = minimal", params: { reasoning_effort: "minimal" } },
-      { id: "low", label: "强度·低 (low)", desc: "reasoning_effort = low，简单任务够用", params: { reasoning_effort: "low" } },
-      { id: "medium", label: "强度·中 (medium)", desc: "reasoning_effort = medium，均衡档", params: { reasoning_effort: "medium" } },
-      { id: "high", label: "强度·高 (high)", desc: "reasoning_effort = high，复杂任务推荐", params: { reasoning_effort: "high" } },
-      { id: "max", label: "强度·最高 (max)", desc: "reasoning_effort = max，最深的推理预算", params: { reasoning_effort: "max" } },
+      { id: "minimal", label: "极低 (minimal)", desc: "reasoning_effort = minimal", params: { reasoning_effort: "minimal" } },
+      { id: "low", label: "低 (low)", desc: "reasoning_effort = low，简单任务够用", params: { reasoning_effort: "low" } },
+      { id: "medium", label: "中 (medium)", desc: "reasoning_effort = medium，均衡档", params: { reasoning_effort: "medium" } },
+      { id: "high", label: "高 (high)", desc: "reasoning_effort = high，复杂任务推荐", params: { reasoning_effort: "high" } },
+      { id: "max", label: "最高 (max)", desc: "reasoning_effort = max，最深的推理预算", params: { reasoning_effort: "max" } },
     ],
   },
   {
@@ -330,7 +330,7 @@ export interface ResolvedReasoning {
   level: string;
   /** 归一化参数（null = 不发送） */
   params: Record<string, unknown> | null;
-  /** 展示用短标签，例如「思考·高 (high)」「关闭思考」「供应商默认」 */
+  /** 展示用短标签，例如「高 (high)」「关闭思考」「供应商默认」 */
   label: string;
   /** 自定义 JSON 解析失败时的提示（前端会红字显示） */
   error?: string;

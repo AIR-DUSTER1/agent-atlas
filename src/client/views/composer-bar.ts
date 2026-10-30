@@ -16,6 +16,7 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
 import { fmtPercent, fmtTokens } from "../modules/format.js";
+import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../modules/reasoning-display.js";
 import { activateModel } from "./model-actions.js";
 import { prepareModelSwitch } from "../actions/model-switch.js";
 import { closeCmMenus } from "./navigation.js";
@@ -92,7 +93,7 @@ export function renderComposerBar(): void {
   const thinkText = document.querySelector("#cm-thinking .cm-text");
   if (thinkText) {
     const lvl = (r.levels || []).find((l) => l.id === r.level);
-    thinkText.textContent = `思考·${lvl?.label || r.label || "默认"}`;
+    thinkText.textContent = quickReasoningDisplayLabel(lvl, r.label || "默认");
   }
   // 弹出菜单开着时同步刷新内容
   const modelMenu = $("cm-model-menu");
@@ -182,19 +183,23 @@ export function renderThinkingMenu(menu: HTMLElement): void {
   const sec = document.createElement("div");
   sec.className = "cm-sec";
   const head = document.createElement("span");
-  head.textContent = `思考等级 · ${activeModelEntryOf()?.displayName || state.config?.model || ""}`;
-  const sub = document.createElement("span");
-  sub.className = "cm-sub";
-  sub.textContent = r.dialectLabel || "";
-  sec.append(head, sub);
+  head.textContent = activeModelEntryOf()?.displayName || state.config?.model || "当前模型";
+  sec.append(head);
   menu.appendChild(sec);
-  for (const l of r.levels || []) {
+  const levels = visibleQuickReasoningLevels(r.levels, r.dialect);
+  if (!levels.length) {
+    const empty = document.createElement("div");
+    empty.className = "cm-desc";
+    empty.textContent = "该模型无需额外设置思考等级";
+    menu.appendChild(empty);
+  }
+  for (const l of levels) {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "cm-item" + (l.id === r.level ? " active" : "");
     item.innerHTML = `<span class="ck">${l.id === r.level ? "✓" : ""}</span><span class="cm-label"></span>`;
     const label = item.querySelector(".cm-label");
-    if (label) label.textContent = l.label;
+    if (label) label.textContent = quickReasoningDisplayLabel(l);
     item.title = l.desc || "";
     item.addEventListener("click", async () => {
       if (l.id === r.level) { closeCmMenus(); return; }
@@ -213,12 +218,6 @@ export function renderThinkingMenu(menu: HTMLElement): void {
       closeCmMenus();
     });
     menu.appendChild(item);
-  }
-  if (r.scheme) {
-    const desc = document.createElement("div");
-    desc.className = "cm-desc";
-    desc.textContent = r.scheme;
-    menu.appendChild(desc);
   }
 }
 

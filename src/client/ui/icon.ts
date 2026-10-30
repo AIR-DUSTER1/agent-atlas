@@ -84,8 +84,13 @@ export function icon(name: IconName, options: IconOptions = {}): HTMLSpanElement
 
 /** 将 root 内未水合的图标替换为 SVG；失败时不抛到调用方。 */
 export async function hydrateIcons(root: ParentNode = document): Promise<void> {
-  const hosts = root.querySelectorAll<HTMLElement>("[data-icon]:not([data-icon-ready])");
-  if (!hosts.length) return;
+  const selector = "[data-icon]:not([data-icon-ready])";
+  const hosts = new Set<HTMLElement>();
+  // icon() 传入的 root 本身就是占位 span；querySelectorAll 不会匹配 root 自身，
+  // 因此动态 replaceChildren(icon(...)) 场景必须显式把根节点也纳入水合。
+  if (typeof Element !== "undefined" && root instanceof Element && root.matches(selector)) { hosts.add(root as HTMLElement); }
+  for (const host of root.querySelectorAll<HTMLElement>(selector)) hosts.add(host);
+  if (!hosts.size) return;
   let mod: typeof import("../vendor/icons.js");
   try {
     mod = await loadIcons();

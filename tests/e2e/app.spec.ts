@@ -12,9 +12,11 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await login(page);
 
+  await expect(page.locator("#theme-btn svg")).toBeVisible();
   const beforeTheme = await page.locator("html").getAttribute("data-theme");
   await page.locator("#theme-btn").click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", beforeTheme ?? "dark");
+  await expect(page.locator("#theme-btn svg")).toBeVisible();
 
   await page.locator("#settings-btn").click();
   await expect(page.locator("#settings-page")).toBeVisible();
