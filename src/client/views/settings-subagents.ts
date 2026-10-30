@@ -1,13 +1,14 @@
 /**
  * views/settings-subagents.ts — 子代理设置页与编辑器
  * ============================================================
- * 职责：加载子代理目录、渲染启停状态、管理新增/编辑/删除，并把模型选择
- * 绑定到已配置的「供应商 × 模型」。
+ * 职责：加载子代理目录、搜索筛选、渲染运行状态、管理新增/编辑/删除，
+ * 并把模型策略绑定到已配置的「供应商 × 模型」。
  *
  * 设计立场：
- *  - 设置页只管理身份、用途、启停和模型；提示词与工具由主 Agent 运行时赋予；
- *  - 所有 DOM 用 h()/textContent 创建，模型名与用户输入不拼 HTML 字符串；
- *  - 关闭编辑器时清空表单状态，保存成功才替换页面快照。
+ *  - 页面只管理身份、用途、启停和模型；提示词与工具由主 Agent 运行时赋予；
+ *  - 状态、模型可用性和启用结果必须同时可读，不能只依赖颜色或开关位置；
+ *  - 所有 DOM 用 h()/textContent 创建，用户输入不拼 HTML 字符串；
+ *  - 编辑器支持焦点循环、Esc 关闭和未保存修改确认，避免误操作丢配置。
  */
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
@@ -23,16 +24,21 @@ import type {
   SubagentSettingsState,
 } from "../modules/types.js";
 
+type SubagentFilter = "all" | "enabled" | "disabled";
+
 let editingId: string | null = null;
 let editorOpen = false;
 let busy = false;
 let trigger: HTMLElement | null = null;
+let activeFilter: SubagentFilter = "all";
+let searchTerm = "";
+let initialSnapshot = "";
 
 function status(message: string, kind: "ok" | "err" | "" = ""): void {
   const el = $("subagent-status");
   if (!el) return;
   el.textContent = message;
-  el.className = `settings-status${kind ? ` ${kind}` : ""}`;
+  el.className = `settings-status subagent-status-line${kind ? ` ${kind}` : ""}`;
 }
 
 function editorStatus(message: string, kind: "ok" | "err" | "" = ""): void {
@@ -54,6 +60,11 @@ function option(value: string, label: string, selected = false): HTMLOptionEleme
   const el = h("option", { value }, label) as HTMLOptionElement;
   el.selected = selected;
   return el;
+}
+
+function setText(id: string, value: string): void {
+  const el = $(id);
+  if (el) el.textContent = value;
 }
 
 function populateProviders(selectedId?: string): void {
@@ -97,7 +108,14 @@ function populateModels(selectedId?: string): void {
 
 function syncModelMode(): void {
   const mode = ($("subagent-model-mode") as HTMLSelectElement | null)?.value;
-  $("subagent-model-picker")?.classList.toggle("hidden", mode !== "fixed");
+  const fixed = mode === "fixed";
+  $("subagent-model-picker")?.classList.toggle("hidden", !fixed);
+  setText(
+    "subagent-model-hint",
+    fixed
+      ? "执行时固定使用所选供应商模型；若模型被删除或停用，卡片会标记为不可用。"
+      : "执行时使用主对话当前实际模型，不复制对话内容。",
+  );
 }
 
 function setEditorBusy(value: boolean): void {
@@ -107,7 +125,18 @@ function setEditorBusy(value: boolean): void {
     if (el) el.disabled = value;
   }
   const save = $("subagent-save-btn") as HTMLButtonElement | null;
-  if (save) save.textContent = value ? "保存中…" : "保存";
+  if (save) save.textContent = value ? "保存中…" : "保存配置";
+}
+
+function editorSnapshot(): string {
+  return JSON.stringify({
+    name: ($("subagent-name") as HTMLInputElement | null)?.value ?? "",
+    description: ($("subagent-description") as HTMLTextAreaElement | null)?.value ?? "",
+    enabled: ($("subagent-enabled") as HTMLInputElement | null)?.checked ?? true,
+    mode: ($("subagent-model-mode") as HTMLSelectElement | null)?.value ?? "inherit",
+    provider: ($("subagent-provider") as HTMLSelectElement | null)?.value ?? "",
+    model: ($("subagent-model") as HTMLSelectElement | null)?.value ?? "",
+  });
 }
 
 function openEditor(agent?: SubagentEntry): void {
@@ -127,26 +156,48 @@ function openEditor(agent?: SubagentEntry): void {
   if (description) description.value = agent?.description ?? "";
   if (enabled) enabled.checked = agent?.enabled ?? true;
   if (mode) mode.value = agent?.model.mode ?? "inherit";
-  if (title) title.textContent = agent ? `编辑 ${agent.name}` : "新建子代理";
-  if (eyebrow) eyebrow.textContent = agent ? `ID · ${agent.id}` : "新建子代理";
+  if (title) title.textContent = agent ? "编辑子代理" : "新建子代理";
+  if (eyebrow) eyebrow.textContent = agent ? `子代理 · ${agent.id}` : "子代理目录";
   remove?.classList.toggle("hidden", !agent);
 
   const fixed = agent?.model.mode === "fixed" ? agent.model : null;
   populateProviders(fixed?.providerId);
   populateModels(fixed?.modelId);
   syncModelMode();
+  initialSnapshot = editorSnapshot();
   $("subagent-editor-mask")?.classList.remove("hidden");
+  document.body.classList.add("subagent-editor-open");
   requestAnimationFrame(() => name?.focus());
 }
 
-export function closeSubagentEditor(): void {
+function closeSubagentEditor(): void {
   if (!editorOpen) return;
+  const closedId = editingId;
   editorOpen = false;
   editingId = null;
+  initialSnapshot = "";
   $("subagent-editor-mask")?.classList.add("hidden");
+  document.body.classList.remove("subagent-editor-open");
   editorStatus("");
-  trigger?.focus();
+  const updatedTrigger = closedId
+    ? document.querySelector<HTMLElement>(`[data-subagent-id="${closedId}"] .subagent-edit-btn`)
+    : null;
+  const fallbackTrigger = closedId ? $("subagent-add-btn") : trigger;
+  (updatedTrigger ?? fallbackTrigger)?.focus();
   trigger = null;
+}
+
+async function requestCloseSubagentEditor(): Promise<void> {
+  if (!editorOpen || busy) return;
+  if (editorSnapshot() !== initialSnapshot) {
+    const confirmed = await uiConfirm("当前配置尚未保存，确定放弃本次修改？", {
+      title: "放弃修改",
+      okText: "放弃修改",
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  closeSubagentEditor();
 }
 
 export function isSubagentEditorOpen(): boolean {
@@ -154,20 +205,70 @@ export function isSubagentEditorOpen(): boolean {
 }
 
 function modelBadge(agent: SubagentEntry): HTMLElement {
-  const label = agent.model.mode === "inherit" ? `继承 · ${agent.modelLabel}` : `固定 · ${agent.modelLabel}`;
+  const fixed = agent.model.mode === "fixed";
+  const label = fixed ? `固定 · ${agent.modelLabel}` : `继承 · ${agent.modelLabel}`;
   return h("span", {
-    class: `subagent-model-badge${agent.model.mode === "fixed" ? " fixed" : ""}${agent.modelAvailable ? "" : " invalid"}`,
-    title: agent.modelAvailable ? label : "固定模型不可用，请编辑子代理后重新选择",
-  }, label);
+    class: `subagent-model-badge${fixed ? " fixed" : ""}${agent.modelAvailable ? "" : " invalid"}`,
+    title: agent.modelAvailable ? label : "固定模型不可用，请配置子代理后重新选择",
+  },
+    icon(fixed ? "SlidersHorizontal" : "Bot", { size: 12 }),
+    h("span", { class: "subagent-model-badge-text" }, label),
+  );
+}
+
+function agentMatches(agent: SubagentEntry): boolean {
+  if (activeFilter === "enabled" && !agent.enabled) return false;
+  if (activeFilter === "disabled" && agent.enabled) return false;
+  if (!searchTerm) return true;
+  return [agent.name, agent.id, agent.description, agent.modelLabel]
+    .some((value) => value.toLocaleLowerCase("zh-CN").includes(searchTerm));
+}
+
+function syncOverview(agents: readonly SubagentEntry[]): void {
+  const enabled = agents.filter((agent) => agent.enabled).length;
+  const disabled = agents.length - enabled;
+  setText("subagent-stat-total", String(agents.length));
+  setText("subagent-stat-enabled", String(enabled));
+  setText("subagent-stat-disabled", String(disabled));
+  const counts: Record<SubagentFilter, number> = { all: agents.length, enabled, disabled };
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-subagent-filter]")) {
+    const filter = button.dataset.subagentFilter as SubagentFilter | undefined;
+    if (!filter) continue;
+    button.classList.toggle("active", filter === activeFilter);
+    button.setAttribute("aria-pressed", String(filter === activeFilter));
+    const count = button.querySelector<HTMLElement>("[data-subagent-count]");
+    if (count) count.textContent = String(counts[filter]);
+  }
+}
+
+function updateEmptyState(visible: boolean, total: number): void {
+  const empty = $("subagents-empty");
+  if (!empty) return;
+  empty.classList.toggle("hidden", !visible);
+  if (!visible) return;
+  if (total === 0) {
+    setText("subagents-empty-title", "还没有可用子代理");
+    setText("subagents-empty-copy", "新建后，主 Agent 才能通过 delegate_agent 选择它执行专项任务。");
+    return;
+  }
+  setText("subagents-empty-title", "没有匹配的子代理");
+  setText("subagents-empty-copy", "调整搜索词或筛选条件后再试。");
 }
 
 function renderCards(): void {
   const list = $("subagents-list");
-  const empty = $("subagents-empty");
-  if (!list || !empty) return;
+  if (!list) return;
+  const allAgents = state.subagents?.agents ?? [];
+  const agents = allAgents.filter(agentMatches);
+  const visibleCount = agents.length === allAgents.length
+    ? `${allAgents.length} 个子代理`
+    : `显示 ${agents.length} / ${allAgents.length} 个子代理`;
+
+  syncOverview(allAgents);
+  setText("subagents-result-count", visibleCount);
   list.replaceChildren();
-  const agents = state.subagents?.agents ?? [];
-  empty.classList.toggle("hidden", agents.length > 0);
+  updateEmptyState(agents.length === 0, allAgents.length);
+
   for (const agent of agents) {
     const toggle = h("input", {
       type: "checkbox",
@@ -179,32 +280,50 @@ function renderCards(): void {
 
     const edit = h("button", {
       type: "button",
-      class: "ghost-btn small",
-      "aria-label": `编辑子代理 ${agent.name}`,
+      class: "subagent-edit-btn",
+      "aria-label": `配置子代理 ${agent.name}`,
+      title: `配置 ${agent.name}`,
       onclick: () => openEditor(agent),
-    }, "编辑");
+    }, icon("Pencil", { size: 13 }), "配置");
 
+    const titleId = `subagent-title-${agent.id}`;
+    const needsAttention = !agent.modelAvailable;
     const card = h("article", {
-      class: `subagent-card${agent.enabled ? "" : " disabled"}`,
+      class: `subagent-card${agent.enabled ? "" : " disabled"}${needsAttention ? " needs-attention" : ""}`,
       dataset: { subagentId: agent.id },
+      "aria-labelledby": titleId,
     },
-      h("div", { class: "subagent-card-icon", "aria-hidden": "true" }, icon("Bot", { size: 20 })),
+      h("div", { class: "subagent-card-icon", "aria-hidden": "true" },
+        icon("Bot", { size: 20 }),
+        h("span", { class: `subagent-card-live${agent.enabled ? "" : " off"}` }),
+      ),
       h("div", { class: "subagent-card-main" },
         h("div", { class: "subagent-card-title" },
-          h("h3", null, agent.name),
+          h("h3", { id: titleId }, agent.name),
           h("span", { class: "subagent-card-id" }, agent.id),
           agent.builtIn ? h("span", { class: "subagent-builtin" }, "内置") : null,
         ),
         h("p", { class: "subagent-card-desc" }, agent.description || "未填写用途说明"),
         h("div", { class: "subagent-card-meta" },
           modelBadge(agent),
-          h("span", { class: `subagent-state${agent.enabled ? " on" : ""}` }, agent.enabled ? "已启用" : "已停用"),
+          h("span", { class: "subagent-policy-badge", title: "每次委派由主 Agent 选择工具子集，且只能使用当前安全目录" },
+            icon("ShieldCheck", { size: 12 }), "运行时授权工具",
+          ),
+          !agent.modelAvailable
+            ? h("span", { class: "subagent-model-warning" }, icon("CircleAlert", { size: 12 }), "模型不可用")
+            : null,
         ),
       ),
       h("div", { class: "subagent-card-actions" },
-        h("label", { class: "subagent-switch", title: agent.enabled ? "停用子代理" : "启用子代理" },
-          toggle,
-          h("span", { class: "subagent-switch-track", "aria-hidden": "true" }),
+        h("label", { class: `subagent-switch${agent.enabled ? " on" : ""}`, title: agent.enabled ? "停用子代理" : "启用子代理" },
+          h("span", { class: "subagent-switch-copy", "aria-hidden": "true" },
+            h("strong", null, agent.enabled ? "已启用" : "已停用"),
+            h("small", null, agent.enabled ? "点击停用" : "点击启用"),
+          ),
+          h("span", { class: "subagent-switch-control" },
+            toggle,
+            h("span", { class: "subagent-switch-track", "aria-hidden": "true" }),
+          ),
         ),
         edit,
       ),
@@ -226,23 +345,31 @@ async function toggleAgent(agent: SubagentEntry, input: HTMLInputElement): Promi
       body: JSON.stringify({ enabled: input.checked }),
     });
     renderCards();
-    status(`✓ ${agent.name}已${input.checked ? "启用" : "停用"}，下一条消息生效`, "ok");
+    status(`${agent.name}已${input.checked ? "启用" : "停用"}，下一条消息生效`, "ok");
   } catch (err) {
     input.checked = !input.checked;
     input.disabled = false;
-    status(`✗ ${(err as Error).message}`, "err");
+    status(`保存失败：${(err as Error).message}`, "err");
   }
 }
 
 export async function refreshSubagents(): Promise<void> {
-  const [config, agents] = await Promise.allSettled([
-    api<AppConfig>("/api/config"),
-    api<SubagentSettingsState>("/api/subagents"),
-  ]);
-  if (config.status === "fulfilled") state.config = config.value;
-  if (agents.status === "fulfilled") state.subagents = agents.value;
-  else throw agents.reason;
-  renderCards();
+  const list = $("subagents-list");
+  list?.setAttribute("aria-busy", "true");
+  status("正在同步子代理配置…");
+  try {
+    const [config, agents] = await Promise.allSettled([
+      api<AppConfig>("/api/config"),
+      api<SubagentSettingsState>("/api/subagents"),
+    ]);
+    if (config.status === "fulfilled") state.config = config.value;
+    if (agents.status !== "fulfilled") throw agents.reason;
+    state.subagents = agents.value;
+    renderCards();
+    status("");
+  } finally {
+    list?.removeAttribute("aria-busy");
+  }
 }
 
 async function saveEditor(): Promise<void> {
@@ -283,10 +410,10 @@ async function saveEditor(): Promise<void> {
       body: JSON.stringify({ name, description, enabled, model }),
     });
     renderCards();
-    status(`✓ 子代理「${name}」已保存，下一条消息生效`, "ok");
+    status(`子代理「${name}」已保存，下一条消息生效`, "ok");
     closeSubagentEditor();
   } catch (err) {
-    editorStatus(`✗ ${(err as Error).message}`, "err");
+    editorStatus(`保存失败：${(err as Error).message}`, "err");
   } finally {
     setEditorBusy(false);
   }
@@ -307,35 +434,76 @@ async function deleteEditing(): Promise<void> {
     state.subagents = await api<SubagentSettingsState>(`/api/subagents/${encodeURIComponent(agent.id)}`, { method: "DELETE" });
     renderCards();
     closeSubagentEditor();
-    status(`✓ 已删除子代理「${agent.name}」`, "ok");
+    status(`已删除子代理「${agent.name}」`, "ok");
   } catch (err) {
-    editorStatus(`✗ ${(err as Error).message}`, "err");
+    editorStatus(`删除失败：${(err as Error).message}`, "err");
   } finally {
     setEditorBusy(false);
+  }
+}
+
+function trapEditorFocus(event: KeyboardEvent): void {
+  if (!editorOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    void requestCloseSubagentEditor();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const form = $("subagent-editor");
+  if (!form) return;
+  const focusable = [...form.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter((el) => el.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0]!;
+  const last = focusable[focusable.length - 1]!;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
 /** 只绑定一次；页面数据按需 refresh。 */
 export function bindSubagentSettings(): void {
   $("subagent-add-btn")?.addEventListener("click", () => openEditor());
-  $("subagent-editor-close")?.addEventListener("click", closeSubagentEditor);
-  $("subagent-cancel-btn")?.addEventListener("click", closeSubagentEditor);
+  $("subagent-editor-close")?.addEventListener("click", () => { void requestCloseSubagentEditor(); });
+  $("subagent-cancel-btn")?.addEventListener("click", () => { void requestCloseSubagentEditor(); });
   $("subagent-delete-btn")?.addEventListener("click", () => { void deleteEditing(); });
-  $("subagent-model-mode")?.addEventListener("change", syncModelMode);
-  $("subagent-provider")?.addEventListener("change", () => populateModels());
+  $("subagent-model-mode")?.addEventListener("change", () => {
+    syncModelMode();
+    editorStatus("");
+  });
+  $("subagent-provider")?.addEventListener("change", () => {
+    populateModels();
+    editorStatus("");
+  });
   $("subagent-editor")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void saveEditor();
   });
+
+  const search = $("subagent-search") as HTMLInputElement | null;
+  search?.addEventListener("input", () => {
+    searchTerm = search.value.trim().toLocaleLowerCase("zh-CN");
+    renderCards();
+  });
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-subagent-filter]")) {
+    button.addEventListener("click", () => {
+      const filter = button.dataset.subagentFilter as SubagentFilter | undefined;
+      if (!filter || !["all", "enabled", "disabled"].includes(filter)) return;
+      activeFilter = filter;
+      renderCards();
+    });
+  }
+
   const mask = $("subagent-editor-mask");
   mask?.addEventListener("click", (event) => {
-    if (event.target === mask) closeSubagentEditor();
+    if (event.target === mask) void requestCloseSubagentEditor();
   });
-  mask?.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeSubagentEditor();
-    }
-  });
+  mask?.addEventListener("keydown", trapEditorFocus);
 }

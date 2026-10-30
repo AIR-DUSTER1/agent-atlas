@@ -456,41 +456,62 @@
 @keyframes bounce { 0%,60%,100% { transform: none; opacity: .4; } 30% { transform: translateY(-4px); opacity: 1; } }
 
 
-/* 委派卡（delegate_agent）：子 Agent 耗时 + 用过的工具，F8 过程可见 */
+/* 委派卡（delegate_agent）：运行态、模型/耗时/用量与工具轨迹 */
 .delegate-wrap {
+  position: relative;
   margin-top: 8px;
-  padding: 10px 12px;
+  padding: 12px 13px 11px;
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elev);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(139,92,246,.075), rgba(91,140,255,.035) 52%, transparent),
+    var(--bg-elev);
 }
-.delegate-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+.delegate-wrap.running { border-left-color: var(--accent); }
+.delegate-wrap.error { border-left-color: var(--red); }
+.delegate-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.delegate-icon {
+  display: grid; place-items: center; flex: none; width: 27px; height: 27px;
+  border: 1px solid rgba(139,92,246,.24); border-radius: 8px;
+  background: rgba(139,92,246,.1); color: var(--accent-2-soft);
 }
-.delegate-icon { flex: none; }
-.delegate-title { font-weight: 600; color: var(--text); }
-.delegate-meta { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.delegate-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 12px;
+.delegate-heading { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.delegate-kicker { color: var(--text-3); font-size: 9px; letter-spacing: .05em; }
+.delegate-title { overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.delegate-state {
+  display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: auto;
+  padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-3); background: var(--bg-input); font-size: 9.5px;
 }
-.delegate-tools-label { color: var(--text-2); }
+.delegate-state.done { color: var(--green); border-color: rgba(63,185,111,.28); background: rgba(63,185,111,.08); }
+.delegate-state.running { color: var(--accent-soft); border-color: rgba(91,140,255,.28); background: rgba(91,140,255,.08); }
+.delegate-state.error { color: var(--red-soft); border-color: rgba(229,96,79,.28); background: rgba(229,96,79,.08); }
+.delegate-state.running .ui-icon { animation: delegate-spin .85s linear infinite; }
+@keyframes delegate-spin { to { transform: rotate(360deg); } }
+.delegate-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.delegate-meta-item {
+  display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%;
+  padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-input); font-variant-numeric: tabular-nums;
+}
+.delegate-meta-item span { flex: none; color: var(--text-3); font-size: 9px; }
+.delegate-meta-item strong { overflow: hidden; color: var(--text-2); font-family: var(--mono); font-size: 9.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.delegate-task {
+  display: -webkit-box; margin: 9px 0 0; overflow: hidden;
+  color: var(--text-2); font-size: 10.5px; line-height: 1.55; overflow-wrap: anywhere;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.delegate-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; font-size: 10px; }
+.delegate-tools-label { flex: none; margin-right: 1px; color: var(--text-3); }
 .delegate-tool-chip {
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
+  max-width: 100%; padding: 2px 6px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-2); background: var(--bg-input);
+  font-family: var(--mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap;
 }
-
+.delegate-pending-copy { margin: 9px 0 0; color: var(--text-3); font-size: 10px; line-height: 1.55; }
 /* 空会话：不再是黑屏，给出可直接执行的起步动作 */
 .empty-session {
   width: min(var(--content-w), calc(100vw - 40px));

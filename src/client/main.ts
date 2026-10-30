@@ -43,7 +43,7 @@ import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { loadPluginState } from "./views/settings-plugins.js";
-import { bindSubagentSettings, closeSubagentEditor, isSubagentEditorOpen } from "./views/settings-subagents.js";
+import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";

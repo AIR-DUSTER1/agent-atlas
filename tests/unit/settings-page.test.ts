@@ -141,6 +141,7 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   assert.match(source, /envKeys/);
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /isMcpEditorOpen/);
+
   assert.doesNotMatch(source, /innerHTML/);
 });
 test("技能库支持上传、启停、分页与卡片删除", async () => {
@@ -181,10 +182,12 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   const html = await readFile(new URL("index.html", root), "utf8");
   const source = await readClientFiles(["views/settings-subagents.ts", "views/settings.ts", "main.ts"]);
   for (const id of [
-    "subagents-list", "subagents-empty", "subagent-add-btn", "subagent-status",
+    "subagents-list", "subagents-empty", "subagents-empty-title", "subagents-empty-copy",
+    "subagent-add-btn", "subagent-status", "subagent-stat-total", "subagent-stat-enabled",
+    "subagent-stat-disabled", "subagent-search", "subagents-result-count",
     "subagent-editor-mask", "subagent-editor", "subagent-name", "subagent-description",
-    "subagent-model-mode", "subagent-provider", "subagent-model", "subagent-enabled",
-    "subagent-delete-btn", "subagent-save-btn",
+    "subagent-model-mode", "subagent-model-hint", "subagent-provider", "subagent-model",
+    "subagent-enabled", "subagent-delete-btn", "subagent-save-btn",
   ]) assert.match(html, new RegExp(`id="${id}"`), id);
   assert.match(html, /data-settings-view="subagents"/);
   assert.match(html, /value="inherit"/);
@@ -194,6 +197,12 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /mode: "inherit"/);
   assert.match(source, /mode: "fixed", providerId, modelId/);
+  assert.match(source, /type SubagentFilter = "all" \| "enabled" \| "disabled"/);
+  assert.match(source, /function agentMatches/);
+  assert.match(source, /data-subagent-filter/);
+  assert.match(source, /function trapEditorFocus/);
+  assert.match(source, /尚未保存，确定放弃本次修改/);
+  assert.match(source, /运行时授权工具/);
   assert.doesNotMatch(source, /innerHTML/);
 });
 

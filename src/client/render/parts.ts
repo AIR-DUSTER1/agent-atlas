@@ -211,11 +211,11 @@ export function updateToolCard(part: ToolPart): void {
       resultPre.textContent = part.result.content;
       resultPre.className = "result-pre" + (part.result.isError ? " err" : "");
     }
-    // 委派是通用编排能力，直接渲染耗时与子 Agent 工具
-    if (part.name === "delegate_agent") renderDelegateInToolCard(part, card);
     // 知识库 / 房产等业务增强由 main.ts 注册，render/* 不反向依赖 views/*
     renderToolEnhancers(part, card);
   }
+  // 委派卡在参数阶段就显示目标与授权边界，结果到达后原地替换为执行摘要。
+  if (part.name === "delegate_agent") renderDelegateInToolCard(part, card);
 }
 
 /* ---------------------------------------------------------------------------

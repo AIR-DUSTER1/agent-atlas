@@ -21,7 +21,6 @@ const VENDOR_PACKAGES = new Set(["chart.js", "lucide", "marked", "dompurify", "h
 /** P0 迁移预算：只允许下降；新增文件默认预算为 0。 */
 const INNER_HTML_BUDGET: Record<string, number> = {
   "composer/menu.ts": 3,
-  "render/delegate-card.ts": 1,
   "render/messages.ts": 3,
   "render/parts.ts": 1,
   "views/attachments.ts": 8,
@@ -126,6 +125,28 @@ test("CSP hash 与 index 内联脚本严格同步且不放行任意 inline scrip
   for (const hash of CSP_SCRIPT_HASHES) assert.ok(csp.includes(`'${hash}'`));
 });
 
+test("index.html 引用的样式全部进入构建产物", async () => {
+  const html = await readFile(join(CLIENT, "index.html"), "utf8");
+  const linked = [...html.matchAll(/href=["']\/styles\/([^"'?#]+\.css)(?:[?#][^"']*)?["']/g)]
+    .map((match) => match[1] ?? "");
+  assert.ok(linked.includes("subagents.css"), "子代理页样式必须由 index.html 显式引用");
+  for (const name of linked) {
+    const built = await readFile(join(ROOT, "src", "server", "public", "styles", name), "utf8").catch(() => "");
+    assert.ok(built.trim().length > 0, `缺少构建样式产物：${name}`);
+  }
+  const buildScript = await readFile(join(ROOT, "scripts", "build-client.ts"), "utf8");
+  assert.match(buildScript, /readdir\(STYLE_DIR/);
+  assert.match(buildScript, /index\.html 引用了未找到的样式/);
+});
+test("委派卡覆盖运行中与完成态且不拼 HTML", async () => {
+  const source = await readFile(join(CLIENT, "render", "delegate-card.ts"), "utf8");
+  assert.match(source, /const pending = !part\.result/);
+  assert.match(source, /dataset: \{ delegateState: stateClass \}/);
+  assert.match(source, /正在等待主 Agent 下发完整任务与工具子集/);
+  assert.match(source, /payload\?\.usage\?\.totalTokens/);
+  assert.match(source, /toolsUsed/);
+  assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML/);
+});
 test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
   const outputs = VENDOR_ENTRIES.map((entry) => entry.outputFile);
   assert.equal(new Set(outputs).size, outputs.length);

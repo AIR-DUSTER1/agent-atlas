@@ -915,7 +915,7 @@ profile，不判断具体业务名。
 **插件启停边界（`src/plugin-state.ts` + `server/plugin-settings.ts`）**：设置 → 插件页的三个开关统一写入 `.web-config.json` 的 `plugins.enabled`，`GET /api/plugins` 返回状态、`PATCH /api/plugins/:id` 切换单项。写入失败不改内存状态；切换成功后 `bumpConfigVersion()`，已有会话下一条消息重建图，确保工具 allowlist 与审批表同步收敛。RAG / 贝壳默认开启以兼容旧配置，Computer Use 默认关闭；非 Windows 平台会直接拒绝启用 Computer Use。关闭后旧图即使仍持有工具引用，工具入口也会 fail-closed，不会触达外部服务或 PowerShell。
 ### 3.24 生产级多 Agent：配置化身份 + 主 Agent 动态赋权
 
-**形态**：子 Agent = 主 Agent 的一次有界委派工具。设置页只管理子代理身份、用途说明、启停和模型；
+**形态**：子 Agent = 主 Agent 的一次有界委派工具。设置页只管理子代理身份、用途说明、启停和模型，并提供搜索、状态筛选、模型可用性与启停状态聚合；
 每次调用 `delegate_agent({ agent, task, prompt, tools })` 时，主 Agent 必须显式赋予专项提示词和工具子集。
 
 ```text
@@ -1802,7 +1802,7 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 一致（否则「第一个工具的结果」会被标成第二个，模型会张冠李戴）。
 
 **过程可见**：`delegate_agent` 返回结构化 JSON（`agent` / `model` / `durationMs` /
-`toolsUsed` / `usage`），前端委派卡渲染目标子代理、实际模型、耗时与工具轨迹。子 Agent
+`toolsUsed` / `usage`），前端委派卡在运行中展示目标子代理和授权工具，完成后展示实际模型、耗时、用量与工具轨迹。子 Agent
 的完整对话仍是黑盒，但关键执行事实足以让用户判断结论可信度。
 
 ### 3.34 `scripts/build-vendor.ts` + `src/client/vendor/*` — 前端依赖隔离与 CSP hash
