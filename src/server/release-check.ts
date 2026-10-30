@@ -46,6 +46,8 @@ export const REQUIRED_RUNTIME_ASSETS = [
   "src/server/public/styles/modals.css",
   "src/server/public/styles/settings.css",
   "src/server/public/styles/plugins.css",
+  "src/server/public/styles/commands.css",
+  "src/server/public/styles/subagents.css",
   "src/server/public/styles/responsive.css",
   "src/server/public/styles/desktop.css",
   "src/server/public/styles/ui.css",

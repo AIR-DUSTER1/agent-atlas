@@ -6,7 +6,7 @@
  * CSP hash，任何缺产物或清单漂移都必须非 0 退出。
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -17,13 +17,35 @@ const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src", "client");
 const OUT = join(ROOT, "src", "server", "public");
+const STYLE_DIR = join(SRC, "styles");
 
 /** 需要原样拷到产物目录的静态资源（TS 编译器不处理非 .ts 文件） */
 const STATIC_ASSETS = ["index.html"];
-const STYLE_ASSETS = [
-  "tokens.css", "reset.css", "layout.css", "typography.css", "chat.css", "composer.css",
-  "modals.css", "settings.css", "plugins.css", "responsive.css", "desktop.css", "commands.css", "ui.css",
-];
+
+/**
+ * 样式按目录自动发现，禁止再维护第二份手写白名单。
+ * 历史上 subagents.css 因为漏登记而 404，页面虽然能加载，交互却退化成裸文本。
+ */
+async function copyStyles(indexHtml: string): Promise<void> {
+  const entries = await readdir(STYLE_DIR, { withFileTypes: true });
+  const names = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".css"))
+    .map((entry) => entry.name)
+    .sort();
+  if (!names.length) throw new Error("styles/ 下没有可发布的 CSS 文件");
+
+  await mkdir(join(OUT, "styles"), { recursive: true });
+  for (const name of names) {
+    await copyFile(join(STYLE_DIR, name), join(OUT, "styles", name));
+  }
+
+  const linked = [...indexHtml.matchAll(/href=["']\/styles\/([^"'?#]+\.css)(?:[?#][^"']*)?["']/g)]
+    .map((match) => match[1] ?? "");
+  const missing = linked.filter((name) => !names.includes(name));
+  if (missing.length) {
+    throw new Error(`index.html 引用了未找到的样式：${[...new Set(missing)].join("、")}`);
+  }
+}
 
 async function main(): Promise<void> {
   // 每次从空产物目录构建，防止已删除模块继续被静态服务
@@ -47,10 +69,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await mkdir(join(OUT, "styles"), { recursive: true });
-  for (const name of STYLE_ASSETS) {
-    await copyFile(join(SRC, "styles", name), join(OUT, "styles", name));
-  }
+  const indexHtml = await readFile(join(SRC, "index.html"), "utf8");
+  await copyStyles(indexHtml);
 
   for (const name of STATIC_ASSETS) {
     await copyFile(join(SRC, name), join(OUT, name));
