@@ -13,12 +13,21 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { searchRag } from "./server/rag.js";
+import { isPluginEnabled } from "./plugin-state.js";
 
 /** 工具结果截断：给模型的观察文本不能过长（挤占上下文） */
 const RESULT_TEXT_LIMIT = 6_000;
 
 export const retrieveDocs = tool(
   async ({ query, topK }) => {
+    if (!isPluginEnabled("rag")) {
+      return JSON.stringify({
+        query,
+        hits: [],
+        error: "知识库插件已停用",
+        note: "请在「设置 → 插件」中启用知识库后再检索。",
+      });
+    }
     try {
       const { query: q, hits } = await searchRag(query, topK ?? undefined);
       if (!hits.length) {

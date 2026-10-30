@@ -21,6 +21,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { runSubagent } from "./agent/subagent.js";
 import type { AgentProfile } from "./agent/profile.js";
+import { isPluginEnabled } from "./plugin-state.js";
 
 /** 任务书长度上限（与 subagent.ts 的 MAX_TASK_CHARS 对齐） */
 const MAX_TASK_CHARS = 2_000;
@@ -34,10 +35,10 @@ const SUBAGENT_LABELS: Record<string, string> = {
 /** 运行时按 id 取 profile（动态 import 破 general ↔ tools-team 循环） */
 async function loadSubagentProfile(profileId: string): Promise<AgentProfile> {
   if (profileId === "general") {
-    return (await import("./agent/general.js")).generalProfile;
+    return (await import("./agent/general.js")).generalProfileWithExternal();
   }
   if (profileId === "estate") {
-    return (await import("./agent/estate.js")).estateProfile;
+    return (await import("./agent/estate.js")).estateProfileWithPlugins();
   }
   throw new Error(`未知子 Agent：${profileId}`);
 }
@@ -45,6 +46,9 @@ async function loadSubagentProfile(profileId: string): Promise<AgentProfile> {
 export const delegateAgent = tool(
   async ({ profile, task }) => {
     try {
+      if (profile === "estate" && !isPluginEnabled("estate")) {
+        return "委派失败：找房数据源插件已停用，请先在「设置 → 插件」中启用。";
+      }
       const target = await loadSubagentProfile(profile);
       const result = await runSubagent(target, task);
       // 返回结构化 JSON：前端委派卡要渲染「耗时 / 用了哪些工具」，

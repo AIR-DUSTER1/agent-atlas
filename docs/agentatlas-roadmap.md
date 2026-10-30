@@ -40,9 +40,9 @@ agentatlas 从“通用 Agent + 房产 Agent”继续演进为可组合的本地
 
 ### 2.2 电脑操作 Agent
 
-现有 `computer_screenshot`、`computer_click`、`computer_type`、`computer_key`、`computer_scroll` 已可作为通用 Agent 工具使用。后续目标是：
+现有 `computer_screenshot`、`computer_click`、`computer_type`、`computer_key`、`computer_scroll` 已放入「设置 → 插件 → Computer Use」，默认关闭，可按需启停。后续目标是：
 
-- 独立 `computer` profile，减少通用 Agent 的隐式高权限面；
+- 独立 `computer` profile，进一步减少误把电脑工具绑进普通对话的风险；
 - 强化“截图 → 定位 → 动作 → 复核”操作闭环；
 - 支持会话级紧急停止、动作节流和明确的当前窗口提示；
 - 继续保持截图只读、动作类工具逐项审批的安全边界。

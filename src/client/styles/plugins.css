@@ -62,7 +62,28 @@
   font-size: 10.5px;
 }
 .plugin-status.ready { background: rgba(63,185,111,.13); color: var(--green); }
+.plugin-kind.kind-builtin { color: var(--accent-2-soft); background: rgba(139,92,246,.1); border-color: rgba(139,92,246,.28); }
+.plugin-enabled-state {
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(127,127,127,.12); color: var(--text-3);
+  font-size: 10.5px;
+}
+.plugin-enabled-state.on { background: rgba(63,185,111,.13); color: var(--green); }
+.plugin-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 .plugin-manage { flex: none; margin: 0; }
+.plugin-switch { position: relative; display: inline-flex; width: 36px; height: 20px; flex: none; cursor: pointer; }
+.plugin-switch input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.plugin-switch-track { position: relative; display: block; width: 36px; height: 20px; border-radius: 999px; background: var(--border); pointer-events: none; transition: background .15s; }
+.plugin-switch-track::after { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; content: ""; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.plugin-switch input:checked + .plugin-switch-track { background: var(--green); }
+.plugin-switch input:checked + .plugin-switch-track::after { transform: translateX(16px); }
+.plugin-switch input:focus-visible + .plugin-switch-track { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.plugin-switch input:disabled + .plugin-switch-track { opacity: .55; cursor: wait; }
+.plugin-card.disabled { background: color-mix(in srgb, var(--bg-input) 88%, var(--bg-elev) 12%); }
+@media (max-width: 760px) {
+  .plugin-card { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .plugin-actions { width: 100%; justify-content: flex-end; }
+}
 
 /* ---------- MCP Servers：全局设置 / 卡片列表 / 编辑弹窗 ---------- */
 .mcp-page-head {

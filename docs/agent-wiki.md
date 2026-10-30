@@ -661,7 +661,7 @@ Header: Authorization: Bearer <key>（可留空）
 
 ---
 
-### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI，插件入口：设置 → 插件 → CLI）
+### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI，插件入口：设置 → 插件 → CLI，可启停）
 
 **设计立场**：贝壳能力由官方 `beike` CLI（LianjiaTech/beike-ai-platform）提供，
 工作台只做「子进程包装 + JSON 解析 + 错误兜底 + 工具 schema」；(indexPath) 不引入贝壳私有
@@ -738,7 +738,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 
 | 目录 | 覆盖 |
 |---|---|
-| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型与插件目录（`plugin-registry.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用按批次阈值折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、审批/自主权限矩阵与风险审查器（`permission.test.ts` / `tool-risk.test.ts` / `tool-isolation.test.ts`）、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
+| `tests/unit/` | 纯函数与内存状态：前端 Markdown/URL 白名单（`modules/format.js`）、`limits.ts` 并发闸、`files.ts` 路径授权/跳目录/二进制、`buildPrehistoryNote` 注入语义、`restoreSessions` 的 pending 恢复语义、`workflow.ts` 澄清/反思图、设置页结构、插件入口、供应商独立弹窗与主从布局（`settings-page.test.ts`）、使用统计双窗口、usage 去重与 M 格式（`settings-page.test.ts` / `stats.test.ts` / `format.test.ts`）、插件类型、启停状态与 profile 工具收敛（`plugin-registry.test.ts` / `plugin-controls.test.ts`）、审批恢复单头像与长命令换行、思考过程默认折叠、工具调用按批次阈值折叠（`chat-flow.test.ts`）、OpenCode 会话传输头（`llm-transport.test.ts`）、`stream.ts` 内部节点正文过滤与 reasoning 提取、审批/自主权限矩阵与风险审查器（`permission.test.ts` / `tool-risk.test.ts` / `tool-isolation.test.ts`）、日志打码/级别、lifecycle 退出状态机、子进程超时/输出上限 |
 | `tests/integration/` | 起临时服务端（mock 模式）：healthz/readyz 形状、`X-Request-Id`、config、会话创建、chat SSE、transcript 回放、审批 pending/恢复、`resume` 错误路径、`/compact`、文件搜索、404/400、静态页面与 ESM 模块 MIME |
 | `tests/security/` | 跨站 POST 403、malformed JSON 400、请求体超限 413、Bearer 认证 401、探针免认证、静态目录穿越 |
 | `tests/helpers/server.ts` | 临时服务端托管：系统分配端口、`API_KEY=""` 强制 mock、`SESSIONS_FILE` / `WEB_CONFIG_FILE` / `AUDIT_FILE` 指向临时目录（**不碰真实 journal、配置与审计**）、`LOG_LEVEL=error` 降噪、`taskkill /T` 杀进程树（Linux 自动退回 `proc.kill()`） |
@@ -912,6 +912,7 @@ profile，不判断具体业务名。
   SSE 的 `tool_result` 事件与 journal 回放只取其中的 text 块（`contentText` 拍平），
   base64 不进前端不进 journal。
 
+**插件启停边界（`src/plugin-state.ts` + `server/plugin-settings.ts`）**：设置 → 插件页的三个开关统一写入 `.web-config.json` 的 `plugins.enabled`，`GET /api/plugins` 返回状态、`PATCH /api/plugins/:id` 切换单项。写入失败不改内存状态；切换成功后 `bumpConfigVersion()`，已有会话下一条消息重建图，确保工具 allowlist 与审批表同步收敛。RAG / 贝壳默认开启以兼容旧配置，Computer Use 默认关闭；非 Windows 平台会直接拒绝启用 Computer Use。关闭后旧图即使仍持有工具引用，工具入口也会 fail-closed，不会触达外部服务或 PowerShell。
 ### 3.24 `src/agent/subagent.ts` + `src/tools-team.ts` — 多智能体协同（委派子 Agent）
 
 **形态**：子 Agent = 工具。主 Agent（general）调 `delegate_agent({ profile, task })`，
@@ -1866,7 +1867,7 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
   `Esc` 优先清空搜索而不直接关闭设置页。
 - 供应商仍采用“左选供应商、右看模型详情”的主从布局；新增/编辑供应商走独立弹窗，
   不再把创建表单塞进详情列。
-- 插件目录按 HTTP / CLI / MCP 真实接入类型展示；RAG 保持 HTTP 插件分类，不与 MCP 混用。
+- 插件目录按 HTTP / CLI / 内置 / MCP 真实接入类型展示；RAG 保持 HTTP 插件分类，不与 MCP 混用。每张内置插件卡都有启停开关，MCP 仍在独立分区做全局与单 server 启停。
 - `ui/field.ts` 提供 `setFieldError/clearFieldError`，记忆、命令等必填表单在控件旁显示错误，
   同步维护 `aria-invalid` 与 `aria-describedby`，底部状态只做整体摘要。
 - API Key、RAG Key、找房凭证全部使用 password 控件与显式显示/隐藏按钮；错误和日志不读取输入明文。

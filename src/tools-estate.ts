@@ -18,6 +18,7 @@ import {
   houseSearch, houseInfo, houseArea, houseResolve, houseMarket, houseAgents,
   houseContact, houseAppoint, buildCompareMap, GEOCODE_LIMITS,
 } from "./server/estate.js";
+import { isPluginEnabled } from "./plugin-state.js";
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
 function finalize(outcome: { ok: boolean; action: string; data?: unknown; error?: string }): string {
@@ -79,6 +80,7 @@ function extractListings(data: unknown): Array<{ id?: string; title?: string; pr
 // ---------------------------------------------------------------------------
 export const houseSearchTool = tool(
   async ({ mode, city, query, houseType }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim()) return badArgs("city 不能为空：先向用户确认城市再搜索");
     if (!query?.trim()) return badArgs("query 不能为空：请把用户的找房条件整理成一句话");
     if (houseType && mode === "rent") return badArgs("listing_type 只适用于买房（mode=buy）");
@@ -109,6 +111,7 @@ export const houseSearchTool = tool(
 // ---------------------------------------------------------------------------
 export const houseLookupTool = tool(
   async ({ action, mode, city, query, houseId }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (action === "detail") {
       if (!city?.trim() || !houseId?.trim()) {
         return badArgs("房源详情需要 city 与 house_id（必须来自 house_search 的真实返回，禁止编造 ID）");
@@ -152,6 +155,7 @@ export const houseLookupTool = tool(
 // ---------------------------------------------------------------------------
 export const houseMarketTool = tool(
   async ({ action, mode, city, query }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim()) {
       return badArgs("city 必填");
     }
@@ -183,6 +187,7 @@ export const houseMarketTool = tool(
 // ---------------------------------------------------------------------------
 export const houseMapTool = tool(
   async ({ city, items }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim()) return badArgs("city 不能为空：用于提高定位准确率");
     const list = (items ?? []).filter((i) => i?.name?.trim());
     if (!list.length) return badArgs("items 不能为空：每项给 name（小区/楼盘/板块名），可选 address（更精确的地址）");
@@ -227,6 +232,7 @@ export const houseMapTool = tool(
 // ---------------------------------------------------------------------------
 export const houseAgentsTool = tool(
   async ({ mode, action, city, query, agentUcid }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim()) return badArgs("city 不能为空");
     if (action === "detail" && !agentUcid?.trim()) {
       return badArgs("agent-detail 需要经纪人 ID（必须来自 house_agents 检索的真实返回，禁止传姓名）");
@@ -255,6 +261,7 @@ export const houseAgentsTool = tool(
 // ---------------------------------------------------------------------------
 export const houseAppointTool = tool(
   async ({ houseId, date, start, end }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!houseId?.trim() || !date?.trim()) return badArgs("house_id 与 date 必填，且 house_id 必须来自 house_search 真实返回");
     const r = await houseAppoint(houseId.trim(), date.trim(), start?.trim() || undefined, end?.trim() || undefined);
     return finalize(r);
@@ -278,6 +285,7 @@ export const houseAppointTool = tool(
 // ---------------------------------------------------------------------------
 export const houseContactTool = tool(
   async ({ mode, city, agentUcid, reason, biz }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim() || !agentUcid?.trim() || !reason?.trim()) {
       return badArgs("city / agent_id / reason 都必填；agent_id 必须来自 house_agents 真实返回，禁止传姓名");
     }

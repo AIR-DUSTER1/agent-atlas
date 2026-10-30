@@ -27,7 +27,19 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
 
   await page.locator('[data-settings-view="plugins"]').click();
   await expect(page.locator("#plugins-panel")).toBeVisible();
-  await expect(page.locator("#plugin-list")).toContainText(/RAG|MCP/);
+  await expect(page.locator("#plugin-list")).toContainText(/RAG|Computer Use/);
+  await expect(page.locator('[data-plugin-id="computer"]')).toContainText("电脑控制");
+  const computerSwitch = page.locator('[data-plugin-id="computer"] .plugin-switch input');
+  await expect(computerSwitch).not.toBeChecked();
+  if (process.platform === "win32") {
+    await computerSwitch.check();
+    await expect(page.locator('[data-plugin-id="computer"]')).toContainText("已启用");
+    await page.locator('[data-plugin-id="computer"] .plugin-switch input').uncheck();
+    await expect(page.locator('[data-plugin-id="computer"]')).toContainText("已停用");
+  } else {
+    await expect(computerSwitch).toBeDisabled();
+    await expect(page.locator('[data-plugin-id="computer"]')).toContainText("仅支持 Windows");
+  }
   await page.locator("#settings-back-btn").click();
   await expect(page.locator("#settings-page")).toBeHidden();
 

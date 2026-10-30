@@ -42,6 +42,7 @@ import { currentlySelectedProvider, renderProviderList } from "./views/model-pan
 import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
+import { loadPluginState } from "./views/settings-plugins.js";
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
@@ -115,6 +116,7 @@ async function init(): Promise<void> {
   await loadExternalAgents();
   await loadRag();
   await loadEstate();
+  await loadPluginState();
   // 用户自定义命令：预热带进斜杠菜单（失败静默，命令不可用不影响对话）
   await loadUserCommands().catch(() => {});
 

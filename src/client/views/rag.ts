@@ -14,7 +14,7 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
 import { escapeHtml } from "../modules/format.js";
-import { renderPluginCards } from "./settings.js";
+import { renderPluginCards } from "./settings-plugins.js";
 import type { FsListResult, RagHit, RagState, ToolPart } from "../modules/types.js";
 
 export function setKbStatus(text: string, kind: string): void {

@@ -585,3 +585,76 @@ test("客户端错误上报只接收摘要并返回 204", async () => {
   assert.equal(res.status, 204);
   assert.equal(await res.text(), "");
 });
+test("插件启停 API：Computer Use 平台限制、持久化与坏请求 400", async () => {
+  const before = await json("/api/plugins");
+  assert.equal(before.status, 200);
+  assert.equal(before.body.enabled.computer, false);
+  assert.equal(before.body.platform, process.platform);
+
+  const turnedOn = await json("/api/plugins/computer", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: true }),
+  });
+  if (process.platform === "win32") {
+    assert.equal(turnedOn.status, 200);
+    assert.equal(turnedOn.body.enabled.computer, true);
+    const reread = await json("/api/plugins");
+    assert.equal(reread.body.enabled.computer, true, "启停状态应由服务端持久化");
+  } else {
+    assert.equal(turnedOn.status, 400);
+    assert.match(turnedOn.body.error, /Windows/);
+    const reread = await json("/api/plugins");
+    assert.equal(reread.body.enabled.computer, false, "不支持的平台不得启用 Computer Use");
+  }
+
+  const bad = await json("/api/plugins/computer", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: "yes" }),
+  });
+  assert.equal(bad.status, 400, "非布尔 enabled 必须拒绝");
+
+  const restored = await json("/api/plugins/computer", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.body.enabled.computer, false);
+});
+test("插件并发切换不丢更新", async () => {
+  const before = await json("/api/plugins");
+  const estate = !before.body.enabled.estate;
+  const rag = !before.body.enabled.rag;
+  const [estateResult, ragResult] = await Promise.all([
+    json("/api/plugins/estate", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: estate }),
+    }),
+    json("/api/plugins/rag", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: rag }),
+    }),
+  ]);
+  assert.equal(estateResult.status, 200);
+  assert.equal(ragResult.status, 200);
+  const after = await json("/api/plugins");
+  assert.equal(after.body.enabled.estate, estate);
+  assert.equal(after.body.enabled.rag, rag);
+
+  await Promise.all([
+    json("/api/plugins/estate", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: before.body.enabled.estate }),
+    }),
+    json("/api/plugins/rag", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: before.body.enabled.rag }),
+    }),
+  ]);
+});

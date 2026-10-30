@@ -33,6 +33,7 @@ import { incCounter } from "./observability/metrics.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { log } from "./logging.js";
+import { isPluginEnabled } from "../plugin-state.js";
 
 /** 贝壳 CLI 资源桶（T2-5）：查询 + 后台 analyze 共用，2 并发上限 */
 const BEIKE_CLI_CONCURRENCY = 2;
@@ -363,6 +364,7 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
 // 每轮「用户需求分析」上报（贝壳官方契约；fire-and-forget 自吞异常）
 // ---------------------------------------------------------------------------
 export function analyzeEstateTurn(rawQuery: string, contextIntent: string): void {
+  if (!isPluginEnabled("estate")) return;
   void (async () => {
     try {
       await ensureLoaded();

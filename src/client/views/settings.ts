@@ -1,31 +1,32 @@
 /**
  * ============================================================
- * views/settings.ts — 设置页骨架：分区导航 / 插件目录 / 开合
+ * views/settings.ts — 设置页骨架：分区导航 / 开合
  * ============================================================
- * 职责：设置页的打开关闭、四个分区的切换与懒加载、插件目录卡片。
+ * 职责：设置页的打开关闭、全部分区的切换与懒加载。
  * 设计立场：
  *  - 分区懒加载：只有切到某个分区才拉它的数据（打开设置不该打一堆请求）；
  *  - 分区内容各自独立成模块（backup / memories / stats），本文件只管导航；
- *  - 插件卡片的「已就绪」判定依赖 RAG / 贝壳两处状态，进分区时统一刷新。
+ *  - 插件目录由 settings-plugins.ts 独立负责，本文件不承载具体插件渲染。
  */
 
 import { $, setSidebarOpen } from "../core/dom.js";
 import { api, logoutSession } from "../core/api.js";
 import { state } from "../core/state.js";
-import { BUILTIN_PLUGINS, pluginTransportMeta } from "../modules/plugin-registry.js";
+
 import { applyConfigState } from "./composer-bar.js";
 import { closeCmMenus } from "./navigation.js";
 import { closeComposerMenu } from "../composer/menu.js";
-import { h } from "../ui/h.js";
+
 import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
 import { refreshMemorySettings, memStatus, bindMemorySettings } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
+import { refreshPluginPanel } from "./settings-plugins.js";
 import { refreshStats } from "./stats/index.js";
 import { destroyStatsCharts } from "./stats/charts.js";
-import type { AppConfig, EstateState, RagState } from "../modules/types.js";
+import type { AppConfig } from "../modules/types.js";
 
 const SETTINGS_VIEWS = new Set(["models", "plugins", "memories", "commands", "skills", "mcp", "stats"]);
 
@@ -54,7 +55,7 @@ export function showSettingsView(view: string): void {
     api<AppConfig>("/api/config").then(applyConfigState).catch(() => {});
     void refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
   } else if (next === "plugins") {
-    void loadPluginStates();
+    void refreshPluginPanel().catch((err) => setPluginPanelError(err));
   } else if (next === "memories") {
     void refreshMemorySettings().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "commands") {
@@ -66,13 +67,6 @@ export function showSettingsView(view: string): void {
   } else {
     refreshStats();
   }
-}
-
-/** 插件状态依赖 RAG / 贝壳两处，统一在进入分区时刷新 */
-async function loadPluginStates(): Promise<void> {
-  try { state.rag = await api<RagState>("/api/rag"); } catch { /* 旧服务进程无该接口 */ }
-  try { state.estate = await api<EstateState>("/api/estate"); } catch { /* 同上 */ }
-  renderPluginCards();
 }
 
 /** 过滤左侧设置项；搜索只匹配导航标题/说明，不触碰表单数据。 */
@@ -88,6 +82,13 @@ function filterSettingsNav(query: string): void {
     const visible = [...group.querySelectorAll<HTMLElement>(".settings-nav-item")].some((button) => !button.classList.contains("hidden"));
     group.classList.toggle("hidden", !visible);
   }
+}
+
+function setPluginPanelError(err: unknown): void {
+  const el = $("plugin-status");
+  if (!el) return;
+  el.textContent = "✗ " + (err instanceof Error ? err.message : String(err));
+  el.className = "settings-status err";
 }
 
 /** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
@@ -170,46 +171,4 @@ export function closeSettingsPage(): void {
   document.body.classList.remove("settings-open");
   void import("./model-form.js").then((m) => m.closeProviderForm());
   $("settings-btn")?.focus();
-}
-
-/** 插件目录按真实接入类型渲染：HTTP / CLI / MCP 不混用配置方式。 */
-export function renderPluginCards(): void {
-  const list = $("plugin-list");
-  if (!list) return;
-  list.replaceChildren();
-  for (const plugin of BUILTIN_PLUGINS) {
-    const transport = pluginTransportMeta(plugin.transport);
-    const ready = plugin.id === "rag"
-      ? Boolean(state.rag?.configured)
-      : Boolean(state.estate?.installed);
-    const status = plugin.id === "rag"
-      ? (ready ? "已配置" : "未配置")
-      : (ready ? `已安装${state.estate?.version ? ` ${state.estate.version}` : ""}` : "未安装");
-    const manage = h("button", {
-      type: "button",
-      class: "plugin-manage btn btn-approve",
-      onclick: () => {
-        if (plugin.id === "rag") void import("./rag.js").then((mod) => mod.openKb());
-        else if (plugin.id === "estate") void import("./estate.js").then((mod) => mod.openEstate());
-      },
-    }, plugin.manageLabel);
-    const card = h("article", { class: "plugin-card", dataset: { transport: transport.id } },
-      h("div", { class: "plugin-main" },
-        h("div", { class: "plugin-icon", "aria-hidden": "true" }, plugin.icon),
-        h("div", { class: "plugin-copy" },
-          h("div", { class: "plugin-title-row" },
-            h("h3", null, plugin.name),
-            h("span", { class: `plugin-kind kind-${transport.id}` }, transport.label),
-          ),
-          h("p", { class: "plugin-desc" }, plugin.description),
-          h("div", { class: "plugin-runtime-row" },
-            h("span", { class: "plugin-runtime" }, plugin.runtime),
-            h("span", { class: "plugin-status" + (ready ? " ready" : "") }, status),
-          ),
-        ),
-      ),
-      manage,
-    );
-    list.appendChild(card);
-  }
 }

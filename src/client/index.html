@@ -241,7 +241,7 @@
             </button>
             <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
               <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
-              <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与接入类型</small></span>
+              <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与 Computer Use</small></span>
             </button>
           </div>
           <div class="settings-nav-group" data-settings-group="extensions">
@@ -402,10 +402,12 @@
             <div class="plugin-transport-guide">
               <span><b>HTTP</b> 自定义 REST 契约</span>
               <span><b>CLI</b> 本地子进程</span>
+              <span><b>内置</b> 应用本地能力</span>
               <span><b>MCP</b> 标准 server（后续插件使用）</span>
             </div>
             <div id="plugin-list" class="plugin-list"></div>
-            <p class="settings-note">当前内置的 RAG 使用自有 HTTP 契约，不是 MCP；如果未来接入的插件声明为 MCP，应使用 MCP server 配置，而不是复用 HTTP 表单。</p>
+            <div id="plugin-status" class="settings-status" role="status" aria-live="polite"></div>
+            <p class="settings-note">开关只改变 Agent 可调用的插件工具，不会删除 RAG / CLI 的已有配置。MCP 是独立扩展类型，请到左侧「MCP 服务器」统一启停。</p>
           </div>
         </section>
 

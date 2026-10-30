@@ -50,9 +50,25 @@ export const PERMISSION_MODES: PermissionMode[] = [
 
 export type WelcomeMode = "default" | "agent-picker";
 
+/** 记住当前欢迎态，供插件启停后只刷新受影响的文案。 */
+let currentWelcomeMode: WelcomeMode = "default";
+
+function agentPickerSubtitle(): string {
+  const hasEstatePlugin = state.plugins?.enabled.estate !== false;
+  return `当前还没有添加项目。先选择${hasEstatePlugin ? "通用 Agent 或租房 / 房产 Agent" : "通用 Agent"}，直接开始即可；需要文件上下文时再到左上角添加项目。`;
+}
+
+/** 插件启停后刷新 Agent 选择页副标题；其他欢迎态不受影响。 */
+export function refreshWelcomePluginCopy(): void {
+  if (currentWelcomeMode !== "agent-picker") return;
+  const subtitle = $("welcome-subtitle");
+  if (subtitle) subtitle.textContent = agentPickerSubtitle();
+}
+
 /** 无项目时把欢迎页提升为明确的 Agent 选择页；普通欢迎态仍保留示例起步。 */
 export function showWelcomeState(mode: WelcomeMode = "default"): void {
   closeComposerMenu();
+  currentWelcomeMode = mode;
   const pickingAgent = mode === "agent-picker";
   const title = $("session-title");
   if (title) title.textContent = pickingAgent ? "选择 Agent" : "选择会话";
@@ -69,7 +85,7 @@ export function showWelcomeState(mode: WelcomeMode = "default"): void {
   const welcomeSubtitle = $("welcome-subtitle");
   if (welcomeSubtitle) {
     welcomeSubtitle.textContent = pickingAgent
-      ? "当前还没有添加项目。先选择通用 Agent 或租房 / 房产 Agent，直接开始即可；需要文件上下文时再到左上角添加项目。"
+      ? agentPickerSubtitle()
       : "可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认";
   }
   $("welcome-examples-label")?.classList.toggle("hidden", pickingAgent);

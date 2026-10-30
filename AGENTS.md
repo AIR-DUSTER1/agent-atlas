@@ -64,12 +64,14 @@ src/
   tools-rag.ts     # 知识检索工具 retrieve_docs（只调 server/rag.ts，不直接碰网络细节）
   tools-web.ts     # 网页抓取工具 browser_fetch（纯 HTTP + 剥标签；内网默认拒，防 SSRF）
   skills.ts        # 技能库：扫描 .setting/skills/*.md，按关键词命中注入
+  plugin-state.ts  # 内置插件运行时启停状态（agent 层只读，不直接碰 server）
   memory-store.ts  # 跨会话长期记忆（每轮动态注入 system 注记）
   tools-*.ts       # 新增同类工具集按 tools-<主题>.ts 命名，一个文件一个主题
   agent/           # LangGraph 图定义（State/Node/Edge 全在这里；general.ts = 产品默认图）
   cli.ts           # CLI 入口；server/ 不 import cli，cli 可 import 一切
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
                    #   mcp.ts = MCP 客户端（JSON-RPC over stdio）；commands.ts = 自定义命令
+                   #   plugin-settings.ts = 内置插件启停持久化；routes/plugins.ts = 启停 API
   client/          # 前端源码（TypeScript，唯一真相）
     main.ts        #   入口：初始化与全部 DOM 事件绑定
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
@@ -80,7 +82,7 @@ src/
     render/        #   渲染层（parts 部件 / messages 块）
     stream/        #   SSE 消费与一轮对话生命周期
     composer/      #   输入框 / 命令与 @ 文件菜单
-    views/         #   各业务视图（会话/项目/设置/RAG/房产…）
+    views/         #   各业务视图（会话/项目/设置/RAG/房产…；settings-plugins.ts = 插件目录与开关）
     actions/       #   审批、压缩等动作
     index.html / styles/*.css
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）

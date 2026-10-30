@@ -4,6 +4,7 @@
  * 接入类型必须与后端实现一致：
  *   http — 自定义 REST 契约（当前 RAG：ingest / search / reset）
  *   cli  — 本地子进程（当前贝壳 beike CLI）
+ *   builtin — 应用内置能力（当前 Computer Use，无外部配置）
  *   mcp  — 标准 MCP server（目录预留；当前 RAG 不是 MCP）
  */
 
@@ -22,9 +23,17 @@ export interface BuiltinPlugin {
   runtime: string;
   description: string;
   manageLabel: string;
+  /** 无配置时使用的默认启停值；运行时以 /api/plugins 为准。 */
+  defaultEnabled: boolean;
 }
 
 export const PLUGIN_TRANSPORTS: Record<string, PluginTransport> = {
+  builtin: {
+    id: "builtin",
+    label: "内置能力",
+    short: "内置",
+    description: "由应用自身实现的本地能力，不需要外部服务地址。",
+  },
   http: {
     id: "http",
     label: "HTTP 插件",
@@ -54,6 +63,7 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     runtime: "REST /ingest · /search · /reset",
     description: "外部向量库与 embedding 服务。agentatlas 使用自有 HTTP 契约，因此归类为 HTTP 插件，而不是 MCP。",
     manageLabel: "配置 RAG",
+    defaultEnabled: true,
   },
   {
     id: "estate",
@@ -63,6 +73,17 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     runtime: "beike CLI · 本地子进程",
     description: "房源检索、户型图、行情与经纪人能力由贝壳官方 CLI 提供，需要检测安装并保存授权。",
     manageLabel: "管理数据源",
+    defaultEnabled: true,
+  },
+  {
+    id: "computer",
+    icon: "🖥️",
+    name: "电脑控制（Computer Use）",
+    transport: "builtin",
+    runtime: "Windows 桌面 · 本地工具",
+    description: "让通用 Agent 截图、点击、输入和滚动本机窗口。默认关闭；开启后仍受会话权限与高风险审批约束。",
+    manageLabel: "查看说明",
+    defaultEnabled: false,
   },
 ];
 

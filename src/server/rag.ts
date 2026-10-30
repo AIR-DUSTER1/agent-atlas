@@ -36,6 +36,7 @@ import { log } from "./logging.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { incCounter } from "./observability/metrics.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
+import { isPluginEnabled } from "../plugin-state.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 
 // ---------------------------------------------------------------------------
@@ -425,6 +426,7 @@ export async function ingestChatAttachments(
   files: Array<{ name: string; content: string; truncated: boolean }>
 ): Promise<void> {
   await ensureLoaded();
+  if (!isPluginEnabled("rag")) return;
   if (!isRagConfigured() || !files.length) return;
   try {
     await ingestTextBatch(files.map((f) => ({

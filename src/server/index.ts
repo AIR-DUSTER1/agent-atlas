@@ -43,6 +43,7 @@ import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
 import { loadEstate } from "./estate.js";
+import { loadPluginSettings } from "./plugin-settings.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
@@ -79,6 +80,7 @@ import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, hand
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
+import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleListCommands, handleSaveCommand, handleUpdateCommand, handleDeleteCommand } from "./routes/commands.js";
 import { handleListSkills, handleSaveSkill, handleDeleteSkill, handleImportSkills, handleSetSkillEnabled } from "./routes/skills.js";
 import {
@@ -157,6 +159,7 @@ try {
   await loadExternalAgents();
   await loadRag();
   await loadEstate();
+  await loadPluginSettings();
   // F1：跨会话长期记忆先预热本地文件，再按配置注册 / 激活本地或 HTTP Provider。
   await loadMemories();
   installMemoryMetricsSink();
@@ -297,6 +300,7 @@ const server = createServer(async (req, res) => {
     const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
+    const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
 
     // 供应商 / 模型 / 思考等级 / 网关探测
     if (pathname === "/api/config" && req.method === "GET") { await handleGetApiConfig(res); return; }
@@ -309,6 +313,10 @@ const server = createServer(async (req, res) => {
     if (providerMatch && req.method === "DELETE") { await handleDeleteProvider(res, req, providerMatch[1]); return; }
     if (pathname === "/api/config/activate" && req.method === "POST") { await handleActivate(res, req); return; }
     if (pathname === "/api/models" && req.method === "POST") { await handleModels(res, req); return; }
+
+    // 内置插件启停（RAG / 找房数据源 / Computer Use）
+    if (pathname === "/api/plugins" && req.method === "GET") { handleListPlugins(res); return; }
+    if (pluginMatch && req.method === "PATCH") { await handleSetPluginEnabled(res, req, pluginMatch[1]); return; }
 
     // 会话
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }

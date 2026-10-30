@@ -63,6 +63,7 @@ export const CLIENT_SOURCES = [
   "views/rag.ts",
   "views/estate.ts",
   "views/settings.ts",
+  "views/settings-plugins.ts",
   "views/settings-backup.ts",
   "views/settings-memories.ts",
   "views/model-store.ts",

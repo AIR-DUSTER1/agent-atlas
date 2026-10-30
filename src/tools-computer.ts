@@ -26,6 +26,7 @@ import { z } from "zod";
 import { spawn } from "node:child_process";
 import { promises as fsp } from "node:fs";
 import { getActiveModality } from "./server/settings.js";
+import { isPluginEnabled } from "./plugin-state.js";
 
 const ACTION_TIMEOUT_MS = 10_000;  // 单个电脑动作的超时（截图含 JPEG 编码，给足）
 const MAX_SCREENSHOT_EDGE = 1_280; // 截图最长边（再大 token 浪费，1080p 会等比缩到 1280）
@@ -161,6 +162,8 @@ export function parseKeyCombo(combo: string): string | null {
 // 动作实现
 // ---------------------------------------------------------------------------
 
+const COMPUTER_DISABLED_MESSAGE = "电脑控制插件已停用，请先在「设置 → 插件」中启用后再操作。";
+
 interface ScreenshotCapture {
   /** 给模型 / 前端看的元数据行 */
   summary: string;
@@ -235,10 +238,12 @@ class ComputerScreenshotTool extends StructuredTool {
   schema = z.object({});
 
   async _call(): Promise<string> {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     return screenshotSummary(await captureScreenshot());
   }
 
   override async invoke(): Promise<unknown> {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     const shot = await captureScreenshot();
     if (getActiveModality() !== "vision") {
       return screenshotSummary(shot, true);
@@ -265,6 +270,7 @@ function clampCoord(value: number): number {
 
 const computerClick = tool(
   async ({ x, y, button, double }) => {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     const cx = clampCoord(x);
     const cy = clampCoord(y);
     const down = button === "right" ? 8 : 2;  // LEFTDOWN=2/UP=4；RIGHTDOWN=8/UP=16
@@ -296,6 +302,7 @@ ${events}`);
 
 const computerType = tool(
   async ({ text }) => {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     const body = isSendKeysSafe(text)
       ? `[System.Windows.Forms.SendKeys]::SendWait(${psQuote(escapeSendKeys(text))})`
       // 非 ASCII（中文等）SendKeys 发不准：剪贴板中转 + Ctrl+V（会覆盖用户剪贴板）
@@ -320,6 +327,7 @@ ${body}`);
 
 const computerKey = tool(
   async ({ combo }) => {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     const sendKeys = parseKeyCombo(combo);
     if (!sendKeys) {
       return `组合键「${combo}」无法解析：只支持 ctrl / alt / shift 修饰键加一个主键（字母、数字、F1-F12、enter、tab、esc、del、方向键等）。`;
@@ -341,6 +349,7 @@ const computerKey = tool(
 
 const computerScroll = tool(
   async ({ direction, lines }) => {
+    if (!isPluginEnabled("computer")) return COMPUTER_DISABLED_MESSAGE;
     const amount = (direction === "up" ? -1 : 1) * Math.max(1, Math.min(MAX_SCROLL_LINES, lines)) * 120;
     await runAction(`${WIN32_HELPER}
 [CuWin]::mouse_event(0x0800, 0, 0, ${amount}, [UIntPtr]::Zero)`);

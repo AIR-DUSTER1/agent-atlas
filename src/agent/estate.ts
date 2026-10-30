@@ -13,6 +13,7 @@ import { estateTools } from "../tools-estate.js";
 import { estateApprovals } from "./approvals.js";
 import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
+import { isPluginEnabled } from "../plugin-state.js";
 
 const tools = [
   // 贝壳找房工具（检索/详情/户型图/对比地图/行情/经纪人）；约看与加微走人工审批
@@ -65,7 +66,18 @@ export const estateProfile: AgentProfile = {
   },
 };
 
+/** 运行时 profile：插件关闭时保留诚实的空能力边界，不把 house_* 工具带进图。 */
+export function estateProfileWithPlugins(): AgentProfile {
+  if (isPluginEnabled("estate")) return estateProfile;
+  return {
+    ...estateProfile,
+    systemPrompt: `${SYSTEM_PROMPT}\n- 当前找房数据源插件已停用；不要调用 house_* 工具，请提示用户到「设置 → 插件」启用。`,
+    tools: [calculator, getCurrentTime],
+    approvalDescriptions: {},
+  };
+}
+
 export function createEstateGraph(sessionId?: string) {
   // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(estateProfile, undefined, { sessionId });
+  return createWorkflowGraph(estateProfileWithPlugins(), undefined, { sessionId });
 }

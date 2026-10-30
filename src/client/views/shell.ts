@@ -10,6 +10,7 @@ import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
 import { h } from "../ui/h.js";
 import { AGENT_PROFILES } from "../modules/agent-profile.js";
+import { refreshWelcomePluginCopy } from "./navigation.js";
 import type { SessionKind } from "../modules/types.js";
 
 let createSessionFn: (
@@ -66,15 +67,17 @@ export function buildDemoCards(container: HTMLElement | null): void {
     onClick: () => createSessionFn("agent", null, null),
   }));
 
-  // 两个正式 Agent 固定在示例前面，避免找房 Agent 被教学示例淹没。
+  // 找房 Agent 是贝壳插件的入口；插件停用时隐藏，避免创建空能力会话。
   const estate = AGENT_PROFILES.estate;
-  container.appendChild(agentCard({
-    icon: estate.icon,
-    name: estate.label,
-    description: estate.description,
-    example: estate.example,
-    onClick: () => createSessionFn("estate"),
-  }));
+  if (state.plugins?.enabled.estate !== false) {
+    container.appendChild(agentCard({
+      icon: estate.icon,
+      name: estate.label,
+      description: estate.description,
+      example: estate.example,
+      onClick: () => createSessionFn("estate"),
+    }));
+  }
 
   for (const demo of state.config?.demos || []) {
     container.appendChild(agentCard({
@@ -85,6 +88,13 @@ export function buildDemoCards(container: HTMLElement | null): void {
       onClick: () => createSessionFn("demo", demo.id, demo.example),
     }));
   }
+}
+
+/** 插件启停后重建欢迎页与新会话弹窗中的 Agent 卡片。 */
+export function refreshAgentCards(): void {
+  buildDemoCards($("demo-cards"));
+  buildDemoCards($("modal-cards"));
+  refreshWelcomePluginCopy();
 }
 
 export function buildExampleChips(): void {

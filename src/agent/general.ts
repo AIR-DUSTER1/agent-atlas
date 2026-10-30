@@ -25,25 +25,31 @@ import { generalApprovals } from "./approvals.js";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { AgentProfile, ApprovalDescriptions } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
+import { isPluginEnabled } from "../plugin-state.js";
 
-const tools = [
+/** 不受插件开关影响的通用 Agent 基础工具。 */
+const baseTools: StructuredToolInterface[] = [
   // 基础工具
   calculator, getCurrentTime, getWeather, sendEmail,
   // 编程/开发工具（terminal 与 write_file 为高风险，走人工审批）
   terminal, readFileTool, writeFileTool, listDirTool, grepSearch,
-  // 电脑控制（截屏只读直接执行；点击/输入/按键/滚动为高风险，走人工审批；
-  // 会话权限切到「只读」时四项动作全部拒绝，切到「自动」时不再逐项审批）
-  ...computerTools,
   // 多智能体协同（delegate_agent：委派子 Agent 后台跑独立子任务，需审批；
   // 子 Agent 强制只读 + 不可再委派，见 subagent.ts）
   ...teamTools,
   // 跨会话长期记忆（memory_save/recall 只写本服务记忆文件，低风险直接执行）
   ...memoryTools,
-  // 知识库检索（外部 RAG 服务，只读低风险，直接执行）
-  retrieveDocs,
   // 网页内容抓取（只读：纯 HTTP GET + 剥标签；内网默认拒，防 SSRF）
   browserFetch,
 ];
+
+/** 插件工具组：静态快照用于目录/测试，实际建图时按 enabled 状态过滤。 */
+const pluginToolSets: Array<{ id: "computer" | "rag"; tools: StructuredToolInterface[] }> = [
+  { id: "computer", tools: computerTools },
+  { id: "rag", tools: [retrieveDocs] },
+];
+
+/** 兼容旧测试与能力目录的完整工具快照；运行时请使用 generalProfileWithPlugins()。 */
+const tools: StructuredToolInterface[] = [...baseTools, ...pluginToolSets.flatMap((entry) => entry.tools)];
 
 const SYSTEM_PROMPT = [
   "你是一个实用的中文 AI 编程助手，运行在 LangGraph.js 的 ReAct 循环上，工作目录是当前项目根。",
@@ -117,22 +123,62 @@ export const generalProfile: AgentProfile = {
   },
 };
 
+/** 只保留当前工具 allowlist 中真实存在的审批项，避免禁用插件后装配期报错。 */
+function boundApprovals(
+  approvals: ApprovalDescriptions,
+  activeTools: StructuredToolInterface[],
+): ApprovalDescriptions {
+  const names = new Set(activeTools.map((tool) => tool.name));
+  return Object.fromEntries(
+    Object.entries(approvals).filter(([name]) => names.has(name)),
+  );
+}
+
+/** 当前插件状态对应的内置工具；开关变化后下一次建图自动生效。 */
+function activePluginTools(): StructuredToolInterface[] {
+  return pluginToolSets
+    .filter((entry) => isPluginEnabled(entry.id))
+    .flatMap((entry) => entry.tools);
+}
+
+/** 动态系统提示：关闭的插件明确告知模型不可调用，避免提示词与工具表互相矛盾。 */
+function promptForPlugins(): string {
+  const disabled = pluginToolSets
+    .filter((entry) => !isPluginEnabled(entry.id))
+    .map((entry) => entry.id === "rag" ? "知识库检索" : "电脑控制");
+  return disabled.length
+    ? `${SYSTEM_PROMPT}\n- 当前已停用插件：${disabled.join("、")}。不要调用对应工具；用户要求时说明需在「设置 → 插件」中启用。`
+    : SYSTEM_PROMPT;
+}
+
+/** 运行时可用的通用 profile：基础工具 + 已启用插件 + 已注入 MCP 工具。 */
+export function generalProfileWithPlugins(): AgentProfile {
+  const activeTools = [...baseTools, ...activePluginTools()];
+  return {
+    ...generalProfile,
+    systemPrompt: promptForPlugins(),
+    tools: activeTools,
+    approvalDescriptions: boundApprovals(generalApprovals, activeTools),
+  };
+}
+
 /**
  * 取「当前生效」的 profile：内置工具 + 已注入的外部工具（MCP）。
  * 每次建图都重新拼，这样新接入的 MCP server 在下一条消息就生效。
  * 外部工具名重复时直接抛错（装配期失败，不静默覆盖内置工具）。
  */
 export function generalProfileWithExternal(): AgentProfile {
-  if (!externalTools.length) return generalProfile;
-  const names = new Set(generalProfile.tools.map((t) => t.name));
+  const base = generalProfileWithPlugins();
+  if (!externalTools.length) return base;
+  const names = new Set(base.tools.map((t) => t.name));
   for (const t of externalTools) {
     if (names.has(t.name)) throw new Error(`外部工具与内置工具重名：${t.name}`);
     names.add(t.name);
   }
   return {
-    ...generalProfile,
-    tools: [...generalProfile.tools, ...externalTools],
-    approvalDescriptions: { ...generalProfile.approvalDescriptions, ...externalApprovals },
+    ...base,
+    tools: [...base.tools, ...externalTools],
+    approvalDescriptions: { ...base.approvalDescriptions, ...externalApprovals },
   };
 }
 

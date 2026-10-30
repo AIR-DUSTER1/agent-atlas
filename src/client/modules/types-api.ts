@@ -255,6 +255,12 @@ export interface RagHit {
   text?: string;
 }
 
+/** 内置插件的启停快照；platform 用于区分仅 Windows 的 Computer Use。 */
+export interface PluginSettingsState {
+  enabled: Record<"rag" | "estate" | "computer", boolean>;
+  platform: string;
+}
+
 export interface EstateState {
   installed: boolean;
   version?: string;
