@@ -8,6 +8,7 @@
  *
  * 约束：
  *  - 弹出窗口可能一直等待用户，必须有超时并限制同一时间只开一个；
+ *  - 第二次请求必须识别为「已打开」而不是普通失败，避免前端误降级到手输路径；
  *  - 命令参数全部固定生成，不接收网页传入的 title/path，避免命令注入；
  *  - 无桌面会话（容器 / SSH）返回中文错误，由前端显式降级到手动输入。
  */
@@ -19,6 +20,17 @@ const run = promisify(execFile);
 const PICK_TIMEOUT_MS = 5 * 60_000;
 const MAX_OUTPUT_BYTES = 16_384;
 const TITLE = "选择要添加的本地项目文件夹";
+export const DIRECTORY_PICKER_BUSY_CODE = "DIRECTORY_PICKER_BUSY";
+export const DIRECTORY_PICKER_BUSY_MESSAGE = "系统目录选择框已经在桌面上打开，请切换到「浏览文件夹」窗口完成选择";
+
+export class DirectoryPickerBusyError extends Error {
+  readonly code = DIRECTORY_PICKER_BUSY_CODE;
+
+  constructor() {
+    super(DIRECTORY_PICKER_BUSY_MESSAGE);
+    this.name = "DirectoryPickerBusyError";
+  }
+}
 
 export interface DirectoryPickerResult {
   canceled: boolean;
@@ -40,11 +52,22 @@ export function buildWindowsPickerScript(): string {
     "$ErrorActionPreference = 'Stop'",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
     "Add-Type -AssemblyName System.Windows.Forms",
+    // 隐藏的 owner 表单强制置顶。若只调用无 owner 的 ShowDialog()，浏览器在前台时
+    // 对话框可能已经创建却不进入前台，用户会误以为没有打开并重复点击。
+    "$owner = New-Object System.Windows.Forms.Form",
+    "$owner.Text = 'agentatlas 目录选择'",
+    "$owner.FormBorderStyle = 'None'",
+    "$owner.ShowInTaskbar = $false",
+    "$owner.Opacity = 0",
+    "$owner.TopMost = $true",
+    "$owner.Show()",
     "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
     `$dialog.Description = '${TITLE}'`,
     "$dialog.ShowNewFolderButton = $true",
-    "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-    "[Console]::Out.Write($dialog.SelectedPath)",
+    "if ($dialog.ShowDialog($owner) -ne [System.Windows.Forms.DialogResult]::OK) { $owner.Close(); exit 2 }",
+    "$selected = $dialog.SelectedPath",
+    "$owner.Close()",
+    "[Console]::Out.Write($selected)",
   ].join("\n");
 }
 
@@ -124,7 +147,7 @@ async function pickOnLinux(): Promise<DirectoryPickerResult> {
 }
 
 export async function pickDirectory(): Promise<DirectoryPickerResult> {
-  if (activePicker) throw new Error("系统目录选择框已经打开，请先完成当前选择");
+  if (activePicker) throw new DirectoryPickerBusyError();
   const task = process.platform === "win32"
     ? pickOnWindows()
     : process.platform === "darwin"

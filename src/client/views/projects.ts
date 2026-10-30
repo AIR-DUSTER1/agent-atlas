@@ -6,12 +6,13 @@
  * 删除项目后由服务端迁移会话，前端只重拉列表，避免本地状态猜测。
  */
 import { $, desktopBridge, setSidebarOpen } from "../core/dom.js";
-import { api } from "../core/api.js";
+import { api, ApiError } from "../core/api.js";
 import { saveLocal, state } from "../core/state.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
 import { h } from "../ui/h.js";
 import { icon, type IconName } from "../ui/icon.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
+import { toast } from "../ui/toast.js";
 import type { ProjectEntry } from "../modules/types.js";
 
 let menuController: MenuController | null = null;
@@ -191,6 +192,12 @@ export async function pickLocalProjectDirectory(): Promise<string | null> {
     if (picked.path?.trim()) return picked.path.trim();
     throw new Error("系统目录选择框没有返回路径");
   } catch (err) {
+    // 409 表示另一个请求已经打开系统对话框，不是能力缺失。此时弹手动输入
+    // 会让用户误以为系统选择器坏了；提示其切回已存在的窗口即可。
+    if (err instanceof ApiError && err.code === "DIRECTORY_PICKER_BUSY") {
+      toast(err.message, "warning", { durationMs: 6500 });
+      return null;
+    }
     const reason = desktopError || (err as Error).message;
     const manual = await uiConfirm(
       `无法打开系统目录选择框：${reason}\n\n是否改为手动输入服务器绝对路径？`,
@@ -204,7 +211,22 @@ export async function pickLocalProjectDirectory(): Promise<string | null> {
     return typeof path === "string" && path.trim() ? path.trim() : null;
   }
 }
-export async function addProjectFolder(type: "local" | "cloud"): Promise<void> {
+let projectAddInFlight: Promise<void> | null = null;
+
+/** 同一页面只允许一个项目添加流程，双击不会重复打开目录框或重复提交项目。 */
+export function addProjectFolder(type: "local" | "cloud"): Promise<void> {
+  if (projectAddInFlight) {
+    toast("项目添加窗口已打开，请先完成当前操作", "info");
+    return projectAddInFlight;
+  }
+  const task = addProjectFolderOnce(type).finally(() => {
+    projectAddInFlight = null;
+  });
+  projectAddInFlight = task;
+  return task;
+}
+
+async function addProjectFolderOnce(type: "local" | "cloud"): Promise<void> {
   let body: Record<string, unknown>;
   if (type === "cloud") {
     const url = await uiPrompt(

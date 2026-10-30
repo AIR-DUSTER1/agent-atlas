@@ -7,7 +7,7 @@ import { readBody, respondBadRequest } from "../http-body.js";
 import { listProjects, getActiveProjectId, setActiveProject, addProject, deleteProject, refreshCloudProject } from "../projects.js";
 import { moveSessions } from "../sessions.js";
 import { writeAudit } from "../audit.js";
-import { pickDirectory } from "../directory-picker.js";
+import { DirectoryPickerBusyError, pickDirectory } from "../directory-picker.js";
 
 export async function handleListProjects(res: import("node:http").ServerResponse): Promise<void> {
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -29,6 +29,11 @@ export async function handlePickProjectDirectory(
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(result));
   } catch (err) {
+    if (err instanceof DirectoryPickerBusyError) {
+      res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: err.message, code: err.code }));
+      return;
+    }
     respondBadRequest(res, req, err);
   }
 }

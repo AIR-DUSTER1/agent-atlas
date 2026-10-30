@@ -33,3 +33,27 @@ test("添加本地文件夹先打开系统目录选择接口，不再弹出手�
   expect(pickerCalls).toBe(1);
   expect(pageErrors).toEqual([]);
 });
+test("目录选择框已经打开时提示切回系统窗口，不降级成手动路径", async ({ page }) => {
+  await login(page);
+
+  let pickerCalls = 0;
+  await page.route("**/api/projects/pick-directory", async (route) => {
+    pickerCalls += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "DIRECTORY_PICKER_BUSY",
+        error: "系统目录选择框已经在桌面上打开，请切换到「浏览文件夹」窗口完成选择",
+      }),
+    });
+  });
+
+  await page.locator("#project-btn").click();
+  await page.getByRole("menuitem", { name: /添加本地文件夹（系统选择）/ }).click();
+
+  await expect(page.getByText(/系统目录选择框已经在桌面上打开/)).toBeVisible();
+  await expect(page.getByText(/是否改为手动输入服务器绝对路径/)).toBeHidden();
+  await expect(page.locator("#ui-dialog-input")).toBeHidden();
+  expect(pickerCalls).toBe(1);
+});

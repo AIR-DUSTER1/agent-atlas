@@ -14,6 +14,18 @@ import { uiPrompt } from "../ui/dialog.js";
 
 let loginInFlight: Promise<boolean> | null = null;
 
+/** /api 业务错误：保留 HTTP 状态与机器可读 code，调用方可区分可恢复冲突与真正失败。 */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function loginSession(hint?: string): Promise<boolean> {
   const token = await uiPrompt(
     hint || "服务已开启访问认证，请输入访问令牌（服务端 .env 的 AUTH_TOKEN）：",
@@ -55,12 +67,12 @@ export async function authFetch(path: string, options: RequestInit = {}, retried
   return res;
 }
 
-/** JSON 请求 + 统一错误转换：失败抛 Error(服务端中文文案) */
+/** JSON 请求 + 统一错误转换：失败抛 ApiError（服务端中文文案 + status/code） */
 export async function api<T = unknown>(path: string, options?: RequestInit): Promise<T> {
   const res = await authFetch(path, options);
   if (!res.ok) {
-    const data = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(data.error || `HTTP ${res.status}`);
+    const data = await res.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new ApiError(data.error || `HTTP ${res.status}`, res.status, data.code);
   }
   return res.json() as Promise<T>;
 }
