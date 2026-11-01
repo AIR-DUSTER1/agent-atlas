@@ -194,6 +194,38 @@ test("MCP 子进程死亡：调用返回可读错误且状态转为断开", asyn
   await deleteMcpServer("crash_srv");
 });
 
+/**
+ * 回归：子进程已退出后再向它的 stdin 写入，内核回 EPIPE。
+ * 修复前该错误以**未捕获的流 error 事件**抛出，直接杀掉整个 Node 进程——
+ * CI 上表现为「e2e 跑到第 12 个后全部 ERR_CONNECTION_REFUSED」。
+ * 这里连续多次调用：第一次触发子进程退出，后续必然走到「已关闭 / 写入失败」分支。
+ * 只要进程没被杀、每次都能拿到中文错误，就说明 stdin 的 error 已被正确接管。
+ */
+test("MCP 子进程退出后再调用：主进程不崩，返回可读错误", async () => {
+  await saveMcpServer({
+    id: "crash_again_srv",
+    name: "退出后再调用的服务",
+    command: process.execPath,
+    args: [crashScript],
+  });
+  const connected = await testMcpServer("crash_again_srv");
+  assert.equal(connected.connected, true);
+
+  const first = await callTool("mcp__crash_again_srv__crash", {});
+  assert.match(String(first), /error/i);
+
+  // 等 close 事件与 pending 清理落定，再发后续请求：这是 EPIPE 的触发点。
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  for (let i = 0; i < 3; i += 1) {
+    const again = await callTool("mcp__crash_again_srv__crash", {});
+    assert.match(String(again), /error|关闭|中断|退出/i, `第 ${i + 2} 次调用应返回可读错误`);
+  }
+
+  // 能走到这里就证明进程活着（没被未捕获异常杀掉）。
+  assert.equal((await listMcpStatus()).find((item) => item.id === "crash_again_srv")?.connected, false);
+  await deleteMcpServer("crash_again_srv");
+});
+
 test("局部更新只改可见字段，保留 JSON 导入的 env / cwd", async () => {
   await saveMcpServer({
     id: "advanced_srv",

@@ -339,6 +339,17 @@ async function connect(server: McpServerConfig): Promise<McpConnection> {
     failAll(conn, mcpSpawnError(server, err));
   });
 
+  // stdin 的 error 必须显式接管：对端退出后内核回 EPIPE，Node 把它作为
+  // 'error' 事件发到流上；没有监听器时是**未捕获异常**，整个服务进程直接退出。
+  // 这是 CI 上「e2e 中途全红、之后全部连接被拒」的根因，不要删。
+  child.stdin?.on("error", (err: NodeJS.ErrnoException) => {
+    conn.closed = true;
+    if (connections.get(server.id) === conn) connections.delete(server.id);
+    failAll(conn, new Error(
+      `MCP server「${server.name ?? server.id}」连接中断（${err.code ?? err.message}）`,
+    ));
+  });
+
   connections.set(server.id, conn);
 
   // initialize 握手（MCP 规定的第一步）
@@ -389,7 +400,17 @@ function writeLine(conn: McpConnection, payload: unknown): void {
   if (conn.closed || !conn.child.stdin?.writable) {
     throw new Error(`MCP server「${conn.server.id}」连接已关闭`);
   }
-  conn.child.stdin.write(JSON.stringify(payload) + "\n");
+  // stdin 是异步流：对端已退出时 write() 只是把数据排进缓冲区，真正的 EPIPE
+  // 以**流 error 事件**抛出。没人监听就是未捕获异常，会直接杀掉整个 Node
+  // 服务进程（CI 上表现为「e2e 跑到第 12 个后全部 ERR_CONNECTION_REFUSED」）。
+  // 这里用回调捕获写失败，让 request() 的既有 catch 分支照常清理 pending。
+  conn.child.stdin.write(JSON.stringify(payload) + "\n", (err) => {
+    if (!err) return;
+    conn.closed = true;
+    failAll(conn, new Error(
+      `MCP server「${conn.server.name ?? conn.server.id}」写入失败：${err.message}`,
+    ));
+  });
 }
 
 function request(conn: McpConnection, method: string, params: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
