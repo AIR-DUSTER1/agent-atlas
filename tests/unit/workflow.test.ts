@@ -189,3 +189,45 @@ test("工作流：反思连续不通过时最多回炉三次，第四次失败�
   assert.ok(answers.includes("答4"));
   assert.equal(result.reviewAttempts, 4);
 });
+
+test("无头模式：澄清不挂起，自动采用首个选项并记入台账", async () => {
+  const fake = new FakeListChatModel({
+    responses: [
+      JSON.stringify({
+        understood: false,
+        brief: "用户想找房但城市未定",
+        question: "先看哪个城市？",
+        options: [
+          { id: "A", label: "北京", description: "北京房源" },
+          { id: "B", label: "上海", description: "上海房源" },
+        ],
+      }),
+      "已按北京给出找房建议。",
+      JSON.stringify({ passes: true, reason: "回答满足需求", feedback: "" }),
+    ],
+  });
+  const graph = createWorkflowGraph(testProfile, {
+    agent: fake as unknown as WorkflowChatModel,
+    analyst: fake as unknown as WorkflowChatModel,
+    reviewer: fake as unknown as WorkflowChatModel,
+  }, { checkpointer: new MemorySaver() });
+  const threadId = `headless-${randomUUID()}`;
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("帮我找房")] },
+    { configurable: { thread_id: threadId, headless: true } },
+  ) as unknown as {
+    messages: Array<{ content: unknown }>;
+    __interrupt__?: unknown[];
+    clarificationHistory?: string;
+    requirementBrief?: string;
+    headlessAssumption?: string;
+  };
+
+  // 关键：不挂起（否则无人应答的外部调用会拿到空输出）
+  assert.equal(result.__interrupt__, undefined, "无头模式不得产生 interrupt");
+  assert.ok(result.messages.some((m) => m.content === "已按北京给出找房建议。"));
+  assert.match(result.clarificationHistory ?? "", /北京/, "假设应写进澄清历史");
+  assert.match(result.requirementBrief ?? "", /【无头模式自动假设】/, "假设应进入需求 brief");
+  assert.match(result.headlessAssumption ?? "", /先看哪个城市/);
+  assert.match(result.headlessAssumption ?? "", /北京/);
+});

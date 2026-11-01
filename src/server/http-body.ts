@@ -1,10 +1,11 @@
 /**
- * http-body.ts — 请求体读取 + 统一失败响应（413/400）
+ * http-body.ts — 请求体读取 + 统一失败响应（413/429/400）
  * ============================================================
  * 从 index.ts 抽出的横切关注点：不依赖任何业务模块；
  * 「丢弃式排水」是此处最要紧的契约（踩坑见函数内注释）。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isResourceBusyError } from "./runtime/resource-gauge.js";
 
 /** 单次请求体字节数上限：聊天消息 + 附件 base64 正常都在 1MB 内；文件上传另有 12MB 白名单 */
 export const BODY_MAX_BYTES = 2_000_000;
@@ -51,8 +52,19 @@ export function readBody(req: IncomingMessage, maxBytes = BODY_MAX_BYTES): Promi
   });
 }
 
-/** 路由统一的失败响应：BodyTooLargeError → 413，其余一律 400 + 中文错误 */
+/** 路由统一的失败响应：BodyTooLargeError → 413，资源繁忙 → 429，其余 400 + 中文错误 */
 export function respondBadRequest(res: ServerResponse, req: IncomingMessage, err: unknown): void {
+  // 资源繁忙是「稍后可以再试」，不是客户端请求有错。回 400 会让调用方
+  // 当成确定性失败直接放弃（并发 3 的评测里就是这样丢样本的）；
+  // 429 + Retry-After 才能被通用重试逻辑正确处理。
+  if (isResourceBusyError(err)) {
+    res.writeHead(429, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Retry-After": String(err.retryAfterSeconds),
+    });
+    res.end(JSON.stringify({ error: err.message, retryAfterSeconds: err.retryAfterSeconds }));
+    return;
+  }
   const tooLarge = err instanceof BodyTooLargeError;
   // 注意：这里**不要**带 `Connection: close`。node:http 在「响应结束 + 请求体没读完」
   // 时会自行 destroy socket（发 RST），可能把已写出的 413 冲掉（客户端只见 ECONNRESET）。

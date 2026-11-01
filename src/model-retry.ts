@@ -8,6 +8,7 @@
  */
 
 import { config } from "./config.js";
+import { disableReasoningPassthrough, reasoningPassthroughEnabled } from "./reasoning-passthrough.js";
 
 export type ModelRetryPhase = "retry" | "success" | "failed";
 
@@ -58,6 +59,18 @@ function errorMessage(err: unknown): string {
 
 function httpStatus(message: string): number {
   return Number(/(?:HTTP\s*)?\b(408|429|5\d{2})\b/i.exec(message)?.[1] ?? 0);
+}
+
+/**
+ * 网关因为「思考回传」规则拒绝请求（400 + 错误信息点名 reasoning_content）。
+ * 这类错误出现在我们确实补过字段之后，说明这个网关不认该字段：
+ * 关掉该会话的回传再重试一次，比让整轮失败更可用。
+ */
+function isReasoningPassthroughRejection(err: unknown): boolean {
+  const message = errorMessage(err);
+  if (!/reasoning_content|thinking mode/i.test(message)) return false;
+  const status = Number(/(?:HTTP\s*)?\b(4\d{2})\b/.exec(message)?.[1] ?? 0);
+  return status === 400 || status === 422;
 }
 
 function shouldRetry(err: unknown, parentSignal?: AbortSignal): boolean {
@@ -116,17 +129,27 @@ export async function invokeWithModelRetry<T>(
       return result;
     } catch (err) {
       lastError = err;
-      const canRetry = attempt < totalAttempts && shouldRetry(err, options.parentSignal);
+      // 思考回传被网关拒绝：先关闭该会话的回传能力，再允许一次「无字段」重试。
+      // 否则原始 400 会被 shouldRetry 判成确定性错误，整轮直接失败。
+      const reasoningRejected = isReasoningPassthroughRejection(err)
+        && reasoningPassthroughEnabled(options.sessionId);
+      if (reasoningRejected) disableReasoningPassthrough(options.sessionId);
+      const canRetry = attempt < totalAttempts
+        && (reasoningRejected || shouldRetry(err, options.parentSignal));
       if (canRetry) {
         publish(options.sessionId, {
           attempt,
           retries: attempt,
           totalAttempts,
           phase: "retry",
-          reason: errorMessage(err),
+          reason: reasoningRejected
+            ? `${errorMessage(err)}（已关闭思考回传后重试）`
+            : errorMessage(err),
           at: Date.now(),
         });
-        const delay = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+        const delay = reasoningRejected
+          ? RETRY_BASE_DELAY_MS
+          : Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
         await sleep(delay, options.parentSignal);
         continue;
       }

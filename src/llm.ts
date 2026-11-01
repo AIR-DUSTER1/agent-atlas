@@ -31,6 +31,7 @@ import { config } from "./config.js";
 import { resolveReasoning } from "./reasoning.js";
 import { defaultModelRuntime, type ModelRuntimeConfig } from "./model-runtime.js";
 import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "./product.js";
+import { patchReasoningPayload, rememberHistoryReasoning } from "./reasoning-passthrough.js";
 
 /** 各协议客户端的统一视图：保证 bindTools 一定存在（图的代码都依赖它） */
 type ChatModelLike = BaseChatModel & {
@@ -102,6 +103,32 @@ function createGatewayFetch(
     for (const [name, value] of Object.entries(headers)) merged.set(name, value);
     const doFetch = fetchImpl ?? globalThis.fetch;
     return doFetch(input, { ...init, headers: merged });
+  };
+}
+
+/** 请求体上限：推理参数 + 历史消息 + 附件 base64 的合理上限，超过就不解析（原样放行） */
+const MAX_PATCHABLE_BODY_BYTES = 8_000_000;
+
+/**
+ * 思考续传拦截：只改出站请求体，给能精确匹配到的历史 assistant 补 reasoning_content。
+ *
+ * 为什么必须在 fetch 层做 —— LangChain 出站序列化会丢弃
+ * additional_kwargs.reasoning_content（fetch 拦截实测确认），消息对象上挂什么都带不出去。
+ * 响应侧不需要旁路：入站转换器已把思考存进 additional_kwargs，
+ * workflow 在每次调用前用 rememberHistoryReasoning 从历史重建回传记录。
+ */
+function createReasoningPassthroughFetch(
+  sessionId: string | undefined,
+  fetchImpl: typeof fetch | undefined
+): typeof fetch {
+  const doFetch = fetchImpl ?? globalThis.fetch;
+  return async (input, init) => {
+    const bodyText = typeof init?.body === "string" && init.body.length <= MAX_PATCHABLE_BODY_BYTES
+      ? init.body
+      : null;
+    const patched = bodyText ? patchReasoningPayload(bodyText, sessionId) : bodyText;
+    // 未变更时沿用原 init：不复制请求体，也不触碰流式请求的 body
+    return doFetch(input, patched && patched !== bodyText ? { ...init, body: patched } : init);
   };
 }
 
@@ -190,6 +217,11 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
   const reasoning = resolveRuntimeReasoning(runtime);
   const defaultHeaders = buildGatewayTransportHeaders(runtime.baseURL, options.sessionId);
   const gatewayFetch = createGatewayFetch(runtime.baseURL, options.sessionId, options.fetch);
+  // 思考续传只对 Chat Completions 协议生效：Anthropic / Gemini 的思考走各自结构，
+  // Responses API 的思考以 reasoning item 形式回传（形状不同，不在这里硬套）。
+  const transportFetch = runtime.protocol === "openai"
+    ? createReasoningPassthroughFetch(options.sessionId, gatewayFetch)
+    : gatewayFetch;
   const requestTimeoutMs = runtime.requestTimeoutMs ?? config.modelRequestTimeoutMs;
   const params = reasoning.params ?? {};
   const { reasoning_effort: reasoningEffort, ...rest } = params as { reasoning_effort?: unknown } & Record<string, unknown>;
@@ -251,7 +283,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
           baseURL: runtime.baseURL,
           timeout: requestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
-          ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
+          fetch: transportFetch,
         },
       }) as unknown as ChatModelLike;
 
@@ -270,7 +302,7 @@ export function createChatModel(temperature = 0, options: ChatModelOptions = {})
           baseURL: runtime.baseURL,
           timeout: requestTimeoutMs,
           ...(defaultHeaders ? { defaultHeaders } : {}),
-          ...(gatewayFetch ? { fetch: gatewayFetch } : {}),
+          fetch: transportFetch,
         },
       });
   }

@@ -24,7 +24,7 @@ import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
 import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
-import { runWithModelSlot } from "../runtime/model-gate.js";
+import { runWithModelSlot, acquireModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
 import {
   beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
@@ -188,8 +188,7 @@ async function streamToClient(
       if (event.type === "interrupt") {
         recordApproval(session, event.payload);
         sawInterrupt = true;
-      }
-      if (event.type === "risk_decision") {
+      }      if (event.type === "risk_decision") {
         recordAutoApprovalAudit(session, event);
       }
       // interrupt 后图也会结束并补 done，此时必须保留 pending 等用户 resume；
@@ -227,6 +226,26 @@ async function streamToClient(
       status: turnStatus,
     });
     if (clientGone) incCounter("agent_sse_disconnects_total", { kind: session.kind });
+    // 任务累计用量：本轮只有一条，且放在 done 之前 —— 下游（外部评测适配器）
+    // 取这一条就是权威口径，不必再猜「哪条 usage 是最终值」。
+    // 中止/出错时也发：已消耗的 token 是事实，不该因为半路失败就消失。
+    if (!clientGone) {
+      const snapshot = taskSnapshot(session);
+      if (snapshot) {
+        const taskEvent: AgentEvent = {
+          type: "task_usage",
+          inputTokens: snapshot.inputTokens,
+          outputTokens: snapshot.outputTokens,
+          toolCalls: snapshot.toolCalls,
+          modelCalls: snapshot.modelCalls,
+          activeMs: snapshot.activeMs,
+          ...(sawInterrupt ? { interrupted: true } : {}),
+        };
+        observeTaskEvent(session, taskEvent);
+        collected.push(taskEvent);
+        writeEvent(res, taskEvent);
+      }
+    }
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过
     onDone?.(collected);
     log("info", "agent_turn_finished", {
@@ -253,7 +272,7 @@ export async function handleChat(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   sessionId: string,
-  body: { message?: unknown; files?: unknown }
+  body: { message?: unknown; files?: unknown; headless?: unknown }
 ): Promise<void> {
   const session = getSession(sessionId);
   if (!session) {
@@ -275,7 +294,15 @@ export async function handleChat(
   assertChatInterval(sessionId);
   const releaseSlot = acquireSessionSlot(sessionId);
   try {
-    await handleChatInner(res, req, session, message, body);
+    // 供应商级模型槽位也在这里取：拿到才继续，拒绝时同样零痕迹且能回 429。
+    // 只对真实模型生效（mock / 外部 Agent 不走模型网关，不该占槽位）。
+    const needsModel = session.kind !== "external" && Boolean(config.apiKey);
+    const releaseModelSlot = needsModel ? await acquireModelSlot(getActiveId()) : null;
+    try {
+      await handleChatInner(res, req, session, message, body);
+    } finally {
+      releaseModelSlot?.();
+    }
   } finally {
     releaseSlot();
   }
@@ -286,7 +313,7 @@ async function handleChatInner(
   req: import("node:http").IncomingMessage,
   session: Session,
   message: string,
-  body: { message?: unknown; files?: unknown }
+  body: { message?: unknown; files?: unknown; headless?: unknown }
 ): Promise<void> {
   // 附件：前端只传引用（项目/远程文件路径 或 上传 id），内容由服务端读取并校验。
   // 图片附件仅在启用中的模型为「多模态」时可用（否则 400 提示）。
@@ -340,6 +367,9 @@ async function handleChatInner(
   }
 
   const contextWindow = getContextWindowForActive();
+  // 无头模式：请求级开关（默认 false，交互行为完全不变）。澄清不挂起、
+  // 自动采用默认假设继续，适用于外部评测 / 批量脚本这类没有人应答的场景。
+  const headless = body.headless === true;
   const { HumanMessage } = await import("@langchain/core/messages");
   // T2-4：journal 回放来的会话首条真图消息 —— 前置注入历史上文摘录（一次性）
   const preNote = buildPrehistoryNote(session);
@@ -350,7 +380,7 @@ async function handleChatInner(
     ...(compactNote ? [new HumanMessage(compactNote)] : []),
     new HumanMessage(fullMessage),
   ];
-  await runWithModelSlot(getActiveId(), () => streamToClient(res, req, session, (signal) =>
+  await streamToClient(res, req, session, (signal) =>
     runGraphEvents(session.graph as Parameters<typeof runGraphEvents>[0], { messages: graphInput }, {
       threadId: session.threadId,
       signal,
@@ -360,8 +390,9 @@ async function handleChatInner(
       taskLedger: renderTaskLedger(session.activeTask),
       budgetNote: renderTaskBudgetNote(session),
       contextWindow,
+      headless,
     })
-  , (events) => completeTurnRecord(session, events)));
+  , (events) => completeTurnRecord(session, events));
 }
 
 export async function handleResume(
@@ -400,7 +431,14 @@ export async function handleResume(
   // T2-5：审批/澄清恢复也是流，同样走同会话唯一流闸
   const releaseSlot = acquireSessionSlot(sessionId);
   try {
-    await handleResumeInner(res, req, session, resumeValue);
+    // 真实模型的恢复同样要占供应商槽位；提前取，排队失败时还没登记轮次、能回 429。
+    const needsModel = Boolean(config.apiKey);
+    const releaseModelSlot = needsModel ? await acquireModelSlot(getActiveId()) : null;
+    try {
+      await handleResumeInner(res, req, session, resumeValue);
+    } finally {
+      releaseModelSlot?.();
+    }
   } finally {
     releaseSlot();
   }
@@ -481,7 +519,7 @@ async function handleResumeInner(
 
   // 真实图：用 Command({ resume }) 把决定送回被暂停的图（见 agent/hitl.ts / workflow.ts）
   const { buildResumeCommand } = await import("../../agent/hitl.js");
-  await runWithModelSlot(getActiveId(), () => streamToClient(
+  await streamToClient(
     res,
     req,
     session,
@@ -508,5 +546,5 @@ async function handleResumeInner(
       }
       completeTurnRecord(session, events);
     }
-  ));
+  );
 }

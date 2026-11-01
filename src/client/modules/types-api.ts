@@ -76,6 +76,23 @@ export type AgentEvent =
       taskActiveMs?: number;
     }
   | { type: "interrupt"; payload: InterruptPayload }
+  /** 无头模式自动采用的澄清假设：不挂起，但要让人知道「本该问什么」 */
+  | {
+      type: "clarification_note";
+      question: string;
+      assumption: string;
+      optionId?: string;
+    }
+  /** 本轮结束时的任务累计用量（token 统计的权威口径，下游优先取它） */
+  | {
+      type: "task_usage";
+      inputTokens: number;
+      outputTokens: number;
+      toolCalls: number;
+      modelCalls: number;
+      activeMs: number;
+      interrupted?: boolean;
+    }
   | {
       type: "risk_decision";
       decision: "auto";

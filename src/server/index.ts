@@ -368,7 +368,7 @@ const server = createServer(async (req, res) => {
     // 对话 / 审批
     if (pathname === "/api/chat" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)) || "{}") as {
-        sessionId?: string; message?: unknown; files?: unknown;
+        sessionId?: string; message?: unknown; files?: unknown; headless?: unknown;
       };
       sessionIdForLog = typeof body.sessionId === "string" ? body.sessionId : undefined;
       try {

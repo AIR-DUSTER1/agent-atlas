@@ -12,6 +12,28 @@ interface Waiter {
   timer: NodeJS.Timeout;
 }
 
+/**
+ * 资源繁忙造成的「可重试」拒绝。
+ *
+ * 为什么单独一个类型：并发满不是客户端请求有错，路由层若把它当 400 返回，
+ * 调用方会当成确定性失败直接放弃（实测外部评测并发 3 时正是这样丢样本）。
+ * 现在路由层据此回 429 + Retry-After，语义正确、可被通用重试逻辑接管。
+ */
+export class ResourceBusyError extends Error {
+  readonly retryAfterSeconds: number;
+  constructor(message: string, retryAfterSeconds: number) {
+    super(message);
+    this.name = "ResourceBusyError";
+    this.retryAfterSeconds = Math.max(1, Math.ceil(retryAfterSeconds));
+  }
+}
+
+/** 跨模块类型守卫：路由层据此决定 429 而不是 400 */
+export function isResourceBusyError(err: unknown): err is ResourceBusyError {
+  return err instanceof ResourceBusyError
+    || (typeof err === "object" && err !== null && (err as { name?: unknown }).name === "ResourceBusyError");
+}
+
 export class ResourceGauge {
   private active = 0;
   private queue: Waiter[] = [];
@@ -38,7 +60,10 @@ export class ResourceGauge {
     }
     if (this.queue.length >= this.maxQueue) {
       incCounter("agent_resource_rejected_total", { resource: this.id, reason: "queue_full" });
-      return Promise.reject(new Error(`资源「${this.id}」繁忙：队列已满（${this.maxQueue}），请稍后重试`));
+      return Promise.reject(new ResourceBusyError(
+        `资源「${this.id}」繁忙：队列已满（${this.maxQueue}），请稍后重试`,
+        this.queueTimeoutMs / 1000,
+      ));
     }
     return new Promise<void>((resolve, reject) => {
       const waiter: Waiter = {
@@ -49,7 +74,10 @@ export class ResourceGauge {
           if (index >= 0) this.queue.splice(index, 1);
           this.publish();
           incCounter("agent_resource_rejected_total", { resource: this.id, reason: "queue_timeout" });
-          reject(new Error(`资源「${this.id}」繁忙：等待超过 ${Math.ceil(this.queueTimeoutMs / 1000)} 秒，请稍后重试`));
+          reject(new ResourceBusyError(
+            `资源「${this.id}」繁忙：等待超过 ${Math.ceil(this.queueTimeoutMs / 1000)} 秒，请稍后重试`,
+            this.queueTimeoutMs / 1000,
+          ));
         }, this.queueTimeoutMs),
       };
       waiter.timer.unref();
@@ -77,6 +105,21 @@ export class ResourceGauge {
     } finally {
       this.release();
     }
+  }
+
+  /**
+   * 只取槽位、不包裹执行体：给「槽位要覆盖整轮、但执行体由调用方分多处 await」
+   * 的场景用（聊天路由要在登记对话记录之前拿到槽位，拒绝时零痕迹）。
+   * 返回释放函数，必须用 try/finally 调用。
+   */
+  async acquireSlot(): Promise<() => void> {
+    await this.acquire();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.release();
+    };
   }
 
   snapshot(): { id: string; active: number; queued: number; capacity: number; maxQueue: number } {

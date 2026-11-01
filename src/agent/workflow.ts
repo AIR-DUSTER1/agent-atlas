@@ -22,6 +22,7 @@ import {
   StateGraph,
   interrupt,
 } from "@langchain/langgraph";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
@@ -33,6 +34,7 @@ import { memoryScope } from "../memory/scope.js";
 import { skillNoteForMessage } from "../skills.js";
 import { buildAgentContext } from "./context-builder.js";
 import { sanitizeCheckpointMessage } from "./checkpoint-sanitize.js";
+import { rememberHistoryReasoning } from "../reasoning-passthrough.js";
 import { createApprovalToolsNode } from "./hitl.js";
 import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
@@ -113,6 +115,14 @@ const WorkflowState = Annotation.Root({
   reviewAttempts: Annotation<number>({
     reducer: (_previous, next) => next ?? 0,
     default: () => 0,
+  }),
+  /**
+   * 无头模式下自动采用的假设（有值 = 本轮本该澄清但无人可问）。
+   * 只用于把假设告诉调用方与模型，不参与后续路由判断。
+   */
+  headlessAssumption: Annotation<string>({
+    reducer: (_previous, next) => next ?? "",
+    default: () => "",
   }),
 });
 
@@ -235,6 +245,18 @@ export function parseReviewResult(raw: string): ReviewResult {
   const reason = asText(record.reason).slice(0, MAX_FEEDBACK_TEXT);
   const feedback = asText(record.feedback).slice(0, MAX_FEEDBACK_TEXT);
   return { passes: explicitPass || !explicitFail, reason, feedback };
+}
+
+/**
+ * 无头模式的默认假设：取第一个选项。
+ *
+ * 为什么是第一个而不是「最保守的」：选项顺序由分析模型按「最常见 / 最可能」排，
+ * 且这条路径的意义是「不要让任务掉在地上」，而不是替用户做不可逆决定 ——
+ * 任何真正高风险的动作仍会走 HITL 审批（clarify 只决定执行方向）。
+ */
+export function defaultAssumption(request: ClarificationRequest): ClarificationOption {
+  const first = request.options[0];
+  return first ?? { id: "A", label: "按最合理的默认方式继续", description: request.question };
 }
 
 function lastHumanText(messages: BaseMessage[]): string {
@@ -398,9 +420,23 @@ export function createWorkflowGraph(
     }
   }
 
-  async function clarifyNode(state: WorkflowStateType) {
+  async function clarifyNode(state: WorkflowStateType, nodeConfig?: LangGraphRunnableConfig) {
     const request = state.clarification;
     if (!request) return {};
+    // 无头模式（REQUEST_HEADLESS / 请求级 headless:true）：没有人能回答，挂起等于
+    // 任务被丢。改为采用默认假设继续，并把「本来要问什么、假设了什么」记进台账
+    // 与 clarificationHistory，让模型和调用方都能看到这个决定。
+    if (nodeConfig?.configurable?.headless === true) {
+      const assumed = defaultAssumption(request);
+      const answerText = `${assumed.label}${assumed.description ? `（${assumed.description}）` : ""}`.slice(0, MAX_ANSWER_TEXT);
+      const note = `问：${request.question}\n假设：${answerText}`;
+      return {
+        requirementBrief: `${state.requirementBrief}\n【无头模式自动假设】${note}`.slice(0, MAX_WORKING_BRIEF),
+        clarification: null,
+        clarificationHistory: answerText,
+        headlessAssumption: note.slice(0, MAX_ANSWER_TEXT),
+      };
+    }
     const answer = interrupt<ClarificationRequest, string>(request);
     const raw = typeof answer === "string" ? answer.trim() : String(answer ?? "").trim();
     const option = request.options.find((item) => item.id === raw);
@@ -453,6 +489,10 @@ export function createWorkflowGraph(
       budgetNote: config?.configurable?.task_budget_note,
       contextWindow: config?.configurable?.context_window,
     });
+    // 思考型网关要求把历史 assistant 的 reasoning_content 原样回传；先从
+    // checkpoint 消息里重新登记一次（服务重启后内存记录为空，靠这一步自愈），
+    // 出站补字段由 llm.ts 的 fetch 封装完成。
+    rememberHistoryReasoning(options?.sessionId, context.messages);
     const response = await invokeModel(agentModel, context.messages, config?.signal, options?.sessionId);
     observeModel("agent", response);
     // 网关回显的 tools/output 与 dataURL 会原样进入 checkpoint；先投影再入状态。

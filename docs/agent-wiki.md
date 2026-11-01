@@ -69,6 +69,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── config.ts         # 统一读取 .env 配置
     ├── product.ts        # 产品名与对外客户端身份（UA / MCP clientInfo）
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
+    ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
@@ -506,12 +507,16 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   （`core/ composer/ render/ stream/ views/ actions/ modules/`，引入图表后加 `vendor/`），
   其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
-  （`[mode, payload]` 元组、子图回显整段历史），统一翻译成 8 种 `AgentEvent`
-  （node / reasoning / token / tool_call / tool_result / interrupt / ai_message / error）。
+  （`[mode, payload]` 元组、子图回显整段历史），统一翻译成归一化的 `AgentEvent`
+  （node / reasoning / token / tool_call / tool_result / interrupt / clarification_note /
+  usage / task_usage / ai_message / error）。完整定义见 `server/events.ts`，前端
+  `stream/events.ts` 的 switch 尾部有 `never` 断言强制穷尽。
   内容只认 messages 模式，updates 只取「节点名 + interrupt + 兜底消息」，按消息 id 去重；
   默认工作流的 `analyze / clarify / review` 是内部节点，正文 token 与整段消息会被过滤，
   但供应商原生 `reasoning_content` / thinking block 会作为 `reasoning` 事件保留，
   供用户按需展开（见 §3.20）；
+  其中 `clarification_note` 只在无头模式出现（§3.43），`task_usage` 每轮一条、
+  位于最后一条 `usage` 之后 `done` 之前，是下游 token 统计的权威口径；
 - **会话绑定 `sessions.ts`**：每个会话一张图实例，Demo 2/3 的 `thread_id` 绑定会话 id，
   多轮记忆与 interrupt 状态因此得以延续；
 - **在线配置 `settings.ts`（多供应商）**：侧栏左下设置页（⚙）可添加任意多个供应商档案
@@ -1552,6 +1557,9 @@ console.log(result.messages.at(-1).content);
 | `HTTP 400` 且无响应体                   | 模型名不在网关支持列表（如 `gpt-4o-mini`）     | `npm run models` 看列表，改 `.env` 的 MODEL |
 | `HTTP 503 SERVICE_BUSY`            | 网关并发过高（本项目网关很频繁）                 | 工作流层默认自动重试 10 次；持续失败时检查网关负载 |
 | 输出夹杂 `<｜begin▁of▁sentence｜>` 等特殊标记 | deepseek 系模型的 tokenizer 特殊 token | 换 `glm-5` / `kimi-k2.5` 等模型           |
+| 多步任务从第 2 次模型调用起必现 `400 The reasoning_content in the thinking mode must be passed back to the API` | `@langchain/openai` 出站序列化丢弃 `additional_kwargs.reasoning_content`（fetch 拦截实测确认） | 已由 `reasoning-passthrough.ts` 在 fetch 层补字段（§3.42）；网关反过来拒绝该字段时自动关闭回传并重试一次 |
+| 并发调用时请求恰好在 ~10 秒后返回 400 | 供应商并发闸 `ResourceGauge` 排队超时默认 10s，旧代码又把资源繁忙统一翻成 400 | 已改为 `ResourceBusyError` → **429 + Retry-After**（§3.44）；可用 `MODEL_CONCURRENCY_PER_PROVIDER` / `MODEL_QUEUE_WAIT_MS` 调整 |
+| 批量 / 无头调用拿到空回答 | 需求澄清 `interrupt()` 挂起等人工，无人应答即任务被弃 | 请求带 `"headless": true`（§3.43）：自动采用首个候选假设继续，并发出 `clarification_note` 事件 |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -1960,3 +1968,83 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 - 每次模型请求注入任务台账：目标、最近补充、已完成工具与关键结论；历史消息被投影省略时仍能跨审批继续。长任务没有业务层执行/调用次数预算，台账只用于避免重复探索。
 - 等价只读 terminal 命令会做规范化去重；当前轮大图保留，历史大图转文本占位；网关回显的 tools schema / 超大 output 在 checkpoint 前瘦身。
 - checkpoint compact 会按字节复核，并在日志中记录优化前后体积；`/compact` 仍会重建线程并注入摘要。
+
+## 外部评测暴露的四个问题与修复（0.9.0-beta.2）
+
+> 来源：用外部评测框架（external_http 接入）对本仓库跑三数据集无头评测的复盘。
+> 四个失分点都不是 Agent 能力问题，而是工程契约问题。
+
+### 3.42 `src/reasoning-passthrough.ts` — 思考型网关的 reasoning_content 回传
+
+**问题**：DeepSeek 等思考型模型在第 2 次模型调用起必现
+`400 The reasoning_content in the thinking mode must be passed back to the API`。
+单轮调用正常，多步 ReAct（工具调用后再问模型）全灭。
+
+**根因（已用 fetch 拦截实测确认）**：`@langchain/openai` 的入站转换器把
+`reasoning_content` 存进 `additional_kwargs`，但出站
+`convertMessagesToCompletionsMessageParams` 只序列化 `content` / `tool_calls`，
+**整段丢弃该字段**。所以在 LangChain 消息对象上挂什么都带不出去。
+
+**修法**：把注入点放到 HTTP 边界——`llm.ts` 的 fetch 封装在发请求前调
+`patchReasoningPayload(body, sessionId)`，按 **tool_call id（优先）或正文完全一致**
+从内存记录里找出对应思考文本补回 `messages[].reasoning_content`。
+
+| 环节 | 位置 | 职责 |
+|---|---|---|
+| 登记 | `agent/workflow.ts` 的 `agentNode` | 每次模型调用前 `rememberHistoryReasoning(context.messages)`，从 checkpoint 消息的 `additional_kwargs` 重建记录（服务重启后自愈） |
+| 注入 | `llm.ts` 的 `createReasoningPassthroughFetch` | 只在 `protocol === "openai"` 时挂载；未匹配到记录时返回原字符串，零改动 |
+| 兜底 | `model-retry.ts` | 收到 400/422 且错误信息点名 `reasoning_content` 时，`disableReasoningPassthrough(sessionId)` 后重试一次（放弃回传换可用性） |
+
+**设计边界**：
+- 只对 Chat Completions 生效；Anthropic / Gemini 的思考走各自结构，Responses API 用
+  reasoning item，形状不同不硬套；
+- 记录按会话隔离，单会话最多 60 条、单条 16k 字符、最多 200 个会话，不会成为泄漏点；
+- 绝不凭空编造思考文本——匹配不到就不补字段。
+
+**验证方式**（零配额）：起本地假网关，第 1 轮返回 `reasoning_content` + tool_call，
+第 2 轮检查请求体里 assistant 是否带该字段；未修复时网关可主动回 400 复现。
+
+### 3.43 无头模式与 `clarification_note` / `task_usage` 事件
+
+**问题一（澄清挂起导致零输出）**：批量调用方没有人能回答澄清，
+`general` 图的 `clarify` 节点 `interrupt()` 后回合挂起，下游拿到空回答。
+
+**修法**：`POST /api/chat` 支持 `"headless": true`（默认 false，交互行为完全不变）。
+经 `stream.ts` 的 `configurable.headless` 传进图，`clarifyNode` 走分支：
+采用 `defaultAssumption(request)`（首个候选选项）作为假设继续执行，写入
+`requirementBrief`（`【无头模式自动假设】`）、`clarificationHistory` 与 `headlessAssumption` 状态。
+事件层把它翻成 `clarification_note`（`question` + `assumption`），让调用方看得到「本该问什么」。
+
+为什么取第一个选项而不是「最保守的」：选项顺序由分析模型按最常见排序，
+而这条路径的意义是不让任务掉在地上；真正高风险的动作仍走 HITL 审批
+（澄清只决定执行方向，不执行改世界操作）。
+
+**问题二（usage 口径不明确）**：一轮内每次模型调用都发一条 `usage`，
+下游取第一条会严重偏小。
+
+**修法**：每轮结束前（最后一条 `usage` 之后、`done` 之前）发一条 `task_usage`，
+携带 `inputTokens` / `outputTokens` / `toolCalls` / `modelCalls` / `activeMs`，
+取服务端 `taskSnapshot(session)`——它跨审批、跨「继续」累计且已按 `callId` 取峰值去重。
+中止/出错时也发（已消耗的 token 是事实）。
+
+### 3.44 并发 400（恒定 10 秒）→ 429
+
+**问题**：3 个会话并发时部分 `/api/chat` 恰好 10002ms 后返回 400，
+单发重放同一输入正常。
+
+**根因（已定位并实测复现）**：`server/runtime/model-gate.ts` 的供应商并发闸
+`ResourceGauge` 默认容量 5、队列上限 20、**排队超时正好 10_000ms**。
+排队超时抛的是普通 `Error`，被 `respondBadRequest` 统一翻成 400——
+语义完全错了：这不是客户端请求有错，而是「稍后再试」。
+
+**修法**：
+1. 新增 `ResourceBusyError`（带 `retryAfterSeconds`）与 `isResourceBusyError` 守卫；
+2. `respondBadRequest` 先判它，命中则回 **429 + `Retry-After`**，body 带 `retryAfterSeconds`；
+3. `ResourceGauge.acquireSlot()`：只取槽位、由调用方释放，聊天路由在**登记对话记录之前**
+   拿槽位（拒绝时 journal 零痕迹），拿到才开 SSE 流；
+4. 容量与排队时间可配：`MODEL_CONCURRENCY_PER_PROVIDER`（默认 5，1–50）、
+   `MODEL_QUEUE_WAIT_MS`（默认 10000，0 视作 1 即不排队）。
+
+**踩坑**：一开始把 `runWithModelSlot` 包在 `streamToClient` 外层，结果排队期间
+SSE 头还没写、也没有任何事件，客户端看到的是「请求卡住 10 秒然后 400」。
+正确顺序是「先拿槽位 → 再登记 → 再开流」，且拒绝路径必须在写响应头之前。

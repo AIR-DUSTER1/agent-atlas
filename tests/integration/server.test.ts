@@ -166,6 +166,19 @@ test("会话创建 → chat SSE → transcript 回放", async () => {
   assert.equal(lastUsage?.contextInputBudget, currentConfig.body.contextBudget.inputBudgetTokens);
   assert.equal(lastUsage?.outputReserveTokens, currentConfig.body.contextBudget.outputReserveTokens);
   assert.equal(lastUsage?.safetyMarginTokens, currentConfig.body.contextBudget.safetyMarginTokens);
+  // R4：本轮结束时的任务累计用量是独立事件，且在 done 之前 —— 下游取它即可，
+  // 不必再从多条 usage 里猜哪条是最终值。
+  const taskUsage = stream.events.find((e) => e.type === "task_usage");
+  assert.ok(taskUsage, "应有一条 task_usage 事件");
+  assert.equal(typeof taskUsage.inputTokens, "number");
+  assert.equal(typeof taskUsage.outputTokens, "number");
+  assert.equal(typeof taskUsage.toolCalls, "number");
+  assert.equal(typeof taskUsage.modelCalls, "number");
+  assert.equal(typeof taskUsage.activeMs, "number");
+  assert.ok(
+    stream.events.indexOf(taskUsage) > stream.events.findIndex((e) => e.type === "usage"),
+    "task_usage 必须晚于 per-call usage",
+  );
   assert.equal(stream.events.at(-1).type, "done");
 
   const tr = await json(`/api/sessions/${id}/transcript`);

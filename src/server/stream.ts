@@ -73,6 +73,8 @@ interface NormalizeOptions {
   budgetNote?: string;
   /** 当前模型总窗口；由路由在请求开始时冻结，避免流中途切换配置。 */
   contextWindow?: number;
+  /** 无头模式：澄清不挂起，自动采用默认假设继续（外部评测/批量调用）。 */
+  headless?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,8 +229,7 @@ function extractAutoRiskDecision(msg: ToolMessage): { reason: string; callId?: s
   };
 }
 
-/** 用量分片合并：分片里的 0 值 / 缺失字段不覆盖已有值（Anthropic 末片 input=0、首片 output=0） */
-function mergeUsage(
+/** 用量分片合并：分片里的 0 值 / 缺失字段不覆盖已有值（Anthropic 末片 input=0、首片 output=0） */function mergeUsage(
   acc: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null,
   next: { inputTokens?: number; outputTokens?: number; totalTokens?: number; cacheReadTokens?: number } | null
 ) {
@@ -244,6 +245,19 @@ function mergeUsage(
     totalTokens: total,
     cacheReadTokens: pick(acc?.cacheReadTokens, next.cacheReadTokens),
   };
+}
+
+/**
+ * 无头模式自动假设：clarify 节点更新里的 headlessAssumption 形如
+ * 「问：…\n假设：…」。解析成人读字段；没有该字段返回 null（交互模式零开销）。
+ */
+function headlessAssumptionOf(update: unknown): { question: string; assumption: string } | null {
+  const value = (update as { headlessAssumption?: unknown } | null)?.headlessAssumption;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const [questionLine = "", assumptionLine = ""] = value.split("\n");
+  const question = questionLine.replace(/^问：/, "").trim();
+  const assumption = assumptionLine.replace(/^假设：/, "").trim();
+  return assumption ? { question, assumption } : null;
 }
 
 /** 从 messages 模式的 metadata 里取出可读的节点标签（子图显示为 "父节点/内层节点"） */
@@ -309,6 +323,7 @@ export async function* runGraphEvents(
       ...(options.taskLedger ? { task_ledger: options.taskLedger } : {}),
       ...(options.budgetNote ? { task_budget_note: options.budgetNote } : {}),
       ...(options.contextWindow ? { context_window: options.contextWindow } : {}),
+      ...(options.headless ? { headless: true } : {}),
     },
     signal: options.signal,
   });
@@ -505,6 +520,10 @@ export async function* runGraphEvents(
             step: nodeKey,
           });
           yield { type: "node", name: nodeKey };
+          // 无头模式：clarify 节点不挂起，而是给出自动假设。这里把它翻成
+          // 显式事件，让任何调用方（外部评测 / 批量脚本）都能看到「本该问什么」。
+          const assumption = headlessAssumptionOf(update);
+          if (assumption) yield { type: "clarification_note", ...assumption };
         }
         const internalNode = isInternalNodeName(nodeKey);
         // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息。

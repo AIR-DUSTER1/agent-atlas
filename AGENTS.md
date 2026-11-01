@@ -59,6 +59,7 @@ src/
   config.ts        # 全局运行时配置（.env 播种，可被内存覆盖；勿在别处直接读 process.env）
   product.ts       # 产品名与对外客户端身份常量（UA / MCP clientInfo 统一来源）
   llm.ts           # 唯一的模型工厂：多协议差异全部收拢于此，graph 代码不感知协议
+  reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（在 llm.ts 的 fetch 边界补字段）
   tools.ts         # 基础工具（calculator / 时间 / 天气 / send_email），zod 声明参数
   tools-dev.ts     # 编程开发工具（terminal / read_file / write_file / list_dir / grep_search）
   tools-rag.ts     # 知识检索工具 retrieve_docs（只调 server/rag.ts，不直接碰网络细节）
@@ -141,11 +142,24 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
   前端 `stream/events.ts` 的 `handleEvent` switch 加 case（尾部 never 断言会强制穷尽）
   → `modules/types-api.ts` 的 `AgentEvent` 联合加变体 → 空数据/半途错误测试回放路径。
 - SSE 帧即 `data: {json}\n\n`；一帧一事件；`done` 由 streamToClient 兜底补发，不要手写。
+- 每轮结束必须发 `task_usage`（累计口径，位于最后一条 `usage` 之后、`done` 之前）：
+  它是下游统计的唯一权威来源；`usage` 是「每次模型调用一条」，不能替代。
+- 无头模式（`/api/chat` 的 `headless:true`）下澄清自动采用首个候选假设继续，
+  并发出 `clarification_note`；新增会 `interrupt()` 的节点必须同样处理该分支，
+  否则无人应答的批量调用会挂到超时。
 
 ### 5.4 高风险操作审批（hitl.ts 为唯一登记处）
 - 新的「执行后改世界」的工具（执行命令 / 写文件 / 发送外部消息…）必须在
   `hitl.ts` 的 `APPROVAL_TOOLS` 登记（含描述文案）；只读类工具（读/列/搜/检索）不登记、直接执行。
 - 工具执行失败**不要 throw 穿透图**：返回「模型可读的中文错误文本」或 JSON `{error}`，让模型转述。
+
+### 5.4.1 思考型网关（DeepSeek 等）
+- 多轮请求要求历史 assistant 带 `reasoning_content`，而 `@langchain/openai` 出站会丢弃它。
+  **补字段只允许在 `reasoning-passthrough.ts` + `llm.ts` 的 fetch 边界做**，
+  不要在别处重复实现（消息装配层只需调 `rememberHistoryReasoning` 登记）。
+- 只对 `protocol === "openai"` 生效；响应侧不用旁路——入站转换器已把思考存进
+  `additional_kwargs`，从历史重建即可（服务重启后自愈）。
+- 新增会中断重试流程的兜底逻辑时，保持「400 点名该字段 → 关闭回传重试一次」这条路径。
 
 ### 5.5 扩展机制分层（改这些位置前先想清楚层次）
 

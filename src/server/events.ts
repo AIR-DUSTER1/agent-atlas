@@ -18,7 +18,9 @@
  *   tool_call   → 工具调用卡片（参数随流式增量到达，边收边渲染）
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
  *   interrupt   → Human-in-the-loop 审批卡片 / 需求澄清选项
+ *   clarification_note → 无头模式下自动采用的假设（不挂起、不等人）
  *   usage       → 本轮模型调用的 token 用量（驱动上下文容量条 + 缓存占比）
+ *   task_usage  → 本轮结束时的任务累计用量（下游统计的权威口径）
  *   ai_message  → 整段助手消息兜底（极少数网关不支持 token 流时使用）
  *   shutdown    → 服务端优雅退出通知（前端提示「稍后刷新重连」）
  *   error/done  → 错误提示 / 本轮流结束
@@ -114,6 +116,32 @@ export type AgentEvent =
       taskToolCalls?: number;
       taskModelCalls?: number;
       taskActiveMs?: number;
+    }
+  /**
+   * 无头模式（/api/chat 带 headless:true）下，本会挂起等人的澄清被自动决策：
+   * 采用 model 给出的默认假设继续执行。下游据此知道「这里本来要问人」。
+   */
+  | {
+      type: "clarification_note";
+      question: string;
+      /** 采用的假设（选项标签或模型给的可执行默认值） */
+      assumption: string;
+      /** 原选项 id（采用某个候选时） */
+      optionId?: string;
+    }
+  /**
+   * 任务累计用量：本轮结束时（done 之前）发一次，是 token 统计的权威口径。
+   * 同一轮内可能有多条 usage（每次模型调用一条），下游只取这一条即可。
+   */
+  | {
+      type: "task_usage";
+      inputTokens: number;
+      outputTokens: number;
+      toolCalls: number;
+      modelCalls: number;
+      activeMs: number;
+      /** 本轮是否有等待人工的挂起（有则累计只到挂起前） */
+      interrupted?: boolean;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }

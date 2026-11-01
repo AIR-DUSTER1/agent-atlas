@@ -1,6 +1,6 @@
 # agentatlas
 
-> **当前状态：`0.9.0-beta.1` 开发预览版。**
+> **当前状态：`0.9.0-beta.2` 开发预览版。**
 > 项目仍有很多功能在完善，接口、数据格式和交互可能继续调整；暂不提供正式版本、Git tag、生产 SLA 或稳定兼容承诺。
 
 一个基于 **LangGraph.js + TypeScript** 的可扩展 Agent 工具集，包含 Web、CLI 和 Electron 桌面壳。当前以通用 Agent 与房产 Agent 为基础，支持由主 Agent 动态赋予提示词和工具的生产级子代理委派。
@@ -54,7 +54,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 通用 Agent | 需求理解、澄清、ReAct 工具循环、结果反思；逻辑任务跨审批/澄清/继续累计工作台账，不限制任务时长与工具/模型调用次数，图执行以 1000 超步兜底 |
 | 子代理委派 | 主 Agent 通过 `delegate_agent` 指定子代理、任务书、专项提示词与工具子集；子代理默认继承当前主对话模型，也可固定其他已配置模型；独立上下文、父请求取消透传、深度固定 1 |
 | 电脑操作（Computer Use 插件） | 截图、点击、双击、右键、文本输入、组合按键与滚轮；仅 Windows，默认关闭，开启后仍受会话权限与高风险审批约束 |
-| 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因 |
+| 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因；思考型网关（DeepSeek 等）的多步续传自动回传 `reasoning_content`，网关不接受该字段时自动降级重试 |
 | 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
 | 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议 |
 | 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
@@ -166,8 +166,35 @@ docs/          用户文档与运维参考
 | `METRICS_TOKEN` | 仅用于 `/metrics` 的只读抓取令牌 |
 | `MODEL_REQUEST_TIMEOUT_MS` | 单次模型 HTTP 请求超时，默认 90 秒；审批与工具等待不受此值影响 |
 | `MODEL_REQUEST_RETRIES` | 可重试模型错误（408/429/5xx/超时/网络）自动重试次数，默认 10 |
+| `MODEL_CONCURRENCY_PER_PROVIDER` | 每个供应商同时进行的模型轮数上限，默认 5（1–50）；超出后进入队列 |
+| `MODEL_QUEUE_WAIT_MS` | 并发占满时的排队等待上限，默认 10000 毫秒；超过回 429 + `Retry-After` |
 
 `.env`、`.web-config.json`、`.setting/` 和 `data/` 已加入 gitignore，不要提交。
+
+## 外部程序对接（/api/chat）
+
+Web 界面之外，任何脚本或评测框架都可以直接用 SSE 驱动一轮对话。请求体除 `sessionId`、`message`、`files` 外还支持一个开关：
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `headless` | boolean | `false` | 无头模式：需求澄清不再挂起等人，而是采用首个候选选项作为假设继续执行，并把假设写进事件流与工作台账 |
+
+```bash
+curl -N -X POST http://127.0.0.1:3000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"sessionId":"<id>","message":"帮我算一下 17×23","headless":true}'
+```
+
+与 token 统计和落地判断相关的两类事件：
+
+| 事件 | 何时发送 | 语义 |
+|---|---|---|
+| `usage` | 每次模型调用（可能多条，流式分片会合并） | 单次调用的用量快照；同一次调用按 `callId` 归并 |
+| `task_usage` | 每轮结束前一条，位于最后一条 `usage` 之后、`done` 之前 | **任务累计用量**：`inputTokens` / `outputTokens` / `toolCalls` / `modelCalls` / `activeMs`；下游统计取这一条即可 |
+
+无头模式自动做假设时，事件流里会出现一条 `clarification_note`，携带原问题（`question`）与被采用的假设（`assumption`），便于调用方判断假设是否合理。
+
+并发方面：单会话同一时刻只允许一条流，超出发送间隔会被拒绝；供应商级并发占满时请求会排队，排队超时返回 **HTTP 429** 与 `Retry-After`（可重试），而不是把它当成请求错误。可以用 `MODEL_CONCURRENCY_PER_PROVIDER` 和 `MODEL_QUEUE_WAIT_MS` 调整。
 
 ## 开发与测试
 
@@ -187,7 +214,8 @@ CI 还包含覆盖率门禁、SBOM、依赖审查和镜像 smoke。当前自动�
 
 - 项目仍是 `pre-1.0` 开发版，暂不打正式 tag。
 - API、配置字段、数据 schema 和前端交互仍可能变化。
-- 子代理只支持一级父子委派，不实时转发子代理内部 token 流，也没有常驻任务队列或跨进程 worker。\n- 单实例、单写者，不支持多副本或共享数据卷。
+- 子代理只支持一级父子委派，不实时转发子代理内部 token 流，也没有常驻任务队列或跨进程 worker。
+- 单实例、单写者，不支持多副本或共享数据卷。
 - 没有多用户账号、RBAC、租户隔离和配额体系。
 - 外部模型、MCP、RAG、HTTP 记忆、贝壳 CLI 的可用性取决于第三方服务；HTTP 记忆故障会降级但不阻断聊天。
 - 真实供应商、复杂长会话、移动端和桌面安装包仍有待持续完善。

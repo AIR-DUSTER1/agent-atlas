@@ -234,6 +234,20 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
       break;
     }
     case "interrupt": addInterrupt(ablock, ev.payload, sid, visible); break;
+    case "clarification_note": {
+      // 无头模式：澄清没有挂起，只把「问了什么 + 假设了什么」留成一条引用块，
+      // 否则下游看到的是一个凭空执行的任务，无从判断假设是否合理。
+      sealStreamingParts(ablock);
+      const text = ev.question
+        ? `无头模式自动假设：${ev.assumption}（原问题：${ev.question}）`
+        : `无头模式自动假设：${ev.assumption}`;
+      const part: AssistantPart = { p: "text", text: `> ${text}`, streaming: false };
+      ablock.parts.push(part);
+      mountPart(ablock, part);
+      break;
+    }
+    // 任务累计用量已随 usage 事件下发（服务端快照），这里不再重复计数。
+    case "task_usage": break;
     // 自动放行只写安全审计，不额外占用聊天正文；保留 case 以维持协议穷尽检查。
     case "risk_decision": break;
     case "usage": applyUsage(ev, ablock, sid); break;
