@@ -25,17 +25,17 @@ npm run sbom
 
 ```bash
 docker build \
-  --build-arg APP_VERSION=0.9.0-beta.6 \
+  --build-arg APP_VERSION=0.9.0-beta.7 \
   --build-arg GIT_COMMIT=<commit> \
   --build-arg BUILD_TIME=<ISO-8601> \
-  -t registry.example.com/agentatlas:0.9.0-beta.6 .
-docker push registry.example.com/agentatlas:0.9.0-beta.6
+  -t registry.example.com/agentatlas:0.9.0-beta.7 .
+docker push registry.example.com/agentatlas:0.9.0-beta.7
 ```
 
 记录 digest：
 
 ```bash
-docker image inspect registry.example.com/agentatlas:0.9.0-beta.6 \
+docker image inspect registry.example.com/agentatlas:0.9.0-beta.7 \
   --format '{{index .RepoDigests 0}}'
 ```
 

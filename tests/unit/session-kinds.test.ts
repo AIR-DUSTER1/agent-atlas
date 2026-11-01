@@ -113,3 +113,55 @@ test("审批/澄清被流占用挡住时必须给出可见提示，不得静默�
     "不得回到静默 return"
   );
 });
+
+/**
+ * 求职 Agent 此前只作为「会话形态」存在，没有注册成可委派的子代理：
+ * 设置页只列出 general / estate，主 Agent 也没法把求职任务派给专项子代理。
+ * 这里守住三件事：种子里有 job、路由名片可用、领域提示词能解析到。
+ */
+test("求职 Agent 是内置子代理，带可参与路由的名片与领域提示词", async () => {
+  const state = await import("../../src/subagent-state.js");
+  const job = state.DEFAULT_SUBAGENTS.find((item) => item.id === "job");
+  assert.ok(job, "内置子代理种子必须包含 job");
+  assert.equal(job.enabled, true, "求职子代理默认启用");
+  assert.equal(job.builtIn, true);
+  // 有路由名片才会被规则层/决策模型挑中；空名片等于「不参与竞争」
+  assert.ok(job.routing.keywords.length >= 5, "求职子代理必须有足够的关键词名片");
+  assert.equal(job.routing.domainProfile, "job");
+  assert.ok(job.routing.category);
+  assert.ok(job.routing.notSuitableFor.length > 0, "必须声明不适用场景，避免抢走找房任务");
+
+  // 领域 profile 要能解析出求职顾问提示词（否者委派出去的子代理不知道四项意图规则）
+  const { resolveDomainProfile } = await import("../../src/agent/domain-profile.js");
+  const domain = resolveDomainProfile("job");
+  assert.ok(domain, "job 领域 profile 必须可解析");
+  assert.match(domain!.systemPrompt, /求职/);
+});
+
+test("求职子代理与房产子代理的关键词名片不重叠", async () => {
+  const { DEFAULT_SUBAGENTS } = await import("../../src/subagent-state.js");
+  const job = DEFAULT_SUBAGENTS.find((item) => item.id === "job");
+  const estate = DEFAULT_SUBAGENTS.find((item) => item.id === "estate");
+  assert.ok(job && estate);
+  const overlap = job!.routing.keywords.filter((word) => estate!.routing.keywords.includes(word));
+  assert.deepEqual(overlap, [], `求职与房产子代理不应共用关键词（会让路由二选一犯难）：${overlap.join("、")}`);
+});
+
+test("设置页领域下拉提供 job 选项，且提交时不被静默丢弃", async () => {
+  const html = await readFile(join(SRC, "client", "index.html"), "utf8");
+  assert.match(html, /<option value="job">/, "领域下拉必须有 job 选项");
+  const form = await readFile(join(SRC, "client", "views", "settings-subagents.ts"), "utf8");
+  // 曾硬编码只认 estate，选 job 会被静默丢成「通用后台子代理提示词」
+  assert.match(form, /picked === "job"/);
+});
+
+test("工具卡在等审批时显示「待审批」而不是「运行中」", async () => {
+  const events = await readFile(join(SRC, "client", "stream", "events.ts"), "utf8");
+  assert.match(events, /markAwaitingApproval\(ablock, payload\.toolName, true\)/);
+  const parts = await readFile(join(SRC, "client", "render", "parts.ts"), "utf8");
+  assert.match(parts, /part\.awaitingApproval/);
+  assert.match(parts, /待审批/);
+  // 审批决定后必须清掉标记，否则卡片永远停在「待审批」
+  const approvals = await readFile(join(SRC, "client", "actions", "approvals.ts"), "utf8");
+  assert.match(approvals, /clearAwaitingApproval\(part\.req\.toolName\)/);
+});

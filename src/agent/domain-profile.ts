@@ -17,10 +17,14 @@
  *    额外登记一份只会造成两处漂移。
  */
 import { estateProfileWithPlugins } from "./estate.js";
+import { jobProfileWithPlugins } from "./job.js";
 import type { AgentProfile, AgentProfileId } from "./profile.js";
 
 /** 领域 profile 的提示词来源；null = 使用默认子代理规则。 */
 export function resolveDomainProfile(id: AgentProfileId | undefined): AgentProfile | null {
   if (id === "estate") return estateProfileWithPlugins();
+  // 求职子代理继承 job 领域提示词（四项意图必须问清、不许编造岗位、采集与补详情不可混跑）。
+  // 工具仍由主 Agent 按需授予，这里只提供提示词与规则。
+  if (id === "job") return jobProfileWithPlugins();
   return null;
 }

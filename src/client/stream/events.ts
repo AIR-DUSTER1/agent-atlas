@@ -115,8 +115,27 @@ export function addNodeChip(ablock: AssistantBlock, name: string, visible = true
   if (visible) scrollBottom();
 }
 
+/**
+ * 把「等审批」标到对应的工具卡上。
+ *
+ * 工具卡从参数流式阶段就显示「运行中」，但审批类工具在这一刻其实**还没执行** ——
+ * interrupt 是执行前的闸门。不标出来用户会以为命令已经在跑、审批只是事后补签。
+ * 载荷里没有 callId，按工具名取「最近一张尚无结果的同名卡」：同一轮的同名同参调用
+ * 会被签名去重，不会有多张并存，这个匹配是确定的。
+ */
+function markAwaitingApproval(ablock: AssistantBlock, toolName: string, pending: boolean): void {
+  for (let i = ablock.parts.length - 1; i >= 0; i -= 1) {
+    const part = ablock.parts[i];
+    if (part?.p !== "tool" || part.name !== toolName || part.result) continue;
+    part.awaitingApproval = pending;
+    void import("../render/parts.js").then((m) => m.updateToolCard(part));
+    return;
+  }
+}
+
 export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, sid: string | null, visible = true): void {
   sealStreamingParts(ablock);
+  if (payload.type === "approval") markAwaitingApproval(ablock, payload.toolName, true);
   if (payload.type === "clarification") {
     const part: AssistantPart = { p: "clarification", req: payload, status: "pending" };
     ablock.parts.push(part);

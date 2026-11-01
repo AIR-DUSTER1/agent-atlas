@@ -1580,6 +1580,8 @@ console.log(result.messages.at(-1).content);
 | 求职会话没有权限切换入口（工具审批本身正常） | 「哪些 kind 有 Agent 执行力」的判断散落四处各写一份 `kind === "agent" \|\| kind === "estate"`，加求职 Agent 时只改了联合类型与建图分支 | 统一走 `isAgentKind()`（服务端 `server/sessions.ts`、前端 `client/modules/session-kind.ts`）；`session-kinds.test.ts` 扫描源码禁止再手写双值白名单（§3.49） |
 | 求职会话压缩后旧 checkpoint 线程不清理、重启后多轮记忆丢失 | 同一处 `agent \|\| estate` 白名单在 `compaction.ts` 与 `hasSessionMemory()` 里各写了一份，都漏了 job | 同上，改为 `isAgentKind()`（§3.49） |
 | 审批卡出现后切到别的会话再回来，「批准并执行」点不动且毫无反馈 | ① `addInterrupt` 只挂卡片不解流占用，`state.streams[sid]` 要等 SSE 尾部才清；② `decideApproval` 首行遇到流占用直接 `return`，静默失败 | interrupt 到达即 `releaseStreamAfterInterrupt()` 解除本轮流占用；收尾按**流对象身份**删除（不能按 ablock，否则会误删 resume 新登记的那条）；被挡住时 `toast` 明确告诉用户该等什么或点停止（§3.49） |
+| 求职 Agent 有独立会话，却在「设置 → 子代理」里找不到 | 会话形态（`kind`）与子代理（`subagent`）是两套机制；种子 `DEFAULT_SUBAGENTS` 只有 general / estate | 种子加 job 条目 + 领域下拉与表单透传（§3.50）；只加种子会让子代理拿不到求职领域提示词 |
+| 审批卡已弹出，上方工具卡却写着「运行中」，像是命令先跑了 | 工具卡创建即带 `running` 类；审批是 `interrupt()` 在 `invokeTool` **之前**的闸门，此时工具一次都没执行 | `addInterrupt` 给对应卡片打 `awaitingApproval`，显示「⏸ 待审批」+ 琥珀色边框，批准后清标（§3.50） |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -2312,3 +2314,33 @@ export function isAgentKind(kind: SessionKind | null | undefined): kind is Agent
 - 对策：interrupt 到达即 `releaseStreamAfterInterrupt()`（只解除确实属于该块的流）；
   收尾改为按**流对象身份**删除，不能按 `ablock` 比较——resume 复用同一个 `ablock`，
   按块删会把用户新发起的那一轮删掉；被挡住时用 `toast` 说明该等什么或先点停止。
+
+### 3.50 求职子代理与「待审批」工具卡
+
+**求职为什么之前不在子代理列表里**：求职 Agent 最初只做成「会话形态」（`kind: "job"`），
+而子代理清单来自 `subagent-state.ts` 的 `DEFAULT_SUBAGENTS` 种子，那里只有 `general`
+与 `estate`。两者是**两套独立机制**：
+
+| | 会话形态（kind） | 子代理（subagent） |
+|---|---|---|
+| 谁在用 | 用户新建对话时选 | 主 Agent 运行时通过 `delegate_agent` 派 |
+| 上下文 | 独立会话、独立检查点与记忆 scope | 主会话内的隔离子图，结果回填主 Agent |
+| 工具 | profile 的完整 allowlist | 主 Agent 本次显式授予的子集 |
+
+补齐三处才算真正接入（缺任一处都会静默半残）：
+
+1. `subagent-state.ts` 种子加 job 条目，**必须带非空 `routing.keywords`** ——
+   空名片等于「不参与路由竞争」（`general` 就是故意留空的兜底型）；
+2. `agent/domain-profile.ts` 的 `resolveDomainProfile` 加 job 分支，
+   否则派出去的子代理只有通用后台规则，不知道「四项意图必须问清、采集与补详情不可混跑」；
+3. `client/index.html` 的领域下拉 + `settings-subagents.ts` 的表单组装都要加 job ——
+   后者原本硬编码 `=== "estate"`，选了也会被静默丢成通用提示词。
+
+**「待审批」不等于「运行中」**：工具卡在参数流式阶段一创建就带 `running` 类，
+但审批类工具在这一刻**一次都还没执行** —— `interrupt()` 是执行前的闸门
+（`hitl.ts` 里 `interrupt()` 之后才 `invokeTool`）。不改文案会让人以为命令已经在跑、
+审批只是事后补签。现在 `addInterrupt` 调 `markAwaitingApproval()` 给对应工具卡打标，
+卡片显示「⏸ 待审批」+ 琥珀色边框；批准后清标回到执行态，`tool_result` 到达再转完成/失败。
+
+**匹配方式**：审批载荷没有 callId，按工具名取「最近一张尚无结果的同名卡」——
+同一轮同名同参调用会被签名去重，不会有多张并存，这个匹配是确定的。

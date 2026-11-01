@@ -183,9 +183,14 @@ function readRoutingInput(): SubagentRouting {
       : {}),
     suitableFor: splitList(($("subagent-routing-suitable") as HTMLTextAreaElement | null)?.value ?? "", 8),
     notSuitableFor: splitList(($("subagent-routing-not-suitable") as HTMLTextAreaElement | null)?.value ?? "", 8),
-    ...((($("subagent-routing-domain") as HTMLSelectElement | null)?.value ?? "") === "estate"
-      ? { domainProfile: "estate" as const }
-      : {}),
+    // 领域提示词按下拉实际取值透传：这里曾硬编码只认 estate，
+    // 导致给求职子代理选了领域后被静默丢弃（下拉里也没有 job 选项）。
+    ...((() => {
+      const picked = ($("subagent-routing-domain") as HTMLSelectElement | null)?.value ?? "";
+      if (picked === "estate") return { domainProfile: "estate" as const };
+      if (picked === "job") return { domainProfile: "job" as const };
+      return {};
+    })()),
   };
 }
 

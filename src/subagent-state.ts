@@ -69,6 +69,32 @@ export const DEFAULT_SUBAGENTS: readonly SubagentConfig[] = Object.freeze([
     createdAt: SEED_TIME,
     updatedAt: SEED_TIME,
   }),
+  Object.freeze({
+    id: "job",
+    name: "求职岗位子代理",
+    description: "处理岗位检索、匹配打分、外包识别与投递清单整理等求职找岗任务。",
+    enabled: true,
+    model: { mode: "inherit" } as const,
+    routing: Object.freeze({
+      keywords: Object.freeze([
+        "找工作", "求职", "招聘", "岗位", "职位", "JD", "简历投递",
+        "BOSS直聘", "boss直聘", "智联", "前程无忧", "51job", "猎聘",
+        "外包", "岗位匹配", "薪资范围", "面试机会",
+      ]),
+      category: "求职",
+      suitableFor: Object.freeze([
+        "按方向/城市/薪资/年限采集招聘岗位并给出匹配排序",
+        "识别并排除外包岗位，整理可跟踪的投递清单",
+      ]),
+      notSuitableFor: Object.freeze([
+        "找房", "租房", "买房", "天气", "算数", "计算", "写代码", "编程", "闲聊",
+      ]),
+      domainProfile: "job" as const,
+    }),
+    builtIn: true,
+    createdAt: SEED_TIME,
+    updatedAt: SEED_TIME,
+  }),
 ]);
 
 function cloneRouting(routing: SubagentRouting): SubagentRouting {

@@ -45,6 +45,7 @@ export async function decideApproval(part: ApprovalPart, status: "approved" | "r
   part.status = status;
   const refs = partEls.get(part);
   if (refs) renderApprovalCard(part, refs.el);
+  clearAwaitingApproval(part.req.toolName);
   const s = state.sessions.find((x) => x.id === state.currentId);
   if (s) s.pendingApproval = false;
   renderSessions();
@@ -53,6 +54,28 @@ export async function decideApproval(part: ApprovalPart, status: "approved" | "r
     { decision: status === "approved" ? "approve" : "reject" },
     assistantBlockContaining(transcript(state.currentId), part)
   );
+}
+
+/**
+ * 审批决定已下：把工具卡的「待审批」标掉。
+ *
+ * 批准时工具即将真正执行，交回「运行中」是正确的；拒绝则由服务端不执行、
+ * 直接回一条「用户拒绝」的 ToolMessage，卡片会随 tool_result 变成失败态。
+ * 两种情况都不能继续挂着「待审批」——那会让用户以为还没处理。
+ */
+function clearAwaitingApproval(toolName: string): void {
+  const blocks = transcript(state.currentId);
+  for (let b = blocks.length - 1; b >= 0; b -= 1) {
+    const block = blocks[b];
+    if (block?.t !== "assistant" || !Array.isArray(block.parts)) continue;
+    for (let i = block.parts.length - 1; i >= 0; i -= 1) {
+      const part = block.parts[i];
+      if (part?.p !== "tool" || part.name !== toolName || !part.awaitingApproval) continue;
+      part.awaitingApproval = false;
+      void import("../render/parts.js").then((m) => m.updateToolCard(part));
+      return;
+    }
+  }
 }
 
 export async function decideClarification(part: ClarificationPart, choice: string, label: string): Promise<void> {

@@ -201,8 +201,17 @@ export function updateToolCard(part: ToolPart): void {
   if (argsPre) argsPre.textContent = fmtArgs(part);
 
   const status = card.querySelector(".tool-status");
-  if (part.result && status) {
+  // 等审批 ≠ 运行中：审批是执行前的闸门，此时工具一次都还没跑。
+  // 不改文案的话用户会以为命令已经在执行，审批只是事后确认。
+  if (!part.result && part.awaitingApproval && status) {
     card.classList.remove("running");
+    card.classList.add("awaiting");
+    status.className = "tool-status awaiting";
+    status.textContent = "⏸ 待审批";
+  }
+  if (part.result && status) {
+    // awaiting 也要清：批准后工具真正开始执行，琥珀色「待审批」边框不能留着
+    card.classList.remove("running", "awaiting");
     card.classList.add(part.result.isError ? "err" : "ok");
     status.className = "tool-status " + (part.result.isError ? "err" : "ok");
     const unsupported = part.result.isError && /当前 Agent 不支持工具/.test(String(part.result.content));

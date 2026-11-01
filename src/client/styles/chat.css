@@ -250,6 +250,9 @@
 .tool-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .tool-status.ok { color: var(--green); }
 .tool-status.err { color: var(--red); }
+/* 等审批 ≠ 运行中：琥珀色 + 不转的圈，与「真的在执行」明确区分 */
+.tool-status.awaiting { color: var(--amber); }
+.tool-card.awaiting { border-color: rgba(226,161,60,.42); }
 .spinner {
   width: 12px; height: 12px;
   border: 2px solid var(--border-strong);

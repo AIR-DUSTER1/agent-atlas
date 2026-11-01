@@ -100,6 +100,12 @@ export interface ToolPart {
   name: string;
   argsText: string;
   result: ToolResult | null;
+  /**
+   * 该调用正在等人工审批（interrupt 已到达、工具尚未执行）。
+   * 工具卡在参数流式阶段就叫「运行中」，而审批类工具此时其实**还没跑** ——
+   * 不标出来会让人以为命令已经在执行、审批只是事后确认。
+   */
+  awaitingApproval?: boolean;
 }
 
 export interface ApprovalPart {

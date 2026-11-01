@@ -10,8 +10,10 @@ test("子代理：搜索筛选、样式产物、继承模型创建、固定模�
   await expect(page.locator("#settings-view-subagents")).toBeVisible();
   await expect(page.locator("#subagents-list")).toContainText("通用子代理");
   await expect(page.locator("#subagents-list")).toContainText("房产找房子代理");
-  await expect(page.locator("#subagent-stat-total")).toHaveText("2");
-  await expect(page.locator("#subagent-stat-enabled")).toHaveText("2");
+  // 求职子代理也是内置项：它与会话形态的「求职岗位 Agent」是两套机制，缺了会静默半残
+  await expect(page.locator("#subagents-list")).toContainText("求职岗位子代理");
+  await expect(page.locator("#subagent-stat-total")).toHaveText("3");
+  await expect(page.locator("#subagent-stat-enabled")).toHaveText("3");
 
   // 守住样式产物：历史上 subagents.css 未进入 public/，页面会退化成裸文本。
   const firstCard = page.locator(".subagent-card").first();
