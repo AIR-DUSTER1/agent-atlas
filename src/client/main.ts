@@ -20,6 +20,7 @@ import { installClientErrorReporting } from "./observability/client-errors.js";
 import { icon, initIconHydration } from "./ui/icon.js";
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
+import { exitGoalMode, syncGoalDraftFromInput } from "./composer/goal.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
 import { renderSessions, loadSessionList } from "./views/sessions.js";
@@ -451,7 +452,10 @@ async function init(): Promise<void> {
 
   on("send-btn", "click", () => { void send(); });
   on("stop-btn", "click", stopStreaming);
+  // Goal 徽标：点击退出连续任务模式
+  on("goal-chip", "click", () => exitGoalMode());
   inputEl.addEventListener("input", () => {
+    syncGoalDraftFromInput();
     import("./core/dom.js").then((m) => m.autoGrowImpl());
     refreshComposerMenu();
   });

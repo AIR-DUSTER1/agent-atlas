@@ -279,6 +279,8 @@ export interface AppState {
   pendingFiles: PendingFile[];
   /** 会话 id → 当前一轮是否为 /goal 连续回合：发送时设置、普通消息清除、resume 时重传 continuous。 */
   continuousTurns: Record<string, boolean>;
+  /** Goal 徽标模式（composer 草稿态，不持久化）：正文只放任务文本，发送层据此决定 continuous。 */
+  goalDraft: boolean;
   /** 记忆 / 统计等懒加载分区的缓存（目前主要给插件卡片判定） */
   memories?: MemoryEntry[];
 }

@@ -25,6 +25,7 @@ import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
 import { toast } from "../ui/toast.js";
 import { parseGoalCommand } from "../modules/goal.js";
+import { exitGoalMode } from "../composer/goal.js";
 import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind, SessionStreamState } from "../modules/types.js";
 
 /** 附件引用：项目/远程文件传路径（服务端读取校验），上传传 uploadId */
@@ -53,15 +54,22 @@ export function setStatus(mode: "idle" | "busy"): void {
 export async function send(): Promise<void> {
   const text = inputEl.value.trim();
   const sid = state.currentId;
-  if (!text || !sid || state.streams[sid] || state.compacting[sid]) return;
+  // Goal 徽标模式下允许「空文本」进入以给出用法提示，其余空输入照旧静默
+  if ((!text && !state.goalDraft) || !sid || state.streams[sid] || state.compacting[sid]) return;
   const cur = state.sessions.find((x) => x.id === sid);
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
-  // /goal 内置命令：以连续模式发送任务。裸 /goal 只提示用法，不发空请求；
-  // 标记按会话记（连续回合被审批打断后 resume 要重传 continuous 放宽超步保险丝），
-  // 普通消息会清掉本会话标记 —— goal 只对它派活的那个回合负责。
-  const goal = parseGoalCommand(text);
+  // /goal 的两个入口汇合：Goal 徽标模式（菜单选中 / 手打前缀自动转换）与
+  // 兜底的手打前缀解析。徽标模式下正文就是任务；两者同时命中时以前缀解析为准，
+  // 避免正文里又写了「/goal xxx」被当成任务原文。
+  const typed = parseGoalCommand(text);
+  const goalActive = state.goalDraft || typed !== null;
+  if (goalActive && !text) {
+    toast("先描述要持续完成的任务再发送；不需要时点 Goal 徽标退出");
+    return;
+  }
+  const goal = goalActive ? { task: typed ? typed.task : text } : null;
   if (goal && !goal.task) {
     toast("用法：/goal <任务描述> —— 任务未完成会持续执行，直到完成、请求出错或手动停止");
     return;
@@ -69,6 +77,7 @@ export async function send(): Promise<void> {
   const message = goal ? goal.task : text;
   if (goal) state.continuousTurns[sid] = true;
   else delete state.continuousTurns[sid];
+  exitGoalMode();
   saveLocal();
 
   // 参考 ZCode：请求耗时期间保留上一轮主模型 context used 与当前模型窗口，

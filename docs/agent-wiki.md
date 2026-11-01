@@ -818,7 +818,7 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
 | `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，普通模式最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过；连续模式换用「任务完成闸」判据（见下） |
 
-**连续工作模式（请求级 `continuous: true` → 图状态 `continuousMode`）**：产品入口是内置命令 `/goal <任务>`（`client/modules/goal.ts` 纯函数解析，菜单选中填充 `/goal `、`turn.ts` 发送时拦截；标记按会话记在 `state.continuousTurns` 并持久化，普通消息清除、resume 重传以延续超步放宽）。反思不通过就持续回炉，直到反思通过 / 空转熔断 / 请求异常 / 用户中止。四个设计决定：
+**连续工作模式（请求级 `continuous: true` → 图状态 `continuousMode`）**：产品入口是内置命令 `/goal <任务>`（`client/modules/goal.ts` 纯函数解析；`composer/goal.ts` 把命令转成 **Goal 徽标模式**——textarea 无法局部高亮前缀，徽标承载命令语义、正文只放任务文本，手打前缀经输入事件自动转换，发送层读 `goalDraft` 决定 continuous；标记按会话记在 `state.continuousTurns` 并持久化，普通消息清除、resume 重传以延续超步放宽）。反思不通过就持续回炉，直到反思通过 / 空转熔断 / 请求异常 / 用户中止。四个设计决定：
 
 - 标记在 `analyze` 从请求 `configurable` 读一次后**写入图状态**而不是每次读 config——审批 resume 走同一线程检查点，图状态还在，`/api/resume` 不用重传该标记；
 - 回炉上限从 3 放宽到 `MAX_CONTINUOUS_REVISIONS = 1000`（保险丝），真正的防失控机制是**空转熔断**：`review` 记录上次反思时的消息总数（`lastReviewMessageCount`），两次反思之间没有任何新工具消息（`idleReviewRounds`）连续计满 `MAX_IDLE_REVIEW_ROUNDS = 3` 就结束回合——任务真在推进时每轮都有工具结果，计数每轮清零；计数器在 `analyze` 的 fallback 里随新回合归零，防止上一轮的空转计数泄漏到下一轮造成提前熔断；

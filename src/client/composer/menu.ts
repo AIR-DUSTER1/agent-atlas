@@ -16,7 +16,7 @@ import { fmtSize } from "../modules/format.js";
 import { addPendingFile } from "../views/attachments.js";
 import { h } from "../ui/h.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
-import { GOAL_COMMAND } from "../modules/goal.js";
+import { enterGoalMode } from "./goal.js";
 import type { ComposerItem, ComposerTrigger } from "../modules/types.js";
 
 export const FILE_MENTION_LIMIT = 20;
@@ -322,13 +322,15 @@ export function selectComposerItem(index: number): void {
       return;
     }
     if (item.id === "goal") {
-      // goal 既不是动作也不是模板：留下「/goal 」让用户接着写任务，
-      // 发送时由 turn 层拦截解析（裸 /goal 只提示用法，不发空请求）
-      inputEl.value = next + GOAL_COMMAND + " ";
+      // goal 既不是动作也不是模板：转成 Goal 徽标模式（前缀语义由徽标承载，
+      // textarea 无法局部高亮），正文留给用户输入任务，发送时由 turn 层拦截
+      inputEl.value = next.replace(/\s+$/, "");
+      enterGoalMode();
       closeComposerMenu();
       autoGrowImpl();
       inputEl.focus();
-      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      const end = inputEl.value.length;
+      inputEl.setSelectionRange(end, end);
       return;
     }
     inputEl.value = next.replace(/\s+$/, "");

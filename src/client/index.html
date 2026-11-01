@@ -184,6 +184,9 @@
           <button id="attach-btn" class="attach-btn" title="附加文件：项目文件 / 远程文件夹 / 本地上传">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </button>
+          <button id="goal-chip" class="goal-chip hidden" type="button" title="连续任务模式：任务未完成会持续执行，直到完成、出错或手动停止；点击退出" aria-label="Goal 连续任务模式，点击退出">
+            <i class="ui-icon" data-icon="Target" aria-hidden="true"></i><span class="gi-text">Goal</span>
+          </button>
           <textarea id="input" aria-label="给 Agent 发送消息" rows="1" placeholder="给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）" aria-autocomplete="list" aria-controls="composer-menu" aria-expanded="false" disabled></textarea>
           <div id="composer-menu" class="composer-menu hidden" role="listbox" aria-label="输入辅助"></div>
           <button id="send-btn" class="icon-btn" title="发送" disabled>

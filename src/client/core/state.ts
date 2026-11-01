@@ -16,7 +16,7 @@ import type { AppState, ChatBlock } from "../modules/types.js";
 import { PRODUCT_NAME } from "../modules/product.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-11-01-8";
+export const APP_VERSION = "web-2026-11-01-9";
 
 console.log(
   `%c[${PRODUCT_NAME}] 前端脚本已加载 ` + APP_VERSION,
@@ -53,6 +53,7 @@ export const state: AppState = {
   settingsView: "models",
   pendingFiles: [],    // 输入框待发送附件
   continuousTurns: {}, // 会话 id → 当前一轮是否为 /goal 连续回合（resume 重传 continuous 用）
+  goalDraft: false,    // Goal 徽标模式：正文只放任务文本，发送层据此带 continuous（composer 草稿态）
 };
 
 /* ---------------------------------------------------------------------------

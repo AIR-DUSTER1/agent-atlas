@@ -325,3 +325,21 @@
 }
 .ext-card .ext-del:hover { color: var(--red); background: rgba(229,96,79,.12); }
 .ext-card.ext-incomplete { border-style: dashed; opacity: .85; }
+
+/* /goal 徽标：Goal 连续任务的胶囊标识（参考 ZCode 的 Goal 样式）。
+   textarea 无法局部高亮前缀，所以命令语义由徽标承载、正文只放任务文本；
+   徽标本身可点击退出，是发送层的语义开关而非纯装饰。 */
+.goal-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex: 0 0 auto; margin-bottom: 3px;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid rgba(91,140,255,.42);
+  border-radius: 999px;
+  background: rgba(91,140,255,.12);
+  color: var(--text);
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.goal-chip .ui-icon { color: rgba(91,140,255,.95); --icon-size: 14px; --icon-stroke: 2; }
+.goal-chip:hover { border-color: rgba(91,140,255,.7); background: rgba(91,140,255,.18); }
