@@ -30,7 +30,7 @@ import type { StructuredToolInterface } from "@langchain/core/tools";
 import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { demoApprovals } from "./approvals.js";
-import { createToolMap, type ApprovalDescriptions } from "./profile.js";
+import { createToolMap, type ApprovalDescriptions, type AgentProfileId } from "./profile.js";
 import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
 import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor } from "./tool-risk.js";
 
@@ -57,7 +57,7 @@ export interface ApprovalToolsNodeOptions {
   /** 自主模式的风险评估器；缺失时 fail-closed，登记工具一律申请审批。 */
   riskAssessor?: ToolRiskAssessor;
   /** 领域标识，仅用于风险审查提示。 */
-  profileId?: "general" | "estate";
+  profileId?: AgentProfileId;
 }
 
 /** 把消息 content 拍平为文本，用于给风险审查器补充当前用户意图。 */

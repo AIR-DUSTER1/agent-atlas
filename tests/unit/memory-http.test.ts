@@ -26,7 +26,7 @@ function baseHttpConfig(baseURL: string, patch: Partial<MemoryHttpConfig> = {}):
     timeoutMs: 1000,
     searchLimit: 8,
     writeEnabled: true,
-    banks: { general: "general-bank", estate: "estate-bank" },
+    banks: { general: "general-bank", estate: "estate-bank", job: "job-bank" },
     ...patch,
     ...(patch.banks ? { banks: { ...patch.banks } } : {}),
   };

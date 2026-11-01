@@ -9,7 +9,7 @@
  */
 import type { StructuredToolInterface } from "@langchain/core/tools";
 
-export type AgentProfileId = "general" | "estate";
+export type AgentProfileId = "general" | "estate" | "job";
 
 export type ApprovalDescriptions = Record<string, (args: Record<string, unknown>) => string>;
 
@@ -38,14 +38,15 @@ export interface AgentProfile {
 }
 
 /** 会话 kind 到 profile 的派生规则；demo / external 没有可执行 profile。 */
-export function profileIdForKind(kind: "agent" | "estate" | "demo" | "external"): AgentProfileId | null {
+export function profileIdForKind(kind: "agent" | "estate" | "job" | "demo" | "external"): AgentProfileId | null {
   if (kind === "agent") return "general";
   if (kind === "estate") return "estate";
+  if (kind === "job") return "job";
   return null;
 }
 
 export function isAgentProfileId(value: unknown): value is AgentProfileId {
-  return value === "general" || value === "estate";
+  return value === "general" || value === "estate" || value === "job";
 }
 
 /** 每个图实例自建的工具表；同名工具在装配期直接失败，避免静默覆盖。 */

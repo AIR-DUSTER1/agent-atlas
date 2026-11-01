@@ -24,6 +24,7 @@ import {
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentEvent, InterruptPayload } from "./events.js";
 import type { PermissionMode } from "../agent/permission.js";
+import type { AgentProfileId } from "../agent/profile.js";
 import { log } from "./logging.js";
 import { getActiveModelLabel } from "./settings.js";
 import { AGENT_RECURSION_LIMIT, config } from "../config.js";
@@ -64,7 +65,7 @@ interface NormalizeOptions {
   threadId: string;
   signal?: AbortSignal;
   /** 观测字段：只写结构化日志，不进入模型上下文或前端事件。 */
-  agentProfileId?: "general" | "estate" | null;
+  agentProfileId?: AgentProfileId | null;
   turnId?: string;
   /** 会话权限模式：经 configurable 传进图，工具执行节点（hitl.ts）按它裁决 */
   permissionMode?: PermissionMode;

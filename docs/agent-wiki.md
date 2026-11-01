@@ -72,9 +72,10 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
+    ├── tools-job.ts      # 求职岗位工具：job_collect / job_query / job_enrich / job_summary（§3.47）
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
     ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
-    ├── agent/            # profile + 共享工作流 + 通用/房产 Agent + 5 个示例的图定义
+    ├── agent/            # profile + 共享工作流 + 通用/房产/求职 Agent + 5 个示例的图定义
     ├── routing/          # 多 Agent 路由决策层：规则 / 向量 / 决策模型 / 守卫（§3.45，默认关闭）
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
@@ -1565,6 +1566,9 @@ console.log(result.messages.at(-1).content);
 | 用户点一次路由选项，子代理却跑了两次 | `interrupt()` 在 resume 时会让**节点从头重跑**；询问与派发放同一节点就会重复执行 | 拆成 `routeAsk` / `dispatch` 两个节点（§3.45），派发节点里不含任何 `interrupt()` |
 | 路由派发绕过了高风险审批 | 程序化派发不经 `delegate_agent`，那条路径的审批不会触发 | 派发只授予**只读工具**（无审批文案者）；写操作由子代理写进「超出范围」，主 Agent 走原审批流程（§3.45） |
 | 多配一个子代理后所有请求都变成「不确定」 | 直接用 `p_max` 当置信度，选项越多 `p_max` 越低 | 用按选项数归一化的 `confidence = (k·p_max−1)/(k−1)`（§3.45 守卫 G2） |
+| 新建求职会话却变成了通用 Agent | `routes/sessions.ts` 有一份独立的 kind 白名单，漏加新 kind 会被静默降级成 `"agent"` | 新增会话类型时必须同时改 `sessions.ts`、`session-store.ts`（两处各有一份 `SessionKind`）与 `routes/sessions.ts` 的白名单（§3.47） |
+| 求职采集能跑但模型说「缺少参数」却给了泛泛的 schema 报错 | zod 把 `city`/`salaryMin` 等设为必填，模型漏传时框架直接抛 `Invalid input: expected number`，模型读不懂 | 关键字段设为 optional，由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示（§3.47） |
+| 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 硬编码 `--enrich 0`，补详情必须单独调 `job_enrich` 且隔几分钟（§3.47） |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -2164,3 +2168,62 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 **为什么默认 `decideTimeoutMs` 是 6 秒**：API 后端一次路由请求通常 0.3–2 s，
 6 s 留足余量。若启用 systemone 的按需加载模式（每次 spawn 冷启动约 5.9 s），
 需要在设置页把它调到 15 s，否则 100% 超时。
+
+### 3.47 `src/server/job.ts` + `agent/job.ts` — 求职岗位 Agent（job-hunter 技能）
+
+**定位**：把 [job-hunter](https://github.com/AIR-DUSTER1/job-hunter) 技能做成第三个
+独立 Agent profile（`job`），与 `general` / `estate` 工具集与记忆 scope 全部隔离。
+
+**分层**：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| profile | `agent/job.ts` | 提示词（浓缩技能工作流）+ 工具 allowlist + 领域分析/反思规则 |
+| 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` |
+| 服务端 | `server/job.ts` | CLI 探测、子进程执行、清单 JSON 读取与投影 |
+| 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor` |
+| 前端 | `views/job.ts` + `#job-mask` | 环境检查面板、路径配置、平台登录、自检 |
+
+**为什么是一个独立 profile 而不是通用 Agent 的一个插件工具**：求职是「有明确
+工作流的多步任务」（问清四项意图 → 采集 → 筛外包 → 补详情 → 交付 Excel），
+需要专属提示词约束「不许猜方向/城市/薪资/年限」、专属反思规则约束「不许把采到的
+说成已投递」。放进通用 Agent 会让这些约束稀释到几十个工具里。
+
+**关键实现约束**：
+
+1. **必须在技能根目录执行 CLI**。`scripts` 是包名，`python -m scripts.main` 只能从
+   技能根目录解析，所以 `runJobCli` 强制 `cwd = skillDir`，换目录会 `ModuleNotFoundError`。
+2. **必须显式设 `JOBHUNT_HOME`**。不设的话登录态和产出写进技能目录，升级技能即丢。
+   `resolveDataDir()` 默认给 `<skillDir>/job-data`，也可在设置页覆盖。
+3. **采集与补详情必须分开**。站点风控看的是短时间请求总量；采集每个关键词 1-2 次，
+   补详情要逐条打开岗位页。`job_collect` 硬编码 `--enrich 0`，`job_enrich` 单独跑。
+4. **登录不封装成 Agent 工具**。登录要停下来等用户扫码（最长 5 分钟），
+   把它做成工具会让模型在无人可扫的场景下干等；只在设置页提供按钮。
+5. **采集的四个字段在 zod 里设为 optional**。设成必填时模型漏传会直接 schema
+   校验失败（`Invalid input: expected number, received undefined`），模型读不懂这种
+   报错；改成 optional 后由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示。
+6. **清单读 JSON 不读 Excel**。技能同时产出 `最新岗位清单.json`（下次增量合并的基准，
+   含投递状态与 JD 全文）和 Excel（给人看）。模型上下文只吃 JSON 的摘要投影。
+
+**数据目录结构**（技能约定）：
+
+```
+<skillDir>/job-data/
+  .profile/            # 浏览器登录态（扫码后保存，所有采集复用）
+  out/最新岗位清单.json  # 权威数据源（增量合并基准，保留投递状态）
+  out/岗位清单_<时间>.xlsx
+```
+
+**新增 Agent profile 的接入清单**（本次实际改动点，供后续加第四个 Agent 参考）：
+
+| 位置 | 改动 |
+|---|---|
+| `agent/profile.ts` | `AgentProfileId` 联合 + `profileIdForKind` + `isAgentProfileId` |
+| `memory/provider.ts`、`memory/scope.ts` | `MemoryProfileId` 联合 + 校验函数 |
+| `server/memory-config.ts` | `banks` 加键；Hindsight 校验改为「每个 profile 独立且互不相同」 |
+| `server/sessions.ts`、`server/session-store.ts` | `SessionKind` 联合（两处各有一份）+ `buildGraph` 分支 + 默认标题 |
+| `server/routes/sessions.ts` | 创建会话时接受新 kind（**这个最容易漏**：漏了会被静默降级成 `agent`） |
+| `plugin-state.ts`、`client/modules/plugin-registry.ts` | 插件 id + 默认启用 + 卡片元数据 |
+| `client/modules/agent-profile.ts`、`client/views/shell.ts` | 展示元数据 + 新建对话页入口 |
+| `client/modules/types-api.ts`、`types-ui.ts`、`core/state.ts` | 状态类型与初始值 |
+| `tests/unit/architecture.test.ts` | 工具集互不越界的守门用例 |

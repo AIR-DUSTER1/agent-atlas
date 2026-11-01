@@ -87,6 +87,8 @@ import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, hand
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
+import { handleGetJob, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import { loadJob } from "./job.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import {
   handleCreateSubagent,
@@ -173,6 +175,7 @@ try {
   await loadExternalAgents();
   await loadRag();
   await loadEstate();
+  await loadJob();
   await loadPluginSettings();
   // F1：跨会话长期记忆先预热本地文件，再按配置注册 / 激活本地或 HTTP Provider。
   await loadMemories();
@@ -492,6 +495,12 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/estate" && req.method === "GET") { await handleGetEstate(res); return; }
     if (pathname === "/api/estate/install" && req.method === "POST") { await handleInstallBeike(res, req); return; }
     if (pathname === "/api/estate/key" && req.method === "POST") { await handleSaveBeikeKey(res, req); return; }
+
+    // 求职岗位 Agent（job-hunter 技能 CLI）：状态 / 路径配置 / 登录 / 自检
+    if (pathname === "/api/job" && req.method === "GET") { await handleGetJob(res); return; }
+    if (pathname === "/api/job" && req.method === "PUT") { await handleSaveJob(res, req); return; }
+    if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }
+    if (pathname === "/api/job/doctor" && req.method === "POST") { await handleJobDoctor(res, req); return; }
 
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "Not Found" }));

@@ -5,7 +5,7 @@
  * HTTP Provider、工具层与 workflow 共用。模型工具 schema 不暴露这些差异。
  */
 export type MemoryProviderId = "local" | "http";
-export type MemoryProfileId = "general" | "estate";
+export type MemoryProfileId = "general" | "estate" | "job";
 export type MemorySource = "agent" | "user" | "import";
 export type MemoryStatus = "active" | "superseded";
 

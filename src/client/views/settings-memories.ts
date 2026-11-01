@@ -23,9 +23,16 @@ let memStatusTimer: ReturnType<typeof setTimeout> | undefined;
 let allMemories: MemoryEntry[] = [];
 let currentConfig: MemorySlotConfig | null = null;
 
-function currentMemoryProfile(): "general" | "estate" {
+function currentMemoryProfile(): "general" | "estate" | "job" {
   const select = $("mem-profile-filter") as HTMLSelectElement | null;
-  return select?.value === "estate" ? "estate" : "general";
+  if (select?.value === "estate") return "estate";
+  if (select?.value === "job") return "job";
+  return "general";
+}
+
+/** 记忆 scope 的中文名：三个 Agent 各自隔离，文案也要能区分。 */
+function memoryProfileLabel(profile: "general" | "estate" | "job"): string {
+  return profile === "estate" ? "租房 Agent" : profile === "job" ? "求职 Agent" : "通用 Agent";
 }
 
 function input(id: string): HTMLInputElement | null {
@@ -115,6 +122,8 @@ function applyConfig(config: MemorySlotConfig): void {
   if (bankGeneral) bankGeneral.value = config.http.banks.general;
   const bankEstate = input("mem-http-bank-estate");
   if (bankEstate) bankEstate.value = config.http.banks.estate;
+  const bankJob = input("mem-http-bank-job");
+  if (bankJob) bankJob.value = config.http.banks.job;
   const apiKey = input("mem-http-api-key");
   if (apiKey) {
     apiKey.value = "";
@@ -154,6 +163,7 @@ function formPatch() {
       banks: {
         general: input("mem-http-bank-general")?.value.trim() || "",
         estate: input("mem-http-bank-estate")?.value.trim() || "",
+        job: input("mem-http-bank-job")?.value.trim() || "",
       },
     },
   };
@@ -225,7 +235,7 @@ function renderMemories(): void {
     if (metaEl) {
       const status = entry.status === "superseded" ? " · 历史版本" : "";
       const tags = entry.tags.length ? ` · #${entry.tags.join(" #")}` : "";
-      metaEl.textContent = `${sourceLabel(entry.source)} · ${entry.scope.profileId === "estate" ? "租房 Agent" : "通用 Agent"} · 命中 ${entry.useCount ?? 0} 次${status}${tags} · ${when}`;
+      metaEl.textContent = `${sourceLabel(entry.source)} · ${(entry.scope.profileId === "estate" ? "租房 Agent" : entry.scope.profileId === "job" ? "求职 Agent" : "通用 Agent")} · 命中 ${entry.useCount ?? 0} 次${status}${tags} · ${when}`;
     }
     row.querySelector(".p-del")?.addEventListener("click", async () => {
       if (!(await uiConfirm(`删除记忆「${entry.key}」？删除后无法恢复。`, { title: "删除记忆", okText: "删除", danger: true }))) return;
@@ -360,7 +370,7 @@ async function importMemories(file: File): Promise<void> {
     const mode = select("mem-import-mode")?.value === "replace" ? "replace" : "merge";
     if (mode === "replace") {
       const confirmed = await uiConfirm(
-        `替换当前「${currentMemoryProfile() === "estate" ? "租房 Agent" : "通用 Agent"}」scope 的全部本地记忆？另一个 scope 不受影响。`,
+        `替换当前「${memoryProfileLabel(currentMemoryProfile())}」scope 的全部本地记忆？其他 scope 不受影响。`,
         { title: "替换记忆", okText: "替换导入", danger: true }
       );
       if (!confirmed) return;

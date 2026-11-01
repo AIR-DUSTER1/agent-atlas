@@ -35,3 +35,17 @@ export const estateApprovals: ApprovalDescriptions = {
   house_contact: (a) =>
     `向贝壳经纪人（ID ${String(a.agentUcid)}，${String(a.biz ?? "")}${String(a.mode) === "rent" ? "租房" : "买房"}）发起加微：${String(a.reason)}`,
 };
+
+export const jobApprovals: ApprovalDescriptions = {
+  job_collect: (a) => {
+    const keywords = Array.isArray(a.keywords) ? a.keywords.map(String).filter(Boolean).join("、") : "";
+    const salary = typeof a.salaryMin === "number" && typeof a.salaryMax === "number"
+      ? `${a.salaryMin}-${a.salaryMax}K`
+      : "未指定薪资";
+    const platforms = Array.isArray(a.platforms) && a.platforms.length ? a.platforms.map(String).join("、") : "四平台全部";
+    return `抓取招聘岗位：${String(a.city ?? "未指定城市")} / ${keywords || "未指定方向"} / ${salary} / ` +
+      `${String(a.years ?? "?")} 年经验；平台 ${platforms}（约 3-5 分钟，会访问招聘站点）`;
+  },
+  job_enrich: (a) =>
+    `补岗位详情：逐条打开岗位页抓 JD 全文、地址与 HR 活跃（最多 ${String(a.limit ?? 10)} 条，会访问招聘站点）`,
+};

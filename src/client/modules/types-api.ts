@@ -216,7 +216,7 @@ export interface GatewayModel {
  * 会话 / 项目 / 外部 Agent
  * ------------------------------------------------------------------------- */
 
-export type SessionKind = "agent" | "estate" | "demo" | "external";
+export type SessionKind = "agent" | "estate" | "job" | "demo" | "external";
 
 export type PermissionModeId = "readonly" | "approve" | "autonomous" | "auto";
 
@@ -287,7 +287,7 @@ export interface RagHit {
 
 /** 内置插件的启停快照；platform 用于区分仅 Windows 的 Computer Use。 */
 export interface PluginSettingsState {
-  enabled: Record<"rag" | "estate" | "computer", boolean>;
+  enabled: Record<"rag" | "estate" | "job" | "computer", boolean>;
   platform: string;
 }
 
@@ -303,7 +303,7 @@ export interface SubagentRouting {
   suitableFor: string[];
   notSuitableFor: string[];
   /** 继承哪个领域 profile 的系统提示（不填 = 通用后台子代理提示词） */
-  domainProfile?: "general" | "estate";
+  domainProfile?: "general" | "estate" | "job";
 }
 
 export interface SubagentEntry {
@@ -396,6 +396,23 @@ export interface EstateState {
   keyUrl?: string;
 }
 
+/** 求职数据源（job-hunter 技能）的环境状态；对应 GET /api/job。 */
+export interface JobState {
+  installed: boolean;
+  skillDir: string;
+  hasOverride: boolean;
+  pythonOK: boolean;
+  pythonVersion: string;
+  depsOK: boolean;
+  depsError: string;
+  dataDir: string;
+  lastRunJobs: number;
+  lastRunAt: string;
+  profilePresent: boolean;
+  platform: string;
+  error?: string;
+}
+
 export interface BackupEntry {
   name: string;
   createdAt: number;
@@ -407,7 +424,7 @@ export interface BackupEntry {
 
 export interface MemoryEntry {
   id: string;
-  scope: { profileId: "general" | "estate"; userId: string };
+  scope: { profileId: "general" | "estate" | "job"; userId: string };
   key: string;
   content: string;
   tags: string[];
@@ -430,7 +447,7 @@ export interface MemoryHttpSettings {
   timeoutMs: number;
   searchLimit: number;
   writeEnabled: boolean;
-  banks: { general: string; estate: string };
+  banks: { general: string; estate: string; job: string };
 }
 
 export interface MemorySlotConfig {

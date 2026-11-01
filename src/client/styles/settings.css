@@ -1062,3 +1062,58 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
   .routing-test-row { flex-direction: column; }
   .routing-actions { flex-direction: column; align-items: stretch; }
 }
+
+/* ---------- 求职数据源面板（job-hunter） ---------- */
+#job-mask {
+  position: fixed; inset: 0; z-index: 140;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45);
+  padding: 24px;
+}
+#job-mask.hidden { display: none; }
+#job-modal {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 20px 22px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+}
+#job-modal h2 { margin: 0 0 6px; font-size: var(--font-md); }
+.job-check-list { display: grid; gap: 4px; margin: 8px 0 12px; }
+.job-check-row { display: flex; gap: 10px; align-items: baseline; font-size: var(--font-sm); }
+.job-check-label { flex: none; width: 180px; color: var(--text-3); }
+.job-check-value {
+  flex: 1; min-width: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.job-check-value.ok { color: var(--green); }
+.job-check-value.err { color: var(--red); }
+.job-fix-hint {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--amber);
+  background: var(--amber-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+}
+.job-fix-hint.hidden { display: none; }
+.job-doctor-output {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  white-space: pre-wrap;
+}
+.job-doctor-output:empty { display: none; }
+.job-platforms { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
+.job-login-btn { display: inline-flex; align-items: center; gap: 6px; }

@@ -97,10 +97,10 @@ export interface SessionRecord {
   }>;
 }
 
-export type SessionKind = "agent" | "estate" | "demo" | "external";
+export type SessionKind = "agent" | "estate" | "job" | "demo" | "external";
 
 function isSessionKind(value: unknown): value is SessionKind {
-  return value === "agent" || value === "estate" || value === "demo" || value === "external";
+  return value === "agent" || value === "estate" || value === "job" || value === "demo" || value === "external";
 }
 
 /** journal 内存视角（回放后的状态），也是 compact 的快照来源 */

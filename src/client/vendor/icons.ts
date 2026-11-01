@@ -13,5 +13,5 @@ export {
   ArrowDown, ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
   TriangleAlert, CircleX, Sparkles, Map, Settings2, PanelLeft,
   ChevronsUpDown, Calendar, Code, FileCode, FolderTree, CheckCircle2, XCircle,
-  Waypoints,
+  Waypoints, Briefcase,
 } from "lucide";

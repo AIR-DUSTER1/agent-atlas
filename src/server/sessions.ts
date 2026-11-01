@@ -19,6 +19,7 @@ import { createHitlGraph } from "../agent/hitl.js";
 import { createMultiAgentGraph } from "../agent/multi.js";
 import { createAgentGraph } from "../agent/general.js";
 import { createEstateGraph } from "../agent/estate.js";
+import { createJobGraph } from "../agent/job.js";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { resolveModelRuntime } from "../model-runtime.js";
 import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
@@ -52,7 +53,7 @@ export function isDemo(v: unknown): v is 1 | 2 | 3 | 4 {
   return v === 1 || v === 2 || v === 3 || v === 4;
 }
 
-export type SessionKind = "agent" | "estate" | "demo" | "external";
+export type SessionKind = "agent" | "estate" | "job" | "demo" | "external";
 
 /** 一轮对话的服务端记录：用户消息 + 该轮全部 AgentEvent（供任意浏览器回放历史） */
 export interface TurnRecord {
@@ -143,6 +144,8 @@ export function buildGraph(
   if (kind === "agent") return createAgentGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
   if (kind === "estate") return createEstateGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
+  // 求职岗位 Agent：job-hunter 技能工具集 + 同一形态（ReAct + 审批 + 反思）
+  if (kind === "job") return createJobGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   switch (demo) {
     case 1: return createBasicGraph(sessionId);
     case 2: return createMemoryGraph(sessionId);
@@ -180,6 +183,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
   const defaultTitle = external ? external.name
     : kind === "demo" ? `${DEMOS.find((d) => d.id === demo)?.name ?? "示例"} 示例`
     : kind === "estate" ? "房产找房"
+    : kind === "job" ? "求职岗位"
     : "新对话";
   const sessionId = randomUUID();
   const threadId = `web-${randomUUID()}`;

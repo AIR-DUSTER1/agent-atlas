@@ -34,6 +34,7 @@ import {
 } from "./views/attachments.js";
 import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
 import { closeEstate, installBeikeCli, openEstate, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
+import { bindJob } from "./views/job.js";
 import { closeProviderForm, openProviderForm, saveModel } from "./views/model-form.js";
 import {
   activateModel, fetchGatewayModelChips, removeProvider, saveProvider,
@@ -444,6 +445,9 @@ async function init(): Promise<void> {
   on("estate-install", "click", () => { void installBeikeCli(); });
   on("estate-key-save", "click", () => { void saveEstateKey(); });
   on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
+
+  // 求职数据源（job-hunter 技能）：面板开关 / 保存路径 / 登录 / 自检
+  bindJob();
 
   on("send-btn", "click", () => { void send(); });
   on("stop-btn", "click", stopStreaming);

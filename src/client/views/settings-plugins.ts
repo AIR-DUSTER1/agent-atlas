@@ -14,7 +14,7 @@ import { state } from "../core/state.js";
 import { h } from "../ui/h.js";
 import { uiAlert } from "../ui/dialog.js";
 import { BUILTIN_PLUGINS, pluginTransportMeta, type BuiltinPlugin } from "../modules/plugin-registry.js";
-import type { EstateState, PluginSettingsState, RagState } from "../modules/types.js";
+import type { EstateState, JobState, PluginSettingsState, RagState } from "../modules/types.js";
 import { refreshAgentCards } from "./shell.js";
 
 type PluginId = keyof PluginSettingsState["enabled"];
@@ -56,6 +56,16 @@ function readiness(plugin: BuiltinPlugin): { ready: boolean; label: string } {
         : "未安装",
     };
   }
+  if (plugin.id === "job") {
+    const status = state.job;
+    if (!status) return { ready: false, label: "未检测" };
+    // 「就绪」必须三者齐备：技能目录存在 + python 可用 + 依赖装齐
+    const ready = status.installed && status.pythonOK && status.depsOK;
+    if (!status.installed) return { ready: false, label: "未找到技能" };
+    if (!status.pythonOK) return { ready: false, label: "缺少 Python" };
+    if (!status.depsOK) return { ready: false, label: "缺少依赖" };
+    return { ready, label: `就绪 · ${status.lastRunJobs} 条岗位` };
+  }
   const available = !state.plugins || state.plugins.platform === "win32";
   return { ready: available, label: available ? "Windows 可用" : "仅支持 Windows" };
 }
@@ -88,6 +98,10 @@ function openPluginManage(plugin: BuiltinPlugin): void {
     void import("./estate.js").then((mod) => mod.openEstate());
     return;
   }
+  if (plugin.id === "job") {
+    void import("./job.js").then((mod) => mod.openJob());
+    return;
+  }
   if (plugin.id === "computer") {
     void uiAlert(
       "Computer Use 只在本机 Windows 桌面会话可用。\n\n" +
@@ -108,15 +122,17 @@ export async function loadPluginState(): Promise<void> {
   renderPluginCards();
 }
 
-/** 设置页插件分区懒加载：三个接口互不阻塞，任一失败保留其它状态。 */
+/** 设置页插件分区懒加载：各接口互不阻塞，任一失败保留其它状态。 */
 export async function refreshPluginPanel(): Promise<void> {
-  const [rag, estate, plugins] = await Promise.allSettled([
+  const [rag, estate, job, plugins] = await Promise.allSettled([
     api<RagState>("/api/rag"),
     api<EstateState>("/api/estate"),
+    api<JobState>("/api/job"),
     api<PluginSettingsState>("/api/plugins"),
   ]);
   if (rag.status === "fulfilled") state.rag = rag.value;
   if (estate.status === "fulfilled") state.estate = estate.value;
+  if (job.status === "fulfilled") state.job = job.value;
   if (plugins.status === "fulfilled") state.plugins = plugins.value;
   renderPluginCards();
 }

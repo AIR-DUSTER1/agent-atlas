@@ -10,7 +10,7 @@ export const MEMORY_USER_ID = "local";
 export const DEFAULT_MEMORY_PROFILE: MemoryProfileId = "general";
 
 export function isMemoryProfileId(value: unknown): value is MemoryProfileId {
-  return value === "general" || value === "estate";
+  return value === "general" || value === "estate" || value === "job";
 }
 
 export function memoryScope(

@@ -9,7 +9,7 @@
  *  - 电脑控制默认关闭：它是本机高权限能力，必须由用户在设置中显式开启。
  */
 
-export const PLUGIN_IDS = ["rag", "estate", "computer"] as const;
+export const PLUGIN_IDS = ["rag", "estate", "job", "computer"] as const;
 export type PluginId = (typeof PLUGIN_IDS)[number];
 export type PluginEnabledMap = Record<PluginId, boolean>;
 
@@ -17,6 +17,7 @@ export type PluginEnabledMap = Record<PluginId, boolean>;
 export const DEFAULT_PLUGIN_ENABLED: Readonly<PluginEnabledMap> = Object.freeze({
   rag: true,
   estate: true,
+  job: true,
   computer: false,
 });
 

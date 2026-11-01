@@ -18,7 +18,7 @@ export interface MemoryHttpConfig {
   timeoutMs: number;
   searchLimit: number;
   writeEnabled: boolean;
-  banks: { general: string; estate: string };
+  banks: Record<"general" | "estate" | "job", string>;
 }
 
 export interface MemoryConfig {
@@ -39,7 +39,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     timeoutMs: 8000,
     searchLimit: 8,
     writeEnabled: true,
-    banks: { general: "", estate: "" },
+    banks: { general: "", estate: "", job: "" },
   },
 };
 
@@ -96,6 +96,7 @@ export function normalizeMemoryConfig(value: unknown): MemoryConfig {
       banks: {
         general: typeof banks.general === "string" ? banks.general.trim().slice(0, 100) : "",
         estate: typeof banks.estate === "string" ? banks.estate.trim().slice(0, 100) : "",
+        job: typeof banks.job === "string" ? banks.job.trim().slice(0, 100) : "",
       },
     },
   };
@@ -119,7 +120,7 @@ export interface MemoryConfigPatch {
     timeoutMs?: unknown;
     searchLimit?: unknown;
     writeEnabled?: unknown;
-    banks?: { general?: unknown; estate?: unknown };
+    banks?: { general?: unknown; estate?: unknown; job?: unknown };
   };
 }
 
@@ -150,6 +151,7 @@ export function mergeMemoryConfigPatch(current: MemoryConfig, patch: MemoryConfi
       banks: {
         general: banksPatch.general ?? current.http.banks.general,
         estate: banksPatch.estate ?? current.http.banks.estate,
+        job: banksPatch.job ?? current.http.banks.job,
       },
     },
   });

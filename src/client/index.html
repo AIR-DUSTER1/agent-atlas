@@ -717,7 +717,7 @@
             <div class="settings-section-heading">
               <div>
                 <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 长期记忆插槽</h2>
-                <p class="settings-sub">默认使用零依赖本地记忆，也可以连接兼容 Generic HTTP 契约或 Hindsight 的外部服务。通用 Agent 与租房 Agent 的 scope 严格隔离。</p>
+                <p class="settings-sub">默认使用零依赖本地记忆，也可以连接兼容 Generic HTTP 契约或 Hindsight 的外部服务。通用 / 房产 / 求职 Agent 的 scope 严格隔离。</p>
               </div>
               <button id="mem-refresh-btn" type="button" class="ghost-btn small" title="刷新记忆插槽状态">刷新状态</button>
             </div>
@@ -801,6 +801,10 @@
                       <span class="field-label">租房 Agent Bank</span>
                       <input id="mem-http-bank-estate" type="text" spellcheck="false" placeholder="例如 estate-local" />
                     </label>
+                    <label class="field">
+                      <span class="field-label">求职 Agent Bank</span>
+                      <input id="mem-http-bank-job" type="text" spellcheck="false" placeholder="例如 job-local" />
+                    </label>
                   </div>
                   <label class="cap-check"><input id="mem-http-write" type="checkbox" /><span>允许工具与设置页写入外部记忆</span></label>
                 </fieldset>
@@ -835,6 +839,7 @@
                   <select id="mem-profile-filter" class="pf-select" aria-label="记忆所属 Agent 范围">
                     <option value="general">通用 Agent</option>
                     <option value="estate">租房 / 房产 Agent</option>
+                    <option value="job">求职岗位 Agent</option>
                   </select>
                 </label>
                 <label class="field memory-search-field">
@@ -1333,6 +1338,51 @@
         <button id="estate-close" class="ghost-btn">关闭</button>
       </div>
       <p class="settings-note">会话里 Agent 自动调用 <code>house_search / house_map（对比区位地图）/ house_lookup（户型图）/ house_agents / house_appoint（人工审批）/ house_contact（人工审批）</code> 等工具；每轮会把用户原话上报给贝壳 <code>beike analyze</code>（官方契约，静默执行）。</p>
+    </div>
+  </div>
+
+  <!-- ============ 求职数据源面板：job-hunter 技能的环境 / 路径 / 登录 / 自检 ============ -->
+  <div id="job-mask" class="hidden">
+    <div id="job-modal" role="dialog" aria-modal="true" aria-labelledby="job-title">
+      <h2 id="job-title"><i class="ui-icon" data-icon="Briefcase" aria-hidden="true"></i> 求职数据源（job-hunter）</h2>
+      <p class="settings-sub">岗位采集来自本地 job-hunter 技能（Python CLI，四平台：BOSS直聘 / 智联 / 前程无忧 / 猎聘）。采集、打分、排除外包、导出 Excel 全在本地完成；Agent 只负责问清需求与解读结果。</p>
+
+      <div class="field-label">环境检查</div>
+      <div id="job-check-list" class="job-check-list" role="status" aria-live="polite">探测中…</div>
+      <div id="job-fix-hint" class="job-fix-hint hidden" role="alert"></div>
+
+      <div class="field-label">路径配置 <em class="key-state">留空表示自动探测</em></div>
+      <label class="field">
+        <span class="field-label">技能根目录（该目录下应有 <code>scripts/main.py</code>）</span>
+        <input id="job-skill-dir" type="text" spellcheck="false" placeholder="例如 C:\Users\你\.agents\skills\job-hunter" />
+      </label>
+      <label class="field">
+        <span class="field-label">Python 解释器</span>
+        <input id="job-python-bin" type="text" spellcheck="false" placeholder="留空使用 PATH 上的 python；需要 3.10+" />
+      </label>
+      <label class="field">
+        <span class="field-label">数据目录（登录态与 Excel 产出）</span>
+        <input id="job-data-dir" type="text" spellcheck="false" placeholder="留空使用 <技能目录>/job-data" />
+      </label>
+      <div class="kb-actions">
+        <button id="job-save-btn" class="btn btn-approve">保存并重新探测</button>
+        <button id="job-doctor-btn" class="ghost-btn">运行自检</button>
+        <span id="job-status" class="settings-status" role="status" aria-live="polite"></span>
+      </div>
+      <pre id="job-doctor-output" class="job-doctor-output"></pre>
+
+      <div class="field-label ext-head">平台登录 <em class="key-state">BOSS直聘必须登录，其余建议登录</em></div>
+      <p class="settings-note" style="margin-top:0;">
+        点按钮会拉起浏览器打开对应平台登录页，请扫码。登录态保存在数据目录的 <code>.profile/</code>，
+        之后所有采集复用，不用重复登录。未登录时 BOSS直聘列表页会被安全校验拦截，一条都拿不到。
+      </p>
+      <div id="job-platforms" class="job-platforms"></div>
+
+      <div class="kb-footer-actions">
+        <span class="spacer"></span>
+        <button id="job-close" class="ghost-btn">关闭</button>
+      </div>
+      <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary</code>；Excel 交付物在数据目录的 <code>out/</code> 下，投递状态改动下次采集会增量保留。</p>
     </div>
   </div>
 

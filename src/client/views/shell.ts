@@ -79,6 +79,18 @@ export function buildDemoCards(container: HTMLElement | null): void {
     }));
   }
 
+  // 求职岗位 Agent 是 job-hunter 技能的入口；同样按插件开关隐藏。
+  const job = AGENT_PROFILES.job;
+  if (state.plugins?.enabled.job !== false) {
+    container.appendChild(agentCard({
+      icon: job.icon,
+      name: job.label,
+      description: job.description,
+      example: job.example,
+      onClick: () => createSessionFn("job"),
+    }));
+  }
+
   for (const demo of state.config?.demos || []) {
     container.appendChild(agentCard({
       icon: String(demo.id),

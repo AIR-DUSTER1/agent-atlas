@@ -76,6 +76,16 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     defaultEnabled: true,
   },
   {
+    id: "job",
+    icon: "💼",
+    name: "求职岗位（job-hunter）",
+    transport: "cli",
+    runtime: "Python CLI · 四平台采集",
+    description: "从 BOSS直聘 / 智联 / 前程无忧 / 猎聘 采集岗位、打分、排除外包并导出 Excel。需要 Python 3.10+ 与 DrissionPage，首次使用要在各平台扫码登录。",
+    manageLabel: "管理数据源",
+    defaultEnabled: true,
+  },
+  {
     id: "computer",
     icon: "🖥️",
     name: "电脑控制（Computer Use）",

@@ -31,6 +31,14 @@ export const AGENT_PROFILES: Readonly<Record<string, AgentProfileMeta>> = Object
     description: "贝壳官方数据 · 找房对比 · 区位地图 · 户型图 · 预约审批",
     example: "帮我在北京租个两居室",
   }),
+  job: Object.freeze({
+    id: "job",
+    label: "求职岗位 Agent",
+    shortLabel: "求职",
+    icon: "💼",
+    description: "四平台岗位采集 · 匹配打分 · 排除外包 · 投递进度表",
+    example: "找青岛的 Agent 开发岗，10-20K，两年经验",
+  }),
 });
 
 export function agentProfileMeta(agentProfileId: unknown): AgentProfileMeta | null {
@@ -50,5 +58,6 @@ export function profileMetaForSession(session: SessionLike | null | undefined): 
   if (direct) return direct;
   if (session?.kind === "agent") return AGENT_PROFILES.general;
   if (session?.kind === "estate") return AGENT_PROFILES.estate;
+  if (session?.kind === "job") return AGENT_PROFILES.job;
   return null;
 }

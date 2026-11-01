@@ -236,7 +236,7 @@ export interface ComposerTrigger {
  * 全局状态
  * ------------------------------------------------------------------------- */
 
-import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent, PluginSettingsState, RoutingSnapshot, SubagentSettingsState } from "./types-api.js";
+import type { AppConfig, PendingFile, RagState, EstateState, JobState, ExternalAgent, PluginSettingsState, RoutingSnapshot, SubagentSettingsState } from "./types-api.js";
 
 export interface SessionStreamState {
   ctrl: AbortController;
@@ -251,6 +251,7 @@ export interface AppState {
   externalAgents: ExternalAgent[];
   rag: RagState | null;
   estate: EstateState | null;
+  job: JobState | null;
   plugins: PluginSettingsState | null;
   subagents: SubagentSettingsState | null;
   /** 路由配置快照（设置页懒加载；未打开过为 null） */

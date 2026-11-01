@@ -8,6 +8,7 @@
  * 最终复用人审批 interrupt，而不是 silently 放行。
  */
 import type { BaseMessage } from "@langchain/core/messages";
+import type { AgentProfileId } from "./profile.js";
 import { invokeWithModelRetry } from "../model-retry.js";
 
 const TOOL_RISK_TIMEOUT_MS = 15_000; // 审查调用超时；超时按高风险处理
@@ -21,7 +22,7 @@ export interface ToolRiskContext {
   args: Record<string, unknown>;
   /** 当前轮用户请求，帮助模型区分“用户明确要求”与越权操作。 */
   userIntent?: string;
-  profileId?: "general" | "estate";
+  profileId?: AgentProfileId;
 }
 
 export interface ToolRiskUsage {

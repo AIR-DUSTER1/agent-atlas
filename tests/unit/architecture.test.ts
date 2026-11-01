@@ -64,6 +64,23 @@ test("通用与房产 Agent 的领域工具导入物理隔离", async () => {
   assert.doesNotMatch(estate, /tools-dev|tools-rag|terminal|write_file|retrieve_docs/);
 });
 
+test("求职 Agent 与通用 / 房产 Agent 的工具集互不越界", async () => {
+  const job = await readFile(join(SRC, "agent", "job.ts"), "utf8");
+  const general = await readFile(join(SRC, "agent", "general.ts"), "utf8");
+  const estate = await readFile(join(SRC, "agent", "estate.ts"), "utf8");
+  // 求职只用 job_* 工具集，不带开发 / 知识库 / 找房能力
+  assert.match(job, /tools-job/);
+  assert.doesNotMatch(job, /tools-dev|tools-rag|tools-estate|terminal|retrieve_docs/);
+  assert.doesNotMatch(job, /house_(search|lookup|appoint|contact|market)/);
+  // 其它 Agent 不得反向引入求职工具
+  assert.doesNotMatch(general, /tools-job|job_(collect|query|enrich|summary)/);
+  assert.doesNotMatch(estate, /tools-job|job_(collect|query|enrich|summary)/);
+});
+
+test("路由层不依赖 server：RAG 与熔断等跨层能力由 server 注入", async () => {
+  assert.deepEqual(await violations(join(SRC, "routing"), /(^|\/)(server|client)(\/|$)/), []);
+});
+
 test("routes 不直接操作文件系统，统一走持久化服务", async () => {
   assert.deepEqual(
     await violations(join(SRC, "server", "routes"), /^node:(fs|fs\/promises)$|^fs(\/promises)?$/),
