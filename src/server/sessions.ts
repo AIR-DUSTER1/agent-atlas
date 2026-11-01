@@ -55,6 +55,19 @@ export function isDemo(v: unknown): v is 1 | 2 | 3 | 4 {
 
 export type SessionKind = "agent" | "estate" | "job" | "demo" | "external";
 
+/**
+ * 这些 kind 的会话由 workflow 图驱动：有 checkpointer（多轮记忆）、受权限模式约束、
+ * 压缩后需要清理旧线程、重启后需要注入历史。
+ *
+ * 新增 Agent 类型必须改这里，而不是在各调用点各写一份 `kind === "agent" || "estate"` ——
+ * 加求职 Agent 时正因为四处各写一份，漏掉了权限 chip、压缩清理与历史注入三处。
+ */
+const AGENT_KINDS: readonly SessionKind[] = ["agent", "estate", "job"];
+
+export function isAgentKind(kind: SessionKind | null | undefined): boolean {
+  return kind != null && AGENT_KINDS.includes(kind);
+}
+
 /** 一轮对话的服务端记录：用户消息 + 该轮全部 AgentEvent（供任意浏览器回放历史） */
 export interface TurnRecord {
   /** 稳定轮次 id：结构化日志、journal 与回放共用，不进入模型上下文。 */
@@ -351,7 +364,7 @@ const PREHISTORY_AI_MAX = 4_000;   // 单轮助手话上限（字符）
 
 /** 这些 kind 的图带 checkpointer（多轮记忆），值得注入历史；其它（demo1/4 无记忆图）不必 */
 function hasSessionMemory(kind: Session["kind"], demo: Session["demo"]): boolean {
-  return kind === "agent" || kind === "estate" || kind === "external" || demo === 2 || demo === 3;
+  return isAgentKind(kind) || kind === "external" || demo === 2 || demo === 3;
 }
 
 /** 取「上一轮文件发生前」的上文摘录；返回 null 表示无需注入。

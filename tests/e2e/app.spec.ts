@@ -450,3 +450,93 @@ test("保存模型后关闭编辑区并给出成功提示", async ({ page }) => 
   await expect(page.locator("#settings-status")).toContainText(/已保存模型/);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * 回归：审批卡出现后切到别的会话再切回来，按钮必须仍然可点。
+ *
+ * 线上表现是「点不动」且毫无反馈：interrupt 到达时前端仍认为该会话在生成
+ * （侧栏挂着「生成中」、输入框是停止键），decideApproval 首行直接静默 return。
+ * 现在 interrupt 会立即解除流占用，且万一被挡住也会有明确 toast。
+ */
+test("审批卡出现后切走再切回，批准按钮仍可执行", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await login(page);
+  await createChat(page);
+  await sendMessage(page, "给 boss@example.com 发一封邮件，主题是回归验证");
+  await expect(page.getByRole("button", { name: "✓ 批准并执行" }).last()).toBeVisible({ timeout: 20_000 });
+
+  // interrupt 到达即视为本轮结束：不应再显示停止键，侧栏也不该挂着「生成中」
+  await expect(page.locator("#stop-btn")).toBeHidden();
+  await expect(page.locator("#send-btn")).toBeVisible();
+  await expect(page.locator(".s-running")).toHaveCount(0);
+  await expect(page.locator(".s-pending").first()).toBeVisible();
+
+  // 切到另一个会话再切回来
+  await createChat(page);
+  await expect(page.locator("#input")).toBeVisible();
+  await page.locator("#session-list .session-item", { has: page.locator(".s-pending") }).first().click();
+  await expect(page.getByRole("button", { name: "✓ 批准并执行" }).last()).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "✓ 批准并执行" }).last().click();
+  await expect(page.locator(".msg-assistant").last()).toContainText("邮件已按你的批准发送完成", { timeout: 20_000 });
+  await expect(page.locator(".s-pending")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 回归：求职会话必须有权限切换入口。
+ *
+ * 权限 chip 的显隐曾硬编码 `kind === "agent" || kind === "estate"`，
+ * 加求职 Agent 时漏改，导致求职会话完全没有权限控制入口
+ * （工具审批照旧生效，但用户看不到也切不了只读/自主/自动）。
+ */
+test("求职会话显示权限切换，且切换后前后端一致", async ({ page }) => {
+  await login(page);
+  // 直接建求职会话，避免依赖 Agent 选择页的卡片文案
+  const sid = await page.evaluate(async () => {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ kind: "job", projectId: "default" }),
+    });
+    const data = await res.json() as { id: string };
+    return data.id;
+  });
+
+  await page.evaluate(async (id) => {
+    // 动态 import 的是浏览器已构建产物（tsc 输出），路径是站点绝对路径。
+    // 用字符串变量包一层，避免 tsc 把 "/core/state.js" 当成本地模块去解析。
+    const stateMod = "/core/state.js";
+    const sessionsMod = "/views/sessions.js";
+    const navMod = "/views/navigation.js";
+    const { state } = await import(/* @vite-ignore */ stateMod) as {
+      state: { sessions: unknown[]; stale?: unknown };
+    };
+    const sessions = await import(/* @vite-ignore */ sessionsMod) as { renderSessions: () => void };
+    const nav = await import(/* @vite-ignore */ navMod) as { selectSession: (sid: string) => void };
+    const res = await fetch("/api/sessions", { credentials: "include" });
+    const list = await res.json() as Array<Record<string, unknown>>;
+    const current = state.sessions as Array<{ stale?: boolean }>;
+    state.sessions = [...list.map((s) => ({ ...s, stale: false })), ...current.filter((s) => s.stale)];
+    sessions.renderSessions();
+    nav.selectSession(id);
+  }, sid);
+
+  await expect(page.locator("#perm-group")).toBeVisible();
+  await expect(page.locator("#cm-perm .cm-text")).toHaveText(/权限·审批/);
+
+  await page.locator("#cm-perm").click();
+  await expect(page.locator("#cm-perm-menu .cm-item").first()).toBeVisible();
+  await page.locator("#cm-perm-menu .cm-item").first().click();
+  await expect(page.locator("#cm-perm .cm-text")).toHaveText(/权限·只读/);
+
+  // 服务端也要真的记下（不只是前端 chip 文案变了）
+  const serverMode = await page.evaluate(async (id) => {
+    const res = await fetch("/api/sessions", { credentials: "include" });
+    const list = await res.json() as Array<{ id: string; permissionMode?: string }>;
+    return list.find((s) => s.id === id)?.permissionMode;
+  }, sid);
+  expect(serverMode).toBe("readonly");
+});

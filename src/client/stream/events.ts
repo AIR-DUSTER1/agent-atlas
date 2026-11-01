@@ -128,6 +128,32 @@ export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, 
   }
   setPendingApproval(true, sid);
   if (visible) scrollBottom(true);
+  // interrupt 之后这一轮就没有更多内容了：服务端会立刻补 done/end，但浏览器拿到
+  // 流末尾的时机不可控（代理缓冲、close 事件竞争都会拖）。这里主动把该会话的
+  // 「生成中」状态收掉 —— 否则用户在这个窗口里点「批准并执行」会被
+  // decideApproval 的流占用守卫拦住，表现就是按钮点不动。
+  releaseStreamAfterInterrupt(sid, ablock);
+}
+
+/**
+ * interrupt 到达即视为本轮结束：解除本会话的流占用，让审批/澄清可以立即响应。
+ *
+ * 只清「确实属于这个块」的那条流，避免误伤用户随后新发起的一轮。
+ * 后续 resume 会登记全新的流对象，所以这里删掉旧的一条不会影响它。
+ */
+function releaseStreamAfterInterrupt(sid: string | null, ablock: AssistantBlock): void {
+  if (!sid) return;
+  const stream = state.streams[sid];
+  if (!stream || stream.ablock !== ablock) return;
+  delete state.streams[sid];
+  // 后台会话（用户已切走）不碰输入区；当前会话则恢复发送按钮、隐藏停止按钮。
+  if (sid === state.currentId) void import("../stream/turn.js").then((m) => m.syncComposerState(sid));
+  sideRenderSessions();
+}
+
+/** 侧栏「生成中」标记挂在 state.streams 上，解除流占用后必须重绘才能消失。 */
+function sideRenderSessions(): void {
+  void import("../views/sessions.js").then((m) => m.renderSessions());
 }
 
 export function addErrorBlock(message: string, sid: string | null = state.currentId): void {

@@ -23,7 +23,7 @@ import { renderAll } from "../render/messages.js";
 import { showChatState } from "../views/navigation.js";
 import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
-import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind } from "../modules/types.js";
+import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind, SessionStreamState } from "../modules/types.js";
 
 /** 附件引用：项目/远程文件传路径（服务端读取校验），上传传 uploadId */
 function fileRefsOf(files: PendingFile[]): Array<{ kind: string; path?: string; uploadId?: string; name: string }> {
@@ -135,7 +135,11 @@ async function streamTurn(
   url: string, body: Record<string, unknown>, ablock: AssistantBlock, sid: string
 ): Promise<void> {
   const ctrl = new AbortController();
-  state.streams[sid] = { ctrl, sid, ablock };
+  // 记住本次请求自己登记的那条流：interrupt 到达时 addInterrupt 会主动解除占用
+  // （让审批按钮能立刻响应），后续 resume 会登记**新的**流对象。收尾时按身份
+  // 比较，绝不能因为 ablock 相同就把用户新发起的那一轮一起删掉。
+  const stream = { ctrl, sid, ablock };
+  state.streams[sid] = stream;
   syncComposerState(sid);
   renderSessions();
   const wasNear = nearBottomImpl();
@@ -159,7 +163,7 @@ async function streamTurn(
       addErrorBlock(`请求失败：${error.message}`, sid);
     }
   } finally {
-    finalize(ablock, sid);
+    finalize(ablock, sid, stream);
     if (sid === state.currentId && wasNear) chatScroll.scrollTop = chatScroll.scrollHeight;
   }
 }
@@ -169,7 +173,11 @@ function nearBottomImpl(): boolean {
 }
 
 /** finalize：结束流式态，清空光标 / 清理空块 */
-export function finalize(ablock: AssistantBlock | null, sid: string | null = state.currentId): void {
+export function finalize(
+  ablock: AssistantBlock | null,
+  sid: string | null = state.currentId,
+  stream?: SessionStreamState
+): void {
   if (ablock) {
     if (!ablock.parts.length) {
       // 整轮无输出（请求失败 / 立即中止）→ 移除空助手块
@@ -189,7 +197,12 @@ export function finalize(ablock: AssistantBlock | null, sid: string | null = sta
       }
     }
   }
-  if (sid && state.streams[sid]?.ablock === ablock) delete state.streams[sid];
+  // interrupt 之后本轮的流已被主动解除，用户可能已经发起新一轮（复用了同一个
+  // ablock）。只有「登记的还是我这一条」才删，否则会把新一轮的流删掉，
+  // 让它永远收不回来（按钮卡在停止态、也无法再发消息）。
+  if (sid && state.streams[sid] && (!stream || state.streams[sid] === stream)) {
+    delete state.streams[sid];
+  }
   if (sid === state.currentId) syncComposerState(sid);
   renderSessions();
   saveLocal();

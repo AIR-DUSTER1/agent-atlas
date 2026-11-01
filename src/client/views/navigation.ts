@@ -15,6 +15,7 @@ import { saveLocal, state, transcript } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
 import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
+import { isAgentKind } from "../modules/session-kind.js";
 import { renderAll } from "../render/messages.js";
 import { applyUsage, handleEvent } from "../stream/events.js";
 import { finalize, setStatus, syncComposerState } from "../stream/turn.js";
@@ -142,7 +143,9 @@ export function renderPermChip(session?: Session): void {
   const chip = $("cm-perm");
   if (!group || !chip) return;
   const current = session || state.sessions.find((x) => x.id === state.currentId);
-  const available = Boolean(current) && !current?.stale && (current?.kind === "agent" || current?.kind === "estate");
+  // 判定走 modules/session-kind 的共享谓词：之前这里硬编码 agent || estate，
+  // 加求职 Agent 时漏改，导致求职会话根本没有权限切换入口。
+  const available = Boolean(current) && !current?.stale && isAgentKind(current?.kind);
   group.classList.toggle("hidden", !available);
   if (!available) return;
   const mode = PERMISSION_MODES.find((m) => m.id === (current?.permissionMode || "approve"));

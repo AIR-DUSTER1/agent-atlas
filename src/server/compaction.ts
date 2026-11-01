@@ -12,7 +12,7 @@ import { createChatModel } from "../llm.js";
 import { clearModelRetryRecords, invokeWithModelRetry } from "../model-retry.js";
 import { getCheckpointSaver } from "../checkpoint.js";
 import { log } from "./logging.js";
-import { buildGraph, currentConfigVersion, type Session, type TurnRecord } from "./sessions.js";
+import { buildGraph, currentConfigVersion, isAgentKind, type Session, type TurnRecord } from "./sessions.js";
 import { journalCompact } from "./session-store.js";
 
 const MAX_TRANSCRIPT_CHARS = 80_000; // 送进摘要模型的原文上限
@@ -132,7 +132,7 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   // 新线程以注入的摘要为起点，模型不再看到被压缩掉的原始消息。
   const nextThreadId = `web-${randomUUID()}`;
   const compactedTurnId = session.turnHistory.at(-1)?.turnId ?? null;
-  if (session.kind === "agent" || session.kind === "estate") {
+  if (isAgentKind(session.kind)) {
     void getCheckpointSaver().deleteThread(session.threadId);
   }
   session.graph = buildGraph(session.kind, session.demo, nextThreadId);

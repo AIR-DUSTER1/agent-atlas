@@ -55,12 +55,12 @@ docker compose build
 
 ```bash
 docker build \
-  --build-arg APP_VERSION=0.9.0-beta.5 \
+  --build-arg APP_VERSION=0.9.0-beta.6 \
   --build-arg GIT_COMMIT=<commit> \
   --build-arg BUILD_TIME=<ISO-8601> \
-  -t registry.example.com/agentatlas:0.9.0-beta.5 .
-docker push registry.example.com/agentatlas:0.9.0-beta.5
-docker image inspect registry.example.com/agentatlas:0.9.0-beta.5 \
+  -t registry.example.com/agentatlas:0.9.0-beta.6 .
+docker push registry.example.com/agentatlas:0.9.0-beta.6
+docker image inspect registry.example.com/agentatlas:0.9.0-beta.6 \
   --format '{{index .RepoDigests 0}}'
 ```
 

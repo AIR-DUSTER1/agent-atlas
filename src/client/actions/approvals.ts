@@ -15,11 +15,33 @@ import { assistantBlockContaining } from "../modules/chat-flow.js";
 import { partEls, saveLocal } from "../core/state.js";
 import { renderApprovalCard, renderClarificationCard, clarificationAnswerLines } from "../render/parts.js";
 import { renderSessions } from "../views/sessions.js";
+import { toast } from "../ui/toast.js";
 import { runResume } from "../stream/turn.js";
 import type { ApprovalPart, ClarificationPart } from "../modules/types.js";
 
+/**
+ * 审批 / 澄清决策的统一准入检查。
+ *
+ * 为什么不能静默 return：原来这里直接 `return`，用户在「会话还在生成」时点
+ * 「批准并执行」会完全没反应 —— 卡片不动、没有提示，看起来就是按钮坏了。
+ * 现在明确告诉用户该等什么、或者可以直接点停止。
+ */
+function blockedReason(): string | null {
+  const sid = state.currentId;
+  if (!sid) return null;
+  if (state.compacting[sid]) return "上下文压缩还没结束，请等它完成后再处理这条审批。";
+  if (state.streams[sid]) {
+    return "本会话还有一轮正在生成。请等它结束，或先点输入框右侧的停止按钮，再回来处理这条审批。";
+  }
+  return null;
+}
+
 export async function decideApproval(part: ApprovalPart, status: "approved" | "rejected"): Promise<void> {
-  if (state.currentId && (state.streams[state.currentId] || state.compacting[state.currentId])) return;
+  const blocked = blockedReason();
+  if (blocked) {
+    toast(blocked, "warning");
+    return;
+  }
   part.status = status;
   const refs = partEls.get(part);
   if (refs) renderApprovalCard(part, refs.el);
@@ -34,7 +56,11 @@ export async function decideApproval(part: ApprovalPart, status: "approved" | "r
 }
 
 export async function decideClarification(part: ClarificationPart, choice: string, label: string): Promise<void> {
-  if (state.currentId && (state.streams[state.currentId] || state.compacting[state.currentId])) return;
+  const blocked = blockedReason();
+  if (blocked) {
+    toast(blocked, "warning");
+    return;
+  }
   const value = String(choice || "").trim();
   if (!value) return;
   part.status = "answered";

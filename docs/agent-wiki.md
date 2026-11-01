@@ -1577,6 +1577,9 @@ console.log(result.messages.at(-1).content);
 | 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
 | 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
 | 4 题各填长答案后，最后一题的答复被切半 | 拼装文本超过 `/api/resume` 的 2000 字上限，服务端静默 `slice` | 拼装时按题均分预算逐题截断（§3.48） |
+| 求职会话没有权限切换入口（工具审批本身正常） | 「哪些 kind 有 Agent 执行力」的判断散落四处各写一份 `kind === "agent" \|\| kind === "estate"`，加求职 Agent 时只改了联合类型与建图分支 | 统一走 `isAgentKind()`（服务端 `server/sessions.ts`、前端 `client/modules/session-kind.ts`）；`session-kinds.test.ts` 扫描源码禁止再手写双值白名单（§3.49） |
+| 求职会话压缩后旧 checkpoint 线程不清理、重启后多轮记忆丢失 | 同一处 `agent \|\| estate` 白名单在 `compaction.ts` 与 `hasSessionMemory()` 里各写了一份，都漏了 job | 同上，改为 `isAgentKind()`（§3.49） |
+| 审批卡出现后切到别的会话再回来，「批准并执行」点不动且毫无反馈 | ① `addInterrupt` 只挂卡片不解流占用，`state.streams[sid]` 要等 SSE 尾部才清；② `decideApproval` 首行遇到流占用直接 `return`，静默失败 | interrupt 到达即 `releaseStreamAfterInterrupt()` 解除本轮流占用；收尾按**流对象身份**删除（不能按 ablock，否则会误删 resume 新登记的那条）；被挡住时 `toast` 明确告诉用户该等什么或点停止（§3.49） |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -2269,3 +2272,43 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 4. 更新选中态必须**就地改 DOM**，不能整卡重绘 —— 重绘会丢其它题输入框的焦点与光标位置。
 5. 旧 journal 里的单问载荷（顶层 `question` + `options` + `allowCustom`）必须继续能渲染，
    由 `normalizeClarify()` 统一提升成一道题；服务端类型只声明新形状，避免两处都写兼容分支。
+
+### 3.49 会话类型能力判定：`isAgentKind()` 单一来源
+
+**定位**：回答「这种会话有没有 Agent 执行力」——是否走 workflow 图、是否受权限模式约束、
+压缩后是否需要清理旧线程、重启后是否需要注入历史。这个问题此前在四个文件里各写了一份
+`kind === "agent" || kind === "estate"`，加求职 Agent 时漏改，一次性暴露出三个缺陷：
+
+| 漏改位置 | 用户可见后果 |
+|---|---|
+| `client/views/navigation.ts` | 求职会话根本没有权限切换 chip（工具审批仍生效，但用户看不见也切不了） |
+| `server/compaction.ts` | 压缩后旧 checkpoint 线程不清理，`checkpoints.ndjson` 无限增长 |
+| `server/sessions.ts` 的 `hasSessionMemory()` | 服务重启后求职会话不注入历史，多轮记忆静默丢失 |
+
+**现在两处唯一定义**（不跨层共享，服务端不得 import 客户端模块）：
+
+```ts
+// src/server/sessions.ts
+const AGENT_KINDS: readonly SessionKind[] = ["agent", "estate", "job"];
+export function isAgentKind(kind: SessionKind | null | undefined): boolean { ... }
+
+// src/client/modules/session-kind.ts
+export const AGENT_KINDS = ["agent", "estate", "job"] as const satisfies readonly SessionKind[];
+export function isAgentKind(kind: SessionKind | null | undefined): kind is AgentKind { ... }
+```
+
+**允许的例外**（`session-kinds.test.ts` 的白名单里显式列出）：
+
+- `agent/profile.ts`、`client/modules/agent-profile.ts`：kind → profile 的逐项映射，
+  每个 kind 落到不同 profile，本来就必须逐个列出；
+- `routing/route-step.ts`：求职会话**有意**不参与子代理路由（领域固定，无需再派）。
+
+**审批按钮「点不动」的成因与对策**（同一轮修复）：
+
+- 成因一：`addInterrupt` 挂出审批卡后没有解除 `state.streams[sid]`，而 `decideApproval`
+  的第一行就是「有流就 return」——浏览器拿到 SSE 尾部的时机不可控（代理缓冲、
+  `close` 事件竞争），用户正好卡在这个窗口里就会看到按钮毫无反应；
+- 成因二：把「被挡住」写成静默 `return`，用户完全无从判断是按钮坏了还是要等；
+- 对策：interrupt 到达即 `releaseStreamAfterInterrupt()`（只解除确实属于该块的流）；
+  收尾改为按**流对象身份**删除，不能按 `ablock` 比较——resume 复用同一个 `ablock`，
+  按块删会把用户新发起的那一轮删掉；被挡住时用 `toast` 说明该等什么或先点停止。
