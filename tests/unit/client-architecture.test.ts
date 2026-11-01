@@ -153,6 +153,34 @@ test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
   for (const wrapper of VENDOR_WRAPPER_FILES) assert.ok(!outputs.includes(wrapper));
 });
 
+/**
+ * icons wrapper 从裸名 "lucide" 导入，import map 把 "lucide" 指向 icons-lib.js。
+ * 只要 wrapper 导出的名字在产物里缺一个，整个模块链接阶段就失败 —— 症状是
+ * **页面上所有图标一起消失**，而不是少一个。曾在加 Waypoints / Briefcase 时踩过：
+ * 只改了 wrapper，忘了改 vendor 清单，CI 三处断言 `svg` 不可见。
+ */
+test("icons wrapper 的每个导出都必须在 vendor 构建清单里", async () => {
+  const wrapper = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");
+  const lucide = VENDOR_ENTRIES.find((entry) => entry.name === "lucide");
+  assert.ok(lucide, "缺少 lucide vendor 条目");
+
+  /** 从 `export { A, B, C } from "..."` 里抽名字（跨行、允许尾逗号） */
+  const namesIn = (source: string): string[] => {
+    const match = /export\s*\{([\s\S]*?)\}\s*from/.exec(source);
+    if (!match) return [];
+    return match[1]!
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item && !item.startsWith("type "));
+  };
+
+  const wrapperNames = namesIn(wrapper);
+  const vendorNames = new Set(namesIn(lucide.source));
+  assert.ok(wrapperNames.length > 0, "wrapper 导出解析失败");
+  const missing = wrapperNames.filter((name) => !vendorNames.has(name));
+  assert.deepEqual(missing, [], `这些图标在 vendor 清单里缺失，会导致整个图标模块链接失败：${missing.join("、")}`);
+});
+
 test("模型重试默认折叠且上下文容量保留历史 used", async () => {
   const parts = await readFile(join(CLIENT, "render", "parts.ts"), "utf8");
   assert.match(parts, /p: "model_retry"/);

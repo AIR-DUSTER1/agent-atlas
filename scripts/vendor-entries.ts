@@ -35,6 +35,10 @@ export const VENDOR_ENTRIES: VendorEntry[] = [
     name: "lucide",
     outputFile: "icons-lib.js",
     license: "ISC",
+    // ⚠ 这份清单必须与 src/client/vendor/icons.ts 的导出**逐个一致**：
+    // wrapper 从裸名 "lucide" 导入，import map 把 "lucide" 指向本产物；
+    // 缺任何一个名字，整个模块在链接阶段就失败 —— 不是少一个图标，而是全没。
+    // tests/unit/client-architecture.test.ts 里有一致性守门用例。
     source: `
       export {
         Plus, Search, Settings, Paperclip, Send, Square, Sun, Moon, Monitor,
@@ -47,7 +51,7 @@ export const VENDOR_ENTRIES: VendorEntry[] = [
         ArrowDown, ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
         TriangleAlert, CircleX, Sparkles, Map, Settings2, PanelLeft,
         ChevronsUpDown, Calendar, Code, FileCode, FolderTree, CheckCircle2,
-        XCircle
+        XCircle, Waypoints, Briefcase
       } from "lucide";
     `,
   },

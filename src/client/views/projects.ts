@@ -29,14 +29,39 @@ export function projectIcon(project: ProjectEntry | null | undefined): IconName 
 let onProjectsChanged: () => void = () => {};
 export function bindProjectsChanged(handler: () => void): void { onProjectsChanged = handler; }
 
+/**
+ * 拉取项目列表并刷新切换器。
+ *
+ * 竞态防护（真实 bug，非测试问题）：「点击项目按钮」会 await 一次本函数，
+ * 若此时用户紧接着点了「添加本地文件夹」，添加流程先回来并设好 projectView，
+ * 而这次**更早发出、更晚返回**的列表响应里还没有新项目 —— 守卫会把刚选中的
+ * 项目重置成「全部项目」，localStorage 也不写入。表现是「加完项目又跳回全部」。
+ *
+ * 对策：只重置「确实已不存在」的 view，并且**忽略晚到的过期响应**（用序号判断）。
+ */
+let projectsRequestSeq = 0;
+
 export async function loadProjects(): Promise<void> {
+  const seq = ++projectsRequestSeq;
   try {
     const data = await api<{ projects?: ProjectEntry[] }>("/api/projects");
+    // 有更新的请求已经发出（或已完成），本次结果作废，避免旧列表覆盖新状态。
+    if (seq !== projectsRequestSeq) return;
     state.projects = data.projects || [];
     if (state.projectView !== "all" && !projectById(state.projectView)) state.projectView = "all";
     renderProjectSwitcher();
     onProjectsChanged();
   } catch { /* 服务重启等临时失败不阻塞主界面 */ }
+}
+
+/** 添加/删除项目后直接写入权威结果，同时作废仍在飞行中的旧列表请求。 */
+export function applyProjectList(projects: ProjectEntry[], view?: string): void {
+  projectsRequestSeq += 1;
+  state.projects = projects;
+  if (view !== undefined) state.projectView = view;
+  saveLocal();
+  renderProjectSwitcher();
+  onProjectsChanged();
 }
 
 export function showProjectMenu(show: boolean): void {
@@ -250,11 +275,9 @@ async function addProjectFolderOnce(type: "local" | "cloud"): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    state.projects = res.projects;
-    state.projectView = res.project.id;
-    saveLocal();
-    renderProjectSwitcher();
-    onProjectsChanged();
+    // 用服务端返回的权威列表直接落状态，并作废仍在飞行中的旧列表请求，
+    // 否则「点开菜单时发出的那次 loadProjects」稍后返回会把新项目抹掉。
+    applyProjectList(res.projects, res.project.id);
   } catch (err) {
     uiAlert(`${type === "cloud" ? "云端仓库" : "本地文件夹"}添加失败：${(err as Error).message}`, "添加项目");
   }

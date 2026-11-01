@@ -7,10 +7,18 @@
   background: rgba(0,0,0,.55);
   backdrop-filter: blur(3px);
   display: grid; place-items: center;
+  /* 内边距 + 允许滚动：内容高过视口时（例如 720p 屏上 Agent 卡片已有 3 个），
+     place-items: center 会把弹窗上下同时挤出屏幕，关闭按钮直接点不到。
+     这两行是该场景的修复，不要删。 */
+  padding: 16px;
+  overflow-y: auto;
   z-index: 100;
 }
 #modal {
   width: min(680px, 92vw);
+  /* 与 mask 的 padding 配合，保证弹窗永远完整可见且可滚动到按钮 */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 16px;

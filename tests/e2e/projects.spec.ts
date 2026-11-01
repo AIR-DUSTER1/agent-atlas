@@ -26,7 +26,14 @@ test("添加本地文件夹先打开系统目录选择接口，不再弹出手�
 
   await page.locator("#project-btn").click();
   await expect(page.locator("#project-menu")).not.toContainText("agentatlas");
+  // 添加流程是「取路径 → POST /api/projects → 渲染切换器」三步异步；
+  // 直接在点击后断言文案会在 POST 还没返回时超时（曾经误判成功能回归）。
+  // 等真实响应再断言，既稳定又能验证接口真的被调用了一次。
+  const created = page.waitForResponse(
+    (res) => res.url().includes("/api/projects") && res.request().method() === "POST",
+  );
   await page.getByRole("menuitem", { name: /添加本地文件夹（系统选择）/ }).click();
+  expect((await created).ok()).toBe(true);
 
   await expect(page.locator("#project-btn-text")).toHaveText("e2e");
   await expect(page.locator("#ui-dialog-input")).toBeHidden();
