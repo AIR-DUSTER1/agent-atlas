@@ -23,6 +23,8 @@ import { renderAll } from "../render/messages.js";
 import { showChatState } from "../views/navigation.js";
 import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
+import { toast } from "../ui/toast.js";
+import { parseGoalCommand } from "../modules/goal.js";
 import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind, SessionStreamState } from "../modules/types.js";
 
 /** 附件引用：项目/远程文件传路径（服务端读取校验），上传传 uploadId */
@@ -56,6 +58,19 @@ export async function send(): Promise<void> {
   if (cur?.stale) return; // 历史会话不可发送
   closeComposerMenu();
 
+  // /goal 内置命令：以连续模式发送任务。裸 /goal 只提示用法，不发空请求；
+  // 标记按会话记（连续回合被审批打断后 resume 要重传 continuous 放宽超步保险丝），
+  // 普通消息会清掉本会话标记 —— goal 只对它派活的那个回合负责。
+  const goal = parseGoalCommand(text);
+  if (goal && !goal.task) {
+    toast("用法：/goal <任务描述> —— 任务未完成会持续执行，直到完成、请求出错或手动停止");
+    return;
+  }
+  const message = goal ? goal.task : text;
+  if (goal) state.continuousTurns[sid] = true;
+  else delete state.continuousTurns[sid];
+  saveLocal();
+
   // 参考 ZCode：请求耗时期间保留上一轮主模型 context used 与当前模型窗口，
   // 新一轮的首个服务端 usage 到达后再用权威 token 快照校正。
   const previousUsage = state.usage[sid];
@@ -88,7 +103,7 @@ export async function send(): Promise<void> {
   autoGrowImpl();
 
   const arr = transcript(sid);
-  const userBlock: ChatBlock = { t: "user", text, ...(filesMeta.length ? { files: filesMeta } : {}) };
+  const userBlock: ChatBlock = { t: "user", text: message, ...(filesMeta.length ? { files: filesMeta } : {}) };
   const ablock: AssistantBlock = { t: "assistant", parts: [] };
   arr.push(userBlock, ablock);
   mountBlock(userBlock);
@@ -100,7 +115,7 @@ export async function send(): Promise<void> {
   // 首条消息自动作为会话标题
   const s = state.sessions.find((x) => x.id === sid);
   if (s && !s._renamed) {
-    s.title = text.slice(0, 24) + (text.length > 24 ? "…" : "");
+    s.title = message.slice(0, 24) + (message.length > 24 ? "…" : "");
     s._renamed = true;
     const titleEl = $("session-title");
     if (titleEl) titleEl.textContent = s.title;
@@ -108,10 +123,9 @@ export async function send(): Promise<void> {
   }
   await streamTurn("/api/chat", {
     sessionId: sid,
-    message: text,
+    message,
     ...(fileRefs.length ? { files: fileRefs } : {}),
-    // 连续工作模式：随请求携带；服务端写进图状态，审批 resume 无需重传
-    ...(state.continuousMode ? { continuous: true } : {}),
+    ...(goal ? { continuous: true } : {}),
   }, ablock, sid);
 }
 
@@ -131,8 +145,8 @@ export async function runResume(
     ablock = created;
   }
   // 审批/澄清恢复：图状态里已有 continuousMode 驱动回炉循环，这里重传只为
-  // 让服务端延续放宽后的超步保险丝（开关已持久化，刷新后依然拿得到）
-  await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousMode ? { continuous: true } : {}), ...payload }, ablock, sid);
+  // 让服务端延续放宽后的超步保险丝；标记按会话持久化，刷新后依然拿得到
+  await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousTurns[sid] ? { continuous: true } : {}), ...payload }, ablock, sid);
 }
 
 async function streamTurn(

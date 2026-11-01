@@ -818,12 +818,13 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
 | `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，普通模式最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过；连续模式换用「任务完成闸」判据（见下） |
 
-**连续工作模式（请求级 `continuous: true` → 图状态 `continuousMode`）**：反思不通过就持续回炉，直到反思通过 / 空转熔断 / 请求异常 / 用户中止。三个设计决定：
+**连续工作模式（请求级 `continuous: true` → 图状态 `continuousMode`）**：产品入口是内置命令 `/goal <任务>`（`client/modules/goal.ts` 纯函数解析，菜单选中填充 `/goal `、`turn.ts` 发送时拦截；标记按会话记在 `state.continuousTurns` 并持久化，普通消息清除、resume 重传以延续超步放宽）。反思不通过就持续回炉，直到反思通过 / 空转熔断 / 请求异常 / 用户中止。四个设计决定：
 
 - 标记在 `analyze` 从请求 `configurable` 读一次后**写入图状态**而不是每次读 config——审批 resume 走同一线程检查点，图状态还在，`/api/resume` 不用重传该标记；
 - 回炉上限从 3 放宽到 `MAX_CONTINUOUS_REVISIONS = 1000`（保险丝），真正的防失控机制是**空转熔断**：`review` 记录上次反思时的消息总数（`lastReviewMessageCount`），两次反思之间没有任何新工具消息（`idleReviewRounds`）连续计满 `MAX_IDLE_REVIEW_ROUNDS = 3` 就结束回合——任务真在推进时每轮都有工具结果，计数每轮清零；计数器在 `analyze` 的 fallback 里随新回合归零，防止上一轮的空转计数泄漏到下一轮造成提前熔断；
 - 判据切到 `CONTINUOUS_REVIEW_PROMPT`：从「回答是否够好」换成「目标动作是否执行完并验证」，feedback 必须是下一步行动指令而不是文风建议；
-- 超步保险丝单独放宽：`stream.ts` 对 `continuous` 请求用 `CONTINUOUS_RECURSION_LIMIT = 20000` 而不是 `AGENT_RECURSION_LIMIT = 1000`——一个回炉周期 ≈ 3-6 超步，小时级任务按 1000 会先撞 GraphRecursionError；`/api/resume` 由前端重传 `continuous` 延续放宽（图状态里的 `continuousMode` 只驱动循环，不决定这个上限）。
+- 超步保险丝单独放宽：`stream.ts` 对 `continuous` 请求用 `CONTINUOUS_RECURSION_LIMIT = 20000` 而不是 `AGENT_RECURSION_LIMIT = 1000`——一个回炉周期 ≈ 3-6 超步，小时级任务按 1000 会先撞 GraphRecursionError；`/api/resume` 由前端重传 `continuous` 延续放宽（图状态里的 `continuousMode` 只驱动循环，不决定这个上限）；
+- 连续请求在图输入里前置一条 `GOAL_MODE_NOTE` 注记（`routes/chat.ts`）：反思闸会拦「提前收尾」，但第一轮就让模型知道规则能省一次回炉；不改会话权限，高风险操作照常审批。
 
 **关键坑**：
 

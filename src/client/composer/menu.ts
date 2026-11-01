@@ -16,6 +16,7 @@ import { fmtSize } from "../modules/format.js";
 import { addPendingFile } from "../views/attachments.js";
 import { h } from "../ui/h.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
+import { GOAL_COMMAND } from "../modules/goal.js";
 import type { ComposerItem, ComposerTrigger } from "../modules/types.js";
 
 export const FILE_MENTION_LIMIT = 20;
@@ -35,6 +36,13 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
     label: "压缩上下文",
     desc: "把当前会话整理成摘要，释放上下文空间",
     keywords: "compact 压缩 上下文 摘要",
+  },
+  {
+    id: "goal",
+    icon: "🎯",
+    label: "连续任务",
+    desc: "/goal <任务>：任务未完成就持续执行，直到完成、出错或手动停止",
+    keywords: "goal 连续 目标 持续 任务",
   },
 ];
 
@@ -307,6 +315,16 @@ export function selectComposerItem(index: number): void {
     const template = "template" in item && typeof item.template === "string" ? item.template : "";
     if (template) {
       inputEl.value = template;
+      closeComposerMenu();
+      autoGrowImpl();
+      inputEl.focus();
+      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      return;
+    }
+    if (item.id === "goal") {
+      // goal 既不是动作也不是模板：留下「/goal 」让用户接着写任务，
+      // 发送时由 turn 层拦截解析（裸 /goal 只提示用法，不发空请求）
+      inputEl.value = next + GOAL_COMMAND + " ";
       closeComposerMenu();
       autoGrowImpl();
       inputEl.focus();

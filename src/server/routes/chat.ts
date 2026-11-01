@@ -47,6 +47,14 @@ function writeEvent(res: import("node:http").ServerResponse, event: AgentEvent):
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+/**
+ * 连续模式注记（/goal 命令或请求体 continuous:true）：反思闸会拦「提前收尾」，
+ * 但第一轮就让模型知道规则能省一次回炉；不改会话权限 —— 高风险操作照常审批。
+ */
+const GOAL_MODE_NOTE =
+  "【连续工作模式】本轮任务未完成前请持续推进（执行、验证、修复），不要提前收尾或中途停等；" +
+  "确需用户决策时再提问，高风险操作仍按会话权限走审批。";
+
 const MODEL_RETRY_POLL_MS = 250;
 
 /** 把模型重试队列转成 SSE 事件；先观察再发送，前端可实时看到供应商失败与重试进度。 */
@@ -381,6 +389,7 @@ async function handleChatInner(
   const graphInput: unknown[] = [
     ...(preNote ? [new HumanMessage(preNote)] : []),
     ...(compactNote ? [new HumanMessage(compactNote)] : []),
+    ...(continuous ? [new HumanMessage(GOAL_MODE_NOTE)] : []),
     new HumanMessage(fullMessage),
   ];
   await streamToClient(res, req, session, (signal) =>
