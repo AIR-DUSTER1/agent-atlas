@@ -20,6 +20,22 @@ test("stream：长任务递归保护固定为 1000", async () => {
   assert.equal(AGENT_RECURSION_LIMIT, 1_000);
 });
 
+test("stream：连续模式放宽超步保险丝，普通模式不受影响", async () => {
+  let seenOptions: Record<string, unknown> | undefined;
+  const graph = {
+    stream: async (_input: unknown, options: Record<string, unknown>) => {
+      seenOptions = options;
+      return (async function* () {})();
+    },
+  };
+  for await (const _event of runGraphEvents(graph, {}, { threadId: "continuous-limit-test", continuous: true })) {
+    // 空流也必须正常结束；本用例只校验传给 LangGraph 的运行参数。
+  }
+  assert.equal(seenOptions?.recursionLimit, 20_000);
+  // 连续标记要进 configurable，图内 analyze 节点靠它写状态
+  assert.equal((seenOptions?.configurable as Record<string, unknown>)?.continuous, true);
+});
+
 test("stream：过滤内部模型节点，保留可见回答与澄清 interrupt", async () => {
   const graph = {
     stream: async () =>

@@ -110,6 +110,8 @@ export async function send(): Promise<void> {
     sessionId: sid,
     message: text,
     ...(fileRefs.length ? { files: fileRefs } : {}),
+    // 连续工作模式：随请求携带；服务端写进图状态，审批 resume 无需重传
+    ...(state.continuousMode ? { continuous: true } : {}),
   }, ablock, sid);
 }
 
@@ -128,7 +130,9 @@ export async function runResume(
     mountBlock(created);
     ablock = created;
   }
-  await streamTurn("/api/resume", { sessionId: sid, ...payload }, ablock, sid);
+  // 审批/澄清恢复：图状态里已有 continuousMode 驱动回炉循环，这里重传只为
+  // 让服务端延续放宽后的超步保险丝（开关已持久化，刷新后依然拿得到）
+  await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousMode ? { continuous: true } : {}), ...payload }, ablock, sid);
 }
 
 async function streamTurn(

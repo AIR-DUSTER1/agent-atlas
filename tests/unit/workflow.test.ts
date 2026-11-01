@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Command, MemorySaver } from "@langchain/langgraph";
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
+import type { ChatResult } from "@langchain/core/outputs";
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { FakeListChatModel } from "@langchain/core/utils/testing";
 import {
   createWorkflowGraph,
@@ -13,6 +16,7 @@ import {
 import type { AgentProfile } from "../../src/agent/profile.js";
 import { generalProfile } from "../../src/agent/general.js";
 import { estateProfile } from "../../src/agent/estate.js";
+import { calculator } from "../../src/tools.js";
 
 const testProfile: AgentProfile = {
   id: "general",
@@ -21,6 +25,41 @@ const testProfile: AgentProfile = {
   tools: [],
   approvalDescriptions: {},
 };
+
+/** 带真实工具的 profile：连续模式的「每轮有工具动作」路径需要一个能真执行的工具。 */
+const toolProfile: AgentProfile = {
+  ...testProfile,
+  tools: [calculator],
+};
+
+/**
+ * 可脚本化的工具调用假模型：响应为 "TOOL" 时发一次 calculator 调用（直接执行，
+ * 不触发审批也不触碰风险评估模型），否则按原文输出。用来模拟「连续回炉期间
+ * 每轮都有工具动作」——这正是空转熔断保持清零的前提。
+ */
+class ScriptedToolCallModel extends BaseChatModel {
+  private script: string[];
+
+  constructor(responses: string[]) {
+    super({});
+    this.script = [...responses];
+  }
+
+  _llmType(): string {
+    return "scripted-tool-call-fake";
+  }
+
+  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
+    const next = this.script.shift() ?? "答（脚本耗尽）";
+    const message: AIMessage = next === "TOOL"
+      ? new AIMessage({
+          content: "",
+          tool_calls: [{ name: "calculator", args: { expression: "1+1" }, id: `call_${this.script.length}`, type: "tool_call" }],
+        })
+      : new AIMessage(next);
+    return { generations: [{ text: "", message }] };
+  }
+}
 
 test("需求分析：fenced JSON + 两个选项 → 进入澄清", () => {
   const result = parseRequirementAnalysis([
@@ -299,4 +338,63 @@ test("无头模式：澄清不挂起，自动采用首个选项并记入台账",
   assert.match(result.requirementBrief ?? "", /【无头模式自动假设】/, "假设应进入需求 brief");
   assert.match(result.headlessAssumption ?? "", /先看哪个城市/);
   assert.match(result.headlessAssumption ?? "", /北京/);
+});
+
+test("连续模式：每轮有工具动作时不受三次回炉上限约束，直到反思通过才结束", async () => {
+  // 消费序列：analyze → (工具, 答1, 拒) ×4 → (工具, 答5, 过)。
+  // 普通模式在第 4 次失败（attempts=3）就强制结束；连续模式必须继续到第 5 轮通过。
+  const agentFake = new ScriptedToolCallModel([
+    "TOOL", "答1", "TOOL", "答2", "TOOL", "答3", "TOOL", "答4", "TOOL", "答5",
+  ]);
+  const judgeFake = new FakeListChatModel({
+    responses: [
+      JSON.stringify({ understood: true, brief: "构建并验证项目", question: "", options: [] }),
+      JSON.stringify({ passes: false, reason: "未完成", feedback: "继续执行" }),
+      JSON.stringify({ passes: false, reason: "未完成", feedback: "继续执行" }),
+      JSON.stringify({ passes: false, reason: "未完成", feedback: "继续执行" }),
+      JSON.stringify({ passes: false, reason: "未完成", feedback: "继续执行" }),
+      JSON.stringify({ passes: true, reason: "构建完成且测试通过", feedback: "" }),
+    ],
+  });
+  const graph = createWorkflowGraph(toolProfile, {
+    agent: agentFake as unknown as WorkflowChatModel,
+    analyst: judgeFake as unknown as WorkflowChatModel,
+    reviewer: judgeFake as unknown as WorkflowChatModel,
+  }, { checkpointer: new MemorySaver() });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("构建并验证项目")] },
+    { configurable: { thread_id: `continuous-${randomUUID()}`, continuous: true } },
+  ) as unknown as { messages: Array<{ content: unknown }>; reviewAttempts?: number; continuousMode?: boolean };
+
+  // 标记必须写入图状态：审批 resume 走同一线程检查点，靠它续存
+  assert.equal(result.continuousMode, true);
+  assert.equal(result.reviewAttempts, 5);
+  const answers = result.messages.map((message) => String(message.content));
+  assert.ok(answers.includes("答5"), "第 4 次失败后必须继续回炉并产出第 5 个回答");
+});
+
+test("连续模式：反思连续失败且期间无任何工具动作时，三轮即空转熔断", async () => {
+  const fake = new FakeListChatModel({
+    responses: [
+      JSON.stringify({ understood: true, brief: "长任务", question: "", options: [] }),
+      "空转1", JSON.stringify({ passes: false, reason: "未完成", feedback: "继续" }),
+      "空转2", JSON.stringify({ passes: false, reason: "未完成", feedback: "继续" }),
+      "空转3", JSON.stringify({ passes: false, reason: "未完成", feedback: "继续" }),
+      "空转4", JSON.stringify({ passes: false, reason: "未完成", feedback: "继续" }),
+    ],
+  });
+  const graph = createWorkflowGraph(testProfile, {
+    agent: fake as unknown as WorkflowChatModel,
+    analyst: fake as unknown as WorkflowChatModel,
+    reviewer: fake as unknown as WorkflowChatModel,
+  }, { checkpointer: new MemorySaver() });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("做一个大项目")] },
+    { configurable: { thread_id: `idle-${randomUUID()}`, continuous: true } },
+  ) as unknown as { messages: Array<{ content: unknown }>; reviewAttempts?: number };
+
+  // 熔断在第 3 次失败反思后生效：第 4 个纯文本回答不应存在
+  const answers = result.messages.map((message) => String(message.content)).filter((text) => text.startsWith("空转"));
+  assert.equal(answers.length, 3);
+  assert.equal(result.reviewAttempts, 3);
 });

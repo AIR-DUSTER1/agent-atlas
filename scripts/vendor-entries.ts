@@ -51,7 +51,7 @@ export const VENDOR_ENTRIES: VendorEntry[] = [
         ArrowDown, ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
         TriangleAlert, CircleX, Sparkles, Map, Settings2, PanelLeft,
         ChevronsUpDown, Calendar, Code, FileCode, FolderTree, CheckCircle2,
-        XCircle, Waypoints, Briefcase, CircleHelp,
+        XCircle, Waypoints, Briefcase, CircleHelp, Infinity,
       } from "lucide";
     `,
   },

@@ -105,6 +105,15 @@ export function renderComposerBar(): void {
   if (modelMenu && !modelMenu.classList.contains("hidden")) renderModelMenu(modelMenu);
   const thinkMenu = $("cm-thinking-menu");
   if (thinkMenu && !thinkMenu.classList.contains("hidden")) renderThinkingMenu(thinkMenu);
+  refreshContinuousChip();
+}
+
+/** 连续模式 chip 的开关态与可访问性状态（点击切换与启动恢复共用这一份） */
+export function refreshContinuousChip(): void {
+  const chip = $("cm-continuous");
+  if (!chip) return;
+  chip.classList.toggle("on", state.continuousMode);
+  chip.setAttribute("aria-pressed", state.continuousMode ? "true" : "false");
 }
 
 export function toggleCmMenu(

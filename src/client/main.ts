@@ -20,7 +20,8 @@ import { installClientErrorReporting } from "./observability/client-errors.js";
 import { icon, initIconHydration } from "./ui/icon.js";
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
-import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
+import { applyConfigState, refreshContinuousChip, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
+import { toast } from "./ui/toast.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
 import { renderSessions, loadSessionList } from "./views/sessions.js";
 import {
@@ -205,6 +206,15 @@ async function init(): Promise<void> {
   on("cm-perm", "click", (e) => {
     e.stopPropagation();
     toggleCmMenu("cm-perm", "cm-perm-menu", renderPermMenu);
+  });
+  // 连续工作模式：无菜单的纯开关；提示随状态说明「什么时候才会停」
+  on("cm-continuous", "click", () => {
+    state.continuousMode = !state.continuousMode;
+    saveLocal();
+    refreshContinuousChip();
+    toast(state.continuousMode
+      ? "连续工作模式已开启：任务未完成会持续执行，直到完成、请求出错或手动停止"
+      : "连续工作模式已关闭：反思通过即结束回合", "info");
   });
 
   // 独立设置页：左下入口 / 返回 / 分区导航

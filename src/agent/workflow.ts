@@ -7,7 +7,9 @@
  *   clarify  interrupt() 生成 2-4 个选项，用户选择后继续；
  *   route    按规则 / 向量 / 决策模型挑子代理，必要时转成澄清询问（默认关闭）；
  *   agent    原有 ReAct 节点（工具循环与人工审批完全复用 hitl.ts）；
- *   review   最终回答不满意时带反馈回炉，最多修订三次防止死循环。
+ *   review   最终回答不满意时带反馈回炉，最多修订三次防止死循环；
+ *            连续工作模式（请求级 continuous）改为「任务完成闸」：不完成就一直
+ *            回炉，只受空转熔断（连续无工具动作）、保险丝上限与异常/中止约束。
  *
  * 约束：本文件属于 agent 层，只依赖 src 顶层与 @langchain/*，不得 import server/*。
  * 关键坑：分析/反思发生在图节点里，但它们的模型 token 不属于用户回答，
@@ -62,6 +64,16 @@ const MAX_OPTIONS = 4;
 /** 一道澄清卡最多打包几道题：再多就该拆成「先问最关键的」，一次问 5 题等于逼用户放弃。 */
 const MAX_QUESTIONS = 4;
 const MAX_REVIEW_REVISIONS = 3;
+/**
+ * 连续模式的反思回炉保险丝：真正的停止条件是「反思通过 / 空转熔断 / 请求异常 / 用户中止」，
+ * 这个数只防「永远差一点」的任务无限烧钱；按 8 小时 × 分钟级回炉周期估算取千级。
+ */
+const MAX_CONTINUOUS_REVISIONS = 1_000;
+/**
+ * 连续模式的空转熔断：连续 N 轮「反思不通过且期间没有任何工具动作」就结束回合。
+ * 任务真在推进时每轮都有工具结果，计数每轮清零；只有纯文本打转才会计满。
+ */
+const MAX_IDLE_REVIEW_ROUNDS = 3;
 const RECENT_MESSAGE_COUNT = 8;
 const RECENT_MESSAGE_CHARS = 700;
 const RECENT_TOOL_RESULT_COUNT = 3;
@@ -169,6 +181,25 @@ const WorkflowState = Annotation.Root({
     reducer: (_previous, next) => next ?? "",
     default: () => "",
   }),
+  /**
+   * 连续工作模式（回合内有效）：反思不通过就持续回炉执行，直到反思通过 /
+   * 空转熔断 / 请求异常 / 用户中止。在 analyze 从请求 configurable 读一次后写入
+   * 图状态 —— 审批 resume 走同一线程检查点，状态还在，前端无需重传该标记。
+   */
+  continuousMode: Annotation<boolean>({
+    reducer: (_previous, next) => next ?? false,
+    default: () => false,
+  }),
+  /** 连续模式：上一次反思执行时的消息总数，用来计算「这轮回炉期间有没有新的工具动作」。 */
+  lastReviewMessageCount: Annotation<number>({
+    reducer: (_previous, next) => next ?? 0,
+    default: () => 0,
+  }),
+  /** 连续模式：连续「反思不通过且期间无工具动作」的轮数；出现工具动作即清零。 */
+  idleReviewRounds: Annotation<number>({
+    reducer: (_previous, next) => next ?? 0,
+    default: () => 0,
+  }),
 });
 
 type WorkflowStateType = typeof WorkflowState.State;
@@ -199,6 +230,21 @@ const REVIEW_PROMPT = [
   '{"passes":false,"reason":"未通过原因","feedback":"给助手的具体修订指令"}',
   "判定失败仅限：没有回答核心问题、遗漏用户明确要求、与工具结果或需求理解矛盾、信息已足够却继续追问。",
   "不要因为文风、长度、措辞或个人偏好判定失败；没有明显问题时一律 passes=true。",
+].join("\n");
+
+/**
+ * 连续模式的反思判据从「回答是否够好」换成「任务是否真正完成」：
+ * 回炉指令必须是下一步行动（还差什么、如何验证），而不是文风建议。
+ */
+const CONTINUOUS_REVIEW_PROMPT = [
+  "你是连续工作模式的任务完成检查节点，负责判断本轮任务是否已经真正完成。",
+  "只输出一个 JSON 对象，不要 Markdown 代码块，不要解释。格式：",
+  '{"passes":true,"reason":"判定完成的依据","feedback":""}',
+  "或：",
+  '{"passes":false,"reason":"未完成的原因","feedback":"下一步行动指令"}',
+  "判定失败仅限：目标动作没有执行完、执行了但没有验证（构建/测试没跑或没通过）、遗漏用户明确要求、与工具结果矛盾、声称完成但工具结果里没有证据。",
+  "passes=true 仅当：目标已达成且有工具结果佐证；或用户请求本身是纯问答且回答已经完整。",
+  "不要因为文风、长度或措辞判定失败。feedback 必须是「下一步做什么」的具体指令（还差什么、如何验证）。",
 ].join("\n");
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -467,6 +513,9 @@ export function createWorkflowGraph(
   const reviewPrompt = profile.reviewerGuidance
     ? `${REVIEW_PROMPT}\n${profile.reviewerGuidance}`
     : REVIEW_PROMPT;
+  const continuousReviewPrompt = profile.reviewerGuidance
+    ? `${CONTINUOUS_REVIEW_PROMPT}\n${profile.reviewerGuidance}`
+    : CONTINUOUS_REVIEW_PROMPT;
 
   function observeModel(node: "analyze" | "agent" | "review", response: AIMessage): void {
     try {
@@ -474,7 +523,10 @@ export function createWorkflowGraph(
     } catch { /* usage 观测失败不能中断业务 */ }
   }
 
-  async function analyzeNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
+  async function analyzeNode(state: WorkflowStateType, nodeConfig?: {
+    signal?: AbortSignal;
+    configurable?: { continuous?: boolean };
+  }) {
     const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
     const history = state.clarificationHistory
       ? `上一轮澄清（仅在相关时参考）：${state.clarificationHistory}`
@@ -484,6 +536,10 @@ export function createWorkflowGraph(
       clarification: null,
       reviewFeedback: "",
       reviewAttempts: 0,
+      // 连续模式标记只由本轮请求决定，不跨回合残留；空转计数同理归零
+      continuousMode: nodeConfig?.configurable?.continuous === true,
+      idleReviewRounds: 0,
+      lastReviewMessageCount: 0,
     };
     if (!userText.trim()) return fallback;
 
@@ -686,9 +742,22 @@ export function createWorkflowGraph(
     const lastAi = last?.getType() === "ai" ? (last as AIMessage) : undefined;
     const answer = contentText(lastAi?.content).slice(0, MAX_USER_TEXT);
     const attempts = state.reviewAttempts;
+    // 空转检测：两次反思之间没有任何新工具消息 = 助手在纯文本打转。
+    // 首次反思以整回合为基准（lastReviewMessageCount 为 0 → 取全部消息）。
+    const sinceLastReview = state.lastReviewMessageCount > 0
+      ? state.messages.slice(state.lastReviewMessageCount)
+      : state.messages;
+    const hadToolWork = sinceLastReview.some((message) => message.getType() === "tool");
+    const bookkeeping = {
+      idleReviewRounds: hadToolWork ? 0 : state.idleReviewRounds + 1,
+      lastReviewMessageCount: state.messages.length,
+    };
+    const continuous = state.continuousMode;
+    // 回炉上限：普通模式 3 次防死循环；连续模式放宽到保险丝级，靠空转熔断与异常兜底
+    const cap = continuous ? MAX_CONTINUOUS_REVISIONS : MAX_REVIEW_REVISIONS;
     try {
       const response = await invokeModel(reviewerModel, [
-        { role: "system", content: reviewPrompt },
+        { role: "system", content: continuous ? continuousReviewPrompt : reviewPrompt },
         {
           role: "user",
           content:
@@ -700,14 +769,19 @@ export function createWorkflowGraph(
       ], nodeConfig?.signal, options?.sessionId);
       observeModel("review", response);
       const review = parseReviewResult(contentText(response.content));
-      if (review.passes || attempts >= MAX_REVIEW_REVISIONS) {
-        return { reviewFeedback: "", reviewAttempts: attempts + 1 };
+      if (review.passes || attempts >= cap) {
+        return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
+      }
+      // 连续模式空转熔断：反思连续多轮不通过且期间没有任何工具动作，
+      // 继续回炉只是烧钱；把控制权交还用户比第 N 次换措辞重说更有价值。
+      if (continuous && bookkeeping.idleReviewRounds >= MAX_IDLE_REVIEW_ROUNDS) {
+        return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
       }
       const feedback = (review.feedback || review.reason || "回答没有完全满足需求，请检查遗漏并补齐。")
         .slice(0, MAX_FEEDBACK_TEXT);
-      return { reviewFeedback: feedback, reviewAttempts: attempts + 1 };
+      return { reviewFeedback: feedback, reviewAttempts: attempts + 1, ...bookkeeping };
     } catch {
-      return { reviewFeedback: "", reviewAttempts: attempts + 1 };
+      return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
     }
   }
 

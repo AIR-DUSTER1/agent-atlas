@@ -33,6 +33,13 @@ import { incCounter } from "./observability/metrics.js";
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
 const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools", "route", "routeAsk", "dispatch"]);
 
+/**
+ * 连续模式的超步保险丝：一个回炉周期 ≈ 3-6 超步（agent/tools/review 各算一次），
+ * 默认 1000 在小时级长任务上会先于业务护栏撞墙（GraphRecursionError 直接终止任务）。
+ * 放宽到 2 万 —— 它仍是失控兜底，真正的停止条件是反思通过 / 空转熔断 / 异常 / 用户中止。
+ */
+const CONTINUOUS_RECURSION_LIMIT = 20_000;
+
 function nodeSegments(node: string | undefined): string[] {
   return (node ?? "").split(/[/:]/).filter(Boolean);
 }
@@ -76,6 +83,8 @@ interface NormalizeOptions {
   contextWindow?: number;
   /** 无头模式：澄清不挂起，自动采用默认假设继续（外部评测/批量调用）。 */
   headless?: boolean;
+  /** 连续工作模式：反思不通过就持续回炉，直到任务完成/空转熔断/请求异常/用户中止。 */
+  continuous?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +364,8 @@ export async function* runGraphEvents(
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
     // 业务层不限制任务时长 / 调用次数；图运行用 1000 超步兜底，避免正常长任务触发默认 25 步上限。
-    recursionLimit: AGENT_RECURSION_LIMIT,
+    // 连续模式放宽到独立保险丝：小时级回炉按 1000 会先撞 GraphRecursionError。
+    recursionLimit: options.continuous ? CONTINUOUS_RECURSION_LIMIT : AGENT_RECURSION_LIMIT,
     // permission_mode 会被 LangGraph 透传给每个节点函数的 config（不传 = 默认审批行为）
     configurable: {
       thread_id: options.threadId,
@@ -364,6 +374,7 @@ export async function* runGraphEvents(
       ...(options.budgetNote ? { task_budget_note: options.budgetNote } : {}),
       ...(options.contextWindow ? { context_window: options.contextWindow } : {}),
       ...(options.headless ? { headless: true } : {}),
+      ...(options.continuous ? { continuous: true } : {}),
     },
     signal: options.signal,
   });

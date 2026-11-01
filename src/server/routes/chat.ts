@@ -272,7 +272,7 @@ export async function handleChat(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   sessionId: string,
-  body: { message?: unknown; files?: unknown; headless?: unknown }
+  body: { message?: unknown; files?: unknown; headless?: unknown; continuous?: unknown }
 ): Promise<void> {
   const session = getSession(sessionId);
   if (!session) {
@@ -313,7 +313,7 @@ async function handleChatInner(
   req: import("node:http").IncomingMessage,
   session: Session,
   message: string,
-  body: { message?: unknown; files?: unknown; headless?: unknown }
+  body: { message?: unknown; files?: unknown; headless?: unknown; continuous?: unknown }
 ): Promise<void> {
   // 附件：前端只传引用（项目/远程文件路径 或 上传 id），内容由服务端读取并校验。
   // 图片附件仅在启用中的模型为「多模态」时可用（否则 400 提示）。
@@ -370,6 +370,9 @@ async function handleChatInner(
   // 无头模式：请求级开关（默认 false，交互行为完全不变）。澄清不挂起、
   // 自动采用默认假设继续，适用于外部评测 / 批量脚本这类没有人应答的场景。
   const headless = body.headless === true;
+  // 连续工作模式：请求级开关（默认 false）。反思不通过就持续回炉执行，
+  // 直到任务完成 / 空转熔断 / 请求异常 / 用户中止；标记进图状态，审批 resume 不用重传。
+  const continuous = body.continuous === true;
   const { HumanMessage } = await import("@langchain/core/messages");
   // T2-4：journal 回放来的会话首条真图消息 —— 前置注入历史上文摘录（一次性）
   const preNote = buildPrehistoryNote(session);
@@ -391,6 +394,7 @@ async function handleChatInner(
       budgetNote: renderTaskBudgetNote(session),
       contextWindow,
       headless,
+      continuous,
     })
   , (events) => completeTurnRecord(session, events));
 }
@@ -399,7 +403,7 @@ export async function handleResume(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   sessionId: string,
-  body: { decision?: unknown; choice?: unknown }
+  body: { decision?: unknown; choice?: unknown; continuous?: unknown }
 ): Promise<void> {
   const session = getSession(sessionId);
   if (!session) {
@@ -435,7 +439,7 @@ export async function handleResume(
     const needsModel = Boolean(config.apiKey);
     const releaseModelSlot = needsModel ? await acquireModelSlot(getActiveId()) : null;
     try {
-      await handleResumeInner(res, req, session, resumeValue);
+      await handleResumeInner(res, req, session, resumeValue, body.continuous === true);
     } finally {
       releaseModelSlot?.();
     }
@@ -448,7 +452,8 @@ async function handleResumeInner(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
   session: Session,
-  resumeValue: string
+  resumeValue: string,
+  continuous: boolean
 ): Promise<void> {
   const approval = session.pendingApproval;
   const clarification = approval?.type === "clarification" ? approval : null;
@@ -535,6 +540,9 @@ async function handleResumeInner(
         taskLedger: renderTaskLedger(session.activeTask),
         budgetNote: renderTaskBudgetNote(session),
         contextWindow: getContextWindowForActive(),
+        // 连续回合被审批/澄清打断后恢复：重传标记以延续放宽后的超步保险丝，
+        // 回炉循环本身由图状态里的 continuousMode 驱动，不依赖这里
+        continuous,
       }
     ),
     (events) => {

@@ -816,7 +816,14 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 | `clarify` | `interrupt({ type:"clarification", questions:[{ id, question, options, allowCustom }] })` | 每题 2–4 个互斥选项、选项 id 只在本题内唯一；服务端 `/api/resume {choice}`；单题回传选项 id 由服务端映射成可读标签，多题回传「题面：答案」拼装文本，答案统一写入 `clarificationHistory`；旧单问载荷（顶层 `question`+`options`）由前端归一化兼容 |
 | `agent` | 绑定工具的 ReAct 节点 | 通过 `context-builder.ts` 组装稳定 system、内部注记与投影后的消息窗口；工具结果按 profile 预算裁剪 |
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
-| `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
+| `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，普通模式最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过；连续模式换用「任务完成闸」判据（见下） |
+
+**连续工作模式（请求级 `continuous: true` → 图状态 `continuousMode`）**：反思不通过就持续回炉，直到反思通过 / 空转熔断 / 请求异常 / 用户中止。三个设计决定：
+
+- 标记在 `analyze` 从请求 `configurable` 读一次后**写入图状态**而不是每次读 config——审批 resume 走同一线程检查点，图状态还在，`/api/resume` 不用重传该标记；
+- 回炉上限从 3 放宽到 `MAX_CONTINUOUS_REVISIONS = 1000`（保险丝），真正的防失控机制是**空转熔断**：`review` 记录上次反思时的消息总数（`lastReviewMessageCount`），两次反思之间没有任何新工具消息（`idleReviewRounds`）连续计满 `MAX_IDLE_REVIEW_ROUNDS = 3` 就结束回合——任务真在推进时每轮都有工具结果，计数每轮清零；计数器在 `analyze` 的 fallback 里随新回合归零，防止上一轮的空转计数泄漏到下一轮造成提前熔断；
+- 判据切到 `CONTINUOUS_REVIEW_PROMPT`：从「回答是否够好」换成「目标动作是否执行完并验证」，feedback 必须是下一步行动指令而不是文风建议；
+- 超步保险丝单独放宽：`stream.ts` 对 `continuous` 请求用 `CONTINUOUS_RECURSION_LIMIT = 20000` 而不是 `AGENT_RECURSION_LIMIT = 1000`——一个回炉周期 ≈ 3-6 超步，小时级任务按 1000 会先撞 GraphRecursionError；`/api/resume` 由前端重传 `continuous` 延续放宽（图状态里的 `continuousMode` 只驱动循环，不决定这个上限）。
 
 **关键坑**：
 
@@ -1582,6 +1589,7 @@ console.log(result.messages.at(-1).content);
 | 审批卡出现后切到别的会话再回来，「批准并执行」点不动且毫无反馈 | ① `addInterrupt` 只挂卡片不解流占用，`state.streams[sid]` 要等 SSE 尾部才清；② `decideApproval` 首行遇到流占用直接 `return`，静默失败 | interrupt 到达即 `releaseStreamAfterInterrupt()` 解除本轮流占用；收尾按**流对象身份**删除（不能按 ablock，否则会误删 resume 新登记的那条）；被挡住时 `toast` 明确告诉用户该等什么或点停止（§3.49） |
 | 求职 Agent 有独立会话，却在「设置 → 子代理」里找不到 | 会话形态（`kind`）与子代理（`subagent`）是两套机制；种子 `DEFAULT_SUBAGENTS` 只有 general / estate | 种子加 job 条目 + 领域下拉与表单透传（§3.50）；只加种子会让子代理拿不到求职领域提示词 |
 | 审批卡已弹出，上方工具卡却写着「运行中」，像是命令先跑了 | 工具卡创建即带 `running` 类；审批是 `interrupt()` 在 `invokeTool` **之前**的闸门，此时工具一次都没执行 | `addInterrupt` 给对应卡片打 `awaitingApproval`，显示「⏸ 待审批」+ 琥珀色边框，批准后清标（§3.50） |
+| e2e 点完设置类开关立刻 `reload`，断言新状态丢失 | `saveLocal()` 是 300ms 防抖写 localStorage，测试在写入前就刷新了页面 | 测试先 `waitForFunction` 等 localStorage 落盘再 reload；产品侧与其他偏好（projectView 等）口径一致，不为测试改产品节奏 |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 

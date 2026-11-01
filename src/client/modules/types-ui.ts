@@ -277,6 +277,8 @@ export interface AppState {
   compacting: Record<string, boolean>;
   settingsView: string;
   pendingFiles: PendingFile[];
+  /** 连续工作模式（用户偏好，localStorage 持久化）：随每条消息发给 /api/chat。 */
+  continuousMode: boolean;
   /** 记忆 / 统计等懒加载分区的缓存（目前主要给插件卡片判定） */
   memories?: MemoryEntry[];
 }
