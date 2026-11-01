@@ -23,11 +23,13 @@ export interface DelegableToolEntry {
 
 const NEVER_DELEGABLE = new Set(["delegate_agent", "memory_save", "memory_recall"]);
 
+/** 构造可委派工具目录；`includeEstateTools` 默认 true（通用 Agent 需要它补齐 house_*）。 */
 export function buildDelegationCatalog(input: {
   parentTools: readonly StructuredToolInterface[];
   parentApprovals: ApprovalDescriptions;
   externalTools?: readonly StructuredToolInterface[];
   externalApprovals?: ApprovalDescriptions;
+  includeEstateTools?: boolean;
 }): DelegableToolEntry[] {
   const entries: DelegableToolEntry[] = [];
   const names = new Set<string>();
@@ -41,7 +43,7 @@ export function buildDelegationCatalog(input: {
 
   for (const tool of input.parentTools) add(tool, input.parentApprovals);
   for (const tool of input.externalTools ?? []) add(tool, input.externalApprovals ?? {});
-  if (isPluginEnabled("estate")) {
+  if (input.includeEstateTools !== false && isPluginEnabled("estate")) {
     for (const tool of estateTools) add(tool, estateApprovals);
   }
   return entries;

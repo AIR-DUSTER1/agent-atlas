@@ -248,6 +248,10 @@
               <span class="sn-icon"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i></span>
               <span class="sn-copy"><strong>子代理</strong><small>模型、启停与动态委派能力</small></span>
             </button>
+            <button type="button" class="settings-nav-item" data-settings-view="routing" role="tab" aria-selected="false" aria-controls="settings-view-routing">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>路由决策</strong><small>按请求自动挑子代理</small></span>
+            </button>
           </div>
           <div class="settings-nav-group" data-settings-group="extensions">
             <div class="settings-nav-group-title">扩展</div>
@@ -537,9 +541,40 @@
                   </div>
                 </section>
 
-                <section class="subagent-form-section is-compact" aria-labelledby="subagent-state-title">
+                <section class="subagent-form-section" aria-labelledby="subagent-routing-title">
                   <div class="subagent-section-heading">
                     <span>03</span>
+                    <div><strong id="subagent-routing-title">路由名片</strong><small>决定「什么时候派给它」。关键词或类别都为空时，它不参与自动路由（只作为兜底型子代理）。</small></div>
+                  </div>
+                  <label class="field">
+                    <span class="field-label">关键词 <em class="key-state">逗号分隔，命中即加分</em></span>
+                    <input id="subagent-routing-keywords" type="text" autocomplete="off" placeholder="例如：租房, 买房, 房源, 小区" maxlength="600" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">类别 <em class="key-state">用于多意图分层归并</em></span>
+                    <input id="subagent-routing-category" type="text" autocomplete="off" placeholder="例如：居住 / 研发 / 数据" maxlength="20" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">适用场景 <em class="key-state">每行一条，最多 8 条</em></span>
+                    <textarea id="subagent-routing-suitable" rows="2" maxlength="1000" placeholder="按城市/预算/区域检索房源并给出对比结论"></textarea>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">不适用场景 <em class="key-state">负向信号，能显著压低误派</em></span>
+                    <textarea id="subagent-routing-not-suitable" rows="2" maxlength="1000" placeholder="天气查询, 数学计算, 写代码"></textarea>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">领域提示词</span>
+                    <select id="subagent-routing-domain">
+                      <option value="">通用后台子代理提示词</option>
+                      <option value="estate">继承房产顾问提示词与领域规则</option>
+                    </select>
+                    <small class="subagent-field-hint">只继承提示词与领域规则；工具仍由主 Agent 本次显式授予。</small>
+                  </label>
+                </section>
+
+                <section class="subagent-form-section is-compact" aria-labelledby="subagent-state-title">
+                  <div class="subagent-section-heading">
+                    <span>04</span>
                     <div><strong id="subagent-state-title">可用状态</strong><small>停用后不会出现在主 Agent 的委派目录中。</small></div>
                   </div>
                   <label class="subagent-enable-row">
@@ -559,6 +594,120 @@
                   <button id="subagent-save-btn" type="submit" class="ui-button ui-button-primary">保存配置</button>
                 </div>
               </form>
+            </div>
+          </div>
+        </section>
+
+        <section id="settings-view-routing" class="settings-view hidden" data-settings-panel="routing" role="tabpanel" aria-labelledby="routing-title">
+          <div id="routing-panel" class="routing-page" role="region" aria-labelledby="routing-title">
+            <div class="routing-head">
+              <div>
+                <span class="routing-kicker"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> Agent routing</span>
+                <h2 id="routing-title"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> 路由决策</h2>
+                <p class="settings-sub">开启后，每条消息会先判断该交给哪个子代理：规则匹配 → 向量比对 → 决策模型，任一层没把握就问你。默认关闭，行为与开启前完全一致。</p>
+              </div>
+              <label class="routing-switch" title="启用路由决策">
+                <input id="routing-enabled" type="checkbox" role="switch" aria-label="启用路由决策" />
+                <span class="routing-switch-track" aria-hidden="true"></span>
+                <span class="routing-switch-label" id="routing-enabled-label">已停用</span>
+              </label>
+            </div>
+
+            <div class="routing-grid">
+              <section class="routing-card">
+                <h3>决策后端</h3>
+                <p class="routing-card-sub">三层里只有第三层需要模型。默认复用你已配置的「供应商 × 模型」，本机零内存占用。</p>
+                <label class="routing-field">
+                  <span>后端</span>
+                  <select id="routing-backend" aria-label="决策后端">
+                    <option value="openai-compat">API 模型（推荐，本机零占用）</option>
+                    <option value="systemone">systemone 决策服务（数据不出本机）</option>
+                    <option value="rules-only">纯规则（完全不调模型）</option>
+                  </select>
+                </label>
+                <div id="routing-llm-fields">
+                  <label class="routing-field">
+                    <span>路由供应商</span>
+                    <select id="routing-llm-provider" aria-label="路由供应商"></select>
+                  </label>
+                  <label class="routing-field">
+                    <span>路由模型</span>
+                    <select id="routing-llm-model" aria-label="路由模型"></select>
+                  </label>
+                  <p class="routing-hint">两者都选「沿用当前模型」时，使用聊天当前启用的供应商与模型。</p>
+                </div>
+                <div id="routing-systemone-fields" class="hidden">
+                  <label class="routing-field">
+                    <span>决策服务地址</span>
+                    <input id="routing-systemone-url" type="url" placeholder="http://127.0.0.1:8765" aria-label="决策服务地址" />
+                  </label>
+                  <label class="routing-field">
+                    <span>期望模型名</span>
+                    <input id="routing-systemone-model" type="text" placeholder="可选：校验服务跑的是哪个模型" aria-label="期望模型名" />
+                  </label>
+                  <label class="routing-field">
+                    <span>访问 Key</span>
+                    <input id="routing-systemone-key" type="password" autocomplete="off" placeholder="留空保持不变" aria-label="决策服务访问 Key" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="routing-card">
+                <h3>阈值</h3>
+                <p class="routing-card-sub">分数低于阈值、或两个候选太接近时，会转成一张选项卡问你，而不是猜。</p>
+                <label class="routing-field">
+                  <span>规则直接派发 <b id="routing-rule-accept-value">0.85</b></span>
+                  <input id="routing-rule-accept" type="range" min="0.5" max="1" step="0.01" aria-label="规则自动派发阈值" />
+                </label>
+                <label class="routing-field">
+                  <span>规则领先幅度 <b id="routing-rule-margin-value">0.30</b></span>
+                  <input id="routing-rule-margin" type="range" min="0" max="0.8" step="0.01" aria-label="规则分差阈值" />
+                </label>
+                <label class="routing-field">
+                  <span>模型置信度 <b id="routing-model-confidence-value">0.70</b></span>
+                  <input id="routing-model-confidence" type="range" min="0" max="1" step="0.01" aria-label="模型置信度阈值" />
+                </label>
+                <label class="routing-field">
+                  <span>候选分差 <b id="routing-candidate-margin-value">0.15</b></span>
+                  <input id="routing-candidate-margin" type="range" min="0" max="0.8" step="0.01" aria-label="候选分差阈值" />
+                </label>
+              </section>
+
+              <section class="routing-card">
+                <h3>上限</h3>
+                <p class="routing-card-sub">批量请求与转回都需要硬边界，避免一次消息触发几十次模型调用。</p>
+                <label class="routing-field">
+                  <span>转回次数上限</span>
+                  <input id="routing-max-handoffs" type="number" min="0" max="3" step="1" aria-label="最大转回次数" />
+                </label>
+                <label class="routing-field">
+                  <span>分层触发意图数</span>
+                  <input id="routing-hierarchical-above" type="number" min="1" max="200" step="1" aria-label="分层触发意图数" />
+                </label>
+                <label class="routing-field">
+                  <span>意图数上限</span>
+                  <input id="routing-max-intents" type="number" min="5" max="200" step="1" aria-label="意图上限" />
+                </label>
+                <label class="routing-field">
+                  <span>决策超时（毫秒）</span>
+                  <input id="routing-timeout" type="number" min="500" max="120000" step="100" aria-label="决策超时" />
+                </label>
+              </section>
+            </div>
+
+            <section class="routing-card routing-test-card">
+              <h3>试跑</h3>
+              <p class="routing-card-sub">用一段样例请求看它会派给谁。注意：选了 API 后端时会真的调用一次模型（可能有少量费用）。</p>
+              <div class="routing-test-row">
+                <input id="routing-test-input" type="text" placeholder="例如：帮我找北京朝阳区两居室，预算 6000" aria-label="路由测试文本" />
+                <button id="routing-test-btn" type="button" class="ui-button">试跑一次</button>
+              </div>
+              <div id="routing-test-result" class="routing-test-result" role="status" aria-live="polite"></div>
+            </section>
+
+            <div class="routing-actions">
+              <div id="routing-status" class="settings-status" role="status" aria-live="polite"></div>
+              <button id="routing-save-btn" type="button" class="ui-button ui-button-primary">保存路由配置</button>
             </div>
           </div>
         </section>

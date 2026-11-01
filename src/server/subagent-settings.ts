@@ -11,6 +11,8 @@ import { randomUUID } from "node:crypto";
 import { mergeConfig, readConfig } from "./config-store.js";
 import { writeAudit } from "./audit.js";
 import { resolveModelRuntime, type SubagentModelSelection } from "../model-runtime.js";
+import { isAgentProfileId, type AgentProfileId } from "../agent/profile.js";
+import type { SubagentRouting } from "../routing/types.js";
 import {
   cloneSubagent,
   cloneSubagents,
@@ -23,7 +25,17 @@ import {
 export interface PublicSubagent extends SubagentConfig {
   modelLabel: string;
   modelAvailable: boolean;
+  /** 是否参与路由竞争（有分类别或关键词）；兜底型 agent 为 false */
+  routable: boolean;
 }
+
+/** 路由元数据字段上限：设置页是手填的，不能让人贴一整段提示词进来。 */
+const MAX_KEYWORDS = 40;
+const MAX_KEYWORD_CHARS = 24;
+const MAX_CATEGORY_CHARS = 20;
+const MAX_SUITABLE_ITEMS = 8;
+const MAX_NOT_SUITABLE_ITEMS = 8;
+const MAX_SCENARIO_CHARS = 120;
 
 export interface SubagentSettingsSnapshot {
   agents: PublicSubagent[];
@@ -62,6 +74,76 @@ function parseModelInput(value: unknown): SubagentModelSelection {
   throw new Error("model.mode 只能是 inherit 或 fixed");
 }
 
+function stringList(value: unknown, field: string, maxItems: number, maxChars: number): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`${field}必须是字符串数组`);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") throw new Error(`${field}必须是字符串数组`);
+    const text = item.trim();
+    if (!text) continue;
+    if (text.length > maxChars) throw new Error(`${field}中每一项不能超过 ${maxChars} 个字符`);
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= maxItems) break;
+  }
+  return result;
+}
+
+/** 读取兼容：旧配置没有 routing 字段时按空名片处理，不报错也不挪用默认值。 */
+function normalizeRouting(raw: unknown): SubagentRouting {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { keywords: [], suitableFor: [], notSuitableFor: [] };
+  }
+  const record = raw as Record<string, unknown>;
+  const category = typeof record.category === "string" ? record.category.trim().slice(0, MAX_CATEGORY_CHARS) : "";
+  const domainProfile = isAgentProfileId(record.domainProfile) ? record.domainProfile : undefined;
+  return {
+    keywords: Array.isArray(record.keywords)
+      ? record.keywords.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, MAX_KEYWORDS)
+      : [],
+    ...(category ? { category } : {}),
+    suitableFor: Array.isArray(record.suitableFor)
+      ? record.suitableFor.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, MAX_SUITABLE_ITEMS)
+      : [],
+    notSuitableFor: Array.isArray(record.notSuitableFor)
+      ? record.notSuitableFor.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, MAX_NOT_SUITABLE_ITEMS)
+      : [],
+    ...(domainProfile ? { domainProfile } : {}),
+  };
+}
+
+/** 写入校验：字段类型与长度不对时抛中文错误，让设置页能直接展示。 */
+function parseRoutingInput(value: unknown): SubagentRouting {
+  if (value === undefined) return { keywords: [], suitableFor: [], notSuitableFor: [] };
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("routing 必须是对象");
+  const record = value as Record<string, unknown>;
+  const keywords = stringList(record.keywords, "路由关键词", MAX_KEYWORDS, MAX_KEYWORD_CHARS);
+  const suitableFor = stringList(record.suitableFor, "适用场景", MAX_SUITABLE_ITEMS, MAX_SCENARIO_CHARS);
+  const notSuitableFor = stringList(record.notSuitableFor, "不适用场景", MAX_NOT_SUITABLE_ITEMS, MAX_SCENARIO_CHARS);
+  const categoryRaw = record.category;
+  if (categoryRaw !== undefined && categoryRaw !== null && typeof categoryRaw !== "string") {
+    throw new Error("类别必须是字符串");
+  }
+  const category = typeof categoryRaw === "string" ? categoryRaw.trim() : "";
+  if (category.length > MAX_CATEGORY_CHARS) throw new Error(`类别不能超过 ${MAX_CATEGORY_CHARS} 个字符`);
+  const domainRaw = record.domainProfile;
+  if (domainRaw !== undefined && domainRaw !== null && domainRaw !== "" && !isAgentProfileId(domainRaw)) {
+    throw new Error("domainProfile 只能是 general 或 estate，留空表示使用通用子代理提示词");
+  }
+  const domainProfile: AgentProfileId | undefined = isAgentProfileId(domainRaw) ? domainRaw : undefined;
+  return {
+    keywords,
+    ...(category ? { category } : {}),
+    suitableFor,
+    notSuitableFor,
+    ...(domainProfile ? { domainProfile } : {}),
+  };
+}
+
 function normalizeSaved(raw: unknown): SubagentConfig[] {
   if (!Array.isArray(raw)) return cloneSubagents(DEFAULT_SUBAGENTS);
   const seen = new Set<string>();
@@ -84,6 +166,7 @@ function normalizeSaved(raw: unknown): SubagentConfig[] {
       description,
       enabled: record.enabled !== false,
       model: normalizeModel(record.model),
+      routing: normalizeRouting(record.routing),
       builtIn: record.builtIn === true,
       createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
       updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : Date.now(),
@@ -103,7 +186,13 @@ function publicAgent(agent: SubagentConfig): PublicSubagent {
     ...cloneSubagent(agent),
     modelLabel: runtime?.label ?? (agent.model.mode === "fixed" ? "固定模型不可用" : "当前主对话模型"),
     modelAvailable: Boolean(runtime),
+    routable: isRoutable(agent.routing),
   };
+}
+
+/** 有类别或关键词才算「能参与路由竞争」；两者都空说明它是兜底型 agent。 */
+function isRoutable(routing: SubagentRouting): boolean {
+  return routing.keywords.length > 0 || Boolean(routing.category);
 }
 
 export function getSubagentSettings(): SubagentSettingsSnapshot {
@@ -131,6 +220,7 @@ export function createSubagent(input: {
   description?: unknown;
   enabled?: unknown;
   model?: unknown;
+  routing?: unknown;
 }): Promise<SubagentSettingsSnapshot> {
   return enqueue(async () => {
     if (input.enabled !== undefined && typeof input.enabled !== "boolean") throw new Error("enabled 必须是布尔值");
@@ -141,6 +231,7 @@ export function createSubagent(input: {
       description: text(input.description, "用途说明", 500),
       enabled: input.enabled !== false,
       model: validateModel(parseModelInput(input.model)),
+      routing: parseRoutingInput(input.routing),
       builtIn: false,
       createdAt: now,
       updatedAt: now,
@@ -161,6 +252,7 @@ export function updateSubagent(
     description?: unknown;
     enabled?: unknown;
     model?: unknown;
+    routing?: unknown;
   },
 ): Promise<SubagentSettingsSnapshot> {
   return enqueue(async () => {
@@ -174,6 +266,7 @@ export function updateSubagent(
       ...(input.description !== undefined ? { description: text(input.description, "用途说明", 500) } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled === true } : {}),
       ...(input.model !== undefined ? { model: validateModel(parseModelInput(input.model)) } : {}),
+      ...(input.routing !== undefined ? { routing: parseRoutingInput(input.routing) } : {}),
       updatedAt: Date.now(),
     };
     if (current.some((item) => item.id !== id && item.name === nextAgent.name)) {

@@ -30,7 +30,7 @@ import { AGENT_RECURSION_LIMIT, config } from "../config.js";
 import { incCounter } from "./observability/metrics.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
-const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools"]);
+const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools", "route", "routeAsk", "dispatch"]);
 
 function nodeSegments(node: string | undefined): string[] {
   return (node ?? "").split(/[/:]/).filter(Boolean);
@@ -260,6 +260,45 @@ function headlessAssumptionOf(update: unknown): { question: string; assumption: 
   return assumption ? { question, assumption } : null;
 }
 
+/**
+ * 路由决策：route 节点的更新里带 routeDecision。只放可解释字段出去，
+ * 不透传 Intent 全文（可能含大段用户原始输入，前端不需要）。
+ */
+function routeDecisionOf(update: unknown): Extract<AgentEvent, { type: "route_decision" }> | null {
+  const value = (update as { routeDecision?: unknown } | null)?.routeDecision;
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const layer = record.layer;
+  if (kind !== "dispatch" && kind !== "ask" && kind !== "main") return null;
+  if (layer !== "rule" && layer !== "vector" && layer !== "model" && layer !== "fallback") return null;
+  const candidates = Array.isArray(record.candidates)
+    ? record.candidates
+      .map((item) => {
+        const entry = item as { agentId?: unknown; name?: unknown; score?: unknown } | null;
+        if (!entry || typeof entry.agentId !== "string" || !entry.agentId) return null;
+        return {
+          agentId: entry.agentId,
+          name: typeof entry.name === "string" ? entry.name : entry.agentId,
+          score: Number.isFinite(Number(entry.score)) ? Number(entry.score) : 0,
+        };
+      })
+      .filter((item): item is { agentId: string; name: string; score: number } => item !== null)
+    : [];
+  return {
+    type: "route_decision",
+    kind,
+    layer,
+    ...(typeof record.agentId === "string" && record.agentId ? { agentId: record.agentId } : {}),
+    ...(typeof record.agentName === "string" && record.agentName ? { agentName: record.agentName } : {}),
+    confidence: Number.isFinite(Number(record.confidence)) ? Number(record.confidence) : 0,
+    margin: Number.isFinite(Number(record.margin)) ? Number(record.margin) : 0,
+    reason: typeof record.reason === "string" ? record.reason : "",
+    candidates,
+    handoffCount: Number.isFinite(Number(record.handoffCount)) ? Number(record.handoffCount) : 0,
+  };
+}
+
 /** 从 messages 模式的 metadata 里取出可读的节点标签（子图显示为 "父节点/内层节点"） */
 function nodeLabel(meta: Record<string, unknown> | undefined): string | undefined {
   if (!meta) return undefined;
@@ -332,6 +371,8 @@ export async function* runGraphEvents(
   const streamedReasoningIds = new Set<string>(); // messages 模式已流式输出过的思考消息 id
   const emittedRiskUsageIds = new Set<string>();  // 审查模型 usage 在 messages/updates 双流中的去重
   const emittedRiskDecisionIds = new Set<string>();
+  // 路由卡去重：同一 reason 只发一次（dispatch 节点会带旧 routeDecision 重放）
+  const emittedRouteReasons = new Set<string>();
   let streamedSinceBoundary = false;              // 距上个「边界消息」（工具结果等）是否已有流式正文
   let toolSeq = 0;                       // 网关不给 tool_call id 时兜底编号
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
@@ -524,6 +565,12 @@ export async function* runGraphEvents(
           // 显式事件，让任何调用方（外部评测 / 批量脚本）都能看到「本该问什么」。
           const assumption = headlessAssumptionOf(update);
           if (assumption) yield { type: "clarification_note", ...assumption };
+          // 路由卡片：只由决策节点产出；后续节点重跑同一决策时不重复发。
+          const routeEvent = routeDecisionOf(update);
+          if (routeEvent && !emittedRouteReasons.has(routeEvent.reason)) {
+            emittedRouteReasons.add(routeEvent.reason);
+            yield routeEvent;
+          }
         }
         const internalNode = isInternalNodeName(nodeKey);
         // 兜底：极少数网关不流式返回 token，此时从 updates 里补出完整 AI 消息。

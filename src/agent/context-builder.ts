@@ -29,6 +29,11 @@ export interface AgentContextInput {
   memoryNote?: string;
   /** 技能注记（skills.ts 按用户消息关键词命中生成；未命中为 undefined，零开销） */
   skillNote?: string;
+  /**
+   * 路由派发结果（子代理已完成的结论）。作为「已知事实」注入，
+   * 让主 Agent 收尾时不必重复调用相同工具，也避免它假装没发生过。
+   */
+  dispatchBrief?: string;
   /** 跨审批/澄清仍保留的任务台账（server/task-budget.ts 生成） */
   taskLedger?: string;
   /** 本任务预算使用情况（供模型主动收口，不等待硬超时） */
@@ -209,6 +214,7 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     input.permissionNote || "",
     input.memoryNote || "",
     input.skillNote || "",
+    input.dispatchBrief || "",
     input.taskLedger || "",
     input.budgetNote || "",
   ].filter(Boolean);

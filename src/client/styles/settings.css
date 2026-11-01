@@ -933,3 +933,132 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
   .memory-span-2 { grid-column: auto; }
   .memory-history-check { padding-top: 0; }
 }
+
+/* ---------- 路由决策分区 ---------- */
+.routing-page { display: flex; flex-direction: column; gap: 16px; }
+.routing-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.routing-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--font-xs);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.routing-head h2 { margin: 4px 0 6px; }
+.routing-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  cursor: pointer;
+}
+.routing-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.routing-switch-track {
+  position: relative;
+  width: 40px; height: 22px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  transition: background .15s;
+}
+.routing-switch-track::after {
+  content: "";
+  position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: transform .15s;
+}
+.routing-switch input:checked + .routing-switch-track { background: var(--accent, #4a7dff); }
+.routing-switch input:checked + .routing-switch-track::after { transform: translateX(18px); }
+.routing-switch input:focus-visible + .routing-switch-track { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.routing-switch-label { font-size: var(--font-sm); color: var(--text-2); }
+
+.routing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.routing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev, var(--bg));
+}
+.routing-card h3 { margin: 0; font-size: var(--font-md); }
+.routing-card-sub { margin: 0; color: var(--text-3); font-size: var(--font-xs); line-height: 1.6; }
+.routing-field { display: flex; flex-direction: column; gap: 4px; }
+.routing-field > span { color: var(--text-2); font-size: var(--font-sm); }
+.routing-field > span b { color: var(--text, var(--text)); font-family: var(--mono); font-weight: 600; }
+.routing-field input[type="text"],
+.routing-field input[type="url"],
+.routing-field input[type="password"],
+.routing-field input[type="number"],
+.routing-field select {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--font-sm);
+}
+.routing-field input:focus-visible,
+.routing-field select:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -1px; }
+.routing-hint { margin: 0; color: var(--text-3); font-size: var(--font-xs); }
+
+.routing-test-card { gap: 12px; }
+.routing-test-row { display: flex; gap: 10px; }
+.routing-test-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--font-sm);
+}
+.routing-test-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-sm);
+  color: var(--text-2);
+}
+.routing-test-result:empty { display: none; }
+.routing-test-head { margin: 0; color: var(--text, var(--text)); font-weight: 600; }
+.routing-test-reason { margin: 0; line-height: 1.6; }
+.routing-test-warn { margin: 0; color: var(--amber-soft, #b8860b); }
+.routing-test-scores { display: grid; gap: 3px; }
+.routing-test-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font-xs);
+}
+.routing-test-score-name { min-width: 90px; color: var(--text, var(--text)); }
+.routing-test-score-value { color: var(--text-2); font-family: var(--mono); }
+.routing-test-score-detail { color: var(--text-3); }
+
+.routing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .routing-test-row { flex-direction: column; }
+  .routing-actions { flex-direction: column; align-items: stretch; }
+}

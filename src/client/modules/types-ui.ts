@@ -116,6 +116,24 @@ export interface ClarificationPart {
   answer?: string;
 }
 
+/**
+ * 路由决策卡：把「为什么派给这个 agent」摊开。
+ * 默认折叠（多数人只关心结果），摘要行给出结论与来源层。
+ */
+export interface RoutePart {
+  p: "route";
+  kind: "dispatch" | "ask" | "main";
+  layer: "rule" | "vector" | "model" | "fallback";
+  /** 被派发的 agent id；kind=dispatch 时存在 */
+  agentId?: string;
+  agentName?: string;
+  confidence: number;
+  margin: number;
+  reason: string;
+  candidates: Array<{ agentId: string; name: string; score: number }>;
+  handoffCount: number;
+}
+
 export type AssistantPart =
   | TextPart
   | ThinkingPart
@@ -123,7 +141,8 @@ export type AssistantPart =
   | ModelRetryPart
   | ToolPart
   | ApprovalPart
-  | ClarificationPart;
+  | ClarificationPart
+  | RoutePart;
 
 /* ---------------------------------------------------------------------------
  * 对话块
@@ -217,7 +236,7 @@ export interface ComposerTrigger {
  * 全局状态
  * ------------------------------------------------------------------------- */
 
-import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent, PluginSettingsState, SubagentSettingsState } from "./types-api.js";
+import type { AppConfig, PendingFile, RagState, EstateState, ExternalAgent, PluginSettingsState, RoutingSnapshot, SubagentSettingsState } from "./types-api.js";
 
 export interface SessionStreamState {
   ctrl: AbortController;
@@ -234,6 +253,8 @@ export interface AppState {
   estate: EstateState | null;
   plugins: PluginSettingsState | null;
   subagents: SubagentSettingsState | null;
+  /** 路由配置快照（设置页懒加载；未打开过为 null） */
+  routing: RoutingSnapshot | null;
   projectView: string;
   projCollapsed: string[];
   currentId: string | null;

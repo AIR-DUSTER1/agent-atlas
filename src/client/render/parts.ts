@@ -25,7 +25,7 @@ import { renderDelegateInToolCard } from "./delegate-card.js";
 import { enhanceCodeBlocks } from "./code-enhance.js";
 import type {
   AgentEvent, AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
-  ModelRetryPart, NodePart, TextPart, ThinkingPart, ToolPart,
+  ModelRetryPart, NodePart, RoutePart, TextPart, ThinkingPart, ToolPart,
 } from "../modules/types.js";
 
 /** 「超过两个」才收进 tools；1–2 个保持平铺 */
@@ -518,6 +518,12 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     renderClarificationCard(part, el);
     body.appendChild(el);
     partEls.set(part, { el });
+    return;
+  }
+
+  if (part.p === "route") {
+    body.appendChild(renderRouteCard(part));
+    return;
   }
 }
 
@@ -542,4 +548,66 @@ export function unmountTyping(block: AssistantBlock): void {
 export function setPendingApproval(on: boolean, sid: string | null = state.currentId): void {
   const s = state.sessions.find((x) => x.id === sid);
   if (s) s.pendingApproval = on;
+}
+
+/* ---------------------------------------------------------------------------
+ * 路由决策卡
+ * ------------------------------------------------------------------------- */
+const ROUTE_LAYER_LABELS: Record<RoutePart["layer"], string> = {
+  rule: "规则匹配",
+  vector: "向量比对",
+  model: "决策模型",
+  fallback: "降级兜底",
+};
+
+const ROUTE_KIND_LABELS: Record<RoutePart["kind"], string> = {
+  dispatch: "已派发",
+  ask: "等待确认",
+  main: "当前 Agent",
+};
+
+/**
+ * 路由卡：默认折叠，摘要行直接给出「派给谁 + 来自哪一层」。
+ * 展开后给出置信度、分差与候选打分，方便判断是否误派。
+ */
+export function renderRouteCard(part: RoutePart): HTMLElement {
+  const details = document.createElement("details");
+  details.className = `route-card layer-${part.layer} kind-${part.kind}`;
+  const target = part.kind === "dispatch" && part.agentName
+    ? part.agentName
+    : ROUTE_KIND_LABELS[part.kind];
+  details.append(
+    h("summary", { class: "route-summary" },
+      h("span", { class: "route-icon" }, icon("Waypoints", { size: 13 })),
+      h("span", { class: "route-title" }, `路由：${target}`),
+      h("span", { class: "route-layer" }, ROUTE_LAYER_LABELS[part.layer]),
+      h("span", { class: "route-chevron" }, icon("ChevronRight", { size: 11 })),
+    ),
+    h("div", { class: "route-body" }),
+  );
+  const body = details.querySelector(".route-body");
+  if (!body) return details;
+
+  body.appendChild(h("p", { class: "route-reason" }, part.reason || "（无依据说明）"));
+
+  const metrics = [
+    `置信度 ${part.confidence.toFixed(2)}`,
+    part.candidates.length > 1 ? `分差 ${part.margin.toFixed(2)}` : "",
+    part.handoffCount > 0 ? `已转回 ${part.handoffCount} 次` : "",
+  ].filter(Boolean);
+  if (metrics.length) body.appendChild(h("div", { class: "route-metrics" }, metrics.join("  ·  ")));
+
+  if (part.candidates.length) {
+    const list = h("div", { class: "route-candidates" });
+    for (const candidate of part.candidates.slice(0, 6)) {
+      const row = h("div", { class: "route-candidate" },
+        h("span", { class: "route-candidate-name" }, candidate.name),
+        h("span", { class: "route-candidate-score" }, candidate.score.toFixed(2)),
+      );
+      if (candidate.agentId === part.agentId) row.classList.add("chosen");
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+  }
+  return details;
 }

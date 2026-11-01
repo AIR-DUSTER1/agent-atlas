@@ -165,7 +165,7 @@ export async function testRagConnection(opts?: { baseURL?: string; apiKey?: stri
   return { ok: true, status: res.status, body };
 }
 
-interface RagHit { name: string; text: string; score: number; source: string }
+export interface RagHit { name: string; text: string; score: number; source: string }
 interface RagNormalized { id: string | null; name: string; text: string; score: number; source: string; meta: Record<string, unknown> }
 
 /** 解析 search 返回的命中结构（兼容 hits / results、text / content、meta 内外两种来源字段） */
@@ -198,18 +198,28 @@ function normalizeHit(h: Record<string, unknown>): RagHit {
   return { name, text: text.slice(0, MAX_SEARCH_CHARS) ?? "", score, source };
 }
 
-/** 检索（对外统一入口：工具与知识库面板都用它） */
-export async function searchRag(query: string, topK?: number): Promise<{ query: string; hits: RagHit[]; service: string }> {
+/**
+ * 检索（对外统一入口：工具与知识库面板都用它）。
+ *
+ * `options.collection` 用于「同一服务、不同用途」：路由层要查 agent-routing
+ * 专用集合，与项目文档集合分开，否则文档内容会污染 agent 匹配结果。
+ */
+export async function searchRag(
+  query: string,
+  topK?: number,
+  options: { collection?: string } = {},
+): Promise<{ query: string; hits: RagHit[]; service: string }> {
   await ensureLoaded();
   if (!isRagConfigured()) throw new Error("未配置外部 RAG 服务：请在 📚 知识库面板填写服务地址");
   const q = query.trim();
   if (!q) throw new Error("检索词不能为空");
+  const collection = options.collection?.trim() || rag.collection;
   const res = await ragBreaker.run(() => ragGauge.run(async () => {
     const response = await fetch(rag.baseURL + "/search", {
       method: "POST",
       headers: ragHeaders(),
       body: JSON.stringify({
-        collection: rag.collection,
+        collection,
         query: q,
         topK: topK && topK >= 1 ? Math.min(20, Math.round(topK)) : rag.topK,
       }),
@@ -271,6 +281,39 @@ export async function ingestText(name: string, text: string, source: string): Pr
   const { chunks } = await ragIngest([{ id, name, text: content, meta: { source } }]);
   await registerDocs([{ id, meta: { name, bytes: content.length, chunks, at: Date.now(), source } }]);
   return getRagPublic();
+}
+
+/**
+ * 幂等入库到指定集合：同名（= 同 agent id）文档会被覆盖重建。
+ * 供路由层同步 agent 名片使用 —— 不登记到知识库面板的 docs 列表，
+ * 那是「用户可见的项目文档」，机器索引不该混进去。
+ */
+export async function upsertCollectionText(input: {
+  collection: string;
+  id: string;
+  name: string;
+  text: string;
+  source: string;
+}): Promise<void> {
+  await ensureLoaded();
+  if (!isRagConfigured()) throw new Error("未配置外部 RAG 服务");
+  const content = input.text.trim();
+  if (!content) throw new Error("文本内容为空");
+  const res = await ragBreaker.run(() => ragGauge.run(async () => {
+    const response = await fetch(rag.baseURL + "/ingest", {
+      method: "POST",
+      headers: ragHeaders(),
+      body: JSON.stringify({
+        collection: input.collection,
+        documents: [{ id: input.id, name: input.name, text: content, meta: { source: input.source } }],
+      }),
+      signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw ragError(response, "ingest");
+    return response;
+  }));
+  // 契约不强制返回体；读掉避免连接悬挂。
+  try { await res.json(); } catch { /* 忽略 */ }
 }
 
 /** 删除单个文档：优先通知外部服务（POST /delete），随后总是移除本地登记 */

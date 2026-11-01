@@ -25,11 +25,12 @@ import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
 import { refreshPluginPanel } from "./settings-plugins.js";
 import { refreshSubagents } from "./settings-subagents.js";
+import { refreshRouting, bindRoutingSettings } from "./settings-routing.js";
 import { refreshStats } from "./stats/index.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "memories", "commands", "skills", "mcp", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "memories", "commands", "skills", "mcp", "stats"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -59,6 +60,8 @@ export function showSettingsView(view: string): void {
     void refreshPluginPanel().catch((err) => setPluginPanelError(err));
   } else if (next === "subagents") {
     void refreshSubagents().catch((err) => setSubagentPanelError(err));
+  } else if (next === "routing") {
+    void refreshRouting().catch((err) => setRoutingPanelError(err));
   } else if (next === "memories") {
     void refreshMemorySettings().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "commands") {
@@ -101,9 +104,17 @@ function setSubagentPanelError(err: unknown): void {
   el.className = "settings-status err";
 }
 
+function setRoutingPanelError(err: unknown): void {
+  const el = $("routing-status");
+  if (!el) return;
+  el.textContent = "✗ " + (err instanceof Error ? err.message : String(err));
+  el.className = "settings-status err";
+}
+
 /** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
 export function bindSettingsNavigation(): void {
   bindMemorySettings();
+  bindRoutingSettings();
   document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
     button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
   });

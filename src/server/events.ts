@@ -19,6 +19,7 @@
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
  *   interrupt   → Human-in-the-loop 审批卡片 / 需求澄清选项
  *   clarification_note → 无头模式下自动采用的假设（不挂起、不等人）
+ *   route_decision → 路由决策卡片（派给谁 / 依据 / 来自哪一层 / 可解释分数）
  *   usage       → 本轮模型调用的 token 用量（驱动上下文容量条 + 缓存占比）
  *   task_usage  → 本轮结束时的任务累计用量（下游统计的权威口径）
  *   ai_message  → 整段助手消息兜底（极少数网关不支持 token 流时使用）
@@ -142,6 +143,25 @@ export type AgentEvent =
       activeMs: number;
       /** 本轮是否有等待人工的挂起（有则累计只到挂起前） */
       interrupted?: boolean;
+    }
+  /**
+   * 路由决策：把「这轮为什么派给这个 agent」摊开给人看。
+   * 三层都可能产出它（rule / vector / model / fallback），前端渲染成一张可折叠卡。
+   */
+  | {
+      type: "route_decision";
+      kind: "dispatch" | "ask" | "main";
+      layer: "rule" | "vector" | "model" | "fallback";
+      agentId?: string;
+      agentName?: string;
+      /** 0..1；规则层是归一化分，模型层是自报置信度 */
+      confidence: number;
+      /** top1 − top2 */
+      margin: number;
+      reason: string;
+      candidates: Array<{ agentId: string; name: string; score: number }>;
+      /** 本轮已发生的转回次数 */
+      handoffCount: number;
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }

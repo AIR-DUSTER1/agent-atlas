@@ -75,6 +75,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
     ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
     ├── agent/            # profile + 共享工作流 + 通用/房产 Agent + 5 个示例的图定义
+    ├── routing/          # 多 Agent 路由决策层：规则 / 向量 / 决策模型 / 守卫（§3.45，默认关闭）
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
@@ -1560,6 +1561,10 @@ console.log(result.messages.at(-1).content);
 | 多步任务从第 2 次模型调用起必现 `400 The reasoning_content in the thinking mode must be passed back to the API` | `@langchain/openai` 出站序列化丢弃 `additional_kwargs.reasoning_content`（fetch 拦截实测确认） | 已由 `reasoning-passthrough.ts` 在 fetch 层补字段（§3.42）；网关反过来拒绝该字段时自动关闭回传并重试一次 |
 | 并发调用时请求恰好在 ~10 秒后返回 400 | 供应商并发闸 `ResourceGauge` 排队超时默认 10s，旧代码又把资源繁忙统一翻成 400 | 已改为 `ResourceBusyError` → **429 + Retry-After**（§3.44）；可用 `MODEL_CONCURRENCY_PER_PROVIDER` / `MODEL_QUEUE_WAIT_MS` 调整 |
 | 批量 / 无头调用拿到空回答 | 需求澄清 `interrupt()` 挂起等人工，无人应答即任务被弃 | 请求带 `"headless": true`（§3.43）：自动采用首个候选假设继续，并发出 `clarification_note` 事件 |
+| 路由规则在中文请求上几乎从不触发快速路径 | 关键词多为 2–4 字，按 `raw/40` 线性归一化后单次命中只有 0.175 | 改用饱和曲线 `1−e^(−raw/5)`（§3.45）：1 次命中 0.75 交模型层，2 次命中 0.94 直接派发 |
+| 用户点一次路由选项，子代理却跑了两次 | `interrupt()` 在 resume 时会让**节点从头重跑**；询问与派发放同一节点就会重复执行 | 拆成 `routeAsk` / `dispatch` 两个节点（§3.45），派发节点里不含任何 `interrupt()` |
+| 路由派发绕过了高风险审批 | 程序化派发不经 `delegate_agent`，那条路径的审批不会触发 | 派发只授予**只读工具**（无审批文案者）；写操作由子代理写进「超出范围」，主 Agent 走原审批流程（§3.45） |
+| 多配一个子代理后所有请求都变成「不确定」 | 直接用 `p_max` 当置信度，选项越多 `p_max` 越低 | 用按选项数归一化的 `confidence = (k·p_max−1)/(k−1)`（§3.45 守卫 G2） |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -2048,3 +2053,114 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 **踩坑**：一开始把 `runWithModelSlot` 包在 `streamToClient` 外层，结果排队期间
 SSE 头还没写、也没有任何事件，客户端看到的是「请求卡住 10 秒然后 400」。
 正确顺序是「先拿槽位 → 再登记 → 再开流」，且拒绝路径必须在写响应头之前。
+
+### 3.45 `src/routing/` — 多 Agent 路由决策层
+
+**定位**：把「该由哪个子代理处理这条消息」从主 Agent 的自由发挥，变成一条可解释、
+可降级的分层管道。**默认关闭**（`routing.enabled=false`），不开启时图里不出现
+`route` 节点，行为与引入前完全一致。
+
+**分层与文件**：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| L1 规则 | `routing/rules.ts` | 关键词命中 + 负向词惩罚 → 0..1 分数 + 快速路径判定 |
+| L2 向量 | `routing/vector.ts`（接口）、`server/routing-vector.ts`（实现） | RAG 专用集合 `agent-routing` 检索；未配 RAG 则整层不存在 |
+| L3 模型 | `routing/backends/{openai,systemone}.ts` | 两套协议，一个 `DecisionBackend` 接口 |
+| 守卫 | `routing/guards.ts` | G1 白名单 / G2 置信度 / G3 分差 / G4 多意图冲突 |
+| 编排 | `routing/decide.ts`、`routing/route-step.ts` | 层级顺序、异常降级、图节点入口 |
+| 元数据 | `routing/types.ts`、`candidates.ts` | 子代理路由名片与「能否参与竞争」的判定 |
+
+**图上的四个节点**（`agent/workflow.ts`）：
+
+```
+analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
+                                              ↑
+                                    dispatch 报「超出范围」时回到 route（≤1 次）
+```
+
+拆成四个节点的原因是 `interrupt()` 会让节点在 resume 时**从头重跑**：
+把「询问」和「派发子代理」放在同一节点，用户点一次选项就会跑两遍子代理。
+
+**关键设计点**：
+
+1. **程序化派发只授予只读工具**。`delegate_agent` 这条路径的「委派动作」本身就是
+   审批项；路由派发没有这一步，如果连 `write_file` / `terminal` 一起下放，
+   等于绕过 AGENTS.md §5.4。需要写操作时子代理把需求写进「超出范围」，由主 Agent
+   走审批流程完成。
+2. **兜底型 agent 不参与竞争**。`general` 子代理没有关键词也没类别，
+   `buildRoutingCandidates` 会把它过滤掉——否则「谁都不合适」就永远无法成立。
+3. **置信度必须按选项数归一化**。G2 用的是上游 `confidence`（systemone 协议保证
+   是 `(k·p_max−1)/(k−1)`），不是 `p_max`；否则多配一个 agent 就让所有请求
+   突然变成「不确定」。
+4. **规则分用饱和曲线，不是线性归一化**。中文领域关键词普遍 2–4 字，
+   单次命中 raw 只有 7，按 `raw/40` 线性归一化后是 0.175——需要 5 次命中才够
+   0.85，快速路径在中文场景等于形同虚设。改用 `1−e^(−raw/5)` 后：
+   1 次命中 → 0.75（交模型层），2 次 → 0.94（直接派发），是符合直觉的分档。
+5. **跨层不依赖 server**。`routing/*` 不 import `server/*`：RAG 检索与熔断器
+   都由 `server/index.ts` 在启动时注入（`configureRoutingVectorFinder` /
+   `configureRoutingBreaker`），`architecture.test.ts` 的分层守门因此照常通过。
+
+**事件协议**：新增 `route_decision`（`events.ts` → `stream.ts` 的
+`routeDecisionOf` → 前端 `handleEvent` 的 switch → `types-api.ts`），
+渲染成 `render/parts.ts` 的 `renderRouteCard()`：默认折叠，展开看候选打分。
+`stream.ts` 用 `emittedRouteReasons` 去重——`dispatch` 节点的更新会带旧决策重放。
+
+**给子代理配路由名片**：`SubagentConfig.routing`（`keywords` / `category` /
+`suitableFor` / `notSuitableFor` / `domainProfile`），持久化在
+`.web-config.json` 的 `subagents[].routing`。旧配置没有该字段时按空名片处理。
+
+**`domainProfile` 修复的既有缺陷**：`buildSubagentProfile()` 原先只用通用
+「后台子代理」规则，路由到房产子代理后它不知道贝壳顾问工作流
+（首轮只确认城市与方向、搜索门槛、不得编造 houseId）。现在按
+`routing.domainProfile` 从 `agent/domain-profile.ts` 取领域提示词，
+只继承提示词与领域规则，**工具仍由主 Agent 本次显式授予**。
+
+### 3.46 配置形状：`routing` 键
+
+`.web-config.json` 的 `routing` 键（与 providers / subagents 共存，走 `mergeConfig`）：
+
+```jsonc
+{
+  "routing": {
+    "enabled": false,                    // 默认关闭
+    "backend": "openai-compat",          // openai-compat | systemone | rules-only
+    "llm": {                             // 仅 openai-compat 用；两字段都 null = 沿用当前模型
+      "providerId": null,
+      "modelId": null,
+      "temperature": 0,
+      "structuredOutput": true,
+      "maxOutputTokens": 300
+    },
+    "systemone": {                       // 仅 systemone 后端用
+      "baseURL": "",
+      "expectedModel": "",
+      "apiKey": ""                       // 只进不出，对外快照恒为空串
+    },
+    "thresholds": {
+      "ruleAutoAccept": 0.85,            // 规则层直接派发的最低分
+      "ruleMargin": 0.30,                // 规则层 top1−top2
+      "vectorAccept": 0.62,              // 向量层相似度门槛
+      "modelConfidence": 0.70,           // 模型层置信度（已归一化口径）
+      "candidateMargin": 0.15            // 模型层 top1−top2
+    },
+    "limits": {
+      "hierarchicalAbove": 20,           // 超过就分层
+      "maxIntents": 50,
+      "maxCategories": 6,
+      "maxHandoffs": 1,                  // R7：转回不超过 1 次
+      "maxPlanDispatches": 8,
+      "maxIntentTextChars": 4000
+    },
+    "decideTimeoutMs": 6000
+  }
+}
+```
+
+**读取处一律兼容字段缺失**：旧配置没有 `routing` 键 → 全部取默认值且 `enabled=false`。
+写入只走 `server/routing-settings.ts` 的 `saveRoutingSettings()`（内部 `mergeConfig`），
+不做整文件覆写。
+
+**为什么默认 `decideTimeoutMs` 是 6 秒**：API 后端一次路由请求通常 0.3–2 s，
+6 s 留足余量。若启用 systemone 的按需加载模式（每次 spawn 冷启动约 5.9 s），
+需要在设置页把它调到 15 s，否则 100% 超时。

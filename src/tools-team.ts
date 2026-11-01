@@ -21,9 +21,11 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
 import { runSubagent, type SubagentResult, type SubagentRunOptions } from "./agent/subagent.js";
 import type { AgentProfile, ApprovalDescriptions } from "./agent/profile.js";
-import { findSubagent, getEnabledSubagents } from "./subagent-state.js";
+import { resolveDomainProfile } from "./agent/domain-profile.js";
+import { findSubagent, getEnabledSubagents, type SubagentConfig } from "./subagent-state.js";
 import { resolveModelRuntime, type ModelRuntimeConfig } from "./model-runtime.js";
 import { describeDelegableTools, type DelegableToolEntry } from "./delegation-catalog.js";
+import { renderBriefing } from "./routing/briefing.js";
 
 const SUBAGENT_SYSTEM_RULES = [
   "你是主 Agent 在运行时创建的后台子代理。",
@@ -31,6 +33,8 @@ const SUBAGENT_SYSTEM_RULES = [
   "- 信息不足时采用合理假设，并在结果开头列明假设。",
   "- 不准再次委派子代理。",
   "- 完成时直接给出可交付结论；不要复述任务书，不要输出内部 JSON。",
+  "- 如果问题明显超出你被赋予的能力范围，照常完成你能做的部分，",
+  "  并在结果末尾用「【超出范围】」小节说明缺什么、建议交给谁。",
 ].join("\n");
 
 function buildAgentCatalogText(): string {
@@ -73,31 +77,72 @@ function buildSubagentProfile(
   displayName: string,
   prompt: string,
   entries: readonly DelegableToolEntry[],
+  domainProfileId: SubagentConfig["routing"]["domainProfile"],
 ): AgentProfile {
   const approvalDescriptions: ApprovalDescriptions = {};
   for (const entry of entries) {
     if (entry.approvalDescription) approvalDescriptions[entry.tool.name] = entry.approvalDescription;
   }
+  // 领域 profile 只贡献「提示词与领域规则」，工具仍以本次显式分配的子集为准：
+  // 继承能力描述不等于放宽授权。
+  const domain = resolveDomainProfile(domainProfileId);
   return {
-    id: "general",
+    id: domain?.id ?? "general",
     displayName,
-    systemPrompt: `${SUBAGENT_SYSTEM_RULES}\n\n主 Agent 赋予的专项指令：\n${prompt}`,
+    systemPrompt: domain
+      ? `${domain.systemPrompt}\n\n${SUBAGENT_SYSTEM_RULES}\n\n主 Agent 赋予的专项指令：\n${prompt}`
+      : `${SUBAGENT_SYSTEM_RULES}\n\n主 Agent 赋予的专项指令：\n${prompt}`,
     tools: entries.map((entry) => entry.tool),
     approvalDescriptions,
     analystGuidance: [
       "这是无交互子代理任务：理解主 Agent 与用户目标后直接执行，不要请求澄清。",
       "工具只允许使用当前 Profile 绑定的子集；缺失能力就给出可执行替代方案。",
+      ...(domain?.analystGuidance ? [domain.analystGuidance] : []),
     ].join("\n"),
     reviewerGuidance: [
       "检查结果是否完成主 Agent 赋予的专项指令，是否基于实际工具结果，是否明确说明假设、限制和失败。",
       "不要把未执行的操作描述成已完成。",
+      ...(domain?.reviewerGuidance ? [domain.reviewerGuidance] : []),
     ].join("\n"),
     contextPolicy: {
       maxRecentMessages: 10_000,
-      maxToolResultChars: 8_000,
+      maxToolResultChars: domain?.contextPolicy?.maxToolResultChars ?? 8_000,
     },
   };
 }
+
+/** 程序化派发需要的最小上下文：一次路由到目标 agent 并执行任务。 */
+export interface DispatchRequest {
+  agent: SubagentConfig;
+  /** 任务书（briefing 渲染结果） */
+  task: string;
+  /** 专项提示词；程序化路由时与 task 相同，主 Agent 调用时另给 */
+  prompt: string;
+  tools: readonly string[];
+  entries: readonly DelegableToolEntry[];
+  modelRuntime: ModelRuntimeConfig;
+  signal?: AbortSignal;
+  run?: (profile: AgentProfile, task: string, options: SubagentRunOptions) => Promise<SubagentResult>;
+}
+
+/**
+ * 程序化派发：规则/模型层决定目标后，由代码直接执行一次子代理，
+ * 不经过 `delegate_agent` 工具（因此不触发审批 —— 路由本身不改世界，
+ * 子代理内部的写操作仍各自走 profile 审批）。
+ */
+export async function dispatchToAgent(request: DispatchRequest): Promise<SubagentResult> {
+  const profile = buildSubagentProfile(
+    request.agent.name,
+    request.prompt.trim(),
+    request.entries,
+    request.agent.routing.domainProfile,
+  );
+  return (request.run ?? runSubagent)(profile, request.task, {
+    modelRuntime: request.modelRuntime,
+    signal: request.signal,
+  });
+}
+
 
 export interface TeamToolFactoryOptions {
   /** 单测可注入假执行器；生产省略，固定走 runSubagent。 */
@@ -141,7 +186,7 @@ export function createTeamTools(
           : "委派失败：当前主对话模型不可解析，请检查模型与供应商配置。";
       }
 
-      const profile = buildSubagentProfile(agent.name, input.prompt.trim(), selection.entries);
+      const profile = buildSubagentProfile(agent.name, input.prompt.trim(), selection.entries, agent.routing.domainProfile);
       const result = await (options.run ?? runSubagent)(profile, input.task, {
         modelRuntime,
         signal: config?.signal,
@@ -161,11 +206,16 @@ export function createTeamTools(
         "把独立子任务委派给一个已启用的子代理。你必须同时赋予本次任务提示词和工具子集；" +
         "子代理拥有独立上下文，只回传结构化结论。工具必须从下方目录中选择，不能越权；" +
         "一次委派会启动多轮模型调用，执行前需要用户批准。\n\n" +
+        "prompt 按「对刚走进会议室的同事交代工作」写清楚：【背景】【你的目标】【已知事实】" +
+        "【边界】【交付】【完成标准】六节；已知事实里写明你已经调过的工具结果，避免子代理重复执行。\n\n" +
         `可用子代理：\n${agentCatalog}\n\n可分配工具：\n${toolCatalog}`,
       schema: z.object({
         agent: z.string().min(1).describe(`子代理 id，可选：${agentIds.join("、")}`),
         task: z.string().min(1).describe("完整任务书：目标、范围、输入、约束与期望输出。"),
-        prompt: z.string().min(1).describe("本次子代理的专项系统提示词：角色、方法、质量标准与禁止事项。"),
+        prompt: z.string().min(1).describe(
+          "本次子代理的专项系统提示词。推荐用 briefing 六节结构：【背景】【你的目标】【已知事实】" +
+          "【边界】【交付】【完成标准】；已知事实写已执行过的工具结果，避免重复调用。"
+        ),
         tools: z.array(z.string()).describe(`本任务允许使用的工具名子集，可选：${toolNames.join("、") || "无"}`),
       }),
     },

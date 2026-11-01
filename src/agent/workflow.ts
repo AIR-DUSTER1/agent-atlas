@@ -5,6 +5,7 @@
  * 这里承载 general / estate 共用的「执行前理解、执行后检查」逻辑：
  *   analyze  用一次独立模型调用判断最新请求是否足够明确；
  *   clarify  interrupt() 生成 2-4 个选项，用户选择后继续；
+ *   route    按规则 / 向量 / 决策模型挑子代理，必要时转成澄清询问（默认关闭）；
  *   agent    原有 ReAct 节点（工具循环与人工审批完全复用 hitl.ts）；
  *   review   最终回答不满意时带反馈回炉，最多修订三次防止死循环。
  *
@@ -40,6 +41,14 @@ import { createToolRiskAssessor, type ToolRiskAssessor } from "./tool-risk.js";
 import { permissionModeNote, type PermissionMode } from "./permission.js";
 import type { AgentProfile } from "./profile.js";
 import type { ModelRuntimeConfig } from "../model-runtime.js";
+import { defaultModelRuntime } from "../model-runtime.js";
+import { isRoutingEnabled, getRoutingSettings } from "../routing/state.js";
+import { runRouteStep, routingAppliesTo, shouldDispatch } from "../routing/route-step.js";
+import { findSubagent } from "../subagent-state.js";
+import { buildDelegationCatalog } from "../delegation-catalog.js";
+import { dispatchToAgent } from "../tools-team.js";
+import { renderBriefing, parseOutOfScope, OUT_OF_SCOPE_MARKER } from "../routing/briefing.js";
+import type { RouteDecision } from "../routing/types.js";
 
 const MAX_USER_TEXT = 8_000;
 const MAX_BRIEF_TEXT = 1_200;
@@ -121,6 +130,29 @@ const WorkflowState = Annotation.Root({
    * 只用于把假设告诉调用方与模型，不参与后续路由判断。
    */
   headlessAssumption: Annotation<string>({
+    reducer: (_previous, next) => next ?? "",
+    default: () => "",
+  }),
+  /** 本轮路由决策（dispatch / ask / main），供流层产出 route_decision 事件 */
+  routeDecision: Annotation<RouteDecision | null>({
+    reducer: (_previous, next) => next,
+    default: () => null,
+  }),
+  /** 本轮已转回次数（R7 硬约束 ≤ maxHandoffs，计数只能由节点代码改） */
+  handoffCount: Annotation<number>({
+    reducer: (_previous, next) => next ?? 0,
+    default: () => 0,
+  }),
+  /** 已尝试过的子代理 id，防止 A→B→A 绕圈 */
+  routeHistory: Annotation<string[]>({
+    reducer: (_previous, next) => next ?? [],
+    default: () => [],
+  }),
+  /**
+   * 程序化派发布展出的任务书：路由节点生成，agent 节点作为前置事实注入。
+   * 只在本轮内有效，不参与跨轮记忆。
+   */
+  dispatchBrief: Annotation<string>({
     reducer: (_previous, next) => next ?? "",
     default: () => "",
   }),
@@ -345,6 +377,11 @@ export function createWorkflowGraph(
     modelRuntime?: ModelRuntimeConfig;
     /** 观测每次模型响应；回调异常不得影响主图。 */
     onModelUsage?: (node: "analyze" | "agent" | "review", response: AIMessage) => void;
+    /**
+     * 路由派发执行器；生产省略（固定走 runSubagent）。
+     * 单测注入假执行器即可覆盖「派发 → 回填 → 收尾」全链路，不碰真实网关。
+     */
+    dispatchRunner?: typeof dispatchToAgent;
   }
 ) {
   const tools = profile.tools;
@@ -453,6 +490,83 @@ export function createWorkflowGraph(
     };
   }
 
+  // ── 路由层（默认关闭）：规则 → 向量 → 决策模型 → 守卫 ────────────────
+  // 拆成 route / routeAsk / dispatch 三个节点，原因：
+  //   1. interrupt() 会让节点在 resume 时「从头重跑」，所以必须把「询问」与
+  //      「派发子代理」放在不同节点，否则用户点一次选项会跑两遍子代理；
+  //   2. dispatch 有副作用（多轮模型调用），绝不能和 interrupt 同节点。
+  async function routeNode(state: WorkflowStateType, nodeConfig?: {
+    signal?: AbortSignal;
+    configurable?: { headless?: boolean };
+  }) {
+    if (!isRoutingEnabled()) return { routeDecision: null };
+    const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
+    if (!userText.trim()) return { routeDecision: null };
+
+    const result = await runRouteStep({
+      text: userText,
+      sessionKind: profile.id === "estate" ? "estate" : "agent",
+      handoffCount: state.handoffCount,
+      exclude: state.routeHistory,
+      signal: nodeConfig?.signal,
+    });
+    const decision = result.decision;
+    // 无头模式没人能回答询问：退化成当前 agent 处理，不留悬挂。
+    if (decision.kind === "ask" && nodeConfig?.configurable?.headless === true) {
+      return {
+        routeDecision: {
+          ...decision,
+          kind: "main" as const,
+          reason: `${decision.reason}（无头模式无人确认，改由当前 Agent 处理）`,
+        },
+      };
+    }
+    return { routeDecision: decision };
+  }
+
+  /**
+   * 询问节点：把路由候选做成本轮澄清卡。
+   * 复用 clarify 的 ClarificationRequest 形状，前端无需新组件。
+   * 用户选择后写进 routeDecision.agentId，再交给 dispatch（不重新路由，避免来回问）。
+   */
+  async function routeAskNode(state: WorkflowStateType) {
+    const decision = state.routeDecision;
+    if (!decision || decision.kind !== "ask") return {};
+    const top = decision.candidates.slice(0, 3);
+    const options = [
+      ...top.map((candidate, index) => ({
+        id: String.fromCharCode(65 + index),
+        label: `交给「${candidate.name}」`,
+        description: `按该子代理的专项能力处理（匹配分 ${candidate.score.toFixed(2)}）`,
+      })),
+      { id: String.fromCharCode(65 + Math.min(top.length, 3)), label: "由当前 Agent 直接处理", description: "不使用子代理" },
+    ];
+    const request: ClarificationRequest = {
+      type: "clarification",
+      question: `路由：${decision.reason}`.slice(0, MAX_QUESTION_TEXT + 20),
+      options,
+      allowCustom: true,
+    };
+    const answer = interrupt<ClarificationRequest, string>(request);
+    const raw = typeof answer === "string" ? answer.trim() : String(answer ?? "").trim();
+    const picked = options.find((option) => option.id === raw);
+    const index = picked ? options.indexOf(picked) : -1;
+    const chosen = index >= 0 && index < top.length ? top[index] : null;
+    return {
+      routeDecision: {
+        ...decision,
+        kind: "dispatch" as const,
+        layer: "fallback" as const,
+        ...(chosen ? { agentId: chosen.agentId, agentName: chosen.name } : {}),
+        reason: chosen
+          ? `用户选择「${chosen.name}」。`
+          : `用户选择由当前 Agent 处理（自定义输入：${raw.slice(0, 200)}）`,
+      },
+      // 用户自己指定了方向，就不再让路由层二次猜测。
+      routeHistory: [...state.routeHistory],
+    };
+  }
+
   async function agentNode(
     state: WorkflowStateType,
     config?: {
@@ -485,6 +599,9 @@ export function createWorkflowGraph(
         query: lastUserText,
       })) ?? undefined,
       skillNote: skillNote ?? undefined,
+      dispatchBrief: state.dispatchBrief
+        ? `【子代理已完成的工作（作为你的已知事实，不要重复调用相同工具）】\n${state.dispatchBrief}`
+        : undefined,
       taskLedger: config?.configurable?.task_ledger,
       budgetNote: config?.configurable?.task_budget_note,
       contextWindow: config?.configurable?.context_window,
@@ -529,8 +646,108 @@ export function createWorkflowGraph(
     }
   }
 
-  function afterAnalyze(state: WorkflowStateType): "clarify" | "agent" {
-    return state.clarification ? "clarify" : "agent";
+  /**
+   * 派发节点（有副作用，必须独立于 interrupt）。
+   *
+   * 安全边界：程序化派发**只授予只读工具**（没有审批文案的那些）。
+   * 原因：`delegate_agent` 这条路径的「委派本身」就是审批项，用户批准时才放行；
+   * 路由派发没有这一步，如果连 write_file / terminal 一起下放，等于绕过 §5.4。
+   * 需要写操作时子代理会把需求写进「超出范围」，由主 Agent 走审批流程完成。
+   */
+  async function dispatchNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
+    const decision = state.routeDecision;
+    if (!decision || decision.kind !== "dispatch" || !decision.agentId) return {};
+    const agent = findSubagent(decision.agentId);
+    if (!agent || !agent.enabled) {
+      return {
+        routeDecision: {
+          ...decision,
+          kind: "main" as const,
+          layer: "fallback" as const,
+          reason: `目标子代理「${decision.agentId}」已不存在或已停用，由当前 Agent 处理。`,
+        },
+      };
+    }
+
+    const catalog = buildDelegationCatalog({
+      parentTools: profile.tools,
+      parentApprovals: profile.approvalDescriptions,
+      // 房产会话本身已经绑了 house_*，再补一次会触发重名保护。
+      includeEstateTools: profile.id !== "estate",
+    });
+    const readonlyEntries = catalog.filter((entry) => !entry.approvalDescription);
+
+    const userText = lastHumanText(state.messages).slice(0, MAX_USER_TEXT);
+    const briefing = renderBriefing({
+      background: userText.slice(0, MAX_BRIEF_TEXT),
+      goal: userText.slice(0, MAX_BRIEF_TEXT),
+      tools: readonlyEntries.map((entry) => entry.tool.name),
+      routing: agent.routing,
+    });
+
+    const result = await (options?.dispatchRunner ?? dispatchToAgent)({
+      agent,
+      task: userText,
+      prompt: briefing,
+      tools: readonlyEntries.map((entry) => entry.tool.name),
+      entries: readonlyEntries,
+      modelRuntime: options?.modelRuntime ?? defaultModelRuntime(),
+      ...(nodeConfig?.signal ? { signal: nodeConfig.signal } : {}),
+    });
+
+    const outOfScope = parseOutOfScope(result.text);
+    // handoffCount 记的是「转回次数」，不是「派发次数」：
+    // 第一次派发不算转回（routeHistory 当时还是空的），之后的派发都算一次转回。
+    const isReroute = state.routeHistory.length > 0;
+    const nextHandoff = isReroute ? state.handoffCount + 1 : state.handoffCount;
+    const history = state.routeHistory.includes(agent.id)
+      ? state.routeHistory
+      : [...state.routeHistory, agent.id];
+
+    return {
+      routeHistory: history,
+      handoffCount: nextHandoff,
+      // 子代理结论作为「已知事实」交给主 Agent 收尾，而不是直接当最终回答：
+      // 主 Agent 还要校验、补齐、组织语言（R7 的「主 agent 收尾」）。
+      dispatchBrief: [
+        `【已派发给子代理「${agent.name}」】`,
+        result.ok ? result.text : `子代理执行失败：${result.text}`,
+        outOfScope ? "（该子代理声明了超出范围的部分，见上）" : "",
+        `（用时 ${Math.round(result.durationMs / 1000)} 秒，用到工具：${result.toolsUsed.join("、") || "无"}）`,
+      ].filter(Boolean).join("\n").slice(0, MAX_WORKING_BRIEF),
+    };
+  }
+
+  /**
+   * 派发后：还能转回就回到 route（排除已试过的 agent），否则交主 Agent 收尾。
+   *
+   * 判定只看「本轮是否出现过超出范围」+「转回额度」：
+   * dispatchBrief 里有 outOfScope 段落才代表子代理明确说「我做不了」，
+   * 普通成功不需要重新路由。
+   */
+  function afterDispatch(state: WorkflowStateType): "route" | "agent" {
+    if (!state.dispatchBrief.includes(OUT_OF_SCOPE_MARKER)) return "agent";
+    const limit = getRoutingSettings().limits.maxHandoffs;
+    return state.handoffCount < limit ? "route" : "agent";
+  }
+
+  function afterRoute(state: WorkflowStateType): "routeAsk" | "dispatch" | "agent" {
+    const decision = state.routeDecision;
+    if (!decision) return "agent";
+    if (decision.kind === "ask") return "routeAsk";
+    if (shouldDispatch(decision)) return "dispatch";
+    return "agent";
+  }
+
+  function afterAnalyze(state: WorkflowStateType): "clarify" | "route" | "agent" {
+    // 路由未启用时直接进 agent：不产出空的 route 节点徽章，行为与引入前一致。
+    if (!isRoutingEnabled()) return state.clarification ? "clarify" : "agent";
+    return state.clarification ? "clarify" : "route";
+  }
+
+  /** 澄清之后同样按开关决定进不进路由节点，避免关闭时多一个空节点徽章。 */
+  function afterClarify(): "route" | "agent" {
+    return isRoutingEnabled() ? "route" : "agent";
   }
 
   function afterAgent(state: WorkflowStateType): "tools" | "review" {
@@ -545,12 +762,18 @@ export function createWorkflowGraph(
   return new StateGraph(WorkflowState)
     .addNode("analyze", analyzeNode)
     .addNode("clarify", clarifyNode)
+    .addNode("route", routeNode)
+    .addNode("routeAsk", routeAskNode)
+    .addNode("dispatch", dispatchNode)
     .addNode("agent", agentNode)
     .addNode("tools", toolsNode)
     .addNode("review", reviewNode)
     .addEdge(START, "analyze")
     .addConditionalEdges("analyze", afterAnalyze)
-    .addEdge("clarify", "agent")
+    .addConditionalEdges("clarify", afterClarify)
+    .addConditionalEdges("route", afterRoute)
+    .addEdge("routeAsk", "dispatch")
+    .addConditionalEdges("dispatch", afterDispatch)
     .addConditionalEdges("agent", afterAgent)
     .addEdge("tools", "agent")
     .addConditionalEdges("review", afterReview)

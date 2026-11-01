@@ -248,6 +248,26 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
     }
     // 任务累计用量已随 usage 事件下发（服务端快照），这里不再重复计数。
     case "task_usage": break;
+    case "route_decision": {
+      // 路由卡：同一轮可能有多张（首次派发 + 一次转回），按序追加即可。
+      sealStreamingParts(ablock);
+      const part: AssistantPart = {
+        p: "route",
+        kind: ev.kind,
+        layer: ev.layer,
+        ...(ev.agentId ? { agentId: ev.agentId } : {}),
+        ...(ev.agentName ? { agentName: ev.agentName } : {}),
+        confidence: ev.confidence,
+        margin: ev.margin,
+        reason: ev.reason,
+        candidates: ev.candidates,
+        handoffCount: ev.handoffCount,
+      };
+      ablock.parts.push(part);
+      mountPart(ablock, part);
+      if (visible) scrollBottom();
+      break;
+    }
     // 自动放行只写安全审计，不额外占用聊天正文；保留 case 以维持协议穷尽检查。
     case "risk_decision": break;
     case "usage": applyUsage(ev, ablock, sid); break;

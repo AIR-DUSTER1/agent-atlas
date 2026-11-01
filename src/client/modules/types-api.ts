@@ -93,6 +93,19 @@ export type AgentEvent =
       activeMs: number;
       interrupted?: boolean;
     }
+  /** 路由决策卡片：派给谁 / 依据 / 来自哪一层（rule / vector / model / fallback） */
+  | {
+      type: "route_decision";
+      kind: "dispatch" | "ask" | "main";
+      layer: "rule" | "vector" | "model" | "fallback";
+      agentId?: string;
+      agentName?: string;
+      confidence: number;
+      margin: number;
+      reason: string;
+      candidates: Array<{ agentId: string; name: string; score: number }>;
+      handoffCount: number;
+    }
   | {
       type: "risk_decision";
       decision: "auto";
@@ -283,21 +296,95 @@ export type SubagentModelSelection =
   | { mode: "inherit" }
   | { mode: "fixed"; providerId: string; modelId: string };
 
+/** 子代理路由名片：规则层与决策模型共用；空关键词 + 空类别 = 不参与竞争。 */
+export interface SubagentRouting {
+  keywords: string[];
+  category?: string;
+  suitableFor: string[];
+  notSuitableFor: string[];
+  /** 继承哪个领域 profile 的系统提示（不填 = 通用后台子代理提示词） */
+  domainProfile?: "general" | "estate";
+}
+
 export interface SubagentEntry {
   id: string;
   name: string;
   description: string;
   enabled: boolean;
   model: SubagentModelSelection;
+  routing: SubagentRouting;
   builtIn: boolean;
   createdAt: number;
   updatedAt: number;
   modelLabel: string;
   modelAvailable: boolean;
+  /** 是否参与路由竞争（有类别或关键词） */
+  routable: boolean;
 }
 
 export interface SubagentSettingsState {
   agents: SubagentEntry[];
+}
+
+export type RoutingBackendId = "openai-compat" | "systemone" | "rules-only";
+
+export interface RoutingSettings {
+  enabled: boolean;
+  backend: RoutingBackendId;
+  llm: {
+    providerId: string | null;
+    modelId: string | null;
+    temperature: number;
+    structuredOutput: boolean;
+    maxOutputTokens: number;
+  };
+  systemone: { baseURL: string; expectedModel: string; apiKey: string };
+  thresholds: {
+    ruleAutoAccept: number;
+    ruleMargin: number;
+    vectorAccept: number;
+    modelConfidence: number;
+    candidateMargin: number;
+  };
+  limits: {
+    hierarchicalAbove: number;
+    maxIntents: number;
+    maxCategories: number;
+    maxHandoffs: number;
+    maxPlanDispatches: number;
+    maxIntentTextChars: number;
+  };
+  decideTimeoutMs: number;
+}
+
+export interface RoutingSnapshot {
+  settings: RoutingSettings;
+  hasSystemoneKey: boolean;
+  vectorAvailable: boolean;
+}
+
+export interface RoutingTestResult {
+  decision: {
+    kind: "dispatch" | "ask" | "main";
+    layer: "rule" | "vector" | "model" | "fallback";
+    agentId?: string;
+    agentName?: string;
+    confidence: number;
+    margin: number;
+    reason: string;
+    candidates: Array<{ agentId: string; name: string; score: number }>;
+    handoffCount: number;
+  };
+  usedModel: boolean;
+  usedVector: boolean;
+  ruleScores: Array<{
+    agentId: string;
+    name: string;
+    score: number;
+    hits: string[];
+    negatives: string[];
+  }>;
+  candidateCount: number;
 }
 
 export interface EstateState {

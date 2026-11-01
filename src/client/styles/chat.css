@@ -573,3 +573,70 @@
 @media (max-width: 860px) {
   .scroll-bottom-btn { right: 16px; bottom: 160px; }
 }
+
+/* ---------- 路由决策卡：默认折叠，展开看依据与候选打分 ---------- */
+.route-card {
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev, var(--surface-1));
+}
+.route-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 9px;
+  border-radius: var(--radius-md);
+  color: var(--content-2);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  user-select: none;
+}
+.route-summary::-webkit-details-marker { display: none; }
+.route-summary:hover { background: var(--surface-hover); color: var(--content-1); }
+.route-summary:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.route-icon { flex: none; color: var(--accent, var(--content-3)); }
+.route-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.route-layer {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--content-3);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+}
+.route-chevron { flex: none; color: var(--content-3); transition: transform .15s; }
+.route-card[open] .route-chevron { transform: rotate(90deg); }
+.route-body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--content-2);
+  font-size: var(--font-sm);
+}
+.route-reason { margin: 0 0 6px; line-height: 1.6; }
+.route-metrics {
+  margin-bottom: 6px;
+  color: var(--content-3);
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+}
+.route-candidates { display: grid; gap: 2px; }
+.route-candidate {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1px 0;
+  font-size: var(--font-xs);
+}
+.route-candidate-chosen, .route-candidate.chosen { color: var(--content-1); font-weight: 600; }
+.route-candidate-score { color: var(--content-3); font-family: var(--mono); }

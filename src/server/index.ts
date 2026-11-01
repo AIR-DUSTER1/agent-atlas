@@ -42,9 +42,15 @@ import { loadSettings, refreshModelInfo } from "./settings.js";
 import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
+import { isRagConfigured } from "./rag.js";
 import { loadEstate } from "./estate.js";
 import { loadPluginSettings } from "./plugin-settings.js";
 import { loadSubagentSettings } from "./subagent-settings.js";
+import { configureRoutingVectorProbe, loadRoutingSettings } from "./routing-settings.js";
+import { createRagVectorFinder, syncRoutingIndex } from "./routing-vector.js";
+import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
+import { configureRoutingBreaker, configureRoutingVectorFinder } from "../routing/state.js";
+import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
@@ -175,6 +181,15 @@ try {
   // MCP：启动时连接已配置的 server 并把工具注入 general profile。
   // 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
   await refreshMcpTools();
+  // 路由：配置镜像 + 向量层注入。RAG 未配置时 createRagVectorFinder 返回 null，
+  // 整层不存在（R4：没配 RAG 就零网络调用）。
+  await loadRoutingSettings();
+  configureRoutingVectorProbe(() => isRagConfigured());
+  configureRoutingVectorFinder(createRagVectorFinder());
+  // systemone 后端的熔断器在 server 层注入；路由层只认最小接口，不 import server。
+  configureRoutingBreaker(new CircuitBreaker("routing-systemone", 3, 300_000));
+  // 索引重建 best-effort：失败只记日志，规则层照常工作。
+  void syncRoutingIndex().catch(() => {});
 } catch (err) {
   await stopForStartup(err);
 }
@@ -332,6 +347,11 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/subagents" && req.method === "POST") { await handleCreateSubagent(res, req); return; }
     if (subagentMatch && req.method === "PATCH") { await handleUpdateSubagent(res, req, subagentMatch[1]); return; }
     if (subagentMatch && req.method === "DELETE") { await handleDeleteSubagent(res, subagentMatch[1]); return; }
+
+    // 路由决策层（默认关闭；开启后按规则 → 向量 → 决策模型挑子代理）
+    if (pathname === "/api/routing" && req.method === "GET") { handleGetRouting(res); return; }
+    if (pathname === "/api/routing" && req.method === "PUT") { await handleSaveRouting(res, req); return; }
+    if (pathname === "/api/routing/test" && req.method === "POST") { await handleTestRouting(res, req); return; }
 
     // 会话
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }

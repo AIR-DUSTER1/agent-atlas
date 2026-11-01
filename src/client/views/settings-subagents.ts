@@ -21,6 +21,7 @@ import type {
   ProviderEntry,
   SubagentEntry,
   SubagentModelSelection,
+  SubagentRouting,
   SubagentSettingsState,
 } from "../modules/types.js";
 
@@ -136,7 +137,56 @@ function editorSnapshot(): string {
     mode: ($("subagent-model-mode") as HTMLSelectElement | null)?.value ?? "inherit",
     provider: ($("subagent-provider") as HTMLSelectElement | null)?.value ?? "",
     model: ($("subagent-model") as HTMLSelectElement | null)?.value ?? "",
+    keywords: ($("subagent-routing-keywords") as HTMLInputElement | null)?.value ?? "",
+    category: ($("subagent-routing-category") as HTMLInputElement | null)?.value ?? "",
+    suitable: ($("subagent-routing-suitable") as HTMLTextAreaElement | null)?.value ?? "",
+    notSuitable: ($("subagent-routing-not-suitable") as HTMLTextAreaElement | null)?.value ?? "",
+    domain: ($("subagent-routing-domain") as HTMLSelectElement | null)?.value ?? "",
   });
+}
+
+/** 逗号/顿号/换行分隔的文本 → 去重字符串数组（设置页与路由层口径一致）。 */
+function splitList(raw: string, max: number): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const piece of raw.split(/[,，、;；\n]+/)) {
+    const text = piece.trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function fillRoutingFields(agent?: SubagentEntry): void {
+  const routing = agent?.routing;
+  const keywords = $("subagent-routing-keywords") as HTMLInputElement | null;
+  if (keywords) keywords.value = (routing?.keywords ?? []).join(", ");
+  const category = $("subagent-routing-category") as HTMLInputElement | null;
+  if (category) category.value = routing?.category ?? "";
+  const suitable = $("subagent-routing-suitable") as HTMLTextAreaElement | null;
+  if (suitable) suitable.value = (routing?.suitableFor ?? []).join("\n");
+  const notSuitable = $("subagent-routing-not-suitable") as HTMLTextAreaElement | null;
+  if (notSuitable) notSuitable.value = (routing?.notSuitableFor ?? []).join("\n");
+  const domain = $("subagent-routing-domain") as HTMLSelectElement | null;
+  if (domain) domain.value = routing?.domainProfile ?? "";
+}
+
+function readRoutingInput(): SubagentRouting {
+  return {
+    keywords: splitList(($("subagent-routing-keywords") as HTMLInputElement | null)?.value ?? "", 40),
+    ...((($("subagent-routing-category") as HTMLInputElement | null)?.value.trim() ?? "")
+      ? { category: (($("subagent-routing-category") as HTMLInputElement | null)?.value ?? "").trim() }
+      : {}),
+    suitableFor: splitList(($("subagent-routing-suitable") as HTMLTextAreaElement | null)?.value ?? "", 8),
+    notSuitableFor: splitList(($("subagent-routing-not-suitable") as HTMLTextAreaElement | null)?.value ?? "", 8),
+    ...((($("subagent-routing-domain") as HTMLSelectElement | null)?.value ?? "") === "estate"
+      ? { domainProfile: "estate" as const }
+      : {}),
+  };
 }
 
 function openEditor(agent?: SubagentEntry): void {
@@ -164,6 +214,7 @@ function openEditor(agent?: SubagentEntry): void {
   populateProviders(fixed?.providerId);
   populateModels(fixed?.modelId);
   syncModelMode();
+  fillRoutingFields(agent);
   initialSnapshot = editorSnapshot();
   $("subagent-editor-mask")?.classList.remove("hidden");
   document.body.classList.add("subagent-editor-open");
@@ -407,7 +458,7 @@ async function saveEditor(): Promise<void> {
     state.subagents = await api<SubagentSettingsState>(path, {
       method: editingId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description, enabled, model }),
+      body: JSON.stringify({ name, description, enabled, model, routing: readRoutingInput() }),
     });
     renderCards();
     status(`子代理「${name}」已保存，下一条消息生效`, "ok");
