@@ -14,6 +14,12 @@ export interface OpenMenuOptions {
   onClose?: () => void;
   focusFirst?: boolean;
   matchAnchorWidth?: boolean;
+  /**
+   * 内置方向键焦点导航的开关（默认开）。调用方自带 active-index 键盘模型时
+   * （如 composer 斜杠菜单）必须关掉：文档级 capture 会把焦点从输入框搬进菜单，
+   * 输入框的键处理从此收不到事件，且菜单按钮只挂 mousedown 时 Enter 会落空。
+   */
+  keyboard?: boolean;
 }
 
 export interface MenuController {
@@ -74,6 +80,7 @@ export function openFloatingMenu(options: OpenMenuOptions): MenuController {
   };
   const onViewport = (): void => place(anchor, menu, options.align ?? "start", options.offset ?? 4, options.matchAnchorWidth);
 
+  const keyboardEnabled = options.keyboard !== false;
   const controller: MenuController = {
     close(returnFocus = true): void {
       if (active?.controller !== controller) return;
@@ -102,7 +109,7 @@ export function openFloatingMenu(options: OpenMenuOptions): MenuController {
   menu.style.bottom = "auto";
   place(anchor, menu, options.align ?? "start", options.offset ?? 4, options.matchAnchorWidth);
   document.addEventListener("pointerdown", onDocumentPointer, true);
-  document.addEventListener("keydown", onKeydown, true);
+  if (keyboardEnabled) document.addEventListener("keydown", onKeydown, true);
   window.addEventListener("resize", onViewport);
   window.addEventListener("scroll", onViewport, true);
   if (options.focusFirst !== false) requestAnimationFrame(() => items(menu)[0]?.focus());

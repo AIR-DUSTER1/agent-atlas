@@ -260,6 +260,9 @@ export function renderComposerMenu(): void {
       align: "start",
       focusFirst: false,
       matchAnchorWidth: true,
+      // 方向键/Enter 由 handleComposerKeydown 的 active-index 模型统一处理：
+      // 浮动菜单的焦点导航会把焦点搬离输入框，让 composer 收不到后续按键
+      keyboard: false,
       onClose: () => {
         composerMenuController = null;
         inputEl.setAttribute("aria-expanded", "false");

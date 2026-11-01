@@ -1591,6 +1591,8 @@ console.log(result.messages.at(-1).content);
 | 求职 Agent 有独立会话，却在「设置 → 子代理」里找不到 | 会话形态（`kind`）与子代理（`subagent`）是两套机制；种子 `DEFAULT_SUBAGENTS` 只有 general / estate | 种子加 job 条目 + 领域下拉与表单透传（§3.50）；只加种子会让子代理拿不到求职领域提示词 |
 | 审批卡已弹出，上方工具卡却写着「运行中」，像是命令先跑了 | 工具卡创建即带 `running` 类；审批是 `interrupt()` 在 `invokeTool` **之前**的闸门，此时工具一次都没执行 | `addInterrupt` 给对应卡片打 `awaitingApproval`，显示「⏸ 待审批」+ 琥珀色边框，批准后清标（§3.50） |
 | e2e 点完设置类开关立刻 `reload`，断言新状态丢失 | `saveLocal()` 是 300ms 防抖写 localStorage，测试在写入前就刷新了页面 | 测试先 `waitForFunction` 等 localStorage 落盘再 reload；产品侧与其他偏好（projectView 等）口径一致，不为测试改产品节奏 |
+| composer 斜杠菜单里 ↓ 能移动高亮、Enter 却选不中 | `ui/menu.ts` 的**文档级 capture 键盘导航**（焦点即选中模型）与 composer 的 active-index 模型打架：capture 把焦点从 textarea 搬进菜单按钮，composer 的键处理从此收不到事件；菜单按钮只挂 `onmousedown` 没有 click，Enter 落在按钮上等于落空 | composer 菜单传 `keyboard: false` 关掉浮动菜单的焦点导航，方向键/Enter 全部走 `handleComposerKeydown`（焦点留在输入框）。给 `openFloatingMenu` 加开关时曾把条件注册写成「条件 + 无条件」两行并存，探针抓到 `onKeydown` 仍在跑才定位 |
+| Goal 徽标退格删不掉 | 空 textarea 按 Backspace 不产生 input 事件，挂在 input 上的退出逻辑永远不跑；反过来「input 里见空值就退出」又会在前缀剥掉后的瞬时空档把「/goal 后继续打字」打断 | 退出只挂 keydown（`handleGoalKeydown`：空输入 + 退格）；input 事件只负责剥前缀转徽标，不看空值。e2e 必须用 `keyboard.type` 逐字输入 —— `fill()` 一次性赋值测不出逐字节奏的坑 |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 

@@ -36,9 +36,23 @@ export function renderGoalChip(): void {
 }
 
 /**
+ * 空输入下按退格退出徽标。必须拦 keydown：空 textarea 的 Backspace 不产生
+ * input 事件，挂在 input 上的 syncGoalDraftFromInput 永远收不到通知。
+ */
+export function handleGoalKeydown(event: KeyboardEvent): boolean {
+  if (event.key === "Backspace" && state.goalDraft && !inputEl.value) {
+    event.preventDefault();
+    exitGoalMode();
+    return true;
+  }
+  return false;
+}
+
+/**
  * 输入事件钩子：手打 /goal 前缀自动转成徽标（正文剥掉前缀只留任务）；
- * 徽标模式下正文又出现 /goal 前缀同样剥掉（语义一致），清空输入即退出，
- * 避免「挂着空 Goal 发呆」。
+ * 徽标模式下正文又出现 /goal 前缀同样剥掉（语义一致）。
+ * 「清空退出」只在退格（handleGoalKeydown）里做 —— 前缀刚剥掉时输入框会
+ * 瞬时为空，这里若因空值退出会把「/goal 后继续打字」的节奏打断。
  */
 export function syncGoalDraftFromInput(): void {
   const parsed = parseGoalCommand(inputEl.value);
@@ -46,12 +60,12 @@ export function syncGoalDraftFromInput(): void {
     if (parsed) {
       inputEl.value = parsed.task;
       autoGrowImpl();
-    } else if (!inputEl.value.trim()) {
-      exitGoalMode();
     }
     return;
   }
-  if (!parsed) return;
+  // /goal 后必须跟空白或任务文本才转换；裸 /goal 留给命令菜单选中，
+  // 避免用户只想浏览菜单时输入框被提前清空
+  if (!parsed || (!parsed.task && !/\s$/.test(inputEl.value))) return;
   inputEl.value = parsed.task;
   enterGoalMode();
   autoGrowImpl();
