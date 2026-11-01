@@ -420,3 +420,33 @@ test("思考档位菜单按内容收紧且不超出视口", async ({ page }) => 
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width + 1);
   expect(overflow.right).toBeLessThanOrEqual(overflow.viewport);
 });
+
+/**
+ * 保存模型后必须给出可见反馈并关闭编辑区。
+ * 曾经的实现保存成功后调用 openModelForm() 重新打开表单，用户会以为「点了没反应」；
+ * 关闭后如果提示条在表单内部也会一起消失，所以两个断言缺一不可。
+ */
+test("保存模型后关闭编辑区并给出成功提示", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await login(page);
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="models"]').click();
+  await expect(page.locator("#provider-list")).toBeVisible();
+
+  // 选一个有模型的供应商，进入某个模型的编辑面板
+  await expect(page.locator("#provider-list .provider-nav-item").first()).toBeVisible();
+  await page.locator("#provider-list .provider-nav-item").first().click();
+  const editBtn = page.locator("#pf-model-list .model-row .m-edit").first();
+  await expect(editBtn).toBeVisible();
+  await editBtn.click();
+  await expect(page.locator("#model-form-wrap")).toBeVisible();
+
+  await page.locator("#mf-save").click();
+
+  // 1) 编辑区关闭
+  await expect(page.locator("#model-form-wrap")).toBeHidden();
+  // 2) 成功提示仍然可见（提示条在表单外面，不能被一起隐藏）
+  await expect(page.locator("#settings-status")).toContainText(/已保存模型/);
+  expect(pageErrors).toEqual([]);
+});

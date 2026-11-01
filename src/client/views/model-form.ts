@@ -181,6 +181,7 @@ export async function saveModel(): Promise<void> {
   const { api } = await import("../core/api.js");
   const { applyConfigState } = await import("./composer-bar.js");
   const { setSettingsStatus } = await import("./model-store.js");
+  const { toast } = await import("../ui/toast.js");
   const p = currentEditingProvider();
   const m = currentEditingModel();
   if (!p || !m) return;
@@ -208,8 +209,14 @@ export async function saveModel(): Promise<void> {
       }
     );
     applyConfigState(await api<import("../modules/types.js").AppConfig>("/api/config"));
-    openModelForm(p.id, m.id);
-    setSettingsStatus(`✓ 已保存模型「${name}」· 思考等级 ${res.model.reasoningLabel || "默认"}`, "ok");
+    // 保存后关闭编辑区：用户已经确认改完，表单继续开着既占空间又容易
+    // 让人以为没生效（改动后的值已经回显在「已配置模型」卡片上）。
+    // 注意提示条 #settings-status 在 model-form-wrap 外面，关闭后仍然可见。
+    closeModelForm();
+    const summary = `已保存模型「${name}」· 思考等级 ${res.model.reasoningLabel || "默认"}`;
+    setSettingsStatus(`✓ ${summary}`, "ok");
+    // 关闭表单后视线会回到列表，再用 toast 确认一次，避免用户以为点了没反应
+    toast(summary, "success");
   } catch (err) {
     setSettingsStatus(`✗ ${(err as Error).message}`, "err");
   }
