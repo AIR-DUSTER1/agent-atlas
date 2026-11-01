@@ -383,34 +383,157 @@
 .approval-verdict.ok { color: var(--green); background: rgba(63,185,111,.12); }
 .approval-verdict.err { color: var(--red); background: rgba(229,96,79,.12); }
 
-/* --- 需求澄清卡片：选项 + 自由输入 --- */
+/* --- 需求澄清卡片：逐题选择 + 一次性提交 ---
+   与审批卡共用 .approval-card 的边框/背景骨架，但内部结构完全不同：
+   审批卡是「摘要行折叠 + 单个决定」，澄清卡是「多题作答 + 提交」。
+   这里不套 .approval-body，所以内边距必须自己给足（早期版本漏了这一点，
+   标题会直接贴着卡片边框）。 */
 .clarification-card {
   border-color: rgba(91,140,255,.42);
   background: rgba(91,140,255,.07);
+  padding: 0;
 }
-.clarify-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 12px; }
-.clarify-option {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
-  width: 100%; padding: 9px 12px;
-  border: 1px solid var(--border); border-radius: 9px;
+.clarify-head {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 13px;
+  border-bottom: 1px solid rgba(91,140,255,.18);
+}
+.clarify-head.done { border-bottom-color: transparent; }
+.clarify-head-icon {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 7px;
+  background: rgba(91,140,255,.16); color: var(--accent-soft);
+  margin-top: 1px;
+}
+.clarify-head-icon.done { background: rgba(63,185,111,.14); color: var(--green); }
+.clarify-head-copy { flex: 1; min-width: 0; }
+.clarify-head-title { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 20px; }
+.clarify-head-note { font-size: 12px; line-height: 1.5; color: var(--text-3); margin-top: 1px; }
+.clarify-progress {
+  flex: none; padding: 2px 9px; border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.06); color: var(--text-3);
+  font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.clarify-progress.ok { background: rgba(63,185,111,.14); color: var(--green); }
+
+.clarify-list { display: flex; flex-direction: column; gap: 12px; padding: 12px 13px 0; }
+.clarify-item { display: flex; flex-direction: column; gap: 6px; }
+.clarify-q { display: flex; align-items: flex-start; gap: 8px; }
+.clarify-q-index {
+  flex: none; display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bg-hover); color: var(--text-2);
+  font-size: 10.5px; font-weight: 700; margin-top: 1px;
+}
+.clarify-q-text {
+  flex: 1; min-width: 0; font-size: 13px; line-height: 1.55; font-weight: 600;
+  color: var(--text); overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* 选项列宽：宽屏固定两列，窄屏一列。
+   用 auto-fit + minmax(210px) 在 728px 卡宽里会铺成三列，每个选项只剩 ~230px，
+   中文标签频繁折行；两列（每列 ~340px）读起来更稳，四项也自然排成 2×2。 */
+.clarify-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 7px;
+}
+@media (min-width: 620px) {
+  .clarify-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.clarify-choice {
+  display: flex; align-items: flex-start; gap: 8px;
+  width: 100%; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--bg-elev); color: var(--text);
   text-align: left; cursor: pointer;
-  transition: border-color .15s, background .15s;
+  transition: border-color var(--motion-fast) var(--motion-ease),
+              background var(--motion-fast) var(--motion-ease);
   font-family: var(--sans);
 }
-.clarify-option:hover { border-color: var(--accent); background: var(--bg-hover); }
-.clarify-option-label { font-size: 13px; font-weight: 600; color: var(--accent-soft-2); }
-.clarify-option-desc { font-size: 12px; line-height: 1.5; color: var(--text-3); }
-.clarify-custom { display: flex; gap: 8px; margin-bottom: 10px; }
-.clarify-custom.hidden { display: none; }
-.clarify-input {
-  flex: 1; min-width: 0;
-  padding: 8px 11px;
-  border: 1px solid var(--border); border-radius: 8px;
-  background: var(--bg-elev); color: var(--text);
-  font-size: 13px; font-family: var(--sans);
+.clarify-choice:hover { border-color: var(--accent); background: var(--bg-hover); }
+.clarify-choice.selected {
+  border-color: var(--accent);
+  background: rgba(91,140,255,.14);
+  box-shadow: inset 0 0 0 1px rgba(91,140,255,.35);
 }
+.clarify-key {
+  flex: none; display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 5px;
+  background: var(--bg-input); color: var(--text-3);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  margin-top: 1px;
+}
+.clarify-choice.selected .clarify-key { background: var(--accent); color: #08130c; }
+.clarify-choice-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.clarify-choice-label {
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.clarify-choice-desc {
+  font-size: 11.5px; line-height: 1.5; color: var(--text-3);
+  overflow-wrap: anywhere; word-break: break-word;
+}
+/* 勾只在选中时占位，未选中时保留空间以免文字跳动 */
+.clarify-choice-check { flex: none; width: 13px; height: 13px; color: var(--accent-soft); opacity: 0; margin-top: 2px; }
+.clarify-choice.selected .clarify-choice-check { opacity: 1; }
+
+/* 自定义输入：默认收起，点「自己填写」展开；展开后开关仍在，可以再收起 */
+.clarify-custom-row { display: flex; flex-direction: column; gap: 6px; }
+.clarify-custom { display: flex; }
+.clarify-custom.hidden { display: none; }
+.clarify-custom-toggle {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 0;
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--text-3); font-size: 11.5px; font-family: var(--sans);
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.clarify-custom-toggle:hover { color: var(--accent-soft); }
+.clarify-custom-toggle.open { color: var(--accent-soft); }
+.clarify-input {
+  width: 100%; min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-input); color: var(--text);
+  font-size: 12.5px; font-family: var(--sans);
+}
+.clarify-input::placeholder { color: var(--text-3); }
 .clarify-input:focus { outline: none; border-color: var(--accent); }
+
+.clarify-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 13px 13px;
+}
+.clarify-hint { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-3); }
+.clarify-submit { flex: none; }
+.clarify-submit:disabled {
+  cursor: not-allowed; opacity: .45; filter: none;
+}
+.clarify-submit:disabled:hover { filter: none; }
+
+/* 已答态：逐题「问题 → 答案」，一行一题，不再画选项按钮 */
+.clarify-answers { display: flex; flex-direction: column; gap: 6px; padding: 0 13px 13px; }
+.clarify-answer {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  font-size: 12px; line-height: 1.55;
+}
+.clarify-answer-q { flex: none; color: var(--text-3); }
+.clarify-answer-a {
+  flex: 1; min-width: 0; color: var(--green-soft); font-weight: 600;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* 移动端：单列铺满，选项与输入框都要能点 */
+@media (max-width: 560px) {
+  .clarify-choices { grid-template-columns: 1fr; }
+  .clarify-foot { flex-direction: column; align-items: stretch; }
+  .clarify-submit { width: 100%; }
+}
 
 /* --- 错误块 --- */
 .error-block {

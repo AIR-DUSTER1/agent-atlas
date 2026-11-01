@@ -88,7 +88,7 @@ test("重启后首次「继续」从 journal 恢复最近任务台账", () => {
       { type: "tool_call", id: "t-old", name: "read_file", argsFragment: '{"path":"sessions.ts"}' },
       { type: "tool_result", id: "t-old", content: "已读取 sessions.ts", isError: false },
       { type: "usage", inputTokens: 1000, outputTokens: 100, totalTokens: 1100, cacheReadTokens: 0, callId: "old-1" },
-      { type: "interrupt", payload: { type: "clarification", question: "继续吗", options: [], allowCustom: true } },
+      { type: "interrupt", payload: { type: "clarification", questions: [{ id: "q1", question: "继续吗", options: [], allowCustom: true }] } },
     ],
     startedAt: Date.now() - 60_000,
   }];

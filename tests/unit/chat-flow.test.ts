@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import type { AssistantPart, ChatBlock } from "../../src/client/modules/types.js";
 import { test } from "node:test";
-import { readClientCss, readClientSource } from "../helpers/client-source.js";
+import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
 import {
   assistantBlockContaining,
   isContinuationRecord,
@@ -138,4 +138,35 @@ test("导出会话使用带认证的 Blob 下载，不打开 Electron 空白新�
   assert.match(app, /URL\.createObjectURL\(blob\)/);
   assert.match(app, /anchor\.download = exportFileName\(session\)/);
   assert.doesNotMatch(app, /window\.open\(`\/api\/sessions\/\$\{session\.id\}\/export`/);
+});
+
+/**
+ * 澄清卡回归守门：早期版本的澄清卡直接往 .approval-card 里塞标题，
+ * 既没有 .approval-body 也没有自带内边距，标题会紧贴左上角边框。
+ * 这里用「头部有 padding」+「渲染层不再直接拼 DOM」两条断言挡住回退。
+ */
+test("澄清卡自带内边距，且渲染逻辑已迁到独立模块", async () => {
+  const css = await readClientCss();
+  const card = await readClientFiles(["render/clarify-card.ts"]);
+  const parts = await readClientFiles(["render/parts.ts"]);
+  assert.match(css, /\.clarify-head\s*\{[^}]*padding:\s*11px 13px/s, "澄清卡头部必须有内边距");
+  assert.match(css, /\.clarify-list\s*\{[^}]*padding:\s*\d+px 13px/s, "题目列表必须有左右内边距");
+  assert.match(css, /\.clarify-foot\s*\{[^}]*padding:\s*12px 13px/s, "底部操作区必须有内边距");
+  // 多题逐答与新载荷归一化必须在 clarify-card / clarify 模块里，parts.ts 只做转发
+  assert.match(card, /normalizeClarify\(part\.req\)/);
+  assert.match(card, /clarify-progress/);
+  assert.match(card, /clarify-submit/);
+  assert.match(parts, /renderClarificationCardImpl\(part, el\)/);
+});
+
+test("澄清卡支持多题：提交按钮在全答完前禁用", async () => {
+  const card = await readClientFiles(["render/clarify-card.ts"]);
+  const clarify = await readClientFiles(["modules/clarify.ts"]);
+  assert.match(card, /submit\.disabled = !ready/);
+  assert.match(card, /answers\[questions\[0\]!\.id\]/, "单题按首题作答判断");
+  // 单题点选即提交：保持旧交互，少一次点击
+  assert.match(card, /if \(!multi\) \{/);
+  // 多题提交必须带题面否则模型分不清答案归属
+  assert.match(clarify, /lines\.push\(`\$\{question\.question\}：\$\{text\}`\)/);
+  assert.match(clarify, /MAX_SUBMISSION_CHARS/);
 });

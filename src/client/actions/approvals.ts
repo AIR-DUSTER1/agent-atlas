@@ -13,7 +13,7 @@
 import { state, transcript } from "../core/state.js";
 import { assistantBlockContaining } from "../modules/chat-flow.js";
 import { partEls, saveLocal } from "../core/state.js";
-import { renderApprovalCard, renderClarificationCard } from "../render/parts.js";
+import { renderApprovalCard, renderClarificationCard, clarificationAnswerLines } from "../render/parts.js";
 import { renderSessions } from "../views/sessions.js";
 import { runResume } from "../stream/turn.js";
 import type { ApprovalPart, ClarificationPart } from "../modules/types.js";
@@ -39,6 +39,10 @@ export async function decideClarification(part: ClarificationPart, choice: strin
   if (!value) return;
   part.status = "answered";
   part.answer = label || value;
+  // 多题卡要在已答态逐题展示「问题 → 答案」；在提交前把草稿固化成 answerLines，
+  // 卡片重绘与历史回放都不必再依赖 draft（draft 只服务于待答态的交互）。
+  const lines = clarificationAnswerLines(part);
+  if (lines) part.answerLines = lines;
   const refs = partEls.get(part);
   if (refs) {
     refs.el.className = "approval-card clarification-card done-approve";

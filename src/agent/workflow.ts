@@ -59,6 +59,8 @@ const MAX_OPTION_DESCRIPTION = 200;
 const MAX_ANSWER_TEXT = 2_000;
 const MAX_FEEDBACK_TEXT = 1_200;
 const MAX_OPTIONS = 4;
+/** 一道澄清卡最多打包几道题：再多就该拆成「先问最关键的」，一次问 5 题等于逼用户放弃。 */
+const MAX_QUESTIONS = 4;
 const MAX_REVIEW_REVISIONS = 3;
 const RECENT_MESSAGE_COUNT = 8;
 const RECENT_MESSAGE_CHARS = 700;
@@ -71,12 +73,24 @@ export interface ClarificationOption {
   description?: string;
 }
 
-/** interrupt() 的澄清载荷：与 server/events.ts 独立声明同构类型，避免 agent 反向依赖 server。 */
-export interface ClarificationRequest {
-  type: "clarification";
+/** 一道澄清题。选项 id 只在本题内唯一（A/B/C…），跨题重复没有意义。 */
+export interface ClarificationQuestion {
+  id: string;
   question: string;
   options: ClarificationOption[];
   allowCustom: boolean;
+}
+
+/**
+ * interrupt() 的澄清载荷：与 server/events.ts 独立声明同构类型，避免 agent 反向依赖 server。
+ *
+ * 一次追问可以打包多道题（如求职同时缺城市/方向/薪资/年限）。原来一次只问一题，
+ * 用户要连点四轮才能补全信息；现在一张卡全部答完再提交，减少来回。
+ * 载荷不再带顶层 question/options —— 旧 journal 里的单问形状由前端归一化兼容。
+ */
+export interface ClarificationRequest {
+  type: "clarification";
+  questions: ClarificationQuestion[];
 }
 
 /** 可注入的模型壳：生产用 createChatModel，测试可用 FakeListChatModel 验证整图流转。 */
@@ -93,8 +107,7 @@ export interface WorkflowModels {
 interface RequirementAnalysis {
   understood: boolean;
   brief: string;
-  question: string;
-  options: ClarificationOption[];
+  questions: ClarificationQuestion[];
 }
 
 interface ReviewResult {
@@ -165,14 +178,17 @@ const ANALYZE_PROMPT = [
   "判定规则：",
   "1. 寒暄、事实问答，以及已经给出明确对象/动作/约束的任务，直接判定 understood=true，不要为了多问而多问。",
   "2. 只有缺少会实质改变执行结果的关键信息时才请求澄清，例如目标对象不明、动作范围冲突、必须二选一才能继续。",
-  "3. 能从最近对话或当前消息推断的信息不要重复询问；用户说「随便」「你决定」时按可执行默认值继续。",
-  "4. 需要澄清时给 2-4 个互斥选项，每个选项必须有 id（A/B/C/D）、简短 label 和一句 description。",
-  "5. 不要生成「其它」选项，前端支持用户自定义输入。",
-  "6. 「上一轮澄清」是用户此前做出的选择；当前请求依赖它时沿用，不要重复询问。",
-  "只输出一个 JSON 对象，不要 Markdown 代码块，不要解释。格式：",
-  '{"understood":true,"brief":"一句话复述你的理解","question":"","options":[]}',
-  "或：",
-  '{"understood":false,"brief":"一句话复述已知信息","question":"需要用户确认的问题","options":[{"id":"A","label":"选项标题","description":"选项说明"}]}',
+  "3. 缺多项信息时**一次问全**：把彼此独立的缺口放进同一个 questions 数组，最多 4 道题。用户一次答完比来回追问四轮体验好得多。",
+  "4. 能相互推断的缺口合并成一道题；后一道题依赖前一道答案时不要并列（那时只问前一题）。",
+  "5. 能从最近对话或当前消息推断的信息不要重复询问；用户说「随便」「你决定」时按可执行默认值继续。",
+  "6. 每道题给 2-4 个互斥选项，选项必须有 id（A/B/C/D）、简短 label 和一句 description；选项 id 只在本道题内唯一。",
+  "7. 不要生成「其它」选项，前端支持用户自定义输入。",
+  "8. 「上一轮澄清」是用户此前做出的选择；当前请求依赖它时沿用，不要重复询问。",
+  "只输出一个 JSON 对象，不要 Markdown，不要解释。不需要澄清时：",
+  '{"understood":true,"brief":"一句话复述你的理解","questions":[]}',
+  "需要澄清时（questions 里每道题都有题面与选项）：",
+  '{"understood":false,"brief":"一句话复述已知信息","questions":[{"id":"q1","question":"需要用户确认的问题","options":[{"id":"A","label":"选项标题","description":"选项说明"},{"id":"B","label":"另一选项","description":"选项说明"}]},{"id":"q2","question":"第二道问题","options":[{"id":"A","label":"选项标题"},{"id":"B","label":"另一选项"}]}]}',
+  "questions 数组顺序即提问顺序，前端按这个顺序渲染。",
 ].join("\n");
 
 const REVIEW_PROMPT = [
@@ -247,24 +263,59 @@ function normalizeOptions(value: unknown): ClarificationOption[] {
   return options;
 }
 
-/** 解析需求分析 JSON。解析失败时宁可继续执行，也不要让坏输出卡住聊天。 */
+/** 一道题至少要两个选项才值得问；只有一个选项等于替用户做决定。 */
+function normalizeQuestions(value: unknown): ClarificationQuestion[] {
+  if (!Array.isArray(value)) return [];
+  const questions: ClarificationQuestion[] = [];
+  const seenIds = new Set<string>();
+  for (const item of value) {
+    const record = asRecord(item);
+    // 兼容模型把字段写成 text / title 的方言
+    const text = asText(record?.question ?? record?.text ?? record?.title ?? item).slice(0, MAX_QUESTION_TEXT);
+    const options = normalizeOptions(record?.options);
+    if (!text || options.length < 2) continue;
+    const suggestedId = asText(record?.id).toLowerCase();
+    const id = /^[a-z0-9_-]{1,24}$/.test(suggestedId) ? suggestedId : `q${questions.length + 1}`;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    questions.push({ id, question: text, options, allowCustom: record?.allowCustom !== false });
+    if (questions.length >= MAX_QUESTIONS) break;
+  }
+  return questions;
+}
+
+/**
+ * 解析需求分析 JSON。解析失败时宁可继续执行，也不要让坏输出卡住聊天。
+ *
+ * 两种载荷都接受：
+ *   - 新格式 questions: [...]（可一次问多题）；
+ *   - 旧格式 question + options（单题），统一提升成一道题，避免旧提示词/旧模型输出失效。
+ */
 export function parseRequirementAnalysis(raw: string): RequirementAnalysis {
   const record = asRecord(extractJson(raw));
-  if (!record) return { understood: true, brief: "", question: "", options: [] };
+  if (!record) return { understood: true, brief: "", questions: [] };
 
   const brief = asText(record.brief).slice(0, MAX_BRIEF_TEXT);
-  const question = asText(record.question).slice(0, MAX_QUESTION_TEXT);
-  const options = normalizeOptions(record.options);
+  let questions = normalizeQuestions(record.questions);
+  if (!questions.length) {
+    // 旧形状：顶层 question + options
+    const legacyQuestion = asText(record.question).slice(0, MAX_QUESTION_TEXT);
+    const legacyOptions = normalizeOptions(record.options);
+    if (legacyQuestion && legacyOptions.length >= 2) {
+      questions = [{ id: "q1", question: legacyQuestion, options: legacyOptions, allowCustom: record.allowCustom !== false }];
+    }
+  }
+
   const explicitPass = record.understood === true || record.needsClarification === false;
   const needsClarification =
     record.understood === false ||
     record.needsClarification === true ||
-    (!explicitPass && Boolean(question) && options.length >= 2);
+    (!explicitPass && questions.length > 0);
 
-  if (needsClarification && question && options.length >= 2) {
-    return { understood: false, brief, question, options };
+  if (needsClarification && questions.length) {
+    return { understood: false, brief, questions };
   }
-  return { understood: true, brief, question: "", options: [] };
+  return { understood: true, brief, questions: [] };
 }
 
 /** 解析反思 JSON。解析失败时默认通过，避免把网关的坏格式变成无限回炉。 */
@@ -280,15 +331,25 @@ export function parseReviewResult(raw: string): ReviewResult {
 }
 
 /**
- * 无头模式的默认假设：取第一个选项。
+ * 无头模式的默认假设：每道题取第一个选项。
  *
  * 为什么是第一个而不是「最保守的」：选项顺序由分析模型按「最常见 / 最可能」排，
  * 且这条路径的意义是「不要让任务掉在地上」，而不是替用户做不可逆决定 ——
  * 任何真正高风险的动作仍会走 HITL 审批（clarify 只决定执行方向）。
+ * 多题时逐题取第一个，返回「题面 → 假设」的对应关系，保证台账里能看出每题假设了什么。
  */
-export function defaultAssumption(request: ClarificationRequest): ClarificationOption {
-  const first = request.options[0];
-  return first ?? { id: "A", label: "按最合理的默认方式继续", description: request.question };
+export function defaultAssumption(request: ClarificationRequest): { label: string; note: string } {
+  const parts = request.questions.map((question) => {
+    const first = question.options[0];
+    const label = first ? first.label : "按最合理的默认方式继续";
+    const detail = first?.description ? `（${first.description}）` : "";
+    return { question: question.question, answer: `${label}${detail}` };
+  });
+  if (!parts.length) return { label: "按最合理的默认方式继续", note: "" };
+  return {
+    label: parts.map((part) => part.answer).join("；"),
+    note: parts.map((part) => `问：${part.question}\n假设：${part.answer}`).join("\n"),
+  };
 }
 
 function lastHumanText(messages: BaseMessage[]): string {
@@ -447,9 +508,7 @@ export function createWorkflowGraph(
         requirementBrief: brief,
         clarification: {
           type: "clarification" as const,
-          question: analysis.question,
-          options: analysis.options,
-          allowCustom: true,
+          questions: analysis.questions,
         },
       };
     } catch {
@@ -459,24 +518,27 @@ export function createWorkflowGraph(
 
   async function clarifyNode(state: WorkflowStateType, nodeConfig?: LangGraphRunnableConfig) {
     const request = state.clarification;
-    if (!request) return {};
+    if (!request || !request.questions.length) return {};
     // 无头模式（REQUEST_HEADLESS / 请求级 headless:true）：没有人能回答，挂起等于
     // 任务被丢。改为采用默认假设继续，并把「本来要问什么、假设了什么」记进台账
     // 与 clarificationHistory，让模型和调用方都能看到这个决定。
     if (nodeConfig?.configurable?.headless === true) {
       const assumed = defaultAssumption(request);
-      const answerText = `${assumed.label}${assumed.description ? `（${assumed.description}）` : ""}`.slice(0, MAX_ANSWER_TEXT);
-      const note = `问：${request.question}\n假设：${answerText}`;
+      const answerText = assumed.label.slice(0, MAX_ANSWER_TEXT);
+      const note = assumed.note.slice(0, MAX_ANSWER_TEXT);
       return {
         requirementBrief: `${state.requirementBrief}\n【无头模式自动假设】${note}`.slice(0, MAX_WORKING_BRIEF),
         clarification: null,
         clarificationHistory: answerText,
-        headlessAssumption: note.slice(0, MAX_ANSWER_TEXT),
+        headlessAssumption: note,
       };
     }
     const answer = interrupt<ClarificationRequest, string>(request);
     const raw = typeof answer === "string" ? answer.trim() : String(answer ?? "").trim();
-    const option = request.options.find((item) => item.id === raw);
+    // 单题卡沿用「回传选项 id」的老协议，在这里映射成可读标签；
+    // 多题卡的前端直接回传拼好的「题面：答案」文本，原样采纳即可。
+    const single = request.questions.length === 1 ? request.questions[0] : null;
+    const option = single ? single.options.find((item) => item.id === raw) : undefined;
     const answerText = (option
       ? `${option.label}${option.description ? `（${option.description}）` : ""}`
       : raw
@@ -543,9 +605,12 @@ export function createWorkflowGraph(
     ];
     const request: ClarificationRequest = {
       type: "clarification",
-      question: `路由：${decision.reason}`.slice(0, MAX_QUESTION_TEXT + 20),
-      options,
-      allowCustom: true,
+      questions: [{
+        id: "route",
+        question: `路由：${decision.reason}`.slice(0, MAX_QUESTION_TEXT + 20),
+        options,
+        allowCustom: true,
+      }],
     };
     const answer = interrupt<ClarificationRequest, string>(request);
     const raw = typeof answer === "string" ? answer.trim() : String(answer ?? "").trim();

@@ -29,11 +29,35 @@ export interface ClarificationOption {
   description?: string;
 }
 
-export interface ClarificationPayload {
-  type: "clarification";
+/** 一道澄清题：选项 id 只在本道题内唯一，跨题可重复使用 A/B/C。 */
+export interface ClarificationQuestion {
+  id: string;
   question: string;
   options: ClarificationOption[];
   allowCustom: boolean;
+}
+
+/**
+ * 载荷里的题面：id 允许缺省。
+ * 新服务端一定会给 id，但历史 journal 与第三方构造可能没有；
+ * 归一化时按顺序补 q1..qN，所以入参类型不能比运行时更严。
+ */
+export type ClarificationQuestionInput = Omit<ClarificationQuestion, "id"> & { id?: string };
+
+/**
+ * 澄清载荷：新形状是可多题的 questions 数组。
+ * 历史 journal 与旧版服务端仍是单问形状（顶层 question + options），
+ * 因此这里保留三个可选旧字段 —— 由 modules/clarify.ts 统一归一化后再渲染。
+ */
+export interface ClarificationPayload {
+  type: "clarification";
+  questions?: ClarificationQuestionInput[];
+  /** @deprecated 旧单问载荷 */
+  question?: string;
+  /** @deprecated 旧单问载荷 */
+  options?: ClarificationOption[];
+  /** @deprecated 旧单问载荷 */
+  allowCustom?: boolean;
 }
 
 export type InterruptPayload = ApprovalPayload | ClarificationPayload;

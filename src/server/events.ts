@@ -42,11 +42,22 @@ export interface ClarificationOption {
   description?: string;
 }
 
-export interface ClarificationPayload {
-  type: "clarification";
+/** 一道澄清题：选项 id 只在本道题内唯一。 */
+export interface ClarificationQuestion {
+  id: string;
   question: string;
   options: ClarificationOption[];
   allowCustom: boolean;
+}
+
+/**
+ * 一张澄清卡可以打包多道题（最多 4 道），前端逐题作答后一次性提交。
+ * 旧 journal 里的单问形状（顶层 question + options）由前端归一化兼容，
+ * 服务端只声明新形状，避免两处都留分叉判断。
+ */
+export interface ClarificationPayload {
+  type: "clarification";
+  questions: ClarificationQuestion[];
 }
 
 export type InterruptPayload = ApprovalPayload | ClarificationPayload;

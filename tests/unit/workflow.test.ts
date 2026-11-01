@@ -28,18 +28,80 @@ test("需求分析：fenced JSON + 两个选项 → 进入澄清", () => {
     JSON.stringify({
       understood: false,
       brief: "用户想找房但没说城市",
-      question: "你想在哪个城市找房？",
-      options: [
-        { id: "A", label: "北京", description: "优先看北京房源" },
-        { id: "B", label: "上海", description: "优先看上海房源" },
-      ],
+      questions: [{
+        id: "q1",
+        question: "你想在哪个城市找房？",
+        options: [
+          { id: "A", label: "北京", description: "优先看北京房源" },
+          { id: "B", label: "上海", description: "优先看上海房源" },
+        ],
+      }],
     }),
     "```",
   ].join("\n"));
   assert.equal(result.understood, false);
-  assert.equal(result.question, "你想在哪个城市找房？");
-  assert.deepEqual(result.options.map((item) => item.id), ["A", "B"]);
-  assert.equal(result.options[0].description, "优先看北京房源");
+  assert.equal(result.questions.length, 1);
+  assert.equal(result.questions[0]?.question, "你想在哪个城市找房？");
+  assert.deepEqual(result.questions[0]?.options.map((item) => item.id), ["A", "B"]);
+  assert.equal(result.questions[0]?.options[0]?.description, "优先看北京房源");
+});
+
+test("需求分析：旧单问载荷（顶层 question + options）自动提升成一道题", () => {
+  const result = parseRequirementAnalysis(JSON.stringify({
+    understood: false,
+    brief: "缺少城市",
+    question: "你想在哪个城市找房？",
+    options: [{ id: "A", label: "北京" }, { id: "B", label: "上海" }],
+    allowCustom: true,
+  }));
+  assert.equal(result.understood, false);
+  assert.equal(result.questions.length, 1);
+  assert.equal(result.questions[0]?.allowCustom, true);
+});
+
+test("需求分析：多题一次问完，逐题保留选项", () => {
+  const result = parseRequirementAnalysis(JSON.stringify({
+    understood: false,
+    brief: "求职信息缺口四项",
+    questions: [
+      { id: "q1", question: "找什么方向？", options: [{ id: "A", label: "前端" }, { id: "B", label: "后端" }] },
+      { id: "q2", question: "在哪个城市？", options: [{ id: "A", label: "青岛" }, { id: "B", label: "济南" }] },
+      { id: "q3", question: "期望月薪？", options: [{ id: "A", label: "15-20K" }, { id: "B", label: "20-30K" }] },
+    ],
+  }));
+  assert.equal(result.questions.length, 3);
+  assert.deepEqual(result.questions.map((item) => item.id), ["q1", "q2", "q3"]);
+  // 选项 id 只在本道题内唯一：两道题都用 A/B 是合法的
+  assert.deepEqual(result.questions.map((item) => item.options.map((option) => option.id)), [["A", "B"], ["A", "B"], ["A", "B"]]);
+});
+
+test("需求分析：缺选项的题被丢弃，其余题保留；一道都不成立则继续执行", () => {
+  const partial = parseRequirementAnalysis(JSON.stringify({
+    understood: false,
+    questions: [
+      { id: "q1", question: "只有一个选项", options: [{ id: "A", label: "唯一" }] },
+      { id: "q2", question: "这题合法", options: [{ id: "A", label: "甲" }, { id: "B", label: "乙" }] },
+    ],
+  }));
+  assert.equal(partial.understood, false);
+  assert.deepEqual(partial.questions.map((item) => item.id), ["q2"]);
+
+  const none = parseRequirementAnalysis(JSON.stringify({
+    understood: false,
+    questions: [{ id: "q1", question: "只有一个选项", options: [{ id: "A", label: "唯一" }] }],
+  }));
+  assert.equal(none.understood, true);
+  assert.deepEqual(none.questions, []);
+});
+
+test("需求分析：超过 4 题时截断到 4 题", () => {
+  const questions = Array.from({ length: 6 }, (_, index) => ({
+    id: `q${index + 1}`,
+    question: `问题 ${index + 1}`,
+    options: [{ id: "A", label: "甲" }, { id: "B", label: "乙" }],
+  }));
+  const result = parseRequirementAnalysis(JSON.stringify({ understood: false, questions }));
+  assert.equal(result.questions.length, 4);
 });
 
 test("需求分析：缺少选项或 JSON 损坏时宁可继续执行", () => {
@@ -53,21 +115,26 @@ test("需求分析：缺少选项或 JSON 损坏时宁可继续执行", () => {
 
   const broken = parseRequirementAnalysis("模型开始胡说，没有 JSON");
   assert.equal(broken.understood, true);
-  assert.deepEqual(broken.options, []);
+  assert.deepEqual(broken.questions, []);
 });
 
 test("需求分析：字段等价写法与选项 id 兜底", () => {
   const result = parseRequirementAnalysis(JSON.stringify({
     needsClarification: true,
     brief: "需要确认范围",
-    question: "这次要改哪些文件？",
-    options: [
-      { label: "只改前端" },
-      { label: "只改后端" },
-    ],
+    questions: [{
+      text: "这次要改哪些文件？",
+      options: [
+        { label: "只改前端" },
+        { label: "只改后端" },
+      ],
+    }],
   }));
   assert.equal(result.understood, false);
-  assert.deepEqual(result.options.map((item) => item.id), ["A", "B"]);
+  assert.equal(result.questions.length, 1);
+  assert.deepEqual(result.questions[0]?.options.map((item) => item.id), ["A", "B"]);
+  // 缺 id 时按顺序补 q1
+  assert.equal(result.questions[0]?.id, "q1");
 });
 
 test("结果反思：明确失败才回炉，坏输出默认通过", () => {
@@ -120,9 +187,11 @@ test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反
   const paused = await graph.invoke(
     { messages: [new HumanMessage("帮我找房")] },
     config
-  ) as unknown as { __interrupt__?: Array<{ value: { type: string; options: unknown[] } }> };
+  ) as unknown as { __interrupt__?: Array<{ value: { type: string; questions: Array<{ options: unknown[] }> } }> };
   assert.equal(paused.__interrupt__?.[0]?.value.type, "clarification");
-  assert.equal(paused.__interrupt__?.[0]?.value.options.length, 2);
+  // 模型回的还是旧单问形状，图出口统一成 questions 数组（一道题）
+  assert.equal(paused.__interrupt__?.[0]?.value.questions.length, 1);
+  assert.equal(paused.__interrupt__?.[0]?.value.questions[0]?.options.length, 2);
 
   const finished = await graph.invoke(new Command({ resume: "A" }), config) as unknown as {
     messages: Array<{ content: unknown }>;

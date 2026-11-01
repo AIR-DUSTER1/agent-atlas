@@ -36,6 +36,7 @@ export const CLIENT_SOURCES = [
   // 协议与纯函数模块
   "modules/format.ts",
   "modules/chat-flow.ts",
+  "modules/clarify.ts",
   "modules/agent-profile.ts",
   "modules/plugin-registry.ts",
   "modules/types.ts",
@@ -43,6 +44,7 @@ export const CLIENT_SOURCES = [
   "modules/types-ui.ts",
   // 渲染层
   "render/parts.ts",
+  "render/clarify-card.ts",
   "render/messages.ts",
   "render/code-enhance.ts",
   "render/tool-enhancers.ts",

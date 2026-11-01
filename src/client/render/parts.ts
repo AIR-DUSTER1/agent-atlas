@@ -17,7 +17,8 @@ import {
   blockBodies, partEls, saveLocal, state, textTimers, thinkingTimers,
 } from "../core/state.js";
 import { scrollBottom } from "../core/dom.js";
-import { decideApproval, decideClarification } from "../actions/approvals.js";
+import { decideApproval } from "../actions/approvals.js";
+import { renderClarificationCard as renderClarificationCardImpl } from "./clarify-card.js";
 import { renderToolEnhancers } from "./tool-enhancers.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
@@ -325,75 +326,12 @@ export function renderApprovalCard(part: ApprovalPart, el: HTMLElement): void {
 }
 
 export function renderClarificationCard(part: ClarificationPart, el: HTMLElement): void {
-  const req = part.req;
-  el.replaceChildren(
-    h("div", { class: "approval-title" }, icon("CircleAlert", { size: 15 }), "需求澄清（请选择一个方向）"),
-    h("div", { class: "approval-desc" }),
-    h("div", { class: "clarify-options" }),
-    h("div", { class: "clarify-custom hidden" }),
-    h("div", { class: "approval-actions" }),
-  );
-  const descEl = el.querySelector(".approval-desc");
-  if (descEl) descEl.textContent = req.question || "请补充关键信息后继续";
-  const options = el.querySelector(".clarify-options");
-  const actions = el.querySelector(".approval-actions");
-
-  if (part.status === "pending") {
-    for (const opt of Array.isArray(req.options) ? req.options : []) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "clarify-option";
-      const label = document.createElement("span");
-      label.className = "clarify-option-label";
-      label.textContent = `${opt.id}. ${opt.label}`;
-      button.appendChild(label);
-      if (opt.description) {
-        const desc = document.createElement("span");
-        desc.className = "clarify-option-desc";
-        desc.textContent = opt.description;
-        button.appendChild(desc);
-      }
-      button.addEventListener("click", () => {
-        void decideClarification(part, opt.id, `${opt.label}${opt.description ? `（${opt.description}）` : ""}`);
-      });
-      options?.appendChild(button);
-    }
-
-    if (req.allowCustom !== false) {
-      const custom = el.querySelector(".clarify-custom");
-      if (custom) {
-        custom.classList.remove("hidden");
-        const input = document.createElement("input");
-        input.className = "clarify-input";
-        input.type = "text";
-        input.maxLength = 2000;
-        input.placeholder = "也可以直接输入补充说明…";
-        const submit = document.createElement("button");
-        submit.type = "button";
-        submit.className = "btn btn-approve";
-        submit.textContent = "提交";
-        const fire = (): void => {
-          const value = input.value.trim();
-          if (value) void decideClarification(part, value, value);
-        };
-        submit.addEventListener("click", fire);
-        input.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            fire();
-          }
-        });
-        custom.append(input, submit);
-      }
-    }
-  } else {
-    el.classList.add("done-approve");
-    const verdict = document.createElement("div");
-    verdict.className = "approval-verdict";
-    verdict.textContent = part.answer ? `已选择：${part.answer}` : "此前已处理";
-    actions?.appendChild(verdict);
-  }
+  renderClarificationCardImpl(part, el);
 }
+
+/* 澄清卡实现在 render/clarify-card.ts（多题逐答、进度与提交），
+   parts.ts 只做分派，保持「一个文件一件事」。 */
+export { clarificationAnswerLines } from "./clarify-card.js";
 
 /* ---------------------------------------------------------------------------
  * 单个 part 的挂载（按 p 分派）

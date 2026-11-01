@@ -114,6 +114,10 @@ export interface ClarificationPart {
   req: ClarificationPayload;
   status: "pending" | "answered";
   answer?: string;
+  /** 逐题作答草稿：题 id → 已选/已填内容。跟随本地缓存，刷新后不丢。 */
+  draft?: Record<string, { optionId: string | null; label: string; detail?: string }>;
+  /** 已提交（或历史回放中已处理）时逐题展示的答案摘要。 */
+  answerLines?: Array<{ question: string; answer: string }>;
 }
 
 /**

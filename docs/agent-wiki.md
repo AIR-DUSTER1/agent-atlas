@@ -228,11 +228,15 @@ await graph.invoke(new Command({ resume: decision }), { configurable: { thread_i
 需求澄清复用同一机制，只是载荷与恢复值不同（`src/agent/workflow.ts`）：
 
 ```ts
+// 一张卡可打包多道题（最多 4 道）：缺多项信息时一次问完，比来回追问四轮体验好得多
 const choice = interrupt<ClarificationRequest, string>({
   type: "clarification",
-  question: "先看哪个城市？",
-  options: [{ id: "A", label: "北京" }, { id: "B", label: "上海" }],
-  allowCustom: true,
+  questions: [{
+    id: "q1",
+    question: "先看哪个城市？",
+    options: [{ id: "A", label: "北京" }, { id: "B", label: "上海" }],
+    allowCustom: true,
+  }],
 });
 ```
 
@@ -808,8 +812,8 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 
 | 节点 | 职责 | 关键约束 |
 |---|---|---|
-| `analyze` | 判断最新请求是否明确，生成 `requirementBrief` | 坏 JSON / 模型异常默认“明确继续”；只问会实质改变结果的信息 |
-| `clarify` | `interrupt({ type:"clarification", question, options, allowCustom })` | 2–4 个互斥选项；服务端 `/api/resume {choice}`；选项 id 映射成可读标签；答案同时写入 `clarificationHistory` |
+| `analyze` | 判断最新请求是否明确，生成 `requirementBrief` | 坏 JSON / 模型异常默认“明确继续”；只问会实质改变结果的信息；缺多项信息时放进同一个 `questions` 数组一次问完（上限 4 道） |
+| `clarify` | `interrupt({ type:"clarification", questions:[{ id, question, options, allowCustom }] })` | 每题 2–4 个互斥选项、选项 id 只在本题内唯一；服务端 `/api/resume {choice}`；单题回传选项 id 由服务端映射成可读标签，多题回传「题面：答案」拼装文本，答案统一写入 `clarificationHistory`；旧单问载荷（顶层 `question`+`options`）由前端归一化兼容 |
 | `agent` | 绑定工具的 ReAct 节点 | 通过 `context-builder.ts` 组装稳定 system、内部注记与投影后的消息窗口；工具结果按 profile 预算裁剪 |
 | `tools` | 由 `createApprovalToolsNode({ tools, approvalDescriptions })` 创建 | 只执行当前 profile 的工具；跨域调用 fail-closed |
 | `review` | 对照需求与最近工具结果，检查最终回答 | 明确失败才回炉，最多三次（`MAX_REVIEW_REVISIONS`）；坏 JSON 默认通过 |
@@ -1569,6 +1573,10 @@ console.log(result.messages.at(-1).content);
 | 新建求职会话却变成了通用 Agent | `routes/sessions.ts` 有一份独立的 kind 白名单，漏加新 kind 会被静默降级成 `"agent"` | 新增会话类型时必须同时改 `sessions.ts`、`session-store.ts`（两处各有一份 `SessionKind`）与 `routes/sessions.ts` 的白名单（§3.47） |
 | 求职采集能跑但模型说「缺少参数」却给了泛泛的 schema 报错 | zod 把 `city`/`salaryMin` 等设为必填，模型漏传时框架直接抛 `Invalid input: expected number`，模型读不懂 | 关键字段设为 optional，由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示（§3.47） |
 | 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 硬编码 `--enrich 0`，补详情必须单独调 `job_enrich` 且隔几分钟（§3.47） |
+| 澄清卡标题紧贴卡片左上角、文字顶着边框 | 澄清卡没套 `.approval-body`（审批卡靠它给内边距），早期版本直接把标题塞进 `.approval-card`，自身又没有 padding | `.clarify-head` / `.clarify-list` / `.clarify-foot` 各自带内边距（§3.48）；`chat-flow.test.ts` 有守门断言 |
+| 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
+| 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
+| 4 题各填长答案后，最后一题的答复被切半 | 拼装文本超过 `/api/resume` 的 2000 字上限，服务端静默 `slice` | 拼装时按题均分预算逐题截断（§3.48） |
 
 ### 7.2 LangGraph v1 API 差异（网上 0.x 教程不适用）
 
@@ -2227,3 +2235,37 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 | `client/modules/agent-profile.ts`、`client/views/shell.ts` | 展示元数据 + 新建对话页入口 |
 | `client/modules/types-api.ts`、`types-ui.ts`、`core/state.ts` | 状态类型与初始值 |
 | `tests/unit/architecture.test.ts` | 工具集互不越界的守门用例 |
+
+### 3.48 需求澄清卡：多题一次问完（`agent/workflow.ts` + `client/render/clarify-card.ts`）
+
+**定位**：把「一次只能问一个问题」的澄清卡改成「一张卡最多问 4 道题、答完一次提交」，
+解决缺多项信息时要来回追问三四轮的体验问题。
+
+**改动分层**：
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 提示词 | `agent/workflow.ts` 的 `ANALYZE_PROMPT` | 要求缺多项时放进同一个 `questions` 数组一次问全；后一题依赖前一题答案时不要并列 |
+| 领域规则 | `agent/general.ts` / `estate.ts` / `job.ts` 的 `analystGuidance` | 各自点明本域常见的「同时缺失」组合（如求职的方向/城市/薪资/年限） |
+| 载荷 | `agent/workflow.ts`、`server/events.ts`、`client/modules/types-api.ts` | `ClarificationRequest.questions: [{ id, question, options, allowCustom }]`，选项 id 只在本题内唯一 |
+| 归一化 | `client/modules/clarify.ts` | 新旧载荷收敛成一种形状；答案拼装、提交文本截断、进度统计都是纯函数 |
+| 渲染 | `client/render/clarify-card.ts` | 逐题作答、就地选中态、进度徽章、全答完才亮提交按钮 |
+
+**交互约定**：
+
+- **单题卡点选项即提交**（沿用旧交互，少一次点击）；多题卡必须显式点「提交答复」，
+  且全部答完前按钮禁用 —— 半答提交等于把半个问题丢回给模型。
+- **单题回传选项 id**（服务端还能映射成可读标签，历史记录保持「（需求澄清：北京）」同形）；
+  多题回传「题面：答案；题面：答案」拼装文本，因为模型只看到一串答案分不清对应关系。
+- **自定义输入按需展开**：3–4 题的卡若每题常驻输入框会高到需要滚动，绝大多数用户只点选项。
+
+**关键约束**：
+
+1. 提交文本不超过 2000 字（`/api/resume` 的上限），超限时按题均分预算逐题截断 ——
+   不做这个收口，4 题各填 500 字就会被服务端静默 `slice` 把最后一题切半。
+2. 选中选项要同时清空本题的自定义输入；输入自定义答案要取消选项高亮。两者互斥，
+   同时显示会让人以为答了两遍。
+3. 收起自定义输入时放弃未提交的草稿并回退进度，否则「看不见的答案被提交」。
+4. 更新选中态必须**就地改 DOM**，不能整卡重绘 —— 重绘会丢其它题输入框的焦点与光标位置。
+5. 旧 journal 里的单问载荷（顶层 `question` + `options` + `allowCustom`）必须继续能渲染，
+   由 `normalizeClarify()` 统一提升成一道题；服务端类型只声明新形状，避免两处都写兼容分支。
