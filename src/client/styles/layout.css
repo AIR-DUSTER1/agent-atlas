@@ -39,6 +39,27 @@
 
 /* ---------- 项目切换器（本地 💻 / 云端 ☁️） ---------- */
 .project-switch { position: relative; margin-top: 8px; }
+.project-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  animation: slideIn .15s ease;
+}
+.project-menu .pm-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 9px 10px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-2);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.project-menu .pm-item:hover { background: var(--bg-hover); color: var(--text); }
+.project-menu .pm-item.active { color: var(--text); background: rgba(91,140,255,.12); }
+.project-menu .pm-item .pm-check { width: 14px; flex: none; color: var(--accent); }
+.project-menu .pm-divider { border-top: 1px solid var(--border-soft); margin: 5px 8px; }
+.project-menu .pm-manage { color: var(--accent-soft); }
 .project-btn {
   display: flex; align-items: center; gap: 7px;
   width: 100%;
@@ -55,8 +76,7 @@
 .project-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border); }
 .project-btn .chevron-down { margin-left: auto; font-size: 9px; color: var(--text-3); }
 #project-btn-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 菜单收在侧栏宽度内（侧栏贴屏幕左缘，超出会被视口裁掉）；
-   用 ID 选择器覆盖 .provider-menu 的宽度/right 定位 */
+/* 菜单收在侧栏宽度内（侧栏贴屏幕左缘，超出会被视口裁掉）。 */
 .project-menu,
 #project-menu {
   width: 244px;
@@ -214,9 +234,8 @@
 .status.error { background: var(--red); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-/* 顶栏右侧控件：强制单行（provider-switch 是 div，不设 flex 会把齿轮挤到下一行溢出） */
+/* 顶栏右侧控件强制单行。 */
 .topbar-right { display: flex; align-items: center; gap: 10px; flex: none; }
-#provider-btn-text { max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .settings-btn {
   width: 30px; height: 30px;
@@ -229,54 +248,6 @@
   transition: all .15s;
 }
 .settings-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border); }
-
-/* ---------- 顶栏供应商快捷切换器 ---------- */
-.provider-switch { position: relative; }
-.provider-btn {
-  display: flex; align-items: center; gap: 7px;
-  max-width: 280px;
-  padding: 6px 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-2);
-  font-size: 12px;
-  font-family: var(--sans);
-  cursor: pointer;
-  transition: all .15s;
-}
-.provider-btn:hover { color: var(--text); border-color: var(--accent); }
-.provider-btn .chevron-down { font-size: 9px; color: var(--text-3); }
-.provider-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  width: 300px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.45);
-  padding: 6px;
-  z-index: 60;
-  animation: slideIn .15s ease;
-}
-.provider-menu .pm-item {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%;
-  padding: 9px 10px;
-  background: transparent; border: 0; border-radius: 8px;
-  color: var(--text-2);
-  font-size: 12.5px;
-  cursor: pointer;
-  text-align: left;
-  font-family: var(--sans);
-}
-.provider-menu .pm-item:hover { background: var(--bg-hover); color: var(--text); }
-.provider-menu .pm-item.active { color: var(--text); background: rgba(91,140,255,.12); }
-.provider-menu .pm-item .pm-check { width: 14px; flex: none; color: var(--accent); }
-.provider-menu .pm-item .pm-model { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
-.provider-menu .pm-divider { border-top: 1px solid var(--border-soft); margin: 5px 8px; }
-.provider-menu .pm-manage { color: var(--accent-soft); }
 
 /* ---------- 设置弹窗里的供应商列表 ---------- */
 #provider-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }

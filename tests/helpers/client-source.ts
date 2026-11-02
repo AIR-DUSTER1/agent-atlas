@@ -72,7 +72,6 @@ export const CLIENT_SOURCES = [
   "views/model-panel.ts",
   "views/model-form.ts",
   "views/model-actions.ts",
-  "views/model-menu.ts",
   // 输入框菜单
   "composer/menu.ts",
   // 第三方隔离 wrapper（业务只允许从这里使用 npm 前端库）

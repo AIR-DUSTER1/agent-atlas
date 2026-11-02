@@ -7,8 +7,8 @@
  *   「思考多深」的划分方式完全不同 ——
  *
  *     · OpenAI（GPT-5 / o 系）：reasoning_effort = none|minimal|low|medium|high|xhigh
- *     · 智谱 GLM：thinking.type = enabled|disabled（开关型，默认就开着）
- *     · DeepSeek：thinking.type 开关 + reasoning_effort 强度档
+ *     · 智谱 GLM-5.3：reasoning_effort = low|high|max（原生强度档）
+ *     · DeepSeek：reasoning_effort = none|low|high|max（原生强度档）
  *     · Anthropic：thinking.budget_tokens 预算（4k/8k/16k…）或 output_config.effort
  *     · Gemini：thinkingConfig.thinkingBudget（token 数）或 thinkingLevel（LOW/MEDIUM/HIGH）
  *     · 通义千问 Qwen：enable_thinking + thinking_budget
@@ -118,33 +118,29 @@ export const DIALECTS: ReasoningDialect[] = [
   },
   {
     id: "zhipu-thinking",
-    label: "智谱 GLM 深度思考开关",
-    vendor: "智谱 AI（GLM-4.5 / 4.6 / 5）",
-    field: "thinking.type",
-    scheme: "智谱按「开关」划分：只有 enabled / disabled 两态（GLM-4.5 起默认开启深度思考，关掉即退化成普通对话速度）。",
+    label: "智谱 GLM 原生思考强度",
+    vendor: "智谱 AI（GLM-5.3 系列）",
+    field: "reasoning_effort",
+    scheme: "GLM-5.3 / FLASH / FLASHX 原生只支持 low → high → max 三档，不支持关闭思考；不再提供会被映射到同一实际值的别名档位。",
     levels: [
       NOOP_LEVEL,
-      { id: "enabled", label: "开启深度思考", desc: "thinking.type = enabled，让 GLM 先推理再回答", params: { thinking: { type: "enabled" } } },
-      { id: "disabled", label: "关闭深度思考", desc: "thinking.type = disabled，响应更快、不再返回思考过程", params: { thinking: { type: "disabled" } } },
+      { id: "low", label: "低 (low)", desc: "reasoning_effort = low", params: { reasoning_effort: "low" } },
+      { id: "high", label: "高 (high)", desc: "reasoning_effort = high", params: { reasoning_effort: "high" } },
+      { id: "max", label: "最高 (max)", desc: "reasoning_effort = max", params: { reasoning_effort: "max" } },
     ],
   },
   {
     id: "deepseek-thinking",
-    label: "DeepSeek 思考开关 + 强度",
+    label: "DeepSeek 原生思考强度",
     vendor: "DeepSeek 官方",
-    field: "thinking.type / reasoning_effort",
-    scheme:
-      "DeepSeek 是「开关 + 强度」两层：thinking.type 决定要不要思考（disabled 后响应里不再有 reasoning_content），" +
-      "reasoning_effort 再细分 minimal → low → medium → high → max 五档强度。",
+    field: "reasoning_effort",
+    scheme: "DeepSeek 原生只有 none / low / high / max 四个有效值；不再把 minimal、medium、xhigh 等别名映射成近似档位。",
     levels: [
       NOOP_LEVEL,
-      { id: "disabled", label: "关闭思考", desc: "thinking.type = disabled，直接给答案（实测 reasoning_content 为空）", params: { thinking: { type: "disabled" } } },
-      { id: "enabled", label: "开启思考（默认强度）", desc: "thinking.type = enabled，显式打开思考模式", params: { thinking: { type: "enabled" } } },
-      { id: "minimal", label: "极低 (minimal)", desc: "reasoning_effort = minimal", params: { reasoning_effort: "minimal" } },
-      { id: "low", label: "低 (low)", desc: "reasoning_effort = low，简单任务够用", params: { reasoning_effort: "low" } },
-      { id: "medium", label: "中 (medium)", desc: "reasoning_effort = medium，均衡档", params: { reasoning_effort: "medium" } },
-      { id: "high", label: "高 (high)", desc: "reasoning_effort = high，复杂任务推荐", params: { reasoning_effort: "high" } },
-      { id: "max", label: "最高 (max)", desc: "reasoning_effort = max，最深的推理预算", params: { reasoning_effort: "max" } },
+      { id: "none", label: "不思考 (none)", desc: "reasoning_effort = none，关闭思考", params: { reasoning_effort: "none" } },
+      { id: "low", label: "低 (low)", desc: "reasoning_effort = low", params: { reasoning_effort: "low" } },
+      { id: "high", label: "高 (high)", desc: "reasoning_effort = high", params: { reasoning_effort: "high" } },
+      { id: "max", label: "最高 (max)", desc: "reasoning_effort = max", params: { reasoning_effort: "max" } },
     ],
   },
   {

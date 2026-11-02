@@ -57,7 +57,7 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 电脑操作（Computer Use 插件） | 截图、点击、双击、右键、文本输入、组合按键与滚轮；仅 Windows，默认关闭，开启后仍受会话权限与高风险审批约束 |
 | 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因；思考型网关（DeepSeek 等）的多步续传自动回传 `reasoning_content`，网关不接受该字段时自动降级重试 |
 | 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
-| 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议 |
+| 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议；DeepSeek 仅展示原生 none / low / high / max，GLM-5.3 仅展示 low / high / max |
 | 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
 | 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
 | 记忆 | LangGraph checkpoint、可插拔长期记忆（本地 / HTTP）、Agent scope 隔离、相关性注入、上下文压缩 |

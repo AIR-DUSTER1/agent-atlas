@@ -168,7 +168,6 @@ export function bindSettingsNavigation(): void {
 }
 /** 打开独立设置页；models 分区可带供应商 id 做定位高亮。 */
 export function openSettings(view = "models", focusProviderId: string | null = null): void {
-  void import("./model-menu.js").then((m) => m.showProviderMenu(false));
   closeCmMenus();
   closeComposerMenu();
   setSidebarOpen(false);

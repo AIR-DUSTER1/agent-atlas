@@ -1450,7 +1450,7 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
   显示名 / 多模态开关 / 上下文窗口 / 思考等级；
 - 保存供应商成功后返回 agentatlas；模型上下文窗口等参数在模型行「编辑」里配置，留空自动读网关，未知时默认 200k，
   点「保存模型」后持久化，重新打开设置仍可继续修改；
-- **顶栏 ▾ 是模型选择器**：按供应商分组列出全部模型，点一行就切换
+- **输入框上方的模型 chip 是唯一模型选择器**：按供应商分组列出全部模型，点一行就切换
   （旧版每个供应商只能存一个模型，同一网关的第二个模型没有入口 —— 现在不会了）；
 - 切换后**新建会话立即生效**，已有会话在下一条消息时自动切换
   （带 checkpoint 的会话记忆会重置，等价于重启服务）；
@@ -1465,8 +1465,8 @@ MODEL=deepseek-v4-flash          # 必须是 npm run models 列出的 id
 | 方言 | 请求字段 | 档位 |
 |---|---|---|
 | OpenAI 强度档 | `reasoning_effort` | none / minimal / low / medium / high / xhigh / max |
-| 智谱 GLM | `thinking.type` | enabled / disabled（只有两态） |
-| DeepSeek | `thinking.type` + `reasoning_effort` | 关闭 / 开启 / minimal→max |
+| 智谱 GLM-5.3 | `reasoning_effort` | low / high / max（不支持关闭） |
+| DeepSeek | `reasoning_effort` | none / low / high / max（原生值） |
 | Anthropic 预算 | `thinking.budget_tokens` | 2k / 8k / 16k / 32k |
 | Anthropic 输出强度 | `output_config.effort` | low / medium / high / xhigh / max |
 | Gemini 预算 / 等级 | `thinkingConfig.thinkingBudget` / `thinkingLevel` | 0 / -1 / 1024 / 8192 / 24576；LOW / MEDIUM / HIGH |
@@ -1680,7 +1680,7 @@ console.log(result.messages.at(-1).content);
 | computer use 中文参数打进来的全是乱码 / 动作错乱 | PS5.1 控制台默认 GBK：中文内联脚本 + `SendKeys` 直发非 ASCII 都不可靠。对策：PowerShell 全走 `-EncodedCommand`（UTF-16LE → base64）；中文文本改 `Set-Clipboard` + Ctrl+V；SendKeys 特殊字符（`+^%~()[]{}{}`）必须大括号转义（§3.23） |
 | 多模态工具结果到模型那里变成一串 JSON 文本 | LangChain `tool()` 对非字符串返回值做 `JSON.stringify`，image_url 内容块被拍扁成字符串、模型看不到图。对策：继承 `StructuredTool` 覆写 `invoke()` 直接返回内容块数组，执行节点（`hitl.invokeTool`）对数组原样透传 |
 | 权限切了但会话行为没变 | 权限模式经 `graph.stream({ configurable.permission_mode })` 传入，对**下一条**消息生效；配置重建（rebuildIfStale）与权限无关，不要去重建图。demo / 外部 Agent 会话没有执行图，权限 chip 前端直接隐藏 |
-| 思考模型多轮回炉/工具轮报 `400 reasoning_content must be passed back` | DeepSeek 等 thinking 网关校验「请求里末条 assistant（含 tool 消息序列中的）必须带 reasoning_content」，而 @langchain/openai 序列化必丢弃它。已修两处：①回炉草稿在 context-builder 投影时全部弹出、并入 system 注记（请求以 HumanMessage 结尾，连续多版草稿都要弹）；②复杂历史（连续 assistant + tool_calls 混合）仍可能触发网关深层校验 —— 规避：把思考等级切「关闭思考」（thinking.type=disabled，实测彻底消失），或换非思考模型。与 multi.ts 的 supervisor 包装 ToolMessage 是同一个坑的三张面孔 |
+| 思考模型多轮回炉/工具轮报 `400 reasoning_content must be passed back` | DeepSeek 等 thinking 网关校验「请求里末条 assistant（含 tool 消息序列中的）必须带 reasoning_content」，而 @langchain/openai 序列化必丢弃它。已修两处：①回炉草稿在 context-builder 投影时全部弹出、并入 system 注记（请求以 HumanMessage 结尾，连续多版草稿都要弹）；②复杂历史（连续 assistant + tool_calls 混合）仍可能触发网关深层校验 —— 规避：把 DeepSeek 思考等级切到「不思考 (none)」（reasoning_effort=none），或换非思考模型。与 multi.ts 的 supervisor 包装 ToolMessage 是同一个坑的三张面孔 |
 
 ***
 

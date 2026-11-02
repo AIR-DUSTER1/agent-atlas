@@ -383,18 +383,22 @@ test("没有项目时首屏与新建对话直接展示 Agent 选择页", async (
   await expect(page.locator("#input")).toBeEnabled();
 });
 
+test("顶栏模型框已移除且输入框模型菜单可正常打开", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await expect(page.locator("#provider-btn")).toHaveCount(0);
+  await expect(page.locator(".provider-switch")).toHaveCount(0);
+  await page.locator("#cm-model").click();
+  await expect(page.locator("#cm-model-menu")).toBeVisible();
+  await expect(page.locator("#cm-model-menu .cm-item").first()).toBeVisible();
+});
 test("思考档位菜单按内容收紧且不超出视口", async ({ page }) => {
   await login(page);
   await createChat(page);
 
-  // mock 默认走「不设置（通用兼容）」方言，只有被隐藏的 default 档 → 入口应隐藏，
-  // 绝不能是「点开只有一句无需设置」的死路菜单。
-  const thinkGroup = page.locator("#cm-thinking").locator("xpath=..");
-  await expect(thinkGroup).toBeHidden();
-
-  // 给当前模型切换成带真实档位的方言后，入口出现且菜单可选项落在视口内。
+  // 固定到 DeepSeek 原生方言，验证菜单只出现 none / low / high / max。
   const setReasoning = await page.request.post("/api/config/reasoning", {
-    data: { dialect: "openai-effort", level: "medium" },
+    data: { dialect: "deepseek-thinking", level: "max" },
   });
   expect(setReasoning.ok()).toBeTruthy();
   // 已登录过，reload 直接带 cookie 恢复；再走 login() 会等一个不会出现的登录框
@@ -406,6 +410,11 @@ test("思考档位菜单按内容收紧且不超出视口", async ({ page }) => 
   const menu = page.locator("#cm-thinking-menu");
   await expect(menu).toBeVisible();
   await expect(menu.locator(".cm-item").first()).toBeVisible();
+  await expect(menu.locator(".cm-item")).toHaveCount(4);
+  await expect(menu).toContainText("不思考 (none)");
+  await expect(menu).toContainText("最高 (max)");
+  await expect(menu).not.toContainText("极低 (minimal)");
+  await expect(menu).not.toContainText("中 (medium)");
   const box = await menu.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.width).toBeGreaterThanOrEqual(228);

@@ -23,10 +23,8 @@
   #messages, .welcome { padding-left: 16px; padding-right: 16px; }
   #composer { padding-left: 16px; padding-right: 16px; }
   .msg-user .bubble { max-width: 88%; }
-  /* 顶栏空间紧张：图标按钮收紧、供应商名截短、冗余徽标隐藏
-     （模拟模式信息供应商按钮里已有；会话类型手机端让位给标题） */
+  /* 顶栏空间紧张：图标按钮收紧、冗余徽标隐藏。 */
   #topbar { padding: 0 12px; gap: 8px; }
-  #provider-btn-text { max-width: 96px; }
   #mode-badge, #demo-badge { display: none; }
 }
 
@@ -106,7 +104,6 @@
   .model-add-row button { flex: 1; }
 }
 @media (max-width: 640px) {
-  .topbar-right .provider-switch,
   .topbar-right #status-dot { display: none; }
   .topbar-breadcrumb > span:first-child {
     max-width: 76px;

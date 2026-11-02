@@ -24,6 +24,8 @@ test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮
   const html = await readFile(new URL("index.html", root), "utf8");
   const topbar = html.slice(html.indexOf('<header id="topbar">'), html.indexOf("</header>"));
   assert.doesNotMatch(topbar, /id="(memories|stats|settings)-btn"/);
+  assert.doesNotMatch(topbar, /id="provider-btn"|class="provider-switch"/);
+  assert.match(html, /id="cm-model"/);
   assert.match(html, /<div class="side-footer">[\s\S]*id="settings-btn"[\s\S]*id="side-model"/);
 });
 
@@ -211,23 +213,18 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
 });
 
 
-test("思考快捷菜单隐藏冗余默认项并简化档位文案", () => {
+test("思考快捷菜单只隐藏供应商默认并简化原生档位文案", () => {
   const levels = [
     { id: "default", label: "供应商默认", desc: "" },
-    { id: "disabled", label: "关闭思考", desc: "" },
-    { id: "enabled", label: "开启思考（默认强度）", desc: "" },
-    { id: "minimal", label: "强度·极低 (minimal)", desc: "" },
+    { id: "none", label: "不思考 (none)", desc: "" },
+    { id: "low", label: "低 (low)", desc: "" },
+    { id: "high", label: "高 (high)", desc: "" },
     { id: "max", label: "强度·最高 (max)", desc: "" },
   ];
   assert.deepEqual(
-    visibleQuickReasoningLevels(levels, "deepseek-thinking").map((level) => level.id),
-    ["disabled", "minimal", "max"],
+    visibleQuickReasoningLevels(levels).map((level) => level.id),
+    ["none", "low", "high", "max"],
   );
-  assert.deepEqual(
-    visibleQuickReasoningLevels(levels, "openai-effort").map((level) => level.id),
-    ["disabled", "enabled", "minimal", "max"],
-  );
-  assert.equal(quickReasoningDisplayLabel(levels[3]), "极低 (minimal)");
+  assert.equal(quickReasoningDisplayLabel(levels[1]), "不思考 (none)");
   assert.equal(quickReasoningDisplayLabel(levels[4]), "最高 (max)");
-  assert.equal(quickReasoningDisplayLabel(levels[2]), "默认强度");
 });

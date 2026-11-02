@@ -41,7 +41,6 @@ import {
   activateModel, fetchGatewayModelChips, removeProvider, saveProvider,
 } from "./views/model-actions.js";
 import { currentlySelectedProvider, renderProviderList } from "./views/model-panel.js";
-import { renderProviderMenu, showProviderMenu } from "./views/model-menu.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { loadPluginState } from "./views/settings-plugins.js";
@@ -266,16 +265,8 @@ async function init(): Promise<void> {
       uiAlert(`清理失败：${(err as Error).message}`, "批量清理旧会话");
     }
   });
-  on("provider-btn", "click", (e) => {
-    e.stopPropagation();
-    const menu = $("provider-menu");
-    api<AppConfig>("/api/config").then(applyConfigState).catch(() => {});
-    showProviderMenu(menu?.classList.contains("hidden") ?? false);
-  });
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
-    const sw = document.querySelector(".provider-switch");
-    if (!sw || !sw.contains(target)) showProviderMenu(false);
     const pw = document.querySelector(".project-switch");
     if (!pw || !pw.contains(target)) showProjectMenu(false);
     // composer 弹出菜单：点击组外关闭（组内交给各自的 item 处理器）
@@ -504,7 +495,6 @@ async function init(): Promise<void> {
       closeFsModal();
       closeKb();
       closeEstate();
-      showProviderMenu(false);
       setSidebarOpen(false);
       closeCmMenus();
     }

@@ -38,7 +38,7 @@ export function activeModelEntryOf(): ModelEntry | null {
   return (p?.models || []).find((m) => m.active) || null;
 }
 
-/** 顶栏按钮 / 侧栏 / 徽章 / composer chip 的统一刷新 */
+/** 侧栏 / 徽章 / composer chip 的统一刷新 */
 export function applyConfigState(cfg: AppConfig): void {
   const previousWindow = state.config?.contextWindow ?? null;
   const previousProvider = activeProviderOf();
@@ -67,17 +67,6 @@ export function applyConfigState(cfg: AppConfig): void {
   const modelLabel = activeModel?.displayName || cfg.model;
   const sideText = $("side-model-text");
   if (sideText) sideText.textContent = mock ? `模拟模式 · ${cfg.model}` : `${active ? active.name + " · " : ""}${modelLabel}`;
-  const btnText = $("provider-btn-text");
-  if (btnText) btnText.textContent = mock
-    ? `模拟模式 · ${cfg.model}`
-    : `${activeModel?.modality === "vision" ? "🖼 " : ""}${modelLabel}`;
-  const reasonBadge = $("provider-btn-reason");
-  if (reasonBadge) {
-    const tag = activeModel && activeModel.reasoningLevel !== "default" ? activeModel.reasoningLabel : "";
-    reasonBadge.textContent = tag;
-    reasonBadge.classList.toggle("hidden", !tag);
-    reasonBadge.title = tag ? `当前思考等级：${tag}` : "";
-  }
   renderComposerBar();
   updateContextBar();
 }
@@ -90,7 +79,7 @@ export function renderComposerBar(): void {
   const modelText = document.querySelector("#cm-model .cm-text");
   if (modelText) modelText.textContent = cfg.mock ? `模拟模式 · ${cfg.model}` : (m?.displayName || cfg.model);
   const r = cfg.reasoning || {};
-  const levels = visibleQuickReasoningLevels(r.levels, r.dialect);
+  const levels = visibleQuickReasoningLevels(r.levels);
   // 没有可切换档位时不显示入口：点开只有「无需设置」，属于死路菜单
   // （无供应商 / 通用兼容方言的 levels 只有被隐藏的 default）
   const thinkGroup = document.querySelector<HTMLElement>("#cm-thinking")?.closest(".cm-group");
@@ -191,7 +180,7 @@ export function renderThinkingMenu(menu: HTMLElement): void {
   head.textContent = activeModelEntryOf()?.displayName || state.config?.model || "当前模型";
   sec.append(head);
   menu.appendChild(sec);
-  const levels = visibleQuickReasoningLevels(r.levels, r.dialect);
+  const levels = visibleQuickReasoningLevels(r.levels);
   if (!levels.length) {
     const empty = document.createElement("div");
     empty.className = "cm-desc";

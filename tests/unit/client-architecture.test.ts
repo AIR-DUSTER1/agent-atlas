@@ -28,7 +28,6 @@ const INNER_HTML_BUDGET: Record<string, number> = {
   "views/estate.ts": 3,
   "views/external.ts": 2,
   "views/model-form.ts": 3,
-  "views/model-menu.ts": 2,
   "views/model-panel.ts": 8,
   "views/navigation.ts": 3,
   "views/projects.ts": 3,
