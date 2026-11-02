@@ -1670,6 +1670,7 @@ console.log(result.messages.at(-1).content);
 | 健康检查从文本 `ok` 改成 JSON 后旧断言/探针失败 | `/healthz` 现在回 `{ok,version,uptimeSeconds}`（`/readyz` 同族）。编排器只看 HTTP 状态码最稳；自动化测试要同步改为解析 JSON，别继续断言 `body === "ok"` |
 | MCP 测试跑完全部用例却不退出（CI 超时） | 子进程被杀后 Node 侧 `ChildProcess` 仍持有 stdio 的 Socket 句柄。① close 回调必须只删「自己那条」连接（重连竞态下按 id 无条件删会抹掉新连接）；② 等 `close` 事件真正到达；③ `destroy()` stdout/stderr/stdin 三流并 `unref()`。单文件跑正常、全量跑才挂 —— 因为 `node --test` 多文件同进程 |
 | MCP server stdout 打了非 JSON 日志 | MCP 协议规定日志走 stderr、stdout 只走协议流。遇到非 JSON 行只能丢弃并记 `mcp_stdout_non_json` 告警 —— 否则解析器会把日志当成协议消息 |
+| 设置页 MCP「测试连接」点了没反应 | 测试要 spawn 子进程并等 initialize 握手（npx 冷启动可达数十秒），旧实现只在请求结束后把结果写到面板底部，按钮禁用态又没有任何视觉样式，用户等到一半就认为按钮坏了。对策：点击即刻把按钮改成「测试中…」+ 旋转图标 + 内联「正在测试连接…」，结果（通过/失败、工具数或错误原因）就地显示在按钮左侧并按 server 缓存，列表重渲染后仍可见 |
 | 技能/命令「改了设置页但斜杠菜单没变」 | 前端把命令清单缓存在 composer 模块里。保存/删除后必须重新 `GET /api/commands` 刷新缓存，否则要刷新整页才看得到 |
 | 上传技能后不自动加载 | 先确认技能处于启用状态；无 `triggers` 时用技能名称/标识兜底匹配，仍不命中就在设置页补充触发词（支持逗号或 YAML 列表） |
 | 技能目录写到了 `src/.setting/skills/` | 与 checkpoint 同一个坑：`src/` 顶层文件回退**一层**到仓库根（`join(MODULE_DIR, "..", ".setting", "skills")`）。照抄 `src/server/` 下文件的两层写法会多退一层 |
@@ -1775,7 +1776,7 @@ console.log(result.messages.at(-1).content);
 | 连接与协议 | `mcp.ts` | spawn 子进程、按行收发 JSON-RPC、请求 id 配对 + 超时、stderr 尾部留存、断线重连、进程树清理 |
 | 工具包装 | `mcp-tools.ts` | `mcp__<server>__<tool>` 命名、inputSchema → 宽松 zod、结果文本化、审批文案生成 |
 | HTTP | `routes/mcp.ts` | 列表 / 增删改 / 全局暂停 / `.mcp.json` 批量导入 / 测试连接 |
-| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：完整命令粘贴解析、全局暂停、卡片列表、单服务器启停、连接测试、JSON 导入与弹窗编辑 |
+| 前端 | `views/settings-mcp.ts` | 设置页 MCP 分区：完整命令粘贴解析、全局暂停、卡片列表、单服务器启停、连接测试（点击即显示「测试中」，成功/失败结果与工具数就地展示）、JSON 导入与弹窗编辑 |
 
 **设计要点**：
 
