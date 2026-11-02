@@ -103,7 +103,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "0.9.0-beta.13");
+  assert.equal(pkg.version, "0.9.0-beta.14");
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);

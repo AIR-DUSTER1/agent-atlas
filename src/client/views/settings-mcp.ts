@@ -58,6 +58,13 @@ let editorReturnFocus: HTMLElement | null = null;
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 const expandedIds = new Set<string>();
 
+/** 最近一次显式「测试连接」的结果。按 server id 保留，列表重渲染后仍显示在按钮旁。 */
+interface McpTestFeedback {
+  tone: "ok" | "err";
+  text: string;
+}
+const testFeedback = new Map<string, McpTestFeedback>();
+
 export function showMcpStatus(text: string, cls = "", editor = false): void {
   const el = $(editor ? "mcp-editor-status" : "mcp-status");
   if (!el) return;
@@ -106,6 +113,13 @@ function updateGlobalControls(): void {
   $("mcp-list")?.classList.toggle("global-paused", !globalEnabled);
 }
 
+function testFeedbackNode(serverId: string): HTMLSpanElement {
+  const feedback = testFeedback.get(serverId);
+  return h("span", {
+    class: "mcp-test-result" + (feedback ? ` ${feedback.tone}` : ""),
+  }, feedback?.text ?? "");
+}
+
 function renderServerDetails(server: McpServerStatus): HTMLElement {
   const command = `$ ${server.command} ${server.args.join(" ")}`.trim();
   const toolList = server.tools.length
@@ -121,12 +135,14 @@ function renderServerDetails(server: McpServerStatus): HTMLElement {
     server.envKeys.length ? `环境变量：${server.envKeys.join("、")}` : "",
   ].filter(Boolean).join(" · ");
 
+  const feedbackEl = testFeedbackNode(server.id);
+  const testLabel = h("span", { class: "mcp-test-label" }, "测试连接");
   const testButton = h("button", {
     type: "button",
     class: "ghost-btn small",
     "aria-label": `测试 MCP 服务器 ${server.name}`,
-  }, icon("RefreshCw", { size: 13 }), "测试连接");
-  testButton.addEventListener("click", () => { void testServer(server, testButton); });
+  }, icon("RefreshCw", { size: 13 }), testLabel);
+  testButton.addEventListener("click", () => { void testServer(server, testButton, testLabel, feedbackEl); });
 
   return h("div", { class: "mcp-server-details" },
     h("div", { class: "mcp-command-row" },
@@ -145,7 +161,7 @@ function renderServerDetails(server: McpServerStatus): HTMLElement {
         advanced ? h("p", { class: "mcp-advanced-meta" }, advanced) : null,
       ),
     ),
-    h("div", { class: "mcp-detail-actions" }, testButton),
+    h("div", { class: "mcp-detail-actions" }, feedbackEl, testButton),
   );
 }
 
@@ -291,12 +307,32 @@ async function toggleGlobal(toggle: HTMLInputElement): Promise<void> {
   }
 }
 
-async function testServer(server: McpServerStatus, button: HTMLButtonElement): Promise<void> {
+async function testServer(
+  server: McpServerStatus,
+  button: HTMLButtonElement,
+  label: HTMLElement,
+  feedbackEl: HTMLElement,
+): Promise<void> {
+  const setFeedback = (tone: "pending" | McpTestFeedback["tone"] | null, text: string): void => {
+    feedbackEl.textContent = text;
+    feedbackEl.className = "mcp-test-result" + (tone ? ` ${tone}` : "");
+  };
+  // 测试要先 spawn 子进程并等 initialize 握手，npx 类命令常要数秒到一分钟。
+  // 期间按钮若没有任何可见变化，用户会以为点击没反应 —— 所以先就地给出「测试中」。
   button.disabled = true;
+  button.classList.add("is-busy");
+  button.setAttribute("aria-busy", "true");
+  label.textContent = "测试中…";
+  setFeedback("pending", "正在测试连接…");
+  showMcpStatus(`正在测试「${server.name}」连接…`);
   try {
     const result = await api<{ status: McpServerStatus }>(`/api/mcp/${encodeURIComponent(server.id)}/test`, { method: "POST" });
     const index = currentServers.findIndex((item) => item.id === server.id);
     if (index >= 0) currentServers[index] = result.status;
+    const feedback: McpTestFeedback = result.status.connected
+      ? { tone: "ok", text: `✓ 测试通过 · ${result.status.tools.length} 个工具` }
+      : { tone: "err", text: `✗ 测试失败：${result.status.error || "未知原因"}` };
+    testFeedback.set(server.id, feedback);
     if (result.status.connected) {
       expandedIds.add(server.id);
       showMcpStatus(`✓ 「${server.name}」连接成功，发现 ${result.status.tools.length} 个工具`, "ok");
@@ -305,9 +341,15 @@ async function testServer(server: McpServerStatus, button: HTMLButtonElement): P
     }
     renderMcpList();
   } catch (err) {
-    showMcpStatus(`✗ ${(err as Error).message}`, "err");
+    const message = (err as Error).message;
+    testFeedback.set(server.id, { tone: "err", text: `✗ 测试失败：${message}` });
+    setFeedback("err", `✗ 测试失败：${message}`);
+    showMcpStatus(`✗ ${message}`, "err");
   } finally {
     button.disabled = false;
+    button.classList.remove("is-busy");
+    button.removeAttribute("aria-busy");
+    label.textContent = "测试连接";
   }
 }
 
@@ -498,6 +540,7 @@ export async function saveMcpFromForm(): Promise<void> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id, ...body }),
         });
+    testFeedback.delete(data.server.id); // 命令/参数变了，旧测试结果不再可信
     applyState(data);
     closeMcpEditor();
     showMcpStatus(`✓ 已${wasEditing ? "更新" : "添加"} MCP 服务器「${data.server.name}」`, "ok");
@@ -516,6 +559,7 @@ export async function deleteMcpFromEditor(): Promise<void> {
   }))) return;
   try {
     const data = await api<McpStateResponse>(`/api/mcp/${encodeURIComponent(server.id)}`, { method: "DELETE" });
+    testFeedback.delete(server.id);
     applyState(data);
     closeMcpEditor();
     showMcpStatus(`已删除 MCP 服务器「${server.name}」`, "ok");
@@ -550,6 +594,7 @@ export async function importMcpFromFile(files: FileList | null): Promise<void> {
         body: JSON.stringify({ config: raw, overwrite: true }),
       });
     }
+    testFeedback.clear(); // 导入可能覆盖已有服务器的 command，旧结果一并作废
     applyState(data);
     showMcpStatus(`✓ 已导入 ${data.imported?.length || 0} 个，覆盖 ${data.overwritten?.length || 0} 个 MCP server`, "ok");
   } catch (err) {

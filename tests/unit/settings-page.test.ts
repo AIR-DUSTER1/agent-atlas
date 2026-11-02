@@ -147,6 +147,8 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   assert.match(source, /parseMcpCommandLine/);
   assert.match(source, /applyQuickCommandLine/);
   assert.match(source, /mcp-command-preview/);
+  assert.match(source, /mcp-test-result/);
+  assert.match(source, /测试中/);
 
   assert.doesNotMatch(source, /innerHTML/);
 });
