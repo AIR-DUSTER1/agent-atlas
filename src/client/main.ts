@@ -34,7 +34,7 @@ import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
 } from "./views/attachments.js";
 import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
-import { closeEstate, installBeikeCli, openEstate, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
+import { closeEstate, installBeikeCli, openEstate, openEstateLogin, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 import { bindJob } from "./views/job.js";
 import { closeProviderForm, openProviderForm, saveModel } from "./views/model-form.js";
 import {
@@ -435,6 +435,7 @@ async function init(): Promise<void> {
     renderEstatePanelForUi();
   });
   on("estate-install", "click", () => { void installBeikeCli(); });
+  on("estate-login-open", "click", () => { void openEstateLogin(); });
   on("estate-key-save", "click", () => { void saveEstateKey(); });
   on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
 

@@ -10,6 +10,7 @@
  *     定位 beike.exe → 校验 sha256 → 写入 .web-config.json 的 estate 键）
  *   - 鉴权（beike auth <KEY> --save；Key 由 CLI 保存到 ~/.beike，
  *     agentatlas **不落盘不回显**——遵循贝壳官方技能的凭证规范）
+ *   - 登录态失效时打开制作方登录页并熔断后续查询，绝不让模型反复撞同一个 401
  *   - 每轮「用户需求分析」上报（beike analyze，贝壳官方契约；
  *     fire-and-forget，失败绝不阻塞回答）
  *
@@ -21,7 +22,7 @@
  *   无 C 端找房检索接口且授权需企业渠道，本期不接入（用户已确认）。
  */
 import { runControlled } from "./subprocess.js";
-import { promises as fsp, createReadStream } from "node:fs";
+import { promises as fsp, createReadStream, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +35,7 @@ import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { log } from "./logging.js";
 import { isPluginEnabled } from "../plugin-state.js";
+import { openExternalUrl } from "./external-open.js";
 
 /** 贝壳 CLI 资源桶（T2-5）：查询 + 后台 analyze 共用，2 并发上限 */
 const BEIKE_CLI_CONCURRENCY = 2;
@@ -49,9 +51,13 @@ export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=beike_skill";
+const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
+/** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
+const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
 
 const BEIKE_RUN_TIMEOUT_MS = 90_000;      // 单条 beike 子进程最长执行时间
 const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出时间
+const BEIKE_LOGIN_TIMEOUT_MS = 15_000;    // 仅打开官方登录页，不等待用户扫码
 const BEIKE_INSTALL_TIMEOUT_MS = 600_000; // 整个安装流程（下载 ~32MB + 解压）
 const MANIFEST_TIMEOUT_MS = 30_000;
 const KEY_AUTH_TIMEOUT_MS = 30_000;
@@ -114,6 +120,7 @@ export interface BeikeStatus {
   hasOverride: boolean;
   platform: string;
   keyUrl: string;    // 前端引导用户去获取授权 Key
+  loginRequired: boolean;
 }
 
 /** spawn 一次 beike：返回退出码 + stdout/stderr（不解析 JSON）。
@@ -170,6 +177,132 @@ export function beikeBusinessError(data: unknown): string | null {
   return typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : null;
 }
 
+/**
+ * CLI/网关的未授权文案并不统一：`invalid cli request` 是当前版本对无效 Key
+ * 的实际返回，其余兼容官方文档与常见 HTTP 错误。登录失效必须被视为终止信号，
+ * 不能当普通业务错误继续换参数重试。
+ */
+export function isBeikeAuthFailure(text: string): boolean {
+  return [
+    /invalid\s+cli\s+request/i,
+    /invalid\s+or\s+missing\s+authorization\s+header/i,
+    /\b(?:401|403)\b/,
+    /\bunauthori[sz]ed\b/i,
+    /\b(?:invalid|expired)\s+(?:api\s*key|bearer|token|credential)/i,
+    /(?:api\s*key|bearer|key|token|凭证|授权|登录态).{0,20}(?:无效|过期|失效|缺失|未登录)/i,
+    /(?:请先|需要|未).{0,8}登录/,
+  ].some((pattern) => pattern.test(text));
+}
+
+/** 从 `beike login` 的人类可读输出中提取官方登录页（仅 building.ke.com）。 */
+export function extractBeikeLoginUrl(text: string): string | null {
+  for (const match of text.matchAll(/https:\/\/building\.ke\.com\/[^\s<>"']+/gi)) {
+    const raw = match[0].replace(/[),.;，。；]+$/u, "");
+    try {
+      const url = new URL(raw);
+      if (url.protocol === "https:" && BEIKE_LOGIN_HOST_ALLOW.has(url.hostname.toLowerCase())) {
+        return url.href;
+      }
+    } catch { /* 忽略日志里的残缺 URL，继续找下一条 */ }
+  }
+  return null;
+}
+
+/** 不保存 Key 本身，只保存足以识别“用户已换凭证”的短指纹。 */
+function beikeCredentialFingerprint(): string {
+  const envKey = process.env.BEIKE_MCP_API_KEY?.trim();
+  if (envKey) return `env:${createHash("sha256").update(envKey).digest("hex").slice(0, 20)}`;
+  try {
+    const stat = statSync(BEIKE_CRED_FILE);
+    return `file:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return "file:missing";
+  }
+}
+
+interface BeikeLoginGate {
+  fingerprint: string;
+  loginUrl: string;
+  opened: boolean;
+  pending?: Promise<void>;
+}
+
+export interface BeikeLoginLaunch {
+  ok: boolean;
+  url: string;
+  opened: boolean;
+  error?: string;
+}
+
+let beikeLoginGate: BeikeLoginGate | null = null;
+let beikeLoginLaunch: Promise<BeikeLoginLaunch> | null = null;
+
+/** 凭证文件变化即自动解除门禁，不要求服务重启或重复点击“重新检测”。 */
+function currentBeikeLoginGate(): BeikeLoginGate | null {
+  if (beikeLoginGate && beikeLoginGate.fingerprint !== beikeCredentialFingerprint()) {
+    beikeLoginGate = null;
+  }
+  return beikeLoginGate;
+}
+
+/** 调官方 `beike login` 取登录页，再由系统默认浏览器打开；同一时刻只拉起一次。 */
+export function startBeikeLogin(): Promise<BeikeLoginLaunch> {
+  if (beikeLoginLaunch) return beikeLoginLaunch;
+  beikeLoginLaunch = (async () => {
+    let url = BEIKE_KEY_URL;
+    let cliError = "";
+    try {
+      const bin = await ensureBeike();
+      const result = await runBeikeRaw(bin.path, ["login"], BEIKE_LOGIN_TIMEOUT_MS);
+      url = extractBeikeLoginUrl(`${result.stdout}\n${result.stderr}`) ?? url;
+      if (result.code !== 0) cliError = "beike login 未能生成登录链接，已使用官方默认登录页";
+    } catch (err) {
+      cliError = err instanceof Error ? err.message : String(err);
+    }
+
+    let opened = false;
+    let openError = "";
+    try {
+      await openExternalUrl(url, BEIKE_LOGIN_HOST_ALLOW);
+      opened = true;
+    } catch (err) {
+      openError = err instanceof Error ? err.message : String(err);
+    }
+    writeAudit("beike.loginPageOpened", { opened, url });
+    return {
+      ok: opened,
+      url,
+      opened,
+      ...(openError || cliError ? { error: openError || cliError } : {}),
+    };
+  })().finally(() => { beikeLoginLaunch = null; });
+  return beikeLoginLaunch;
+}
+
+async function activateBeikeLoginGate(): Promise<BeikeLoginGate> {
+  const existing = currentBeikeLoginGate();
+  if (existing) {
+    if (existing.pending) await existing.pending.catch(() => {});
+    return existing;
+  }
+  const gate: BeikeLoginGate = {
+    fingerprint: beikeCredentialFingerprint(),
+    loginUrl: BEIKE_KEY_URL,
+    opened: false,
+  };
+  beikeLoginGate = gate;
+  gate.pending = startBeikeLogin().then((launch) => {
+    gate.loginUrl = launch.url;
+    gate.opened = launch.opened;
+    if (launch.error) log("warn", "beike_login_open_failed", { message: launch.error });
+  }).catch((err) => {
+    log("warn", "beike_login_open_failed", { message: err instanceof Error ? err.message : String(err) });
+  });
+  await gate.pending;
+  delete gate.pending;
+  return gate;
+}
+
 /** 探测可用的 beike 二进制：配置路径优先，其次 PATH 里的 beike */
 async function resolveBeikeBin(): Promise<{ path: string; version: string } | null> {
   const candidates: string[] = [];
@@ -198,6 +331,7 @@ export async function getEstatePublic(): Promise<BeikeStatus> {
     hasOverride: Boolean(saved.beikeCliPath),
     platform: process.platform,
     keyUrl: BEIKE_KEY_URL,
+    loginRequired: Boolean(currentBeikeLoginGate()),
   };
 }
 
@@ -316,8 +450,6 @@ async function doInstallBeike(): Promise<BeikeStatus> {
 // ---------------------------------------------------------------------------
 // 鉴权：Key 不再进 argv（T1-3），直接写官方凭证文件 + doctor 免费校验
 // ---------------------------------------------------------------------------
-/** 贝壳 CLI 的凭证存储文件（`beike auth <KEY> --save` 的本质就是写它，权限 600） */
-const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
 /** 文案回显时的密钥遮蔽：首尾各保留多少明文 */
 const REDACT_KEEP = 4;
 
@@ -349,6 +481,7 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   const doctor = await runBeikeRaw(bin, ["doctor"], KEY_AUTH_TIMEOUT_MS);
   const out = `${doctor.stdout}\n${doctor.stderr}`;
   if (/Key 有效/.test(out)) {
+    beikeLoginGate = null;
     return { ok: true, message: "Key 已保存并通过 CLI 校验，可以开始找房了" };
   }
   const tail = out.trim().slice(-300);
@@ -365,17 +498,22 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
 // ---------------------------------------------------------------------------
 export function analyzeEstateTurn(rawQuery: string, contextIntent: string): void {
   if (!isPluginEnabled("estate")) return;
+  // 已经确认凭证失效时不再上报：下一次工具调用会直接走登录门禁。
+  if (currentBeikeLoginGate()) return;
   void (async () => {
     try {
       await ensureLoaded();
       const bin = await resolveBeikeBin();
       if (!bin) return;
       // 首轮不传 --session-id：CLI 自行签发并缓存；context-intent 截 200 字
-      await runBeikeRaw(
+      const result = await runBeikeRaw(
         bin.path,
         ["analyze", "--raw-query", rawQuery.slice(0, 2_000), "--context-intent", contextIntent.slice(0, 200)],
         BEIKE_ANALYZE_TIMEOUT_MS
       );
+      if (isBeikeAuthFailure(`${result.stdout}\n${result.stderr}`)) {
+        void activateBeikeLoginGate();
+      }
     } catch { /* 上报失败静默：绝不影响找房回答 */ }
   })();
 }
@@ -390,33 +528,64 @@ export interface BeikeOutcome {
   raw?: string;     // 解析失败时的原文本兜底（已截断）
   error?: string;   // 正常语料转述给模型的中文错误
   truncated?: boolean;
+  /** 登录失效：前端渲染登录卡，图编排收到 stopAgent 后立即结束本轮。 */
+  authRequired?: boolean;
+  loginUrl?: string;
+  loginOpened?: boolean;
+  stopAgent?: boolean;
+}
+
+async function beikeAuthOutcome(action: string): Promise<BeikeOutcome> {
+  const gate = await activateBeikeLoginGate();
+  recordDependency("beike", "degraded", "贝壳登录已失效，等待用户完成登录");
+  incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
+  writeAudit("beike.authRequired", { action, loginOpened: gate.opened });
+  return {
+    ok: false,
+    action,
+    authRequired: true,
+    loginUrl: gate.loginUrl,
+    loginOpened: gate.opened,
+    stopAgent: true,
+    error: gate.opened
+      ? "贝壳登录已失效，已自动打开浏览器登录页。完成登录后复制页面显示的 Key，到「设置 → 插件 → 找房数据源」保存，再重试刚才的问题。"
+      : "贝壳登录已失效，请打开登录页完成登录，再到「设置 → 插件 → 找房数据源」保存页面显示的 Key 后重试。",
+  };
 }
 
 async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcome> {
   try {
+    // 认证失败后不再触达 CLI：并行工具、反思回炉和下一轮追问都走同一个短路点。
+    if (currentBeikeLoginGate()) return await beikeAuthOutcome(action);
     const { path: bin } = await ensureBeike();
     // T2-5：贝壳 CLI 全局并发上限 2（用户查询 + analyze 后台上报不会互相挤爆）
     const r = await beikeBreaker.run(() => beikeGauge.run(() =>
       runBeikeRaw(bin, args, BEIKE_RUN_TIMEOUT_MS)));
-    if (r.code === 0) {
-      recordDependency("beike", "ok", "贝壳 CLI 调用正常");
-      incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
-    } else {
-      recordDependency("beike", "degraded", "贝壳 CLI 返回错误");
-      incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
-    }
     if (r.code === 0) {
       const parsed = parseBeikeJson(r.stdout);
       if (parsed.ok) {
         // CLI 可能以 exit 0 返回业务失败 JSON（例如后端工具名升级）。
         // 只看退出码会把这类失败画成绿色「完成」，上层也无法熔断。
         const businessError = beikeBusinessError(parsed.data);
-        if (businessError) return { ok: false, action, error: businessError };
+        if (businessError) {
+          if (isBeikeAuthFailure(businessError)) return await beikeAuthOutcome(action);
+          recordDependency("beike", "degraded", "贝壳 CLI 返回业务错误");
+          incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
+          return { ok: false, action, error: businessError };
+        }
+        recordDependency("beike", "ok", "贝壳 CLI 调用正常");
+        incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
         return { ok: true, action, data: parsed.data };
       }
       // 纯文本输出（非 JSON）：对模型来说文本本身就是可读结果
+      if (isBeikeAuthFailure(parsed.raw)) return await beikeAuthOutcome(action);
+      recordDependency("beike", "ok", "贝壳 CLI 调用正常");
+      incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
       return { ok: true, action, data: { text: parsed.raw.slice(0, 6_000) } };
     }
+    if (isBeikeAuthFailure(`${r.stderr}\n${r.stdout}`)) return await beikeAuthOutcome(action);
+    recordDependency("beike", "degraded", "贝壳 CLI 返回错误");
+    incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
     // CLI 版本过低（-32001）：T1-6 后不再静默自动重装 —— 下载执行代码必须由
     // 用户显式确认。这里明确告知版本差并指引用户到面板点「安装/升级 CLI」。
     if (/CLI_UPGRADE_REQUIRED|版本过低|-32001/i.test(r.stderr + r.stdout)) {

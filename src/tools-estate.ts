@@ -21,7 +21,16 @@ import {
 import { isPluginEnabled } from "./plugin-state.js";
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
-function finalize(outcome: { ok: boolean; action: string; data?: unknown; error?: string }): string {
+function finalize(outcome: {
+  ok: boolean;
+  action: string;
+  data?: unknown;
+  error?: string;
+  authRequired?: boolean;
+  loginUrl?: string;
+  loginOpened?: boolean;
+  stopAgent?: boolean;
+}): string {
   if (outcome.ok) {
     const text = JSON.stringify({ action: outcome.action, ...((outcome.data ?? {}) as object) });
     if (text.length <= 26_000) return text;
@@ -31,6 +40,15 @@ function finalize(outcome: { ok: boolean; action: string; data?: unknown; error?
       truncated: true,
       note: "返回内容过长已截断，请缩小查询范围或分批查询",
       text: text.slice(0, 26_000),
+    });
+  }
+  if (outcome.authRequired) {
+    return JSON.stringify({
+      error: outcome.error,
+      authRequired: true,
+      loginUrl: outcome.loginUrl,
+      loginOpened: outcome.loginOpened === true,
+      stopAgent: true,
     });
   }
   return JSON.stringify({ error: outcome.error });

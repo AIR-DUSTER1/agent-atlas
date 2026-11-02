@@ -1,11 +1,16 @@
 /**
- * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 一键安装 / 保存授权 Key
+ * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 登录页 / 保存 Key
  * ============================================================
  * getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await 再回 200；
  * installBeike 是几十秒级的下载解压，失败回 500。
  */
 import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
-import { getEstatePublic, installBeike, saveBeikeKey } from "../estate.js";
+import { getEstatePublic, installBeike, saveBeikeKey, startBeikeLogin } from "../estate.js";
+
+function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
 
 export async function handleGetEstate(res: import("node:http").ServerResponse): Promise<void> {
   try {
@@ -48,5 +53,19 @@ export async function handleSaveBeikeKey(res: import("node:http").ServerResponse
       res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     }
+  }
+}
+
+/** 打开官方登录页；即使系统浏览器拉起失败也返回 URL，前端可提供手动入口。 */
+export async function handleStartBeikeLogin(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  try {
+    await readBody(req);
+    sendJson(res, 200, await startBeikeLogin());
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
+    sendJson(res, 500, { ok: false, url: "", opened: false, error: err instanceof Error ? err.message : String(err) });
   }
 }

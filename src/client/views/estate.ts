@@ -55,8 +55,10 @@ function renderEstatePanel(): void {
   if (keyEl) keyEl.value = "";
   const s2 = $("estate-status2");
   if (s2) {
-    s2.textContent = st.installed ? "CLI 就绪后即可保存 Key 开始找房" : "请先安装 CLI";
-    s2.style.color = st.installed ? "" : "var(--amber)";
+    s2.textContent = st.loginRequired
+      ? "登录已失效：打开官方登录页，重新获取并保存 Key 后才能继续找房"
+      : st.installed ? "CLI 就绪后即可登录并保存 Key 开始找房" : "请先安装 CLI";
+    s2.style.color = st.installed && !st.loginRequired ? "" : "var(--amber)";
   }
 }
 
@@ -108,6 +110,48 @@ export async function saveEstateKey(): Promise<void> {
   }
 }
 
+interface BeikeLoginLaunch {
+  ok: boolean;
+  url: string;
+  opened: boolean;
+  error?: string;
+}
+
+async function requestEstateLogin(): Promise<BeikeLoginLaunch> {
+  return api<BeikeLoginLaunch>("/api/estate/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+}
+
+/** 设置页手动打开官方登录页；Agent 认证失败时服务端也会自动调用同一入口。 */
+export async function openEstateLogin(): Promise<void> {
+  const button = $("estate-login-open") as HTMLButtonElement | null;
+  const status = $("estate-status2");
+  if (button) button.disabled = true;
+  if (status) {
+    status.textContent = "正在打开贝壳官方登录页…";
+    status.style.color = "var(--amber)";
+  }
+  try {
+    const result = await requestEstateLogin();
+    if (status) {
+      status.textContent = result.opened
+        ? "✓ 登录页已打开，请扫码登录后复制页面显示的 Key"
+        : `浏览器未能自动打开，请手动访问：${result.url}`;
+      status.style.color = result.opened ? "" : "var(--amber)";
+    }
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ 打开登录页失败：${(err as Error).message}`;
+      status.style.color = "var(--red)";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * 房产 JSON 结果 → 卡片渲染
  * ------------------------------------------------------------------------- */
@@ -131,6 +175,9 @@ interface EstatePayload {
   error?: string;
   setup?: string;
   keyUrl?: string;
+  authRequired?: boolean;
+  loginUrl?: string;
+  loginOpened?: boolean;
   platform?: string;
   action?: string;
   city?: string;
@@ -169,6 +216,46 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   let data: EstatePayload | null;
   try { data = JSON.parse(part.result?.content || "") as EstatePayload; } catch { return; }
   if (!data || typeof data !== "object") return;
+
+  // 登录失效 → 明确的登录卡；浏览器已由服务端自动拉起，按钮只负责重开。
+  if (data.authRequired) {
+    const extra = estateExtra(card);
+    const box = document.createElement("div");
+    box.className = "estate-setup";
+    const copy = document.createElement("div");
+    const title = document.createElement("b");
+    title.textContent = data.loginOpened ? "🔐 登录已失效，浏览器登录页已打开" : "🔐 需要登录贝壳账号";
+    const message = document.createElement("div");
+    message.className = "err-line";
+    message.textContent = data.error || "请完成登录后在设置中保存页面显示的 Key";
+    copy.append(title, message);
+
+    const actions = document.createElement("div");
+    actions.className = "kb-actions";
+    const reopen = document.createElement("button");
+    reopen.type = "button";
+    reopen.className = "btn btn-approve";
+    reopen.textContent = "重新打开登录页";
+    reopen.addEventListener("click", async () => {
+      reopen.disabled = true;
+      reopen.textContent = "正在打开…";
+      try {
+        const result = await requestEstateLogin();
+        reopen.textContent = result.opened ? "✓ 登录页已打开" : "请使用下方手动链接";
+      } catch (err) {
+        reopen.textContent = `打开失败：${(err as Error).message}`;
+      } finally {
+        reopen.disabled = false;
+      }
+    });
+    actions.appendChild(reopen);
+
+    const href = safeHref(data.loginUrl || data.keyUrl);
+    if (href) actions.appendChild(linkButton("手动打开登录页", href));
+    box.append(copy, actions);
+    extra.appendChild(box);
+    return;
+  }
 
   // CLI 未安装 / 未授权 一类引导性错误 → 渲染一键安装卡
   if (data.error && data.setup === "beike-install") {

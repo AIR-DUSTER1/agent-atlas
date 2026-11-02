@@ -7,6 +7,8 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { ChatResult } from "@langchain/core/outputs";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { FakeListChatModel } from "@langchain/core/utils/testing";
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
 import {
   createWorkflowGraph,
   parseRequirementAnalysis,
@@ -31,6 +33,17 @@ const toolProfile: AgentProfile = {
   ...testProfile,
   tools: [calculator],
 };
+
+/** 模拟“登录失效”一类不可继续状态：工具返回 stopAgent，图必须直接结束。 */
+const stoppingTool = tool(
+  async () => JSON.stringify({ error: "需要登录", stopAgent: true }),
+  {
+    name: "calculator",
+    description: "测试用停止工具",
+    schema: z.object({ expression: z.string() }),
+  },
+);
+const stoppingToolProfile: AgentProfile = { ...testProfile, tools: [stoppingTool] };
 
 /**
  * 可脚本化的工具调用假模型：响应为 "TOOL" 时发一次 calculator 调用（直接执行，
@@ -397,4 +410,27 @@ test("连续模式：反思连续失败且期间无任何工具动作时，三�
   const answers = result.messages.map((message) => String(message.content)).filter((text) => text.startsWith("空转"));
   assert.equal(answers.length, 3);
   assert.equal(result.reviewAttempts, 3);
+});
+
+test("工具返回 stopAgent 时直接结束本轮，不再调用模型重试", async () => {
+  const agentFake = new ScriptedToolCallModel(["TOOL", "不应出现的第二次回答"]);
+  const analystFake = new FakeListChatModel({
+    responses: [JSON.stringify({ understood: true, brief: "查询房源", question: "", options: [] })],
+  });
+  const reviewerFake = new FakeListChatModel({
+    responses: [JSON.stringify({ passes: true, reason: "无需反思", feedback: "" })],
+  });
+  const graph = createWorkflowGraph(stoppingToolProfile, {
+    agent: agentFake as unknown as WorkflowChatModel,
+    analyst: analystFake as unknown as WorkflowChatModel,
+    reviewer: reviewerFake as unknown as WorkflowChatModel,
+  }, { checkpointer: new MemorySaver() });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("帮我找青岛两室")] },
+    { configurable: { thread_id: `stop-tool-${randomUUID()}` } },
+  ) as unknown as { messages: Array<{ content: unknown }> };
+
+  const texts = result.messages.map((message) => String(message.content));
+  assert.ok(texts.some((text) => text.includes("需要登录")));
+  assert.equal(texts.includes("不应出现的第二次回答"), false);
 });

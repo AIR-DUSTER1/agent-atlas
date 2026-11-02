@@ -1,6 +1,6 @@
 {
   "name": "agentatlas",
-  "version": "0.9.0-beta.11",
+  "version": "0.9.0-beta.12",
   "description": "可扩展的 agentatlas：LangGraph.js + TypeScript（CLI + Web + Desktop）",
   "type": "module",
   "scripts": {

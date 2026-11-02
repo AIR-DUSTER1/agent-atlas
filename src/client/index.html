@@ -1301,7 +1301,7 @@
   <div id="estate-mask" class="hidden">
     <div id="estate-modal" role="dialog" aria-modal="true" aria-labelledby="estate-title">
       <h2 id="estate-title"><i class="ui-icon" data-icon="House" aria-hidden="true"></i> 房产数据源（贝壳官方 AI）</h2>
-      <p class="settings-sub">房源检索 / 板块评测 / 户型图 / 行情来自贝壳官方 <code>beike</code> 命令行工具（本地子进程，无 npm 依赖）。首次使用需两步：安装 CLI → 保存授权 Key</p>
+      <p class="settings-sub">房源检索 / 板块评测 / 户型图 / 行情来自贝壳官方 <code>beike</code> 命令行工具（本地子进程，无 npm 依赖）。首次使用：安装 CLI → 浏览器登录 → 保存页面显示的 Key</p>
 
       <div class="field-label">第一步 · 安装贝壳 CLI</div>
       <div id="estate-status" class="estate-status">探测中…</div>
@@ -1313,7 +1313,7 @@
 
       <div class="field-label ext-head">第二步 · 保存授权 Key <em class="key-state">贝壳本地凭证，agentatlas 不落盘不回显</em></div>
       <p class="settings-note" style="margin-top:0;">
-        1. 浏览器打开登录页：<a href="https://building.ke.com/?action=get-key&source=beike_skill" target="_blank" rel="noopener">building.ke.com · 获取 Key</a><br>
+        1. 在浏览器登录贝壳账号：<a href="https://building.ke.com/?action=get-key&source=beike_skill" target="_blank" rel="noopener">building.ke.com · 获取 Key</a><br>
         2. 登录后页面会显示一串只属于你的「身份凭证」，完整复制粘贴到下面（不会在对话中重复显示）<br>
         3. 官方协议：<a href="https://m.ke.com/user/commonProtocol?id=beike_AI_open_Platform_private_protocol" target="_blank" rel="noopener">服务协议</a> · <a href="https://m.ke.com/user/commonProtocol?id=beike_agent_privacy_protocol" target="_blank" rel="noopener">隐私协议</a>
       </p>
@@ -1325,6 +1325,7 @@
         </div>
       </label>
       <div class="kb-actions">
+        <button id="estate-login-open" class="ghost-btn"><i class="ui-icon" data-icon="ExternalLink" aria-hidden="true"></i> 打开官方登录页</button>
         <button id="estate-key-save" class="btn btn-approve">保存 Key</button>
         <span id="estate-status2" class="settings-status"></span>
       </div>

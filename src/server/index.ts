@@ -86,7 +86,7 @@ import { handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportM
 import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, handleMemoryStatus } from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
-import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey } from "./routes/estate.js";
+import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
 import { handleGetJob, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import { loadJob } from "./job.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
@@ -494,6 +494,7 @@ const server = createServer(async (req, res) => {
     // 房产 Agent（贝壳 CLI）
     if (pathname === "/api/estate" && req.method === "GET") { await handleGetEstate(res); return; }
     if (pathname === "/api/estate/install" && req.method === "POST") { await handleInstallBeike(res, req); return; }
+    if (pathname === "/api/estate/login" && req.method === "POST") { await handleStartBeikeLogin(res, req); return; }
     if (pathname === "/api/estate/key" && req.method === "POST") { await handleSaveBeikeKey(res, req); return; }
 
     // 求职岗位 Agent（job-hunter 技能 CLI）：状态 / 路径配置 / 登录 / 自检

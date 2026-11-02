@@ -418,6 +418,7 @@ export interface EstateState {
   path?: string;
   error?: string;
   keyUrl?: string;
+  loginRequired?: boolean;
 }
 
 /** 求职数据源（job-hunter 技能）的环境状态；对应 GET /api/job。 */

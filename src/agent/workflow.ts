@@ -51,6 +51,7 @@ import { buildDelegationCatalog } from "../delegation-catalog.js";
 import { dispatchToAgent } from "../tools-team.js";
 import { renderBriefing, parseOutOfScope, OUT_OF_SCOPE_MARKER } from "../routing/briefing.js";
 import type { RouteDecision } from "../routing/types.js";
+import { toolResultsStopTurn } from "./turn-stop.js";
 
 const MAX_USER_TEXT = 8_000;
 const MAX_BRIEF_TEXT = 1_200;
@@ -894,6 +895,11 @@ export function createWorkflowGraph(
     return last?.tool_calls?.length ? "tools" : "review";
   }
 
+  /** 工具返回明确的终止标记时不回模型，避免登录失效等状态触发重试循环。 */
+  function afterTools(state: WorkflowStateType): "agent" | typeof END {
+    return toolResultsStopTurn(state.messages) ? END : "agent";
+  }
+
   function afterReview(state: WorkflowStateType): "agent" | typeof END {
     return state.reviewFeedback ? "agent" : END;
   }
@@ -914,7 +920,7 @@ export function createWorkflowGraph(
     .addEdge("routeAsk", "dispatch")
     .addConditionalEdges("dispatch", afterDispatch)
     .addConditionalEdges("agent", afterAgent)
-    .addEdge("tools", "agent")
+    .addConditionalEdges("tools", afterTools)
     .addConditionalEdges("review", afterReview)
     .compile({
       // 默认挂共享持久检查点（重启续命，见 src/checkpoint.ts）；
