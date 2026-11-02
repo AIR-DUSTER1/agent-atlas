@@ -2386,3 +2386,34 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 **为什么不直接把 iframe 当浏览器**：跨域 iframe 无法被 Agent 读取或点击，且登录流程没有稳定的 DOM 访问；服务端 BrowserContext + 认证截图既能在 Web 模式工作，也能在 Electron 内保持同一套行为。当前面板面向「观察 + AI 操作」，不是用户手动远程控制浏览器。
 
 **子代理边界**：`browser_*` 固定列入 `NEVER_DELEGABLE`。浏览器有界面、有状态、需要用户审批，只允许主 Agent 操作，避免子代理在父会话看不到的上下文里提交表单。
+
+### 3.52 工具调用分类展示：`client/modules/tool-presentation.ts`
+
+工具卡不再只显示原始函数名和一串 JSON。展示层先把工具归入稳定类别，再根据类别提取
+路径、命令、检索词、URL 或任务摘要；原始工具名始终保留，避免“分类清楚但看不出到底调了哪个工具”。
+
+| 类别 | 典型工具 | 参数摘要 |
+|---|---|---|
+| 文件读取 | `read_file`、`list_dir` | 文件 / 目录路径 |
+| 文件写入 | `write_file` | 路径 + 内容字符数 |
+| 编辑文件 | `edit_file`、`apply_patch` | 目标路径 |
+| 读取图片 | `read_image`、`computer_screenshot` | 图片路径 / 当前屏幕 |
+| 运行命令 | `terminal` | 原始命令单行摘要 |
+| 文件检索 | `grep_search` | 正则 + 搜索起点 |
+| 浏览器 / 网页 | `browser_*`、`browser_fetch` | 动作、URL 或元素 ref |
+| 知识 / 记忆 / 子代理 | `retrieve_docs`、`memory_*`、`delegate_agent` | query / key / 子代理与任务 |
+| 电脑 / 业务 / MCP | `computer_*`、`house_*`、`job_*`、`mcp__*` | 动作、查询条件或首个有效参数 |
+
+**关键约束**：
+
+1. 分类是**纯函数**，只依赖 `toolName + argsText`，刷新历史记录和离线回放不依赖新增事件字段；
+2. 未知工具与 MCP 缺名片时回落到「工具调用」，不能因分类器不认识而隐藏卡片；
+3. 分类判断集中在新模块，`render/parts.ts` 不再维护 `TOOL_ICONS` 或按工具名散落判断；
+4. 同批超过两个工具时仍折叠成一个 `tools` 分组，但分组内部按类别分区，摘要同时显示
+   「类别 × 次数」与「原始工具名 × 次数」；工具名晚到时可原地重新分类；
+5. 类别色只用于图标、胶囊和分区标题，运行 / 待审批 / 成功 / 失败继续使用独立状态色，
+   不让分类色掩盖风险状态。
+
+**测试**：`tests/unit/tool-presentation.test.ts` 覆盖文件、图片、命令、MCP 与未知工具；
+`tests/unit/chat-flow.test.ts` 守分类接线和分组结构；`app.spec.ts` 在真实浏览器里校验
+类别、原始工具名与参数摘要。

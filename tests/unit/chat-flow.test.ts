@@ -99,6 +99,21 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
   assert.doesNotMatch(css, /\.tool-drawer|\.drawer-head|\.drawer-items/);
 });
 
+test("工具卡按类别展示并保留原始工具名，批量调用内部按类别分区", async () => {
+  const app = await readClientFiles(["render/parts.ts", "stream/events.ts"]);
+  const presentation = await readClientFiles(["modules/tool-presentation.ts"]);
+  const css = await readClientCss();
+  assert.match(presentation, /export const TOOL_CATEGORIES/);
+  assert.match(presentation, /file-read.*file-write.*file-edit.*image-read.*command/s);
+  assert.match(app, /describeTool\(part\)/);
+  assert.match(app, /card\.dataset\.toolCategory = presentation\.category\.id/);
+  assert.match(app, /tool-category-section/);
+  assert.match(app, /refreshToolGroup/);
+  assert.match(app, /presentation\.rawName/);
+  assert.match(css, /\.tool-category-section\s*\{/);
+  assert.match(css, /\.tool-card\[data-tool-category="command"\]/);
+  assert.doesNotMatch(app, /TOOL_ICONS/);
+});
 test("房产地图与户型图作为富结果默认可见，不被 tools 分组藏掉", async () => {
   const app = await readClientFiles(["views/estate.ts", "render/parts.ts"]);
   assert.match(app, /card\.classList\.add\("open", "estate-rich"\)/);

@@ -146,6 +146,17 @@ test("新建会话不继承上一会话的上下文用量显示", async ({ page 
   await expect(page.locator("#context-bar")).toBeHidden();
 });
 
+test("工具卡展示统一分类、原始工具名与可读参数摘要", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await sendMessage(page, "帮我查北京天气");
+  const card = page.locator(".tool-card").first();
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card.locator(".tool-category")).toHaveText("工具调用");
+  await expect(card.locator(".tool-name")).toHaveText("get_weather");
+  await expect(card.locator(".tool-args-preview")).toContainText("北京");
+  await expect(card).toHaveAttribute("data-tool-category", "other");
+});
 test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await login(page);
   await createChat(page);
