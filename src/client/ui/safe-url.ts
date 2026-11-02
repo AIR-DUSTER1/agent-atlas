@@ -6,7 +6,7 @@
  */
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-const DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i;
+const DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,[a-z0-9+/=\s]+$/i;
 
 export interface UrlPolicy {
   /** 是否允许 data:image；只给 img/src 使用 */ allowDataImage?: boolean;

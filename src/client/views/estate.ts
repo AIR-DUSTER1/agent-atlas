@@ -347,7 +347,9 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     return;
   }
 
-  // 区位对比 → 内嵌 OSM 地图 + 各平台跳转链接
+  // 区位对比 → 内嵌 OSM 地图 + 各平台跳转链接。
+  // 地图是用户决策要看的成品，不等同于可折叠的调试参数；标记 rich 让
+  // 工具分组保持展开，避免一轮多工具调研结束后位置信息被“全部完成”摘要藏掉。
   if (data.action === "map") {
     const extra = estateExtra(card);
     const points = Array.isArray(data.points) ? data.points : [];
@@ -378,6 +380,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
       }
       extra.appendChild(row);
     }
+    if (points.length) card.classList.add("open", "estate-rich");
     if (data.note) {
       const note = document.createElement("div");
       note.className = "estate-missed";
@@ -387,11 +390,12 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     return;
   }
 
-  // 户型图 → 图片网格
+  // 户型图 → 图片网格。与地图同理，图片必须直接可见，不能埋在两层折叠里。
   if (data.action === "material") {
     const images = Array.isArray(data.images) ? data.images : [];
     const extra = estateExtra(card);
     if (images.length) {
+      card.classList.add("open", "estate-rich");
       const grid = document.createElement("div");
       grid.className = "estate-material-grid";
       for (const src of images) {

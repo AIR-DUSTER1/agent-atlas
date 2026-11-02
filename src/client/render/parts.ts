@@ -161,7 +161,9 @@ export function groupToolCallsIfNeeded(
   const errors = tools.filter((tool) => tool.result?.isError).length;
   const status = running ? `${running} 个运行中` : errors ? `${errors} 个失败` : "全部完成";
 
-  const details = h("details", { class: "tool-group" },
+  // 地图/户型图这类富结果属于交付物，不是调试轨迹；包含它们时分组默认展开。
+  const hasRichResult = tools.some((tool) => partEls.get(tool)?.el.classList.contains("estate-rich"));
+  const details = h("details", { class: "tool-group", ...(hasRichResult ? { open: true } : {}) },
     h("summary", { class: "tool-group-summary" },
       h("span", { class: "tool-group-caret" }, "▶"),
       h("span", { class: "tool-group-icon" }, icon("Wrench", { size: 13 })),

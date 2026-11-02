@@ -303,9 +303,9 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       const rent = /租/.test(message);
       const city = /上海/.test(message) ? "上海" : /广州/.test(message) ? "广州" : /深圳/.test(message) ? "深圳" : "北京";
       const cond = /两居|两房/.test(message) ? "两居" : rent ? "一居" : "两居";
-      // 内联 SVG 户型图：data URL，零外链依赖，前端 <img> 直接可渲染
+      // 内联 SVG 户型图：base64 data URL，零外链依赖且能通过前端图片白名单
       const floorplanSvg = (label: string) =>
-        "data:image/svg+xml;utf8," + encodeURIComponent(
+        "data:image/svg+xml;base64," + Buffer.from(
           `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='260'>` +
           `<rect width='360' height='260' fill='#f5f2ea'/>` +
           `<rect x='16' y='16' width='200' height='150' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
@@ -317,8 +317,8 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
           `<rect x='16' y='174' width='200' height='70' fill='#fff' stroke='#8a8f98' stroke-width='2'/>` +
           `<text x='28' y='198' font-size='13' fill='#4a5568'>厨房/卫生间</text>` +
           `<text x='16' y='252' font-size='12' fill='#8a8f98'>${label}</text>` +
-          `</svg>`
-        );
+          `</svg>`, "utf8"
+        ).toString("base64");
 
       yield { type: "node", name: "agent" };
       yield* streamText(

@@ -99,6 +99,13 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
   assert.doesNotMatch(css, /\.tool-drawer|\.drawer-head|\.drawer-items/);
 });
 
+test("房产地图与户型图作为富结果默认可见，不被 tools 分组藏掉", async () => {
+  const app = await readClientFiles(["views/estate.ts", "render/parts.ts"]);
+  assert.match(app, /card\.classList\.add\("open", "estate-rich"\)/);
+  assert.match(app, /classList\.contains\("estate-rich"\)/);
+  assert.match(app, /hasRichResult \? \{ open: true \}/);
+});
+
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
   const app = await readClientSource();
   const css = await readClientCss();

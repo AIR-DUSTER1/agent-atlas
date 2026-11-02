@@ -209,6 +209,11 @@ test("通用与房产 profile 注入不同的分析 / 反思领域规则", () =>
   assert.match(estateProfile.analystGuidance ?? "", /houseId/);
   assert.match(estateProfile.reviewerGuidance ?? "", /宏观均价/);
   assert.match(estateProfile.reviewerGuidance ?? "", /预约或加微/);
+  // 找房调研的图文交付不能是可选项：模型必须优先产出地图与户型图工具结果。
+  assert.match(estateProfile.systemPrompt, /区位是找房调研的默认交付/);
+  assert.match(estateProfile.systemPrompt, /必须调用 house_map/);
+  assert.match(estateProfile.systemPrompt, /户型图同样是默认交付/);
+  assert.match(estateProfile.systemPrompt, /house_lookup\(action=material\)/);
 });
 
 test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反思", async () => {
