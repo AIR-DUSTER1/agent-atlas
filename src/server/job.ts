@@ -2,7 +2,7 @@
  * ============================================================
  * server/job.ts — 求职岗位能力接入（job-hunter 技能 CLI 客户端）
  * ============================================================
- * 设计定位：岗位采集 / 补详情 / Excel 交付全部委托给 job-hunter 技能的
+ * 设计定位：岗位采集 / 补详情 / Excel 交付与 HTML 报告生成全部委托给 job-hunter 技能链路的
  * Python CLI（`python -m scripts.main`）。本模块是它的子进程客户端：
  *   - 探测：找到 python 解释器 + job-hunter 技能根目录 + 依赖是否装齐
  *   - 执行：collect / enrich / login / verify / doctor 子命令
@@ -21,6 +21,7 @@ import { promises as fsp } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig, mergeConfig } from "./config-store.js";
+import { writeJobHtmlReport } from "./job-html.js";
 import { writeAudit } from "./audit.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
@@ -350,6 +351,7 @@ export interface JobRecord {
   published: string;
   hrActive: string;
   companySize: string;
+  companyIntro: string;
   companyIndustry: string;
   companyFinancing: string;
   workRest: string;
@@ -360,6 +362,7 @@ export interface JobRecord {
   applyUrl: string;
   direction: string;
   remark: string;
+  fetchedAt: string;
 }
 
 export interface JobManifest {
@@ -395,6 +398,7 @@ function toJobRecord(raw: Record<string, unknown>): JobRecord {
     published: asText(raw.published),
     hrActive: asText(raw.hr_active),
     companySize: asText(raw.company_size),
+    companyIntro: asText(raw.company_intro),
     companyIndustry: asText(raw.company_industry),
     companyFinancing: asText(raw.company_financing),
     workRest: asText(raw.work_rest),
@@ -405,6 +409,7 @@ function toJobRecord(raw: Record<string, unknown>): JobRecord {
     applyUrl: asText(raw.apply_url),
     direction: asText(raw.direction),
     remark: asText(raw.remark),
+    fetchedAt: asText(raw.fetched_at),
   };
 }
 
@@ -439,7 +444,7 @@ export async function readManifest(skillDirHint?: string): Promise<JobManifest |
   const jobs = parsed
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
     .map(toJobRecord);
-  return { jobs, fetchedAt: asText((jobs[0] as { fetchedAt?: string } | undefined)?.fetchedAt), path };
+  return { jobs, fetchedAt: jobs[0]?.fetchedAt ?? "", path };
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +468,10 @@ export interface CliOutcome {
   output?: string;
   /** 采集完成后的清单（仅成功时） */
   manifest?: JobManifest;
+  /** 已生成的 HTML 报告路径；生成失败时省略 */
+  htmlPath?: string;
+  /** HTML 报告生成失败原因；Excel 采集成功时不把整个结果判成失败 */
+  htmlError?: string;
 }
 
 /** 把 CLI 输出尾部压成一段可读文本（排障用，不含敏感信息）。 */
@@ -517,14 +526,25 @@ export async function collectJobs(input: CollectInput): Promise<CliOutcome> {
   }
   recordDependency("job", "ok", "岗位采集正常");
   const manifest = await readManifest().catch(() => null);
+  // CLI 成功退出意味着 Excel 与清单 JSON 已写完；这里再生成同名 HTML 交付物。
+  // 报告失败不让耗时数分钟的采集变成失败，但要告诉用户 Excel 可用、HTML 需重试。
+  const html: { path?: string; error?: string } | null = manifest
+    ? await writeJobHtmlReport(manifest).then(
+      (path) => ({ path }),
+      (err) => ({ error: err instanceof Error ? err.message : String(err) }),
+    )
+    : null;
   const count = manifest?.jobs.length ?? 0;
+  const htmlSuffix = html?.path ? "HTML 报告已生成。" : html?.error ? `HTML 报告生成失败：${html.error}` : "";
   return {
     ok: true,
     summary: count
-      ? `采集完成，清单共 ${count} 条岗位（已按分数排序）。`
+      ? `采集完成，清单共 ${count} 条岗位（已按分数排序）。${htmlSuffix}`
       : "采集命令执行完成，但清单里没有岗位：通常是未登录或被风控，请先在设置页登录对应平台。",
     output: tailOutput(result.stdout, result.stderr),
     ...(manifest ? { manifest } : {}),
+    ...(html?.path ? { htmlPath: html.path } : {}),
+    ...(html?.error ? { htmlError: html.error } : {}),
   };
 }
 
@@ -563,11 +583,15 @@ export async function enrichJobs(limit = 10): Promise<CliOutcome> {
   }
   recordDependency("job", "ok", "岗位补详情正常");
   const manifest = await readManifest().catch(() => null);
+  // 补详情会改写清单字段；同步刷新报告，避免用户拿到旧 HTML。
+  const htmlPath = manifest ? await writeJobHtmlReport(manifest).catch(() => undefined) : undefined;
   return {
     ok: true,
-    summary: `补详情完成（本次最多处理 ${safeLimit} 条）。注意：上下班时间等字段多数 JD 本就没有，留空是正常的。`,
+    summary: `补详情完成（本次最多处理 ${safeLimit} 条）。注意：上下班时间等字段多数 JD 本就没有，留空是正常的。` +
+      (htmlPath ? "HTML 报告已同步刷新。" : ""),
     output: tailOutput(result.stdout, result.stderr),
     ...(manifest ? { manifest } : {}),
+    ...(htmlPath ? { htmlPath } : {}),
   };
 }
 

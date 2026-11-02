@@ -15,7 +15,8 @@ import { test } from "node:test";
 import { jobTools } from "../../src/tools-job.js";
 import { jobApprovals } from "../../src/agent/approvals.js";
 import { jobProfile } from "../../src/agent/job.js";
-import { JOB_SUPPORTED_CITIES } from "../../src/server/job.js";
+import { JOB_SUPPORTED_CITIES, readManifest } from "../../src/server/job.js";
+import { writeJobHtmlReport } from "../../src/server/job-html.js";
 
 /** 按名字取工具；测试里只用 invoke，因此放宽成通用可调用形状。 */
 const byName = (name: string): { invoke: (input: unknown) => Promise<unknown> } => {
@@ -96,7 +97,7 @@ test("采集：缺少 city 时把它列进「还缺什么」", async () => {
  * 造一个临时的「技能目录 + 数据目录 + 清单」，验证纯本地查询链路。
  * 这里直接构造 JSON 而不是跑 Python：查询逻辑不该依赖采集过程。
  */
-async function withManifest<T>(jobs: Array<Record<string, unknown>>, run: () => Promise<T>): Promise<T> {
+async function withManifest<T>(jobs: Array<Record<string, unknown>>, run: (root: string) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "job-tools-"));
   try {
     await mkdir(join(root, "scripts"), { recursive: true });
@@ -107,7 +108,7 @@ async function withManifest<T>(jobs: Array<Record<string, unknown>>, run: () => 
     const saved = process.env.JOB_TEST_SKILL_DIR;
     process.env.JOB_TEST_SKILL_DIR = root;
     try {
-      return await run();
+      return await run(root);
     } finally {
       if (saved === undefined) delete process.env.JOB_TEST_SKILL_DIR;
       else process.env.JOB_TEST_SKILL_DIR = saved;
@@ -173,6 +174,31 @@ test("查询：按关键词/城市/排除外包/最低分过滤，并按分数�
     assert.equal(scored[0]!.score, 91);
     const nonOutsource = scored.filter((job) => job.is_outsourcing !== "是");
     assert.equal(nonOutsource.length, 2);
+  });
+});
+
+test("HTML 报告：与最新 Excel 同名，内容转义且不生成脚本", async () => {
+  await withManifest([
+    rawJob({
+      company_intro: "专注 <Agent> 平台",
+      apply_url: "javascript:alert(1)",
+      remark: "报告内容需要转义 \"引号\"",
+    }),
+  ], async (root) => {
+    const outDir = join(root, "job-data", "out");
+    const excelPath = join(outDir, "岗位清单_20261102_1100.xlsx");
+    await writeFile(excelPath, "excel stub", "utf8");
+    const manifest = await readManifest(root);
+    assert.ok(manifest, "临时清单应可读取");
+    const htmlPath = await writeJobHtmlReport(manifest);
+    assert.equal(htmlPath, excelPath.replace(/\.xlsx$/i, ".html"));
+    const html = await (await import("node:fs/promises")).readFile(htmlPath, "utf8");
+    assert.match(html, /求职岗位清单报告/);
+    assert.match(html, /Agent 开发工程师/);
+    assert.match(html, /专注 &lt;Agent&gt; 平台/);
+    assert.match(html, /报告内容需要转义 &quot;引号&quot;/);
+    assert.doesNotMatch(html, /<script[\s>]/i);
+    assert.doesNotMatch(html, /javascript:alert/i);
   });
 });
 

@@ -3,7 +3,7 @@
  * tools-job.ts — 求职岗位 Agent 的工具集（job-hunter CLI 的模型接口）
  * ============================================================
  * 数据来自 server/job.ts 包装的 job-hunter 技能 CLI（BOSS直聘 / 智联 /
- * 前程无忧 / 猎聘 四平台采集 → 规则打分 → 排除外包 → Excel 交付）。
+ * 前程无忧 / 猎聘 四平台采集 → 规则打分 → 排除外包 → Excel + HTML 报告交付）。
  *
  * 约定（与仓库其它工具一致）：
  *   - zod schema + describe 全中文；description 写清「何时用/何时不用」
@@ -119,14 +119,19 @@ export const jobCollectTool = tool(
       // 只给 Top N，避免把整张表灌进上下文
       returned: top.length,
       jobs: top.map(summarizeJob),
-      note: "Excel 已生成在技能数据目录的 out/ 下（技能清单是唯一权威数据源）。" +
-        "需要更多条目请用 job_query 加条件筛选，不要让我复述整张表。",
+      ...(outcome.htmlPath ? { htmlPath: outcome.htmlPath } : {}),
+      ...(outcome.htmlError ? { htmlError: outcome.htmlError } : {}),
+      note: outcome.htmlPath
+        ? `Excel 与 HTML 报告已生成在技能数据目录的 out/ 下（HTML：${outcome.htmlPath}；技能清单是唯一权威数据源）。` +
+          "需要更多条目请用 job_query 加条件筛选，不要让我复述整张表。"
+        : "Excel 已生成在技能数据目录的 out/ 下；HTML 报告生成失败，请把错误转述给用户。" +
+          "需要更多条目请用 job_query 加条件筛选，不要让我复述整张表。",
     });
   },
   {
     name: "job_collect",
     description:
-      "从 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘 批量采集岗位，按匹配度打分、自动识别外包，并导出多 sheet Excel。" +
+      "从 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘 批量采集岗位，按匹配度打分、自动识别外包，并导出多 sheet Excel 与同名 HTML 报告。" +
       "何时用：用户想找工作、想筛岗位，且已明确「岗位方向 + 城市 + 期望月薪 + 工作年限」四项。" +
       "何时不用：用户只想看已有清单用 job_query；只想补 JD 详情用 job_enrich。" +
       "注意：这是重操作（3-5 分钟，会访问招聘站点），执行前系统会人工审批。",
