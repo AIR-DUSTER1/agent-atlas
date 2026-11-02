@@ -38,6 +38,21 @@ test("子代理：搜索筛选、样式产物、继承模型创建、固定模�
 
   await page.locator("#subagent-add-btn").click();
   await expect(page.locator("#subagent-editor")).toBeVisible();
+  const descriptionLayout = await page.locator("#subagent-description").evaluate((element) => {
+    const field = element.parentElement!;
+    const style = getComputedStyle(element);
+    return {
+      textareaWidth: element.getBoundingClientRect().width,
+      fieldWidth: field.getBoundingClientRect().width,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      resize: style.resize,
+    };
+  });
+  // 原生 textarea 约 20 列宽会把表单切出一条窄框；宽度必须跟随字段容器，只允许纵向缩放。
+  expect(Math.abs(descriptionLayout.textareaWidth - descriptionLayout.fieldWidth)).toBeLessThan(1.5);
+  expect(descriptionLayout.scrollWidth).toBeLessThanOrEqual(descriptionLayout.clientWidth + 1);
+  expect(descriptionLayout.resize).toBe("vertical");
   await page.locator("#subagent-name").fill("E2E 研究代理");
   await page.locator("#subagent-description").fill("用于 E2E 验证的独立研究任务");
   await expect(page.locator("#subagent-model-mode")).toHaveValue("inherit");

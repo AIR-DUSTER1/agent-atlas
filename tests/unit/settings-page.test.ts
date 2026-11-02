@@ -187,6 +187,7 @@ test("技能库支持上传、启停、分页与卡片删除", async () => {
 test("子代理设置页支持列表、启停、新增编辑删除与继承/固定模型", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   const source = await readClientFiles(["views/settings-subagents.ts", "views/settings.ts", "main.ts"]);
+  const css = await readFile(new URL("styles/subagents.css", root), "utf8");
   for (const id of [
     "subagents-list", "subagents-empty", "subagents-empty-title", "subagents-empty-copy",
     "subagent-add-btn", "subagent-status", "subagent-stat-total", "subagent-stat-enabled",
@@ -209,6 +210,10 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   assert.match(source, /function trapEditorFocus/);
   assert.match(source, /尚未保存，确定放弃本次修改/);
   assert.match(source, /运行时授权工具/);
+  // 原生 textarea 默认约 20 列宽，必须显式占满字段，否则表单出现窄条并浪费横向空间。
+  assert.match(css, /\.subagent-editor textarea\s*\{[^}]*width:\s*100%/s);
+  assert.match(css, /\.subagent-editor textarea\s*\{[^}]*max-width:\s*100%/s);
+  assert.match(css, /\.subagent-editor textarea\s*\{[^}]*resize:\s*vertical/s);
   assert.doesNotMatch(source, /innerHTML/);
 });
 

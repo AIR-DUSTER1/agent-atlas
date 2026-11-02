@@ -232,9 +232,29 @@ body.subagent-editor-open { overflow: hidden; }
 .subagent-section-heading div { min-width: 0; }
 .subagent-section-heading strong { display: block; color: var(--text); font-size: 12.5px; }
 .subagent-section-heading small { display: block; margin-top: 2px; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
-.subagent-editor .field { margin: 0 0 12px; }
+.subagent-editor .field { min-width: 0; margin: 0 0 12px; }
 .subagent-editor .field:last-child { margin-bottom: 0; }
-.subagent-editor textarea { resize: vertical; min-height: 92px; }
+/* 浏览器原生 textarea 默认只有约 20 列宽；这里让它占满字段整行，只保留纵向缩放，
+   避免横向拖拽把文本域缩成截图里的窄条或撑出卡片。 */
+.subagent-editor textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 92px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color .15s;
+}
+.subagent-editor textarea:focus { border-color: var(--accent); }
+.subagent-editor textarea::placeholder { color: var(--text-3); }
 .subagent-field-hint { display: block; margin-top: 5px; color: var(--text-3); font-size: 10px; line-height: 1.5; }
 .subagent-model-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px; }
 .subagent-runtime-note {
