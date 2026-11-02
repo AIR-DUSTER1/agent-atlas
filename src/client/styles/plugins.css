@@ -215,8 +215,18 @@
 }
 .mcp-policy, .mcp-advanced-meta, .mcp-detail-empty { margin: 6px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.55; }
 .mcp-advanced-meta { overflow-wrap: anywhere; }
-.mcp-detail-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.mcp-detail-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; }
 .mcp-detail-actions .ghost-btn { display: inline-flex; align-items: center; gap: 5px; margin: 0; }
+.mcp-detail-actions .ghost-btn:disabled { opacity: .6; cursor: wait; }
+.mcp-detail-actions .ghost-btn.is-busy .ui-icon { animation: spin 1s linear infinite; }
+.mcp-test-result {
+  min-width: 0; margin-right: auto;
+  color: var(--text-3); font-size: 11px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mcp-test-result:empty { display: none; }
+.mcp-test-result.ok { color: var(--green); }
+.mcp-test-result.err { color: var(--red); }
 .mcp-empty-state { display: grid; place-items: center; gap: 6px; padding: 45px 20px; text-align: center; }
 .mcp-empty-state > .ui-icon { color: var(--accent-soft); }
 .mcp-empty-state h3 { margin: 2px 0 0; color: var(--text); font-size: 14px; }
