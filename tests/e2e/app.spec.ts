@@ -30,6 +30,8 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await page.locator('[data-settings-view="plugins"]').click();
   await expect(page.locator("#plugins-panel")).toBeVisible();
   await expect(page.locator("#plugin-list")).toContainText(/RAG|Computer Use/);
+  await expect(page.locator('[data-plugin-id="browser"]')).toContainText("Browser Use");
+  await expect(page.locator('[data-plugin-id="browser"] .plugin-switch input')).not.toBeChecked();
   await expect(page.locator('[data-plugin-id="computer"]')).toContainText("电脑控制");
   const computerSwitch = page.locator('[data-plugin-id="computer"] .plugin-switch input');
   await expect(computerSwitch).not.toBeChecked();
@@ -51,6 +53,54 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await page.locator("#ui-dialog-ok").click();
   await expect(page.locator("#ui-dialog-input")).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test("Browser Use 右侧浏览器面板可打开、切换布局并关闭", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  const sessionId = await page.evaluate(async (modulePath) => {
+    const mod = await import(modulePath);
+    return mod.state.currentId;
+  }, "/core/state.js");
+  expect(sessionId).toBeTruthy();
+  await page.route("**/api/browser/sessions/**", async (route) => {
+    const url = route.request().url();
+    if (url.includes("/screenshot")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z3XcAAAAASUVORK5CYII=", "base64"),
+      });
+      return;
+    }
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          sessionId,
+          active: true,
+          busy: false,
+          url: "https://example.com/",
+          title: "Browser Use Test",
+          updatedAt: Date.now(),
+          viewport: { width: 1280, height: 800 },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+  await page.evaluate(async ({ sid, modulePath }) => {
+    const mod = await import(modulePath);
+    mod.openBrowserDock(String(sid));
+  }, { sid: sessionId, modulePath: "/views/browser-use.js" });
+  await expect(page.locator("#browser-dock")).toBeVisible();
+  await expect(page.locator("#main")).toHaveClass(/browser-open/);
+  await expect(page.locator("#browser-dock-title")).toBeVisible();
+  await page.locator("#browser-dock-close").click();
+  await expect(page.locator("#browser-dock")).toBeHidden();
+  await expect(page.locator("#main")).not.toHaveClass(/browser-open/);
 });
 
 test("会话发送、刷新恢复、人工审批折叠且只出现一个助手头像", async ({ page }) => {

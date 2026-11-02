@@ -311,8 +311,29 @@ export interface RagHit {
 
 /** 内置插件的启停快照；platform 用于区分仅 Windows 的 Computer Use。 */
 export interface PluginSettingsState {
-  enabled: Record<"rag" | "estate" | "job" | "computer", boolean>;
+  enabled: Record<"rag" | "estate" | "job" | "browser" | "computer", boolean>;
   platform: string;
+}
+
+export interface BrowserUseState {
+  available: boolean;
+  browserName: string;
+  executableName: string;
+  activeSessions: number;
+  maxSessions: number;
+  platform: string;
+  error?: string;
+}
+
+export interface BrowserPageState {
+  sessionId: string;
+  active: boolean;
+  busy: boolean;
+  url: string;
+  title: string;
+  updatedAt: number;
+  viewport: { width: number; height: number };
+  error?: string;
 }
 
 /** 子代理模型：默认继承主对话，也可固定到已配置的供应商 × 模型。 */

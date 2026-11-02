@@ -636,6 +636,38 @@ test("插件启停 API：Computer Use 平台限制、持久化与坏请求 400",
   assert.equal(restored.status, 200);
   assert.equal(restored.body.enabled.computer, false);
 });
+
+test("Browser Use 状态与不存在会话返回稳定契约", async () => {
+  const status = await json("/api/browser/status");
+  assert.equal(status.status, 200);
+  assert.equal(typeof status.body.available, "boolean");
+  assert.equal(status.body.maxSessions, 3);
+  assert.equal(typeof status.body.activeSessions, "number");
+
+  const missing = await json("/api/browser/sessions/missing-session");
+  assert.equal(missing.status, 404);
+  assert.match(String(missing.body.error), /不存在|已关闭/);
+
+  const bad = await json("/api/browser/sessions/bad%2Fid");
+  assert.equal(bad.status, 400);
+
+  const before = await json("/api/plugins");
+  const browserEnabled = !before.body.enabled.browser;
+  const toggled = await json("/api/plugins/browser", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: browserEnabled }),
+  });
+  assert.equal(toggled.status, 200);
+  assert.equal(toggled.body.enabled.browser, browserEnabled);
+  const restored = await json("/api/plugins/browser", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: before.body.enabled.browser }),
+  });
+  assert.equal(restored.status, 200);
+});
+
 test("插件并发切换不丢更新", async () => {
   const before = await json("/api/plugins");
   const estate = !before.body.enabled.estate;

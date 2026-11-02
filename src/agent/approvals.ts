@@ -20,6 +20,13 @@ export const generalApprovals: ApprovalDescriptions = {
   computer_type: (a) => `向当前窗口输入 ${String(a.text ?? "").length} 字符文本：${String(a.text ?? "").slice(0, 40)}`,
   computer_key: (a) => `发送组合按键 ${String(a.combo)}`,
   computer_scroll: (a) => `在鼠标位置${a.direction === "up" ? "向上" : "向下"}滚动 ${String(a.lines ?? 3)} 行`,
+  browser_act: (a) => {
+    const action = String(a.action ?? "操作");
+    if (action === "press") return `在 Browser Use 页面发送按键 ${String(a.key ?? "未指定")}`;
+    if (action === "type") return `在 Browser Use 元素 ${String(a.ref ?? "未指定")} 输入 ${String(a.text ?? "").length} 字符${a.submit ? "并提交" : ""}`;
+    if (action === "select") return `在 Browser Use 元素 ${String(a.ref ?? "未指定")} 选择 ${String(a.value ?? "未指定")}`;
+    return `点击 Browser Use 页面元素 ${String(a.ref ?? "未指定")}`;
+  },
   delegate_agent: (a) => {
     const tools = Array.isArray(a.tools) ? a.tools.map(String).filter(Boolean) : [];
     const prompt = String(a.prompt ?? "").replace(/\s+/g, " ").slice(0, 120);

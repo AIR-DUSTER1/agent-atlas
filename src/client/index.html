@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/styles/modals.css" />
   <link rel="stylesheet" href="/styles/settings.css" />
   <link rel="stylesheet" href="/styles/plugins.css" />
+  <link rel="stylesheet" href="/styles/browser-use.css" />
   <link rel="stylesheet" href="/styles/subagents.css" />
   <link rel="stylesheet" href="/styles/responsive.css" />
   <link rel="stylesheet" href="/styles/desktop.css" />
@@ -114,6 +115,40 @@
           <span id="status-dot" class="status idle" title="空闲" role="status" aria-live="polite"></span>
         </div>
       </header>
+
+      <!-- ============ Browser Use：会话右侧实时浏览器画面 ============ -->
+      <aside id="browser-dock" class="hidden" aria-label="Browser Use 浏览器画面">
+        <header class="browser-dock-head">
+          <div class="browser-dock-heading">
+            <span class="browser-dock-icon"><i class="ui-icon" data-icon="Globe" aria-hidden="true"></i></span>
+            <div class="browser-dock-copy">
+              <strong>Browser Use</strong>
+              <span id="browser-dock-title">等待网页</span>
+            </div>
+          </div>
+          <span id="browser-dock-state" class="browser-dock-state" role="status" aria-live="polite">未连接</span>
+          <button id="browser-dock-close" type="button" class="browser-dock-close" aria-label="关闭 Browser Use 浏览器" title="关闭浏览器">
+            <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
+          </button>
+        </header>
+        <div class="browser-dock-toolbar">
+          <span class="browser-dock-dot" aria-hidden="true"></span>
+          <span id="browser-dock-url" class="browser-dock-url">about:blank</span>
+          <span class="browser-dock-owner">AI 控制</span>
+        </div>
+        <div class="browser-dock-canvas">
+          <img id="browser-dock-screen" alt="Browser Use 当前页面画面" />
+          <div id="browser-dock-empty" class="browser-dock-empty">
+            <i class="ui-icon" data-icon="Globe" aria-hidden="true"></i>
+            <strong>等待 Agent 打开网页</strong>
+            <span>浏览器画面会在这里实时更新</span>
+          </div>
+        </div>
+        <footer class="browser-dock-foot">
+          <span id="browser-dock-meta">会话隔离 · 空闲 10 分钟自动关闭</span>
+          <span>Chrome / Edge</span>
+        </footer>
+      </aside>
 
       <div id="chat-scroll">
         <div id="welcome" class="welcome">
@@ -237,7 +272,7 @@
             </button>
             <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
               <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
-              <span class="sn-copy"><strong>插件</strong><small>RAG、找房数据源与 Computer Use</small></span>
+              <span class="sn-copy"><strong>插件</strong><small>RAG、数据源与浏览器 / 电脑控制</small></span>
             </button>
             <button type="button" class="settings-nav-item" data-settings-view="subagents" role="tab" aria-selected="false" aria-controls="settings-view-subagents">
               <span class="sn-icon"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i></span>

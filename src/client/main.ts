@@ -47,6 +47,7 @@ import { loadPluginState } from "./views/settings-plugins.js";
 import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
+import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
 import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { bindCommandSettings, refreshCommands } from "./views/settings-commands.js";
 import {
@@ -86,6 +87,7 @@ function openNewSessionChooser(): void {
  * ------------------------------------------------------------------------- */
 registerToolEnhancer((part) => part.name === "retrieve_docs", renderRagHitsInToolCard);
 registerToolEnhancer((part) => Boolean(part.name?.startsWith("house_")), renderEstateInToolCard);
+registerToolEnhancer((part) => Boolean(part.name?.startsWith("browser_")), renderBrowserInToolCard);
 bindProjectsChanged(() => renderSessions());
 bindShellCreate(createSession);
 bindExtCreate(createSession);
@@ -438,6 +440,8 @@ async function init(): Promise<void> {
   on("estate-login-open", "click", () => { void openEstateLogin(); });
   on("estate-key-save", "click", () => { void saveEstateKey(); });
   on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
+
+  bindBrowserDock();
 
   // 求职数据源（job-hunter 技能）：面板开关 / 保存路径 / 登录 / 自检
   bindJob();

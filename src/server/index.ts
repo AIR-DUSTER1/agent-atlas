@@ -25,6 +25,12 @@
  *   POST /api/config/activate                     启用「供应商 × 模型」{ providerId, modelId }
  *   POST /api/config/reasoning                    只改思考等级 { providerId?, modelId?, dialect?, level?, custom? }
  *
+ * Browser Use（通用 Agent 插件）：
+ *   GET  /api/browser/status                     浏览器可用性与活动会话数
+ *   GET  /api/browser/sessions/:id               当前页面状态（URL / 标题 / busy）
+ *   GET  /api/browser/sessions/:id/screenshot    最近一次 PNG 画面（内存，no-store）
+ *   POST /api/browser/sessions/:id               关闭该会话浏览器
+ *
  * 运维探针（免认证）：
  *   GET /healthz            存活探针（进程/事件循环活着，永不 503）
  *   GET /readyz             就绪探针（配置目录/journal 目录可写且未在关闭中）
@@ -88,7 +94,11 @@ import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
 import { handleGetJob, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import {
+  handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
+} from "./routes/browser-use.js";
 import { loadJob } from "./job.js";
+import { closeAllBrowserSessions } from "./browser-use.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import {
   handleCreateSubagent,
@@ -503,6 +513,18 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }
     if (pathname === "/api/job/doctor" && req.method === "POST") { await handleJobDoctor(res, req); return; }
 
+    // Browser Use（通用 Agent 插件）：状态 / 实时画面 / 关闭会话
+    if (pathname === "/api/browser/status" && req.method === "GET") { handleBrowserStatus(res); return; }
+    const browserMatch = pathname.match(/^\/api\/browser\/sessions\/([^/]+)(\/screenshot)?$/);
+    if (browserMatch) {
+      let browserSessionId = "";
+      try { browserSessionId = decodeURIComponent(browserMatch[1] || ""); }
+      catch { res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify({ error: "浏览器会话 id 编码非法" })); return; }
+      if (!browserMatch[2] && req.method === "GET") { handleBrowserState(res, browserSessionId); return; }
+      if (browserMatch[2] && req.method === "GET") { handleBrowserScreenshot(res, browserSessionId); return; }
+      if (!browserMatch[2] && req.method === "POST") { await handleBrowserClose(res, req, browserSessionId); return; }
+    }
+
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "Not Found" }));
   } catch (err) {
@@ -576,6 +598,7 @@ function handleSignal(signal: string): void {
       await flushAudit();
       await flushCheckpointLog();
       await flushMemoryUsage();
+      await closeAllBrowserSessions();
   await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，

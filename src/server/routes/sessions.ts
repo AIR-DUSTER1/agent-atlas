@@ -6,6 +6,7 @@
  */
 import { readBody, respondBadRequest } from "../http-body.js";
 import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
+import { closeBrowserSession } from "../browser-use.js";
 import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
 import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
@@ -50,6 +51,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
 }
 
 export async function handleDeleteSession(res: import("node:http").ServerResponse, id: string): Promise<void> {
+  await closeBrowserSession(id).catch(() => {});
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ ok: deleteSession(id) }));
 }
@@ -207,7 +209,10 @@ export async function handleCleanupSessions(
   }
   const cutoff = Date.now() - days * 86_400_000;
   const victims: Session[] = listSessions().filter((s) => s.createdAt < cutoff);
-  for (const s of victims) deleteSession(s.id);
+  for (const s of victims) {
+    deleteSession(s.id);
+    await closeBrowserSession(s.id).catch(() => {});
+  }
   writeAudit("sessions.cleanup", { daysBefore: days, removed: victims.length });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ ok: true, removed: victims.length, daysBefore: days }));

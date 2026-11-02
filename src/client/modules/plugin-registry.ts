@@ -4,7 +4,7 @@
  * 接入类型必须与后端实现一致：
  *   http — 自定义 REST 契约（当前 RAG：ingest / search / reset）
  *   cli  — 本地子进程（当前贝壳 beike CLI）
- *   builtin — 应用内置能力（当前 Computer Use，无外部配置）
+ *   builtin — 应用内置能力（Browser Use / Computer Use，无外部配置）
  *   mcp  — 标准 MCP server（目录预留；当前 RAG 不是 MCP）
  */
 
@@ -84,6 +84,16 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     description: "从 BOSS直聘 / 智联 / 前程无忧 / 猎聘 采集岗位、打分、排除外包并导出 Excel。需要 Python 3.10+ 与 DrissionPage，首次使用要在各平台扫码登录。",
     manageLabel: "管理数据源",
     defaultEnabled: true,
+  },
+  {
+    id: "browser",
+    icon: "🌐",
+    name: "浏览器操作（Browser Use）",
+    transport: "builtin",
+    runtime: "Chrome / Edge · 无头浏览器 · 会话隔离",
+    description: "让通用 Agent 打开网页、读取真实渲染结果、点击链接、填写表单并滚动页面；画面实时显示在会话右侧，动作仍受权限与高风险审批约束。",
+    manageLabel: "查看说明",
+    defaultEnabled: false,
   },
   {
     id: "computer",

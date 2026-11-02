@@ -30,6 +30,7 @@ cp production.env.example production.env
 | `METRICS_TOKEN` | Prometheus 只读令牌，至少 16 位 |
 | `BASE_URL` / `API_KEY` / `MODEL` | 首次启动至少一套可用模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
+| `BROWSER_USE_EXECUTABLE_PATH` | 可选；启用 Browser Use 时指向容器内 Chrome / Edge / Chromium 可执行文件 |
 
 生成随机值（Windows PowerShell、Linux bash 均可）：
 

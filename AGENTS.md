@@ -20,7 +20,7 @@ TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、�
 | 约束 | 说明 |
 |---|---|
 | TS 配置 | `strict` + `NodeNext` + `noEmit`；ESM 导入**必须带 `.js` 后缀**（`import x from "./foo.js"`） |
-| 运行时依赖 | 服务端白名单：`@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod`；electron 仅 devDependency |
+| 运行时依赖 | 服务端白名单：`@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod` `playwright-core`（仅 Browser Use 动态导入，驱动系统 Chrome/Edge，不下载浏览器）；electron 仅 devDependency |
 | 前端依赖 | `src/client/` 可引入 npm 库（图表 / 图标 / 语法高亮 / Markdown 等），但须在 §2.1 登记版本、许可证与产物体积；**禁止引入 UI 框架**（React/Vue/Svelte）与需要打包器的构建链（Vite/Webpack/Tailwind CLI） |
 | 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
 | 单一职责 | 文件按职责拆分，不设行数硬指标：一个文件只做一件事、能被一句话说清即可；超过 ~500 行时先问「是不是混了两件事」 |
@@ -64,6 +64,8 @@ src/
   tools-dev.ts     # 编程开发工具（terminal / read_file / write_file / list_dir / grep_search）
   tools-rag.ts     # 知识检索工具 retrieve_docs（只调 server/rag.ts，不直接碰网络细节）
   tools-web.ts     # 网页抓取工具 browser_fetch（纯 HTTP + 剥标签；内网默认拒，防 SSRF）
+  tools-browser.ts # Browser Use 工具（真实浏览器会话；点击/输入等写操作必须审批）
+  url-guard.ts     # browser_fetch 与 Browser Use 共用的 HTTP(S)/WebSocket 地址防线
   skills.ts        # 技能库：扫描 .setting/skills/*.md，按关键词命中注入
   plugin-state.ts  # 内置插件运行时启停状态（agent 层只读，不直接碰 server）
   memory-store.ts  # 跨会话长期记忆（每轮动态注入 system 注记）
@@ -73,6 +75,7 @@ src/
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
                    #   mcp.ts = MCP 客户端（JSON-RPC over stdio）；commands.ts = 自定义命令
                    #   plugin-settings.ts = 内置插件启停持久化；routes/plugins.ts = 启停 API
+                   #   browser-use.ts = 无头 Chrome/Edge 会话池；routes/browser-use.ts = 画面/状态 API
   client/          # 前端源码（TypeScript，唯一真相）
     main.ts        #   入口：初始化与全部 DOM 事件绑定
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
@@ -83,7 +86,7 @@ src/
     render/        #   渲染层（parts 部件 / messages 块）
     stream/        #   SSE 消费与一轮对话生命周期
     composer/      #   输入框 / 命令与 @ 文件菜单
-    views/         #   各业务视图（会话/项目/设置/RAG/房产…；settings-plugins.ts = 插件目录与开关）
+    views/         #   各业务视图（会话/项目/设置/RAG/房产/Browser Use…；settings-plugins.ts = 插件目录与开关）
     actions/       #   审批、压缩等动作
     index.html / styles/*.css
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）

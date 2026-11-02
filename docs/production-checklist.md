@@ -1,4 +1,4 @@
-> 当前为开发预览阶段（`0.9.0-beta.7`）。本 Checklist 用于部署前自检，不代表正式生产发布。
+> 当前为开发预览阶段（`0.9.0-beta.13`）。本 Checklist 用于部署前自检，不代表正式生产发布。
 
 # 生产上线 Checklist
 
@@ -45,6 +45,8 @@
 - [ ] **P1** CPU / 内存限制已设置；容器重启策略为 `unless-stopped`。
 - [ ] **P1** `stop_grace_period` 大于应用 10 秒排空超时。
 - [ ] **P1** 根文件系统只读、`cap_drop: ALL`、`no-new-privileges`。
+- [ ] **P1** 启用 Browser Use 时已安装 Chrome / Edge 或挂载浏览器，设置 `BROWSER_USE_EXECUTABLE_PATH`，并限制容器内存/进程数避免无头浏览器挤占主服务。
+- [ ] **P1** 启用 Browser Use 时已配置出站网络策略；应用默认拒绝私网，仍需在网络层阻断云元数据、管理网段和不需要的内网目标。
 - [ ] **P1** 标准备份、恢复、升级和回滚步骤由非开发者演练通过。
 
 ## 质量门

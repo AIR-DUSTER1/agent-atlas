@@ -2,7 +2,7 @@
  * tests/unit/plugin-controls.test.ts — 插件启停与 Agent 能力边界
  * ============================================================
  * 守三件事：
- *   1. 未配置时 RAG / 找房保持兼容默认，Computer Use 默认关闭；
+ *   1. 未配置时 RAG / 找房保持兼容默认，Browser Use / Computer Use 默认关闭；
  *   2. 启停状态会真实改变 general / estate profile 的 tool allowlist；
  *   3. 关闭插件后审批项同步收敛，不留下装配期悬空审批。
  */
@@ -22,17 +22,33 @@ import {
 beforeEach(() => resetPluginStateForTests());
 afterEach(() => resetPluginStateForTests());
 
-test("插件默认值：RAG / 找房兼容开启，Computer Use 显式关闭", () => {
+test("插件默认值：RAG / 找房兼容开启，Browser Use / Computer Use 显式关闭", () => {
   const enabled = getPluginEnabledSnapshot();
   assert.equal(enabled.rag, true);
   assert.equal(enabled.estate, true);
+  assert.equal(enabled.browser, false);
   assert.equal(enabled.computer, false);
 
   const profile = generalProfileWithPlugins();
   assert.ok(profile.tools.some((tool) => tool.name === "retrieve_docs"));
   assert.equal(profile.tools.some((tool) => tool.name.startsWith("computer_")), false);
+  for (const name of ["browser_open", "browser_snapshot", "browser_navigate", "browser_scroll", "browser_act"]) {
+    assert.equal(profile.tools.some((tool) => tool.name === name), false);
+  }
   assert.equal("computer_click" in profile.approvalDescriptions, false);
   assert.equal("terminal" in profile.approvalDescriptions, true);
+});
+
+test("Browser Use 启用后装配浏览器工具，只有 browser_act 需要审批", () => {
+  setPluginEnabledState({ browser: true });
+  const profile = generalProfileWithPlugins();
+  for (const name of ["browser_open", "browser_snapshot", "browser_navigate", "browser_scroll", "browser_act"]) {
+    assert.ok(profile.tools.some((tool) => tool.name === name), `缺少浏览器工具：${name}`);
+  }
+  assert.ok("browser_act" in profile.approvalDescriptions);
+  for (const name of ["browser_open", "browser_snapshot", "browser_navigate", "browser_scroll"]) {
+    assert.equal(name in profile.approvalDescriptions, false);
+  }
 });
 
 test("关闭 RAG 会移除 retrieve_docs，不影响基础工具", () => {
@@ -46,6 +62,7 @@ test("关闭 RAG 会移除 retrieve_docs，不影响基础工具", () => {
 test("平台支持矩阵：Computer Use 仅允许 Windows", () => {
   assert.equal(isPluginSupported("rag", "linux"), true);
   assert.equal(isPluginSupported("estate", "linux"), true);
+  assert.equal(isPluginSupported("browser", "linux"), true);
   assert.equal(isPluginSupported("computer", "linux"), false);
   assert.equal(isPluginSupported("computer", "win32"), true);
 });

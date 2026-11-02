@@ -25,6 +25,9 @@ export const TOOL_ICONS: Record<string, string> = {
   // 房产 Agent（贝壳）
   house_search: "🏙", house_lookup: "🔍", house_market: "📈", house_map: "🗺️",
   house_agents: "👤", house_appoint: "📅", house_contact: "🤝",
+  // Browser Use（右侧实时浏览器）
+  browser_open: "🌐", browser_snapshot: "🧭", browser_navigate: "↔️",
+  browser_scroll: "↕️", browser_act: "🖱️",
 };
 
 export function nodeIcon(name: string): string {

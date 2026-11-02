@@ -83,6 +83,27 @@ test("profile 工具集互不越界，审批项都包含在各自 allowlist 内"
   assert.ok(!estateNames.includes("delegate_agent"));
 });
 
+test("工具执行透传 thread_id 等会话配置，Browser Use 不靠全局猜会话", async () => {
+  let seenThreadId = "";
+  const probe = tool(
+    async (_args, config) => {
+      seenThreadId = String(config?.configurable?.thread_id ?? "");
+      return "ok";
+    },
+    { name: "config_probe", description: "读取运行配置", schema: z.object({}) },
+  );
+  const profile = { ...generalProfile, tools: [probe], approvalDescriptions: {} };
+  const graph = createWorkflowGraph(profile, models(scriptedAgent([
+    toolCall("config_probe", {}),
+    new AIMessage("完成"),
+  ])), { checkpointer: new MemorySaver() });
+  await graph.invoke(
+    { messages: [new HumanMessage("测试配置透传")] },
+    { configurable: { thread_id: "browser-session_01", permission_mode: "auto" } },
+  );
+  assert.equal(seenThreadId, "browser-session_01");
+});
+
 test("通用 Agent 图拒绝伪造的房产工具调用，不执行也不中断", async () => {
   const graph = createWorkflowGraph(generalProfile, models(scriptedAgent([
     toolCall("house_search", { query: "北京" }),

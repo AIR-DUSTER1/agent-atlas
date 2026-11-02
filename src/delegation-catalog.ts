@@ -21,7 +21,11 @@ export interface DelegableToolEntry {
   approvalDescription?: (args: Record<string, unknown>) => string;
 }
 
-const NEVER_DELEGABLE = new Set(["delegate_agent", "memory_save", "memory_recall"]);
+const NEVER_DELEGABLE = new Set([
+  "delegate_agent", "memory_save", "memory_recall",
+  // 浏览器是有界面、有状态且需要用户审批的交互能力，只允许主 Agent 操作。
+  "browser_open", "browser_snapshot", "browser_navigate", "browser_scroll", "browser_act",
+]);
 
 /** 构造可委派工具目录；`includeEstateTools` 默认 true（通用 Agent 需要它补齐 house_*）。 */
 export function buildDelegationCatalog(input: {

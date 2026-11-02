@@ -217,10 +217,15 @@ function isTransientToolFailure(text: string): boolean {
 async function invokeTool(
   toolFn: StructuredToolInterface,
   args: Record<string, unknown>,
-  signal?: AbortSignal
+  config?: { signal?: AbortSignal; configurable?: Record<string, unknown> }
 ): Promise<ToolInvocationResult> {
   try {
-    const value = await toolFn.invoke(args, { signal });
+    // thread_id / permission_mode 等会话上下文必须透传给工具；Browser Use 依赖
+    // thread_id 做浏览器上下文隔离，不能从全局单例猜当前会话。
+    const value = await toolFn.invoke(args, {
+      signal: config?.signal,
+      configurable: config?.configurable,
+    });
     // 多模态工具（如 computer_screenshot）覆写 invoke 直接返回内容块数组，原样透传
     if (Array.isArray(value)) return { content: value as ToolMessage["content"], status: "success" };
     const text = toolResultText(value);
@@ -371,7 +376,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           ...(riskReason ? { riskReason } : {}),
         });
         if (decision === "approve") {
-          const result = await invokeTool(toolFn, call.args, config?.signal);
+          const result = await invokeTool(toolFn, call.args, config);
           content = result.content;
           status = result.status;
         } else {
@@ -379,7 +384,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         }
       } else {
         // 自主模式判定为低风险：直接执行（其余「可直接执行」的已在批处理里）
-        const result = await invokeTool(toolFn, call.args, config?.signal);
+        const result = await invokeTool(toolFn, call.args, config);
         content = result.content;
         status = result.status;
       }
@@ -408,7 +413,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
             // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
             return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
           }
-          const result = await invokeTool(item.toolFn, item.call.args, config?.signal);
+          const result = await invokeTool(item.toolFn, item.call.args, config);
           return { item, content: result.content, status: result.status };
         })
       );

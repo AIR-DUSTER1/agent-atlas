@@ -21,6 +21,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { PRODUCT_USER_AGENT } from "./product.js";
+import { assertAllowedHttpUrl } from "./url-guard.js";
 
 /** 抓取超时：网页比 API 慢，但仍要防挂死 */
 const FETCH_TIMEOUT_MS = 15_000;
@@ -31,50 +32,7 @@ const BODY_LIMIT = 4_000_000;
 /** 重定向最多跟随次数（逐跳校验，防 302 绕过内网限制） */
 const MAX_REDIRECTS = 5;
 
-/** 内网 / 环回 / 链路本地判定：命中即拒绝（除非 allowLocalhost） */
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
-  if (host === "::1" || host === "0.0.0.0") return true;
-  // IPv4 字面量
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 0) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 169 && b === 254) return true; // 云元数据 169.254.169.254
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    return false;
-  }
-  // IPv6 唯一的本地/链路本地前缀
-  if (/^f[cd]/.test(host) || /^fe80:/.test(host)) return true;
-  // 单标签主机名（如 "intranet"）可能是内网 DNS
-  if (!host.includes(".") && !host.includes(":")) return true;
-  return false;
-}
-
-/** 校验并规范化 URL；不安全时抛中文错误（模型会转述给用户） */
-function assertFetchable(raw: string, allowLocalhost: boolean): URL {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    throw new Error("URL 格式不合法：需要完整地址，例如 https://example.com/docs");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`不支持的协议 ${url.protocol}：只允许 http / https`);
-  }
-  if (!allowLocalhost && isPrivateHost(url.hostname)) {
-    throw new Error(
-      `拒绝访问内网地址 ${url.hostname}：出于安全考虑默认禁止（防 SSRF）。` +
-      "如果确实要读本机或局域网服务，请把 allowLocalhost 设为 true。"
-    );
-  }
-  return url;
-}
+const assertFetchable = assertAllowedHttpUrl;
 
 /** 剥 script/style/注释，再把标签换成换行 —— 零依赖的「HTML 转文本」 */
 function htmlToText(html: string): string {
@@ -214,7 +172,7 @@ export const browserFetch = tool(
           finalUrl: outcome.finalUrl,
           title: outcome.title,
           text: "",
-          note: "页面抓取成功但没有提取到正文（可能是纯 JS 渲染的页面）。这种情况本工具读不到内容 —— 可以改用 computer_screenshot 看渲染后的界面，或直接请用户贴关键内容。",
+          note: "页面抓取成功但没有提取到正文（可能是纯 JS 渲染的页面）。这种情况本工具读不到内容 —— 已启用 Browser Use 时改用 browser_open；否则可以用 computer_screenshot 看渲染后的界面，或请用户贴关键内容。",
         });
       }
       const notes: string[] = [];

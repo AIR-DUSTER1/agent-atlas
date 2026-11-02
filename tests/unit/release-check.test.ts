@@ -29,7 +29,10 @@ const PRODUCTION_ENV: NodeJS.ProcessEnv = {
 
 async function makeRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agent-release-check-"));
-  await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.9.0-beta.1", dependencies: { tsx: "4.23.15" } }));
+  await writeFile(join(root, "package.json"), JSON.stringify({
+    version: "0.9.0-beta.13",
+    dependencies: { tsx: "4.23.15", "playwright-core": "1.64.1" },
+  }));
   for (const relative of REQUIRED_RUNTIME_ASSETS) {
     await mkdir(dirname(join(root, relative)), { recursive: true });
     await writeFile(join(root, relative), "fixture", "utf8");
@@ -37,6 +40,9 @@ async function makeRuntimeFixture(): Promise<string> {
   await mkdir(join(root, "node_modules", "tsx"), { recursive: true });
   await writeFile(join(root, "node_modules", "tsx", "package.json"), JSON.stringify({ name: "tsx", version: "4.23.15", main: "index.cjs" }));
   await writeFile(join(root, "node_modules", "tsx", "index.cjs"), "module.exports = {};\n", "utf8");
+  await mkdir(join(root, "node_modules", "playwright-core"), { recursive: true });
+  await writeFile(join(root, "node_modules", "playwright-core", "package.json"), JSON.stringify({ name: "playwright-core", version: "1.64.1", main: "index.js" }));
+  await writeFile(join(root, "node_modules", "playwright-core", "index.js"), "module.exports = {};\n", "utf8");
   return root;
 }
 
@@ -97,7 +103,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "0.9.0-beta.12");
+  assert.equal(pkg.version, "0.9.0-beta.13");
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);

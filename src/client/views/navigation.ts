@@ -219,6 +219,7 @@ export function selectSession(sid: string): void {
   if (s) showChatState(s);
   updateContextBar();
   chatScroll.scrollTop = chatScroll.scrollHeight;
+  document.dispatchEvent(new CustomEvent("agentatlas:session-selected", { detail: { sessionId: sid } }));
   void hydrateFromServer(s); // 本地没有该会话的记录 → 从服务端拉取回放（修复历史会话打开为空）
 }
 

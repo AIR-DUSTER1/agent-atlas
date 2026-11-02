@@ -682,11 +682,11 @@ Header: Authorization: Bearer <key>（可留空）
 
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
-| `server/estate.ts` | CLI 客户端 | `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，调用官方 `beike login` 并打开 `building.ke.com` 登录页；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
+| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 login / analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，调用官方 `beike login` 只准备 `building.ke.com` 登录链接，手动按钮才打开浏览器；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；连续 2 次认证/业务失败熔断 60 秒，login 链接 60 秒内复用；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后直接结束本轮，不再让模型重试工具 |
-| `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图对比 / 材料前置 / 禁编造 ID / 高风险复述 / 口径声明） |
+| `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
-**关键常量**（city 名尽量存表）：`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
+**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
 4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）只信任 HTTPS host 白名单，下载
@@ -709,7 +709,7 @@ Header: Authorization: Bearer <key>（可留空）
 | `auth.ts` | Bearer 认证 | 惰性读 env（防 ESM 早求值）；token 比 sha256 摘要 + `timingSafeEqual`（防时序侧信道）；401 统一文案 + `Connection: close` |
 | `http-guard.ts` | 请求层防线 | `checkSameOrigin`（`Sec-Fetch-Site: cross-site` / `Origin` 不符 → 403，即使带令牌也拒——防恶意页面借浏览器自动携带凭证）；`SECURITY_HEADERS`（nosniff / no-referrer / X-Frame-Options / CSP）；`shedRequestBodyAfterResponse` 拒绝路径排水（**空 body 的 GET 不能 destroy**，会在响应 flush 前带 RST） |
 | `subprocess.ts` | 受控运行器 | `runControlled` 统一 stdin/超时/abort/输出上限（stdout 头部 4MB、stderr 尾部 64KB、超限树杀），`killProcessTree`（win32 `taskkill /T /F`、unix detached 组杀）；`realRunner` 可替换 → 测试不碰真进程 |
-| `audit.ts` | 审计日志 | `writeAudit(ev, detail)` fire-and-forget 自吞异常；append-only NDJSON 到 `.setting/audit.ndjson`；`AUDIT_MAX_BYTES=1MB` 超限尾部截断重写；事件族：`external.*`、`beike.install/upgradeDeclined/authRequired/loginPageOpened` |
+| `audit.ts` | 审计日志 | `writeAudit(ev, detail)` fire-and-forget 自吞异常；append-only NDJSON 到 `.setting/audit.ndjson`；`AUDIT_MAX_BYTES=1MB` 超限尾部截断重写；事件族：`external.*`、`beike.*`、`browser.opened/closed/idleClosed/requestBlocked` |
 
 **external.ts 配套**（Phase 1 硬化）：启动命令进入 `EXTERNAL_COMMAND_ALLOWLIST`（node /
 npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent 的 clone 目录内；
@@ -931,7 +931,7 @@ profile，不判断具体业务名。
   SSE 的 `tool_result` 事件与 journal 回放只取其中的 text 块（`contentText` 拍平），
   base64 不进前端不进 journal。
 
-**插件启停边界（`src/plugin-state.ts` + `server/plugin-settings.ts`）**：设置 → 插件页的三个开关统一写入 `.web-config.json` 的 `plugins.enabled`，`GET /api/plugins` 返回状态、`PATCH /api/plugins/:id` 切换单项。写入失败不改内存状态；切换成功后 `bumpConfigVersion()`，已有会话下一条消息重建图，确保工具 allowlist 与审批表同步收敛。RAG / 贝壳默认开启以兼容旧配置，Computer Use 默认关闭；非 Windows 平台会直接拒绝启用 Computer Use。关闭后旧图即使仍持有工具引用，工具入口也会 fail-closed，不会触达外部服务或 PowerShell。
+**插件启停边界（`src/plugin-state.ts` + `server/plugin-settings.ts`）**：设置 → 插件页的五个开关统一写入 `.web-config.json` 的 `plugins.enabled`，`GET /api/plugins` 返回状态、`PATCH /api/plugins/:id` 切换单项。写入失败不改内存状态；切换成功后 `bumpConfigVersion()`，已有会话下一条消息重建图，确保工具 allowlist 与审批表同步收敛。RAG / 贝壳 / 求职默认开启以兼容旧配置，Browser Use / Computer Use 默认关闭；关闭 Browser Use 会同步关闭所有浏览器上下文，非 Windows 平台会直接拒绝启用 Computer Use。关闭后旧图即使仍持有工具引用，工具入口也会 fail-closed，不会触达外部服务、浏览器或 PowerShell。
 ### 3.24 生产级多 Agent：配置化身份 + 主 Agent 动态赋权
 
 **形态**：子 Agent = 主 Agent 的一次有界委派工具。设置页只管理子代理身份、用途说明、启停和模型，并提供搜索、状态筛选、模型可用性与启停状态聚合；
@@ -1621,9 +1621,15 @@ console.log(result.messages.at(-1).content);
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会自动打开官方登录页并熔断后续 CLI 调用；扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，新 Key 通过 doctor 后门禁自动解除。若浏览器未弹出，用登录卡或面板里的「打开官方登录页」 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
+| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |\n| `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
+| 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
 | 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agentatlas 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
+| Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
+| Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
+| 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
 | 房产会话地图空白 / 点位缺              | Nominatim 限流 1 req/s：候选 ≤6 且串行；地址太口语（如「望京那种小区」）解析失败属预期，列为「未定位」；换官方小区名重试 |
+| 房产调研完成后看不到地图 / 户型图      | 先确认对应 `house_map` / `house_lookup(action=material)` 卡片是否真的出现：提示词已把两者列为默认交付，且富结果会自动展开工具卡与 tools 分组；若工具返回「拿不到图片/未定位」，则如实展示失败而不是伪装成图文 |
 | e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 | 413 客户端只见 ECONNRESET         | 超限响应后直接 destroy socket 会带 RST，把已发出的 413 一起冲掉（客户端拿不到状态码）。对策「丢弃式排水」：继续读完剩余 body 再关 + 攻击流总量上限兜底。**另两个坑（5.6 测试实锤）**：① 响应头别带 `Connection: close` —— node:http 会在「响应结束 + 请求体没读完」时自行 destroy，同样发 RST；② 排水完用 `socket.end()` 发 FIN，不要 `destroy()`（Windows 上带未读数据 destroy 会 RST）。**验收方式**：node:http 客户端在 Windows loopback 上偶发 ECONNRESET（还没读到响应头），curl/浏览器正常；自动化测试用**裸 TCP 先读响应再断开**才稳定 |
 | 测试后端口被神秘进程占用                 | 测试脚本里 `child.kill()` 只杀 cmd 壳（npx 包装），tsx 孙进程变孤儿长期占端口（0.0.0.0 和 127.0.0.1 会**同端口并存**，`netstat` 看着两个都怪）。对策：拿到 child.pid 就直接 `taskkill /pid X /T /F`，并按 port+LISTENING 过滤 netstat 只看绑定向 |
@@ -2205,11 +2211,12 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 | profile | `agent/job.ts` | 提示词（浓缩技能工作流）+ 工具 allowlist + 领域分析/反思规则 |
 | 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` |
 | 服务端 | `server/job.ts` | CLI 探测、子进程执行、清单 JSON 读取与投影 |
+| 报告 | `server/job-html.ts` | Excel 写完后把清单 JSON 渲染成同名自包含 HTML |
 | 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor` |
 | 前端 | `views/job.ts` + `#job-mask` | 环境检查面板、路径配置、平台登录、自检 |
 
 **为什么是一个独立 profile 而不是通用 Agent 的一个插件工具**：求职是「有明确
-工作流的多步任务」（问清四项意图 → 采集 → 筛外包 → 补详情 → 交付 Excel），
+工作流的多步任务」（问清四项意图 → 采集 → 筛外包 → 补详情 → 交付 Excel 与 HTML 报告），
 需要专属提示词约束「不许猜方向/城市/薪资/年限」、专属反思规则约束「不许把采到的
 说成已投递」。放进通用 Agent 会让这些约束稀释到几十个工具里。
 
@@ -2228,6 +2235,10 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
    报错；改成 optional 后由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示。
 6. **清单读 JSON 不读 Excel**。技能同时产出 `最新岗位清单.json`（下次增量合并的基准，
    含投递状态与 JD 全文）和 Excel（给人看）。模型上下文只吃 JSON 的摘要投影。
+7. **HTML 报告在 Excel 之后生成**。`collectJobs()` 等 CLI 成功退出并读到清单 JSON，
+   再由 `job-html.ts` 找最新 `.xlsx` 并写同名 `.html`；报告无脚本、全字段转义、
+   只放行 HTTP/HTTPS 链接。`enrichJobs()` 成功后也刷新同一报告。报告失败不影响
+   Excel 采集结果，但会把失败原因带回给模型转述。
 
 **数据目录结构**（技能约定）：
 
@@ -2236,6 +2247,7 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
   .profile/            # 浏览器登录态（扫码后保存，所有采集复用）
   out/最新岗位清单.json  # 权威数据源（增量合并基准，保留投递状态）
   out/岗位清单_<时间>.xlsx
+  out/岗位清单_<时间>.html  # 与 Excel 同名的自包含报告
 ```
 
 **新增 Agent profile 的接入清单**（本次实际改动点，供后续加第四个 Agent 参考）：
@@ -2355,3 +2367,22 @@ export function isAgentKind(kind: SessionKind | null | undefined): kind is Agent
 
 **匹配方式**：审批载荷没有 callId，按工具名取「最近一张尚无结果的同名卡」——
 同一轮同名同参调用会被签名去重，不会有多张并存，这个匹配是确定的。
+
+### 3.51 Browser Use：会话右侧实时浏览器
+
+Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fetch` 的分工是：
+后者只抓静态 HTTP 正文；前者启动真实 Chromium，能处理 JS 渲染、登录态和页面交互。
+
+| 层 | 实现 | 关键约束 |
+|---|---|---|
+| 工具层 | `tools-browser.ts` | `browser_open/snapshot/navigate/scroll` 直接执行；`browser_act` 的 click/type/press/select 进入人工审批；所有工具从 `ToolRunnableConfig.configurable.thread_id` 取会话，禁止全局猜会话 |
+| 浏览器层 | `server/browser-use.ts` | 一个聊天线程一个 BrowserContext；最多 3 个并发会话；空闲 10 分钟回收；禁止下载与持久化；密码/文件输入值在快照中打码 |
+| URL 安全 | `url-guard.ts` | 只允许 http/https 与 wss（本地显式允许时才可 ws）；默认拒绝环回、私网、链路本地与单标签主机；主文档、子资源和 WebSocket 都逐请求拦截 |
+| 画面层 | `views/browser-use.ts` + `browser-use.css` | 工具结果自动打开右侧面板；只轮询认证 API 的 PNG 截图与状态；截图不写 localStorage，切换会话时隐藏，返回原会话恢复 |
+| 服务端 API | `/api/browser/status`、`/api/browser/sessions/:id`、`/screenshot`、关闭 POST | 全部走现有认证与同源边界；截图 `no-store`，会话 id 只允许字母数字下划线连字符 |
+
+**浏览器进程边界**：`playwright-core` 动态导入，只驱动系统 Chrome / Edge / Chromium，不下载浏览器。Windows 自动探测 Chrome、Edge，macOS/Linux 探测常见安装路径；容器环境可设置 `BROWSER_USE_EXECUTABLE_PATH`。浏览器不可用时插件可以保持启用，但工具会返回明确的安装提示。
+
+**为什么不直接把 iframe 当浏览器**：跨域 iframe 无法被 Agent 读取或点击，且登录流程没有稳定的 DOM 访问；服务端 BrowserContext + 认证截图既能在 Web 模式工作，也能在 Electron 内保持同一套行为。当前面板面向「观察 + AI 操作」，不是用户手动远程控制浏览器。
+
+**子代理边界**：`browser_*` 固定列入 `NEVER_DELEGABLE`。浏览器有界面、有状态、需要用户审批，只允许主 Agent 操作，避免子代理在父会话看不到的上下文里提交表单。

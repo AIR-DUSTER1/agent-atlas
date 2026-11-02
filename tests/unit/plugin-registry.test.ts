@@ -9,21 +9,25 @@ import {
   pluginTransportMeta,
 } from "../../src/client/modules/plugin-registry.js";
 
-test("内置 RAG / 贝壳 / Computer Use 按真实接入类型分类", () => {
+test("内置 RAG / 贝壳 / Browser Use / Computer Use 按真实接入类型分类", () => {
   const rag = BUILTIN_PLUGINS.find((plugin) => plugin.id === "rag");
   const estate = BUILTIN_PLUGINS.find((plugin) => plugin.id === "estate");
   const computer = BUILTIN_PLUGINS.find((plugin) => plugin.id === "computer");
+  const browser = BUILTIN_PLUGINS.find((plugin) => plugin.id === "browser");
   assert.equal(rag?.transport, "http");
   assert.equal(estate?.transport, "cli");
   assert.equal(computer?.transport, "builtin");
   assert.equal(computer?.defaultEnabled, false);
+  assert.equal(browser?.transport, "builtin");
+  assert.equal(browser?.defaultEnabled, false);
+  assert.match(browser?.description ?? "", /右侧/);
   assert.equal(pluginTransportMeta("http").short, "HTTP");
   assert.equal(pluginTransportMeta("mcp").short, "MCP");
   assert.equal(pluginTransportMeta("builtin").short, "内置");
   assert.match(PLUGIN_TRANSPORTS.mcp.description, /server/);
 });
 
-test("RAG、找房数据源与 Computer Use 集中到设置页插件分区并可启停", async () => {
+test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插件分区并可启停", async () => {
   const root = new URL("../../src/client/", import.meta.url);
   const html = await readFile(new URL("index.html", root), "utf8");
   const shell = await readFile(new URL("views/shell.ts", root), "utf8");
@@ -40,6 +44,7 @@ test("RAG、找房数据源与 Computer Use 集中到设置页插件分区并可
   assert.match(app, /plugin\.id === "rag"/);
   assert.match(app, /plugin\.id === "estate"/);
   assert.match(app, /plugin\.id === "computer"/);
+  assert.match(app, /plugin\.id === "browser"/);
   assert.match(app, /plugin-switch/);
   assert.match(pluginSettings, /toggle\.disabled = !supported/);
   assert.match(shell, /refreshWelcomePluginCopy\(\)/);

@@ -46,6 +46,7 @@ export const REQUIRED_RUNTIME_ASSETS = [
   "src/server/public/styles/modals.css",
   "src/server/public/styles/settings.css",
   "src/server/public/styles/plugins.css",
+  "src/server/public/styles/browser-use.css",
   "src/server/public/styles/commands.css",
   "src/server/public/styles/subagents.css",
   "src/server/public/styles/responsive.css",
@@ -131,13 +132,22 @@ export async function collectProductionReleaseChecks(
     pkg.dependencies?.tsx ? "tsx 已登记为生产依赖" : "tsx 必须放在 dependencies，否则精简运行镜像无法启动",
     "deployment"
   ));
+  checks.push(result(
+    "browser-runtime-dependency",
+    Boolean(pkg.dependencies?.["playwright-core"]),
+    pkg.dependencies?.["playwright-core"]
+      ? "playwright-core 已登记为生产依赖（Browser Use 按需加载）"
+      : "playwright-core 必须放在 dependencies，否则 Browser Use 在生产运行时不可用",
+    "deployment"
+  ));
 
   try {
     const requireFromRoot = createRequire(join(root, "package.json"));
     requireFromRoot.resolve("tsx");
-    checks.push(result("tsx-runtime", true, "tsx 运行时可解析", "deployment"));
+    requireFromRoot.resolve("playwright-core");
+    checks.push(result("tsx-runtime", true, "tsx 与 playwright-core 运行时可解析", "deployment"));
   } catch {
-    checks.push(result("tsx-runtime", false, "node_modules 中缺少 tsx 运行时", "deployment"));
+    checks.push(result("tsx-runtime", false, "node_modules 中缺少 tsx 或 playwright-core 运行时", "deployment"));
   }
 
   const missingAssets: string[] = [];

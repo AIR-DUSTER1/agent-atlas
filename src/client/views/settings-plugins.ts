@@ -2,7 +2,7 @@
  * ============================================================
  * views/settings-plugins.ts — 设置页插件目录与启停
  * ============================================================
- * 职责：读取 RAG / 贝壳 / Computer Use 状态，渲染真实接入类型卡片，并提交启停开关。
+ * 职责：读取 RAG / 贝壳 / 求职 / Browser Use / Computer Use 状态并提交启停。
  * 设计立场：
  *  - 开关只改变 tool allowlist，插件自身配置仍保留；关闭不等于删除配置；
  *  - 卡片文本全部走 h() 的 textContent 语义，不拼用户可控 HTML；
@@ -14,7 +14,7 @@ import { state } from "../core/state.js";
 import { h } from "../ui/h.js";
 import { uiAlert } from "../ui/dialog.js";
 import { BUILTIN_PLUGINS, pluginTransportMeta, type BuiltinPlugin } from "../modules/plugin-registry.js";
-import type { EstateState, JobState, PluginSettingsState, RagState } from "../modules/types.js";
+import type { BrowserUseState, EstateState, JobState, PluginSettingsState, RagState } from "../modules/types.js";
 import { refreshAgentCards } from "./shell.js";
 
 type PluginId = keyof PluginSettingsState["enabled"];
@@ -66,6 +66,16 @@ function readiness(plugin: BuiltinPlugin): { ready: boolean; label: string } {
     if (!status.depsOK) return { ready: false, label: "缺少依赖" };
     return { ready, label: `就绪 · ${status.lastRunJobs} 条岗位` };
   }
+  if (plugin.id === "browser") {
+    const status = state.browser;
+    if (!status) return { ready: false, label: "未检测" };
+    return {
+      ready: status.available,
+      label: status.available
+        ? `${status.browserName}${status.activeSessions ? ` · ${status.activeSessions}/${status.maxSessions} 会话` : ""}`
+        : "未找到 Chrome / Edge",
+    };
+  }
   const available = !state.plugins || state.plugins.platform === "win32";
   return { ready: available, label: available ? "Windows 可用" : "仅支持 Windows" };
 }
@@ -102,6 +112,18 @@ function openPluginManage(plugin: BuiltinPlugin): void {
     void import("./job.js").then((mod) => mod.openJob());
     return;
   }
+  if (plugin.id === "browser") {
+    const status = state.browser;
+    void uiAlert(
+      "Browser Use 使用本机 Chrome / Edge 的无头浏览器，不持久化账号数据，空闲 10 分钟自动回收。\n\n" +
+      "启用后通用 Agent 可以打开网页、读取真实渲染内容、点击、填写表单和滚动；所有会改变页面的动作仍需人工审批。\n\n" +
+      (status?.available
+        ? `当前浏览器：${status.browserName}（${status.executableName}）`
+        : status?.error || "当前未检测到可用浏览器，可设置 BROWSER_USE_EXECUTABLE_PATH。"),
+      "Browser Use 说明"
+    );
+    return;
+  }
   if (plugin.id === "computer") {
     void uiAlert(
       "Computer Use 只在本机 Windows 桌面会话可用。\n\n" +
@@ -124,15 +146,17 @@ export async function loadPluginState(): Promise<void> {
 
 /** 设置页插件分区懒加载：各接口互不阻塞，任一失败保留其它状态。 */
 export async function refreshPluginPanel(): Promise<void> {
-  const [rag, estate, job, plugins] = await Promise.allSettled([
+  const [rag, estate, job, browser, plugins] = await Promise.allSettled([
     api<RagState>("/api/rag"),
     api<EstateState>("/api/estate"),
     api<JobState>("/api/job"),
+    api<BrowserUseState>("/api/browser/status"),
     api<PluginSettingsState>("/api/plugins"),
   ]);
   if (rag.status === "fulfilled") state.rag = rag.value;
   if (estate.status === "fulfilled") state.estate = estate.value;
   if (job.status === "fulfilled") state.job = job.value;
+  if (browser.status === "fulfilled") state.browser = browser.value;
   if (plugins.status === "fulfilled") state.plugins = plugins.value;
   renderPluginCards();
 }

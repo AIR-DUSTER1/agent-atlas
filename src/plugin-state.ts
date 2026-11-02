@@ -6,10 +6,10 @@
  * 设计立场：
  *  - 本模块不读文件、不依赖 server/*，因此 Agent 层可以安全引用；
  *  - 持久化由 server/plugin-settings.ts 负责，启动时把配置加载进这里；
- *  - 电脑控制默认关闭：它是本机高权限能力，必须由用户在设置中显式开启。
+ *  - Browser Use / 电脑控制默认关闭：二者都能代替用户操作外部环境，必须显式开启。
  */
 
-export const PLUGIN_IDS = ["rag", "estate", "job", "computer"] as const;
+export const PLUGIN_IDS = ["rag", "estate", "job", "browser", "computer"] as const;
 export type PluginId = (typeof PLUGIN_IDS)[number];
 export type PluginEnabledMap = Record<PluginId, boolean>;
 
@@ -18,6 +18,7 @@ export const DEFAULT_PLUGIN_ENABLED: Readonly<PluginEnabledMap> = Object.freeze(
   rag: true,
   estate: true,
   job: true,
+  browser: false,
   computer: false,
 });
 
