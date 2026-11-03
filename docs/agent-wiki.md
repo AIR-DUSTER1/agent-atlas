@@ -80,6 +80,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
+        ├── job.ts / job-browser.ts / job-model.ts / job-workbook.ts # 求职 Agent 内置采集、规则、清单与 XLSX（§3.47）
         ├── health.ts     # /healthz 存活 + /readyz 就绪探针（§3.19）
         ├── lifecycle.ts  # 在途请求统计 + 优雅退出（§3.19）
         ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
@@ -688,10 +689,10 @@ Header: Authorization: Bearer <key>（可留空）
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后直接结束本轮，不再让模型重试工具 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
-**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
+**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
-4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）只信任 HTTPS host 白名单，下载
+4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/x64` 映射为官方 manifest 的 `windows/amd64`，并逐跳校验 GitHub Release 重定向；只信任 HTTPS host 白名单，下载
 缓冲溢出即拒，校验 sha256 后经 `.part` 临时名原子改名，tar 用 `%WINDIR%\System32\tar.exe`
 绝对路径；安装动作写审计（URL/version/sha256）。
 
@@ -727,7 +728,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 |---|---|---|
 | `config-store.ts` | `.web-config.json` 原子存储 | 写入「`.tmp` + fsync + rename」（Windows rename 抖动重试一次）；`.bak` 滚动备份 + 启动自动抢救（双坏降级 `{}` 不崩服务）；跨进程文件锁 `.web-config.lock`（O_EXCL 创建，**存活判断只能靠时间戳** —— `process.kill(pid,0)` 在 Windows 对在在/否/无权限一律 EPERM，纯 pid 探测不可靠）；`schemaVersion=2` 注入向后兼容 |
 | `session-store.ts` | 会话 journal | append-only NDJSON `.setting/sessions.ndjson`（gitignore）；事件：`session`（upsert，**白名单挑字段**——Session 含编译图/内存结构严禁整只序列化）、`approval`（pending 全量 payload）、`decided`（approve / reject / answered，一次性转移）、`delete`、`turn`（user + events）；坏行跳过告警；`JOURNAL_MAX_BYTES=2MB` 超限快照重写 + 轮转 `.1`；启动 `replaySessions()` 回放进内存 |
-| `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `runWithLimit("beike-cli", 2)` |
+| `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `ResourceGauge("beike", 1)`，相邻启动至少间隔 1.5 秒 |
 
 **sessions.ts 启动回放配套**（Phase 2）：`restoreSessions()` 把 journal 回放成内存会话
 （图按 kind 重建为空态 checkpointer）；`pendingApproval` 仍为 `status=pending` 的会话标
@@ -1594,7 +1595,9 @@ console.log(result.messages.at(-1).content);
 | 多配一个子代理后所有请求都变成「不确定」 | 直接用 `p_max` 当置信度，选项越多 `p_max` 越低 | 用按选项数归一化的 `confidence = (k·p_max−1)/(k−1)`（§3.45 守卫 G2） |
 | 新建求职会话却变成了通用 Agent | `routes/sessions.ts` 有一份独立的 kind 白名单，漏加新 kind 会被静默降级成 `"agent"` | 新增会话类型时必须同时改 `sessions.ts`、`session-store.ts`（两处各有一份 `SessionKind`）与 `routes/sessions.ts` 的白名单（§3.47） |
 | 求职采集能跑但模型说「缺少参数」却给了泛泛的 schema 报错 | zod 把 `city`/`salaryMin` 等设为必填，模型漏传时框架直接抛 `Invalid input: expected number`，模型读不懂 | 关键字段设为 optional，由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示（§3.47） |
-| 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 硬编码 `--enrich 0`，补详情必须单独调 `job_enrich` 且隔几分钟（§3.47） |
+| 求职 Agent 又要求填写 Skill 根目录/Python | 早期实现把外部 job-hunter CLI 当成产品依赖，Skill 升级、Python 3.10 与 DrissionPage 都会影响可用性 | 执行流程已内化到 `job-browser.ts` / `job-model.ts` / `job-workbook.ts`；设置页只保留浏览器、数据目录和平台登录（§3.47） |
+| 智联/BOSS 采集时被 Security Verification 拦住 | 站点对无头浏览器和短时间访问启用人机校验 | 采集默认使用可见浏览器窗口，用户可完成一次验证；导航带随机间隔与冷却，校验页会作为平台警告返回，不伪装成 0 条正常结果 |
+| 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 只抓列表；补详情必须单独调 `job_enrich`，两者间隔几分钟（§3.47） |
 | 澄清卡标题紧贴卡片左上角、文字顶着边框 | 澄清卡没套 `.approval-body`（审批卡靠它给内边距），早期版本直接把标题塞进 `.approval-card`，自身又没有 padding | `.clarify-head` / `.clarify-list` / `.clarify-foot` 各自带内边距（§3.48）；`chat-flow.test.ts` 有守门断言 |
 | 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
 | 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
@@ -1635,8 +1638,10 @@ console.log(result.messages.at(-1).content);
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
-| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |\n| `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
+| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |
+| 安装贝壳 CLI 报「暂无 win32/x64」或 `unexpected redirect` | 官方 manifest 使用 `windows/amd64`，不是 Node 的 `win32/x64`；GitHub Release 下载会 302 到 `release-assets.githubusercontent.com`。安装器现做平台名映射，并逐跳重新校验重定向 host |
+| `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
 | 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
 | 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agentatlas 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
 | Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
@@ -2217,55 +2222,49 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 6 s 留足余量。若启用 systemone 的按需加载模式（每次 spawn 冷启动约 5.9 s），
 需要在设置页把它调到 15 s，否则 100% 超时。
 
-### 3.47 `src/server/job.ts` + `agent/job.ts` — 求职岗位 Agent（job-hunter 技能）
+### 3.47 `src/server/job*.ts` + `agent/job.ts` — 求职岗位 Agent（内置采集流程）
 
-**定位**：把 [job-hunter](https://github.com/AIR-DUSTER1/job-hunter) 技能做成第三个
-独立 Agent profile（`job`），与 `general` / `estate` 工具集与记忆 scope 全部隔离。
+**定位**：把原 [job-hunter](https://github.com/AIR-DUSTER1/job-hunter) 的执行流程内化到第三个
+独立 Agent profile（`job`）：需求澄清 → 四平台搜索 → 规则打分 → 外包识别 → 增量合并 →
+Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调用 `scripts/main.py`。
 
 **分层**：
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| profile | `agent/job.ts` | 提示词（浓缩技能工作流）+ 工具 allowlist + 领域分析/反思规则 |
+| profile | `agent/job.ts` | 提示词 + 工具 allowlist + 领域分析/反思规则 |
 | 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` |
-| 服务端 | `server/job.ts` | CLI 探测、子进程执行、清单 JSON 读取与投影 |
-| 报告 | `server/job-html.ts` | Excel 写完后把清单 JSON 渲染成同名自包含 HTML |
+| 领域规则 | `server/job-model.ts` | 岗位字段、同义词扩展、五维评分、外包识别、增量合并、纯本地查询 |
+| 浏览器执行 | `server/job-browser.ts` | Playwright 持久化 Profile、四平台搜索适配、详情补全、登录等待、导航限速 |
+| 编排与存储 | `server/job.ts` | 数据目录、采集/补详情编排、清单 JSON 原子写入 |
+| Excel | `server/job-workbook.ts` | 标准库生成最小 OOXML `.xlsx`；状态列带下拉校验 |
+| 报告 | `server/job-html.ts` | 与 Excel 同名的自包含 HTML 报告 |
 | 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor` |
-| 前端 | `views/job.ts` + `#job-mask` | 环境检查面板、路径配置、平台登录、自检 |
+| 前端 | `views/job.ts` + `#job-mask` | 浏览器检查、数据目录、平台登录、自检 |
 
-**为什么是一个独立 profile 而不是通用 Agent 的一个插件工具**：求职是「有明确
-工作流的多步任务」（问清四项意图 → 采集 → 筛外包 → 补详情 → 交付 Excel 与 HTML 报告），
-需要专属提示词约束「不许猜方向/城市/薪资/年限」、专属反思规则约束「不许把采到的
-说成已投递」。放进通用 Agent 会让这些约束稀释到几十个工具里。
+**为什么内化而不是引用 skill**：Skill 目录属于用户可安装/升级的外部文档与代码，作为产品能力交付时
+会出现路径配置、Python 版本、第三方包、脚本升级和生命周期不一致等额外故障面。现在岗位模型、
+评分规则、平台适配和交付物生成都在应用内，Agent profile 是唯一产品入口。
 
 **关键实现约束**：
 
-1. **必须在技能根目录执行 CLI**。`scripts` 是包名，`python -m scripts.main` 只能从
-   技能根目录解析，所以 `runJobCli` 强制 `cwd = skillDir`，换目录会 `ModuleNotFoundError`。
-2. **必须显式设 `JOBHUNT_HOME`**。不设的话登录态和产出写进技能目录，升级技能即丢。
-   `resolveDataDir()` 默认给 `<skillDir>/job-data`，也可在设置页覆盖。
-3. **采集与补详情必须分开**。站点风控看的是短时间请求总量；采集每个关键词 1-2 次，
-   补详情要逐条打开岗位页。`job_collect` 硬编码 `--enrich 0`，`job_enrich` 单独跑。
-4. **登录不封装成 Agent 工具**。登录要停下来等用户扫码（最长 5 分钟），
-   把它做成工具会让模型在无人可扫的场景下干等；只在设置页提供按钮。
-5. **采集的四个字段在 zod 里设为 optional**。设成必填时模型漏传会直接 schema
-   校验失败（`Invalid input: expected number, received undefined`），模型读不懂这种
-   报错；改成 optional 后由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示。
-6. **清单读 JSON 不读 Excel**。技能同时产出 `最新岗位清单.json`（下次增量合并的基准，
-   含投递状态与 JD 全文）和 Excel（给人看）。模型上下文只吃 JSON 的摘要投影。
-7. **HTML 报告在 Excel 之后生成**。`collectJobs()` 等 CLI 成功退出并读到清单 JSON，
-   再由 `job-html.ts` 找最新 `.xlsx` 并写同名 `.html`；报告无脚本、全字段转义、
-   只放行 HTTP/HTTPS 链接。`enrichJobs()` 成功后也刷新同一报告。报告失败不影响
-   Excel 采集结果，但会把失败原因带回给模型转述。
+1. **持久化浏览器 Profile**：`launchPersistentContext(<dataDir>/.profile)`；登录按钮打开可见浏览器等待扫码，采集时复用同一登录态。
+2. **串行访问与导航冷却**：四平台按顺序访问；导航间隔 2–3.5 秒随机抖动，每 8 次导航冷却 7 秒，平台切换再等待 4 秒。
+3. **采集与补详情分开**：`job_collect` 只取列表与已有结构化字段，`job_enrich` 再打开岗位页补 JD；避免短时请求过量。
+4. **四要素 optional 校验**：岗位方向、城市、薪资、年限由工具返回可操作的中文缺口提示，不让 zod 直接抛难懂的 schema 错误。
+5. **增量合并**：岗位链接优先作为主键；旧记录的投递状态、备注不覆盖；本轮未采集的平台原样保留。
+6. **同义词在本地面扩展**：Agent/智能体/AI 应用/大模型应用等方向词参与标题评分，不依赖模型临时扩词。
+7. **不新增前端依赖**：XLSX 由 `job-workbook.ts` 用标准库构建 ZIP/OOXML；HTML 报告全字段转义，不执行站点内容。
+8. **登录不是 Agent 工具**：扫码是交互步骤，只由设置页按钮触发；模型只调采集/查询/补详情。
 
-**数据目录结构**（技能约定）：
+**数据目录结构**：
 
 ```
-<skillDir>/job-data/
-  .profile/            # 浏览器登录态（扫码后保存，所有采集复用）
-  out/最新岗位清单.json  # 权威数据源（增量合并基准，保留投递状态）
+.setting/job-data/
+  .profile/             # Chrome/Edge 持久化登录态
+  out/最新岗位清单.json  # 权威数据源，含完整岗位字段
   out/岗位清单_<时间>.xlsx
-  out/岗位清单_<时间>.html  # 与 Excel 同名的自包含报告
+  out/岗位清单_<时间>.html
 ```
 
 **新增 Agent profile 的接入清单**（本次实际改动点，供后续加第四个 Agent 参考）：
