@@ -431,7 +431,7 @@ test("记忆导入导出：JSON 快照在 scope 之间迁移且来源标记为 i
   assert.equal(created.status, 200);
   const exported = await json("/api/memories/export?profileId=general&history=1");
   assert.equal(exported.status, 200);
-  assert.equal(exported.body.schemaVersion, 2);
+  assert.equal(exported.body.schemaVersion, 3);
   assert.ok(exported.body.memories.some((item: { key: string }) => item.key === "导出主题"));
 
   const imported = await json("/api/memories/import", {
@@ -565,6 +565,34 @@ test("批量清理：按创建时间删旧会话，坏参数 400", async () => {
   assert.ok(list.body.some((s: { id: string }) => s.id === sid), "清理后新会话仍在列表");
 });
 
+test("自动沉淀候选：对话结束后可确认生效且按 Agent scope 隔离", async () => {
+  const created = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId: "default", title: "自动记忆候选" }),
+  });
+  assert.equal(created.status, 200);
+  const sid = created.body.id as string;
+  await readSse("/api/chat", { sessionId: sid, message: "请记住：以后部署测试统一使用 npm test" });
+
+  let candidates: any[] = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const listed = await json("/api/memories/candidates?profileId=general");
+    candidates = listed.body.memories ?? [];
+    if (candidates.some((item) => String(item.content).includes("npm test"))) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const candidate = candidates.find((item) => String(item.content).includes("npm test"));
+  assert.ok(candidate, "明确记忆表达应生成待确认候选；实际=" + JSON.stringify(candidates));
+  assert.equal((await json("/api/memories?profileId=estate")).body.memories.some((item: any) => item.id === candidate.id), false);
+
+  const confirmed = await json(`/api/memories/${encodeURIComponent(candidate.id)}/confirm?profileId=general`, { method: "POST" });
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.body.entry.status, "active");
+  const active = await json("/api/memories?profileId=general");
+  assert.ok(active.body.memories.some((item: any) => item.id === candidate.id));
+});
+
 test("运维指标与诊断接口：受认证边界保护的结构化快照", async () => {
   const metrics = await fetch(srv.base + "/metrics");
   assert.equal(metrics.status, 200);
@@ -578,7 +606,7 @@ test("运维指标与诊断接口：受认证边界保护的结构化快照", as
   assert.equal(diagnostics.status, 200);
   assert.equal(typeof diagnostics.body.status, "string");
   assert.ok(diagnostics.body.schemaVersions);
-  assert.equal(diagnostics.body.schemaVersions.memory, 2);
+  assert.equal(diagnostics.body.schemaVersions.memory, 3);
   assert.ok(diagnostics.body.data.journal);
   assert.ok(diagnostics.body.data.checkpoint);
   assert.equal(diagnostics.body.data.memory.state, "ok");

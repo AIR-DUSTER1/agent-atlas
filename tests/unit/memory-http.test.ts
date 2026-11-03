@@ -189,10 +189,13 @@ test("连接测试与配置安全视图：真实 Key 不回传，危险配置被
   const publicView = publicMemoryConfig({
     ...DEFAULT_MEMORY_CONFIG,
     http: { ...DEFAULT_MEMORY_CONFIG.http, apiKey: "sk-very-secret-value" },
+    embedding: { ...DEFAULT_MEMORY_CONFIG.embedding, apiKey: "embedding-secret-value" },
   });
   assert.equal(publicView.http.apiKey, "");
   assert.equal(publicView.http.hasApiKey, true);
-  assert.doesNotMatch(JSON.stringify(publicView), /very-secret/);
+  assert.equal(publicView.embedding.apiKey, "");
+  assert.equal(publicView.embedding.hasApiKey, true);
+  assert.doesNotMatch(JSON.stringify(publicView), /very-secret|embedding-secret/);
 
   assert.throws(
     () => mergeMemoryConfigPatch(DEFAULT_MEMORY_CONFIG, { http: { enabled: true, baseURL: "file:///tmp/x" } }),
@@ -208,10 +211,10 @@ test("连接测试与配置安全视图：真实 Key 不回传，危险配置被
         enabled: true,
         baseURL: "http://127.0.0.1:9999",
         preset: "hindsight",
-        banks: { general: "same", estate: "same" },
+        banks: { general: "same", estate: "same", job: "job-bank" },
       },
     }),
-    /必须不同/
+    /必须不同|互不相同/
   );
   const merged = mergeMemoryConfigPatch({
     ...DEFAULT_MEMORY_CONFIG,
@@ -220,4 +223,10 @@ test("连接测试与配置安全视图：真实 Key 不回传，危险配置被
     http: { enabled: true, baseURL: "http://127.0.0.1:9999", apiKey: "" },
   });
   assert.equal(merged.http.apiKey, "keep-me");
+  assert.throws(() => mergeMemoryConfigPatch(DEFAULT_MEMORY_CONFIG, {
+    embedding: { enabled: true, baseURL: "http://127.0.0.1:9999", model: "" },
+  }), /必须填写 Embedding/);
+  assert.throws(() => mergeMemoryConfigPatch(DEFAULT_MEMORY_CONFIG, {
+    retention: { activePerScope: 5000, historyPerScope: 1000 },
+  }), /不能小于/);
 });

@@ -30,6 +30,8 @@ export function createMemoryTools(profileId: MemoryProfileId) {
           key,
           content,
           source: "agent",
+          status: "active",
+          origin: { mode: "agent_tool" },
         });
         return `已记住（当前 Agent 长期记忆，跨会话生效）：[${entry.key}] ${entry.content}`;
       } catch (err) {
@@ -49,8 +51,9 @@ export function createMemoryTools(profileId: MemoryProfileId) {
   const memoryRecall = tool(
     async ({ query }) => {
       const result = await memorySlot.search({ scope: memoryScope(profileId), text: query, limit: 10 });
-      if (result.degraded) return `长期记忆暂时不可用：${result.message || "Provider 降级"}`;
+      if (result.degraded && !result.records.length) return `长期记忆暂时不可用：${result.message || "Provider 降级"}`;
       const hits = result.records;
+      const degradedNote = result.degraded ? `（语义召回降级，以下为词法结果：${result.message || "Provider 降级"}）\n` : "";
       if (!hits.length) return `没有与「${query}」相关的长期记忆。`;
       return hits.map((entry) => `[${entry.key}] ${entry.content}`).join("\n");
     },

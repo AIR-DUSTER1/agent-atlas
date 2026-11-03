@@ -1,10 +1,8 @@
 /**
  * routes/memories.ts — Memory Slot 管理路由（按 Agent scope 隔离）
  * ============================================================
- * GET    /api/memories?profileId=general|estate&history=1
- * POST   /api/memories   { profileId?, key, content, tags?, allowPII? }
- * DELETE /api/memories/:id?profileId=general|estate
- * 路由只依赖统一 Slot；本地 / HTTP Provider 的选择由注册表决定。
+ * 列表 / 手动保存 / 候选确认与拒绝 / 导出导入都只依赖统一 Slot；
+ * profileId 在三类 Agent 之间强隔离，任何路由都不能跨 scope 查找或删除。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
 import type { MemoryProfileId } from "../../memory/provider.js";
@@ -19,9 +17,13 @@ function profileIdOf(raw: string | null | undefined): MemoryProfileId | null {
   return isMemoryProfileId(raw) ? raw : null;
 }
 
+function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
+
 function respondInvalidScope(res: import("node:http").ServerResponse): void {
-  res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ error: "profileId 只能是 general 或 estate" }));
+  sendJson(res, 400, { error: "profileId 只能是 general、estate 或 job" });
 }
 
 export async function handleListMemories(
@@ -32,14 +34,23 @@ export async function handleListMemories(
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
   const memories = await memorySlot.list(memoryScope(profileId), { includeHistory });
-  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({
+  sendJson(res, 200, {
     memories,
     profileId,
     providerId: await memorySlot.providerId(),
     providers: memorySlot.registered(),
     store: localMemoryStoreStatus(),
-  }));
+  });
+}
+
+export async function handleListMemoryCandidates(
+  res: import("node:http").ServerResponse,
+  rawProfileId?: string | null
+): Promise<void> {
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  const memories = await memorySlot.list(memoryScope(profileId), { statuses: ["candidate"] });
+  sendJson(res, 200, { memories, profileId });
 }
 
 export async function handleSaveMemory(
@@ -60,8 +71,7 @@ export async function handleSaveMemory(
     ? body.tags.filter((item): item is string => typeof item === "string")
     : undefined;
   if (!key.trim() || !content.trim()) {
-    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "主题（key）与内容（content）都不能为空" }));
+    sendJson(res, 400, { error: "主题（key）与内容（content）都不能为空" });
     return;
   }
   try {
@@ -71,13 +81,52 @@ export async function handleSaveMemory(
       key,
       content,
       source: "user",
+      status: "active",
+      origin: { mode: "manual" },
       ...(tags ? { tags } : {}),
       ...(config.local.allowPII ? { allowPII: true } : {}),
     });
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: true, entry, profileId }));
+    sendJson(res, 200, { ok: true, entry, profileId });
   } catch (err) {
     respondBadRequest(res, req, err);
+  }
+}
+
+export async function handleConfirmMemory(
+  res: import("node:http").ServerResponse,
+  id: string,
+  rawProfileId?: string | null
+): Promise<void> {
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  try {
+    const entry = await memorySlot.confirm(id, memoryScope(profileId));
+    if (!entry) {
+      sendJson(res, 404, { error: "候选记忆不存在、已被处理，或不属于当前 Agent" });
+      return;
+    }
+    sendJson(res, 200, { ok: true, entry, profileId });
+  } catch (err) {
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export async function handleRejectMemory(
+  res: import("node:http").ServerResponse,
+  id: string,
+  rawProfileId?: string | null
+): Promise<void> {
+  const profileId = profileIdOf(rawProfileId);
+  if (!profileId) return respondInvalidScope(res);
+  try {
+    const gone = await memorySlot.reject(id, memoryScope(profileId));
+    if (!gone) {
+      sendJson(res, 404, { error: "候选记忆不存在、已被处理，或不属于当前 Agent" });
+      return;
+    }
+    sendJson(res, 200, { ok: true, profileId });
+  } catch (err) {
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -91,17 +140,15 @@ export async function handleDeleteMemory(
   try {
     const gone = await memorySlot.delete(id, memoryScope(profileId));
     if (!gone) {
-      res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" }));
+      sendJson(res, 404, { error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" });
       return;
     }
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: true, profileId }));
+    sendJson(res, 200, { ok: true, profileId });
   } catch (err) {
-    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
   }
 }
+
 export async function handleExportMemories(
   res: import("node:http").ServerResponse,
   rawProfileId?: string | null,
@@ -135,8 +182,7 @@ export async function handleImportMemories(
       mode: body.mode === "replace" ? "replace" : "merge",
       allowPII: config.local.allowPII,
     });
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: true, profileId, ...result }));
+    sendJson(res, 200, { ok: true, profileId, ...result });
   } catch (err) {
     respondBadRequest(res, req, err);
   }

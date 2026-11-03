@@ -771,8 +771,9 @@
                 </label>
                 <div class="memory-stat-grid">
                   <div><span>active</span><strong id="mem-local-active">0</strong></div>
+                  <div><span>待确认</span><strong id="mem-local-candidates">0</strong></div>
                   <div><span>历史版本</span><strong id="mem-local-history">0</strong></div>
-                  <div><span>文件状态</span><strong id="mem-local-state">-</strong></div>
+                  <div><span>索引状态</span><strong id="mem-local-state">-</strong></div>
                 </div>
                 <p id="mem-provider-detail" class="settings-note">正在读取记忆插槽状态…</p>
                 <label class="cap-check memory-check">
@@ -847,6 +848,107 @@
               </section>
             </div>
 
+            <div class="memory-advanced-grid">
+              <section class="settings-card" aria-labelledby="memory-distill-title">
+                <div class="memory-card-head">
+                  <div>
+                    <h3 id="memory-distill-title">自动沉淀与生命周期</h3>
+                    <p>对话完成后提取长期记忆；高置信低风险项可自动入库，其余等待确认</p>
+                  </div>
+                </div>
+                <div class="memory-form-grid">
+                  <label class="field">
+                    <span class="field-label">沉淀模式</span>
+                    <select id="mem-distill-mode" class="pf-select">
+                      <option value="off">关闭</option>
+                      <option value="confirm">每次确认</option>
+                      <option value="smart">智能沉淀</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">每轮最多候选</span>
+                    <input id="mem-distill-max-turn" type="number" min="1" max="10" value="3" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">每小时上限</span>
+                    <input id="mem-distill-hourly" type="number" min="1" max="200" value="20" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Stale 宽限（天）</span>
+                    <input id="mem-stale-grace-days" type="number" min="1" max="3650" value="30" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">偏好有效期（天）</span>
+                    <input id="mem-preference-days" type="number" min="1" max="3650" value="180" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">项目事实有效期（天）</span>
+                    <input id="mem-project-days" type="number" min="1" max="3650" value="120" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">纠错有效期（天）</span>
+                    <input id="mem-correction-days" type="number" min="1" max="3650" value="365" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">身份信息有效期（天）</span>
+                    <input id="mem-identity-days" type="number" min="1" max="3650" value="365" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">每 Agent active 上限</span>
+                    <input id="mem-retention-active" type="number" min="100" max="50000" value="2000" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">每 Agent 历史上限</span>
+                    <input id="mem-retention-history" type="number" min="100" max="100000" value="5000" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="settings-card" aria-labelledby="memory-semantic-title">
+                <div class="memory-card-head">
+                  <div>
+                    <h3 id="memory-semantic-title">语义召回</h3>
+                    <p>OpenAI 兼容 Embedding；失败时自动降级词法召回，不阻塞聊天</p>
+                  </div>
+                  <label class="cap-check"><input id="mem-embedding-enabled" type="checkbox" /><span>启用</span></label>
+                </div>
+                <div class="memory-form-grid">
+                  <label class="field memory-span-2">
+                    <span class="field-label">Base URL（可填 /v1 或完整 /embeddings）</span>
+                    <input id="mem-embedding-base-url" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">模型名</span>
+                    <input id="mem-embedding-model" type="text" spellcheck="false" placeholder="text-embedding-3-small" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">API Key</span>
+                    <input id="mem-embedding-api-key" type="password" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">超时（ms）</span>
+                    <input id="mem-embedding-timeout" type="number" min="500" max="30000" value="8000" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">维度（0=自动）</span>
+                    <input id="mem-embedding-dimensions" type="number" min="0" max="16384" value="0" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">最低相似度</span>
+                    <input id="mem-embedding-similarity" type="number" min="0" max="1" step="0.01" value="0.25" />
+                  </label>
+                  <label class="cap-check memory-span-2"><input id="mem-embedding-clear-key" type="checkbox" /><span>清除已保存的 Embedding API Key</span></label>
+                </div>
+                <p id="mem-embedding-key-state" class="settings-note">尚未保存 API Key</p>
+                <p id="mem-semantic-status" class="settings-note">语义索引未启用</p>
+                <div class="settings-actions memory-config-actions">
+                  <button id="mem-test-embedding-btn" type="button" class="ghost-btn small">测试 Embedding</button>
+                  <button id="mem-reindex-btn" type="button" class="ghost-btn small">重建当前 Agent 索引</button>
+                </div>
+                <p id="mem-embedding-status" class="settings-status" role="status" aria-live="polite"></p>
+              </section>
+            </div>
+
             <section class="settings-card memory-manage-card" aria-labelledby="memory-manage-title">
               <div class="memory-card-head memory-manage-head">
                 <div>
@@ -878,6 +980,11 @@
                   <input id="mem-search" type="search" spellcheck="false" placeholder="按主题、内容或标签筛选" />
                 </label>
                 <label class="cap-check memory-history-check"><input id="mem-history-toggle" type="checkbox" /><span>显示历史版本</span></label>
+              </div>
+
+              <div class="memory-candidate-block">
+                <div class="field-label">待确认的自动沉淀</div>
+                <div id="mem-candidates-list" class="memories-list"></div>
               </div>
 
               <div id="memories-list" class="memories-list"></div>

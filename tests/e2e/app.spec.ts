@@ -247,6 +247,9 @@ test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP �
   await expect(page.locator("#memories-modal")).toBeVisible();
   await expect(page.locator("#mem-health-badge")).toHaveText("可用", { timeout: 15_000 });
   await expect(page.locator("#mem-active-provider")).toHaveValue("local");
+  await expect(page.locator("#mem-distill-mode")).toHaveValue("smart");
+  await expect(page.locator("#mem-retention-active")).toHaveValue("2000");
+  await expect(page.locator("#mem-semantic-status")).toContainText("语义召回未启用");
 
   await page.locator("#mem-key").fill("E2E 记忆偏好");
   await page.locator("#mem-content").fill("回答先给结论，再给依据");
@@ -273,6 +276,14 @@ test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP �
   await page.locator("#mem-http-timeout").fill("500");
   await page.locator("#mem-test-http-btn").click();
   await expect(page.locator("#mem-http-status")).toContainText(/连接失败|无法连接|超时/, { timeout: 10_000 });
+
+  await page.locator("#mem-embedding-enabled").check();
+  await page.locator("#mem-embedding-base-url").fill("http://127.0.0.1:1/v1");
+  await page.locator("#mem-embedding-model").fill("mock-embedding");
+  await page.locator("#mem-embedding-timeout").fill("500");
+  await page.locator("#mem-test-embedding-btn").click();
+  await expect(page.locator("#mem-embedding-status")).toContainText(/失败|超时|HTTP/, { timeout: 10_000 });
+  await page.locator("#mem-embedding-enabled").uncheck();
   expect(pageErrors).toEqual([]);
 });
 

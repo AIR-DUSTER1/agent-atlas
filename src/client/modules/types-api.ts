@@ -474,7 +474,14 @@ export interface MemoryEntry {
   key: string;
   content: string;
   tags: string[];
-  status: "active" | "superseded";
+  status: "candidate" | "active" | "stale" | "superseded" | "archived";
+  category?: "preference" | "project_fact" | "correction" | "identity" | "other";
+  confidence?: number;
+  expiresAt?: number;
+  staleAt?: number;
+  lastConfirmedAt?: number;
+  origin?: { mode: "manual" | "agent_tool" | "auto" | "import" | "http"; sessionId?: string; turnId?: string };
+  replacedBy?: string;
   createdAt: number;
   updatedAt: number;
   lastUsedAt?: number;
@@ -496,10 +503,42 @@ export interface MemoryHttpSettings {
   banks: { general: string; estate: string; job: string };
 }
 
+export interface MemoryDistillationSettings {
+  mode: "off" | "confirm" | "smart";
+  maxPerTurn: number;
+  hourlyLimit: number;
+}
+
+export interface MemoryEmbeddingSettings {
+  enabled: boolean;
+  preset: "openai-compatible";
+  baseURL: string;
+  model: string;
+  apiKey?: string;
+  hasApiKey?: boolean;
+  keyMasked?: string;
+  timeoutMs: number;
+  dimensions: number;
+  minSimilarity: number;
+}
+
+export interface MemoryRetentionSettings {
+  activePerScope: number;
+  historyPerScope: number;
+  staleGraceDays: number;
+  preferenceDays: number;
+  projectFactDays: number;
+  correctionDays: number;
+  identityDays: number;
+}
+
 export interface MemorySlotConfig {
   activeProvider: "local" | "http";
   local: { allowPII: boolean };
   http: MemoryHttpSettings;
+  distillation: MemoryDistillationSettings;
+  embedding: MemoryEmbeddingSettings;
+  retention: MemoryRetentionSettings;
 }
 
 export interface MemoryProviderHealth {
@@ -523,12 +562,25 @@ export interface MemorySlotStatus {
   localStore: {
     state: string;
     file: string;
+    storeDir: string;
     loaded: boolean;
     migratedFrom?: number;
     quarantinedTo?: string;
     message?: string;
     activeCount: number;
+    candidateCount: number;
+    staleCount: number;
     historyCount: number;
+    eventCount: number;
+    bytes?: number;
+  };
+  semantic: {
+    enabled: boolean;
+    model: string;
+    indexed: number;
+    dimensions: number;
+    updatedAt: number | null;
+    message?: string;
   };
 }
 
