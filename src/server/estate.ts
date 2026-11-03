@@ -72,8 +72,10 @@ const beikeBreaker = new CircuitBreaker("beike", BEIKE_BREAKER_FAILURES, BEIKE_B
  * host 命中列表 —— manifest 被 MITM/篡改后给出的任意 host 不再下载执行。
  */
 const INSTALL_URL_HOST_ALLOW = new Set([
-  "raw.githubusercontent.com", "objects.githubusercontent.com", "github.com", "codeload.github.com",
+  "raw.githubusercontent.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+  "github.com", "codeload.github.com",
 ]);
+const INSTALL_MAX_REDIRECTS = 5;
 
 /** 下载/解压 URL 的信任校验：HTTPS + host 白名单（导出供注入式测试使用） */
 export function assertTrustedInstallUrl(u: string, what: string): void {
@@ -422,6 +424,23 @@ async function pickLatestBinary(os: string, arch: string): Promise<{ url: string
   return { url: hit.url, sha256: hit.sha256, version: manifest.latest };
 }
 
+/** GitHub Release 会先 302 到 release-assets，再返回文件；每一跳都必须重新过 host 白名单。 */
+async function fetchTrustedRelease(url: string): Promise<Response> {
+  let current = url;
+  for (let redirects = 0; redirects <= INSTALL_MAX_REDIRECTS; redirects += 1) {
+    assertTrustedInstallUrl(current, "二进制下载地址");
+    const res = await fetch(current, {
+      signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS),
+      redirect: "manual",
+    });
+    if (res.status < 300 || res.status >= 400) return res;
+    const location = res.headers.get("location");
+    if (!location) throw new Error(`贝壳 CLI 下载重定向缺少 Location（HTTP ${res.status}）`);
+    current = new URL(location, current).href;
+  }
+  throw new Error(`贝壳 CLI 下载重定向超过 ${INSTALL_MAX_REDIRECTS} 次`);
+}
+
 /**
  * 安装互斥（T1-6）：并发点击只保留第一调用，后续调用复用同一个 Promise。
  * 否则两次 tar 解压/写配置会互相踩（.setting/beike 半拆状态）。
@@ -444,15 +463,14 @@ async function doInstallBeike(): Promise<BeikeStatus> {
   }
   // Windows 自动化依赖系统自带 tar.exe 解 .tar.gz；linux/mac 引导 install.sh（官方脚本）
   if (os === "win32") {
-    const bin = await pickLatestBinary("win32", "x64");
+    // 官方 manifest 使用自己的平台命名：Windows/x64 对应 windows/amd64。
+    const bin = await pickLatestBinary("windows", "amd64");
     if (!bin) throw new Error("未找到可用的官方二进制");
     await fsp.mkdir(BEIKE_DIR, { recursive: true });
     // 先写 .part 临时名再 rename：防响应中断留下「看似可用」的半份压缩包
     const archive = join(BEIKE_DIR, "beike-cli.tar.gz.part");
     log("info", "estate_cli_download", { version: bin.version, url: bin.url });
-    assertTrustedInstallUrl(bin.url, "二进制下载地址"); // 落到真实 request 前再度校验
-    const res = await fetch(bin.url, { signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS), redirect: "error" });
-    // redirect: "error"：显式拒绝跟到非白名单 host（重定向即视为篡改）
+    const res = await fetchTrustedRelease(bin.url);
     if (!res.ok) throw new Error(`下载贝壳 CLI 失败：HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     // sha256 校验：manifest 里给的是十六进制摘要，下载必须完全一致才落盘解压
@@ -522,6 +540,11 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   // 所以这里由服务端直接写该文件（mode 600），再用 doctor 做校验：
   // doctor 只探测 /mcp 的工具清单（免费、不耗网关配额），判定 Key 是否被 CLI 认可。
   await fsp.mkdir(dirname(BEIKE_CRED_FILE), { recursive: true });
+  // 先保留旧凭证：新 Key 校验失败时恢复，避免一次错误粘贴把原本可用的登录态也覆盖掉。
+  let previousKey: Buffer | null = null;
+  try {
+    previousKey = await fsp.readFile(BEIKE_CRED_FILE);
+  } catch { /* 首次配置没有旧文件 */ }
   await fsp.writeFile(BEIKE_CRED_FILE, key, { mode: 0o600 });
   const doctor = await runBeikeRaw(bin, ["doctor"], KEY_AUTH_TIMEOUT_MS);
   const out = `${doctor.stdout}\n${doctor.stderr}`;
@@ -530,12 +553,20 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
     beikeCredentialVerified = true;
     return { ok: true, message: "Key 已保存并通过 CLI 校验，可以开始找房了" };
   }
+  let restoreError = "";
+  try {
+    if (previousKey) await fsp.writeFile(BEIKE_CRED_FILE, previousKey, { mode: 0o600 });
+    else await fsp.rm(BEIKE_CRED_FILE, { force: true });
+  } catch (err) {
+    restoreError = err instanceof Error ? err.message : String(err);
+  }
   const tail = out.trim().slice(-300);
+  const detail = tail
+    ? `凭证校验未通过：${redactSecret(tail, key)}`
+    : "凭证校验未通过，请确认复制的是页面上的完整字符";
   return {
     ok: false,
-    message: tail
-      ? `凭证校验未通过：${redactSecret(tail, key)}`
-      : "凭证校验未通过，请确认复制的是页面上的完整字符",
+    message: restoreError ? `${detail}；旧凭证恢复失败：${restoreError}` : detail,
   };
 }
 
