@@ -26,7 +26,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
     const body = JSON.parse((await readBody(req)) || "{}") as { kind?: unknown; demo?: unknown; projectId?: unknown; title?: string; agentId?: unknown };
     // 新逻辑：{ kind: "agent" }（默认）/ { kind: "demo", demo: 1-4 } / { kind: "external", agentId }
     //         / { kind: "estate" }（房产 Agent，贝壳工具集）
-    //         / { kind: "job" }（求职岗位 Agent，job-hunter 技能工具集）
+    //         / { kind: "job" }（求职岗位 Agent，内置采集工具集）
     // 兼容旧调用：只传 { demo: N } 视为示例会话
     const kind = body.kind === "demo" || body.kind === "external" || body.kind === "estate"
       || body.kind === "job" || (!body.kind && isDemo(body.demo))

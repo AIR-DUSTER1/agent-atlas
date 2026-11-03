@@ -78,10 +78,10 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
   {
     id: "job",
     icon: "💼",
-    name: "求职岗位（job-hunter）",
+    name: "求职岗位（内置采集）",
     transport: "cli",
-    runtime: "Python CLI · 四平台采集",
-    description: "从 BOSS直聘 / 智联 / 前程无忧 / 猎聘 采集岗位、打分、排除外包并导出 Excel。需要 Python 3.10+ 与 DrissionPage，首次使用要在各平台扫码登录。",
+    runtime: "内置 Chrome / Edge · 四平台采集",
+    description: "由求职 Agent 内置驱动 Chrome / Edge，从 BOSS直聘 / 智联 / 前程无忧 / 猎聘采集岗位、打分、排除外包并导出 Excel；不依赖外部 Skill 或 Python，首次使用按需扫码登录。",
     manageLabel: "管理数据源",
     defaultEnabled: true,
   },

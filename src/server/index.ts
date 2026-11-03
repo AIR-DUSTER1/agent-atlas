@@ -533,7 +533,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/estate/login" && req.method === "POST") { await handleStartBeikeLogin(res, req); return; }
     if (pathname === "/api/estate/key" && req.method === "POST") { await handleSaveBeikeKey(res, req); return; }
 
-    // 求职岗位 Agent（job-hunter 技能 CLI）：状态 / 路径配置 / 登录 / 自检
+    // 求职岗位 Agent（内置浏览器采集）：状态 / 数据目录 / 登录 / 自检
     if (pathname === "/api/job" && req.method === "GET") { await handleGetJob(res); return; }
     if (pathname === "/api/job" && req.method === "PUT") { await handleSaveJob(res, req); return; }
     if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }

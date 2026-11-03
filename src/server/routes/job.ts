@@ -1,10 +1,10 @@
 /**
- * routes/job.ts — 求职岗位 Agent（job-hunter CLI）路由
+ * routes/job.ts — 求职岗位 Agent（内置浏览器执行）路由
  * ============================================================
  * GET    /api/job            环境状态（技能目录 / python / 依赖 / 最近清单）
  * PUT    /api/job            保存技能目录 / python / 数据目录
- * POST   /api/job/login      打开指定平台的登录页等扫码（长请求，最长 5 分钟）
- * POST   /api/job/doctor     环境自检（对应技能 CLI 的 doctor）
+ * POST   /api/job/login      打开内置浏览器完成平台扫码（长请求，最长 5 分钟）
+ * POST   /api/job/doctor     内置执行器自检
  *
  * 设计立场：
  *  - 登录是**交互步骤**，必须停下来等用户扫码，所以不封装成 Agent 工具，
@@ -28,12 +28,10 @@ export async function handleGetJob(res: ServerResponse): Promise<void> {
     // 探测失败也要给前端一个可渲染的降级状态，而不是 500 让卡片空着
     sendJson(res, 200, {
       installed: false,
-      skillDir: "",
       hasOverride: false,
-      pythonOK: false,
-      pythonVersion: "",
-      depsOK: false,
-      depsError: err instanceof Error ? err.message : String(err),
+      browserOK: false,
+      browserName: "",
+      browserError: err instanceof Error ? err.message : String(err),
       dataDir: "",
       lastRunJobs: 0,
       lastRunAt: "",

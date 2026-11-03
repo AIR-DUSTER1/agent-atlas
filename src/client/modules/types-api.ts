@@ -442,15 +442,13 @@ export interface EstateState {
   loginRequired?: boolean;
 }
 
-/** 求职数据源（job-hunter 技能）的环境状态；对应 GET /api/job。 */
+/** 求职 Agent 内置浏览器与数据目录状态；对应 GET /api/job。 */
 export interface JobState {
   installed: boolean;
-  skillDir: string;
   hasOverride: boolean;
-  pythonOK: boolean;
-  pythonVersion: string;
-  depsOK: boolean;
-  depsError: string;
+  browserOK: boolean;
+  browserName: string;
+  browserError: string;
   dataDir: string;
   lastRunJobs: number;
   lastRunAt: string;

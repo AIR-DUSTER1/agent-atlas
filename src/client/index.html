@@ -1480,28 +1480,20 @@
     </div>
   </div>
 
-  <!-- ============ 求职数据源面板：job-hunter 技能的环境 / 路径 / 登录 / 自检 ============ -->
+  <!-- ============ 求职 Agent 内置数据源：浏览器 / 数据目录 / 平台登录 / 自检 ============ -->
   <div id="job-mask" class="hidden">
     <div id="job-modal" role="dialog" aria-modal="true" aria-labelledby="job-title">
-      <h2 id="job-title"><i class="ui-icon" data-icon="Briefcase" aria-hidden="true"></i> 求职数据源（job-hunter）</h2>
-      <p class="settings-sub">岗位采集来自本地 job-hunter 技能（Python CLI，四平台：BOSS直聘 / 智联 / 前程无忧 / 猎聘）。采集、打分、排除外包、导出 Excel 全在本地完成；Agent 只负责问清需求与解读结果。</p>
+      <h2 id="job-title"><i class="ui-icon" data-icon="Briefcase" aria-hidden="true"></i> 求职 Agent（内置采集）</h2>
+      <p class="settings-sub">采集流程已经内化到求职 Agent：内置驱动 Chrome / Edge 访问 BOSS直聘、智联招聘、前程无忧与猎聘，完成搜索、打分、外包识别、清单合并和 Excel / HTML 交付，不需要安装外部 Skill 或 Python。</p>
 
       <div class="field-label">环境检查</div>
       <div id="job-check-list" class="job-check-list" role="status" aria-live="polite">探测中…</div>
       <div id="job-fix-hint" class="job-fix-hint hidden" role="alert"></div>
 
-      <div class="field-label">路径配置 <em class="key-state">留空表示自动探测</em></div>
+      <div class="field-label">数据目录 <em class="key-state">留空使用应用默认目录</em></div>
       <label class="field">
-        <span class="field-label">技能根目录（该目录下应有 <code>scripts/main.py</code>）</span>
-        <input id="job-skill-dir" type="text" spellcheck="false" placeholder="例如 C:\Users\你\.agents\skills\job-hunter" />
-      </label>
-      <label class="field">
-        <span class="field-label">Python 解释器</span>
-        <input id="job-python-bin" type="text" spellcheck="false" placeholder="留空使用 PATH 上的 python；需要 3.10+" />
-      </label>
-      <label class="field">
-        <span class="field-label">数据目录（登录态与 Excel 产出）</span>
-        <input id="job-data-dir" type="text" spellcheck="false" placeholder="留空使用 <技能目录>/job-data" />
+        <span class="field-label">登录态、岗位清单与 Excel 产出</span>
+        <input id="job-data-dir" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
       </label>
       <div class="kb-actions">
         <button id="job-save-btn" class="btn btn-approve">保存并重新探测</button>
@@ -1512,8 +1504,8 @@
 
       <div class="field-label ext-head">平台登录 <em class="key-state">BOSS直聘必须登录，其余建议登录</em></div>
       <p class="settings-note" style="margin-top:0;">
-        点按钮会拉起浏览器打开对应平台登录页，请扫码。登录态保存在数据目录的 <code>.profile/</code>，
-        之后所有采集复用，不用重复登录。未登录时 BOSS直聘列表页会被安全校验拦截，一条都拿不到。
+        点按钮会拉起独立浏览器打开对应平台登录页，请扫码。登录态保存在数据目录的 <code>.profile/</code>，
+        之后内置采集流程会复用，不用重复登录。采集时会出现独立浏览器窗口，遇到站点安全验证可在窗口中完成；未登录时 BOSS直聘列表页通常会被拦截。
       </p>
       <div id="job-platforms" class="job-platforms"></div>
 
@@ -1521,7 +1513,7 @@
         <span class="spacer"></span>
         <button id="job-close" class="ghost-btn">关闭</button>
       </div>
-      <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary</code>；Excel 交付物在数据目录的 <code>out/</code> 下，投递状态改动下次采集会增量保留。</p>
+      <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary</code>；执行流程、评分规则和平台适配均在应用内，Excel / HTML 交付物写入数据目录的 <code>out/</code>。</p>
     </div>
   </div>
 

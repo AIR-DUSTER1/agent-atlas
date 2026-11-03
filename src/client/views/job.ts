@@ -1,15 +1,7 @@
 /**
+ * views/job.ts — 求职 Agent 的内置数据源与登录管理
  * ============================================================
- * views/job.ts — 求职岗位数据源管理（job-hunter 技能）
- * ============================================================
- * 职责：显示环境状态（技能目录 / Python / 依赖 / 最近清单），配置路径，
- * 触发平台登录与自检。
- *
- * 设计立场：
- *  - 登录是**交互步骤**：点按钮后会一直挂着等扫码（最长 5 分钟），
- *    所以按钮进入 disabled + 明确提示，避免用户重复点击拉起多个浏览器；
- *  - 状态优先展示「哪里没就绪 + 怎么修」，而不是只给一个红点；
- *  - 所有文本走 textContent / h()，不拼用户可控 HTML。
+ * 面板只管理浏览器、数据目录和平台登录；采集流程由求职 Agent 内部执行。
  */
 import { api } from "../core/api.js";
 import { $ } from "../core/dom.js";
@@ -18,7 +10,7 @@ import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import type { JobState } from "../modules/types.js";
 
-const PLATFORM_BUTTONS: Array<{ id: string; label: string }> = [
+const PLATFORM_BUTTONS = [
   { id: "boss", label: "BOSS直聘" },
   { id: "zhilian", label: "智联招聘" },
   { id: "job51", label: "前程无忧" },
@@ -48,49 +40,22 @@ function line(label: string, value: string, ok?: boolean): HTMLElement {
 }
 
 function renderStatus(status: JobState): void {
-  const list = $("job-check-list");
-  if (list) {
-    list.replaceChildren(
-      line("技能目录", status.installed ? status.skillDir : "未找到（请在下方填写 job-hunter 技能根目录）", status.installed),
-      line(
-        "Python",
-        status.pythonOK ? `可用 ${status.pythonVersion}` : "不可用：需要 3.10+ 并在 PATH 中",
-        status.pythonOK,
-      ),
-      line("依赖（DrissionPage / openpyxl）", status.depsOK ? "已安装" : (status.depsError || "未就绪"), status.depsOK),
-      line("数据目录", status.dataDir || "—", undefined),
-      line("登录态", status.profilePresent ? "已存在（至少登录过一个平台）" : "未登录", undefined),
-      line(
-        "最近清单",
-        status.lastRunJobs ? `${status.lastRunJobs} 条${status.lastRunAt ? ` · ${status.lastRunAt}` : ""}` : "还没有采集记录",
-        undefined,
-      ),
-    );
-  }
-
-  const skillInput = $("job-skill-dir") as HTMLInputElement | null;
-  if (skillInput && !skillInput.value) skillInput.value = status.skillDir;
-  const pythonInput = $("job-python-bin") as HTMLInputElement | null;
-  if (pythonInput && !pythonInput.value) pythonInput.value = status.pythonVersion ? "" : "";
+  $("job-check-list")?.replaceChildren(
+    line("浏览器", status.browserOK ? `可用 · ${status.browserName}` : (status.browserError || "未找到 Chrome / Edge"), status.browserOK),
+    line("内置执行流程", "BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘（无需 Python / Skill）", true),
+    line("数据目录", status.dataDir || "—"),
+    line("浏览器 Profile", status.profilePresent ? "已初始化（是否登录以采集结果为准）" : "首次登录时初始化"),
+    line("最近清单", status.lastRunJobs ? `${status.lastRunJobs} 条${status.lastRunAt ? ` · ${status.lastRunAt}` : ""}` : "还没有采集记录"),
+  );
   const dataInput = $("job-data-dir") as HTMLInputElement | null;
   if (dataInput && !dataInput.value) dataInput.value = status.dataDir;
-
-  // 依赖不齐时把「怎么修」写成显式提示，别让用户猜
   const hint = $("job-fix-hint");
   if (hint) {
     hint.replaceChildren();
-    if (!status.installed) {
-      hint.appendChild(h("span", null,
-        "未找到技能：请在下方填写 job-hunter 技能的根目录（该目录下应有 scripts/main.py）。"));
-    } else if (!status.pythonOK) {
-      hint.appendChild(h("span", null,
-        "需要 Python 3.10+：技能里用了 `X | None` 联合类型，3.9 运行时会报 TypeError。"));
-    } else if (!status.depsOK) {
-      hint.appendChild(h("span", null,
-        status.depsError || "依赖未装齐，请在技能根目录执行 pip install -r requirements.txt"));
-    }
+    if (!status.browserOK) hint.appendChild(h("span", null, status.browserError || "请安装 Chrome / Edge，或设置 BROWSER_USE_EXECUTABLE_PATH。"));
+    else if (status.lastRunJobs === 0) hint.appendChild(h("span", null, "首次使用请先登录 BOSS直聘；未登录时列表页通常会被安全校验拦截。"));
   }
-  hint?.classList.toggle("hidden", status.installed && status.pythonOK && status.depsOK);
+  hint?.classList.toggle("hidden", status.browserOK && status.lastRunJobs > 0);
 }
 
 async function load(): Promise<void> {
@@ -107,11 +72,7 @@ async function save(): Promise<void> {
     const status = await api<JobState>("/api/job", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        skillDir: ($("job-skill-dir") as HTMLInputElement | null)?.value ?? "",
-        pythonBin: ($("job-python-bin") as HTMLInputElement | null)?.value ?? "",
-        dataDir: ($("job-data-dir") as HTMLInputElement | null)?.value ?? "",
-      }),
+      body: JSON.stringify({ dataDir: ($("job-data-dir") as HTMLInputElement | null)?.value ?? "" }),
     });
     state.job = status;
     renderStatus(status);
@@ -175,7 +136,6 @@ export function renderJobManage(): void {
   }
 }
 
-/** 打开求职数据源管理弹窗。 */
 export async function openJob(): Promise<void> {
   $("job-mask")?.classList.remove("hidden");
   document.body.classList.add("job-open");
@@ -187,7 +147,7 @@ export async function openJob(): Promise<void> {
   } catch (err) {
     setStatus(`✗ ${(err as Error).message}`, "err");
   }
-  requestAnimationFrame(() => ($("job-skill-dir") as HTMLInputElement | null)?.focus());
+  requestAnimationFrame(() => ($("job-data-dir") as HTMLInputElement | null)?.focus());
 }
 
 export function closeJob(): void {
@@ -200,15 +160,12 @@ export function isJobOpen(): boolean {
   return Boolean(mask) && !mask?.classList.contains("hidden");
 }
 
-/** 只绑定一次。 */
 export function bindJob(): void {
   $("job-close")?.addEventListener("click", () => closeJob());
   $("job-save-btn")?.addEventListener("click", () => { void save(); });
   $("job-doctor-btn")?.addEventListener("click", () => { void doctor(); });
   const mask = $("job-mask");
-  mask?.addEventListener("click", (event) => {
-    if (event.target === mask) closeJob();
-  });
+  mask?.addEventListener("click", (event) => { if (event.target === mask) closeJob(); });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isJobOpen()) {
       event.preventDefault();

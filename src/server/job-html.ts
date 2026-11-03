@@ -1,11 +1,11 @@
 /**
  * server/job-html.ts — 求职岗位 HTML 报告生成器
- * 职责：把 job-hunter 的最新岗位 JSON 渲染成与 Excel 同名的自包含 HTML。
+ * 职责：把内置求职 Agent 的最新岗位 JSON 渲染成与 Excel 同名的自包含 HTML。
  * 设计立场：报告只做本地静态交付，不引脚本、不读网络；所有岗位字段先转义再拼装。
  */
 import { promises as fsp } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { JobManifest, JobRecord } from "./job.js";
+import type { JobManifest, JobRecord } from "./job-model.js";
 
 /** HTML 报告最多渲染的岗位数；超出时保留摘要并明确标注截断，避免生成超大文件 */
 const MAX_HTML_JOB_ROWS = 1_000;
@@ -139,7 +139,7 @@ main,header,footer{max-width:1440px;margin:0 auto;padding:24px}header{padding-to
 <body>
 <header>
 <h1>求职岗位清单报告</h1>
-<p class="meta">生成时间：${escapeHtml(generatedAt)} · 数据采集：${escapeHtml(collectedAt)} · 数据源：job-hunter 最新岗位清单</p>
+<p class="meta">生成时间：${escapeHtml(generatedAt)} · 数据采集：${escapeHtml(collectedAt)} · 数据源：求职 Agent 最新岗位清单</p>
 </header>
 <div class="layout">
 <div class="cards">
@@ -157,7 +157,7 @@ ${omitted > 0 ? `<p class="notice">清单共 ${manifest.jobs.length} 条，报�
 <tbody>${jobs.map(renderJobRow).join("")}</tbody>
 </table></div>
 </main>
-<footer>由 agentatlas 在 job-hunter 写完 Excel 后生成；报告与 Excel 位于同一 out 目录，可离线打开与打印。</footer>
+<footer>由 agentatlas 内置求职 Agent 在写完 Excel 后生成；报告与 Excel 位于同一 out 目录，可离线打开与打印。</footer>
 </body></html>`;
 }
 
