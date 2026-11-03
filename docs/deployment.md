@@ -1,6 +1,6 @@
 # 部署与运维总览
 
-> 适用范围：**开发预览阶段的自托管与部署参考**。当前版本为 `0.9.0-beta.7`，不是正式发布版。
+> 适用范围：**开发预览阶段的自托管与部署参考**。当前版本为 `0.9.0-beta.15`，不是正式发布版。
 > 这些文档用于验证单实例部署、数据恢复和运维流程，不构成生产 SLA 或稳定兼容承诺。
 
 ## 文档导航
@@ -32,7 +32,7 @@ agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
       ├── web-config.json          # 敏感字段 AES-256-GCM 加密
       ├── sessions.ndjson          # 会话 journal
       ├── checkpoints.ndjson       # LangGraph 持久检查点
-      ├── memories.json            # 跨会话记忆
+      ├── memory-store/            # 跨会话记忆 v3（事件 / 快照 / 向量索引）
       ├── skills/                  # 用户技能文档
       ├── audit.ndjson             # 安全审计
       ├── audit-archive*/          # 审计归档与哈希清单

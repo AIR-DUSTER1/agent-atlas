@@ -1,6 +1,6 @@
 # agentatlas
 
-> **当前状态：`0.9.0-beta.13` 开发预览版。**
+> **当前状态：`0.9.0-beta.15` 开发预览版。**
 > 项目仍有很多功能在完善，接口、数据格式和交互可能继续调整；暂不提供正式版本、Git tag、生产 SLA 或稳定兼容承诺。
 
 一个基于 **LangGraph.js + TypeScript** 的可扩展 Agent 工具集，包含 Web、CLI 和 Electron 桌面壳。当前以通用 Agent 与房产 Agent 为基础，支持由主 Agent 动态赋予提示词和工具的生产级子代理委派。
@@ -233,10 +233,17 @@ docs/          用户文档与运维参考
 .setting/
   sessions.ndjson       会话 journal
   checkpoints.ndjson    LangGraph 检查点
-  memories.json         长期记忆（schema v2，可导出 / 导入）
+  memory-store/         长期记忆 v3（scope 事件日志 + 快照 + 向量索引）
   skills/               技能文档
   audit.ndjson          安全审计
 ```
+
+旧版 `memories.json` 会在首次启动时自动迁移，并保留为 `memories.json.v2-backup`。长期记忆支持：
+- 自动沉淀：`关闭 / 每次确认 / 智能沉淀`，高置信低风险偏好可自动入库，身份信息与低置信候选等待确认；
+- 语义召回：可选 OpenAI 兼容 Embedding；不可用时自动降级词法召回；
+- 生命周期：到期转为 stale，宽限后归档，候选、历史与归档分别管理；
+- 大规模存储：按 Agent scope 分目录追加事件，达到阈值后生成快照并压缩；
+- 5 万条规模自测：`npm run memory:bench`。
 
 容器默认使用 `/data`。
 
@@ -257,6 +264,7 @@ docs/          用户文档与运维参考
 | `MODEL_CONCURRENCY_PER_PROVIDER` | 每个供应商同时进行的模型轮数上限，默认 5（1–50）；超出后进入队列 |
 | `BROWSER_USE_EXECUTABLE_PATH` | Browser Use 使用的 Chrome / Edge / Chromium 可执行文件；未设置时自动探测系统安装 |
 | `MODEL_QUEUE_WAIT_MS` | 并发占满时的排队等待上限，默认 10000 毫秒；超过回 429 + `Retry-After` |
+| `MEMORY_STORE_DIR` | 长期记忆 v3 目录；默认 `.setting/memory-store`，测试/容器可覆盖 |
 
 `.env`、`.web-config.json`、`.setting/` 和 `data/` 已加入 gitignore，不要提交。
 

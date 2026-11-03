@@ -16,7 +16,7 @@
 - 模型：错误数、供应商/模型、超时与状态；
 - 工具与审批：审批次数、拒绝/完成；
 - 外部依赖：资源队列、拒绝、熔断状态与失败；
-- 长期记忆：`memory_save_total`、`memory_recall_hit_total`、`memory_injected_total`、`memory_provider_latency_milliseconds`、`memory_provider_degraded_total`、`memory_sensitive_blocked_total`、`memory_provider_health`；
+- 长期记忆：`memory_save_total`、`memory_recall_hit_total`、`memory_injected_total`、`memory_provider_latency_milliseconds`、`memory_provider_degraded_total`、`memory_sensitive_blocked_total`、`memory_provider_health`、`memory_distillation_candidate_total`、`memory_distillation_auto_saved_total`、`memory_lifecycle_maintenance_failed_total`；
 - 进程：uptime、RSS、heap、event loop lag。
 
 ## 2. Prometheus 抓取

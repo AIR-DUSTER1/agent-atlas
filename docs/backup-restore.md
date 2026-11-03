@@ -9,7 +9,8 @@
 | `web-config.json` | 是 | 供应商、模型、插件配置；敏感字段为密文 |
 | `sessions.ndjson` | 是 | 会话与逐轮 usage / 审批记录 |
 | `checkpoints.ndjson` | 是 | LangGraph 多轮记忆 |
-| `memories.json` | 是 | 跨会话长期记忆（schema v2，含 `general` / `estate` scope 与历史版本） |
+| `memory-store/` | 是 | 跨会话长期记忆 v3（scope manifest、事件日志、快照、向量索引） |
+| `memories.json` | 存在时是 | 旧 v1/v2 记忆文件；用于迁移兼容 |
 | `skills/` | 是 | 用户技能 markdown |
 | `audit.ndjson` + 归档 | 是 | 安全审计与 SHA-256 清单 |
 | `backups/` | 否（本身） | 备份根，不应递归备份自己 |
@@ -17,7 +18,7 @@
 备份 v2 manifest 记录：
 
 - 文件相对路径、字节数与 SHA-256；
-- schemaVersion（其中 `memories.json` 当前为 2）；
+- schemaVersion（`memory-store` 当前为 3，旧 `memories.json` 为 2）；
 - 创建时间；
 - 是否包含密文；
 - 保留策略执行结果。

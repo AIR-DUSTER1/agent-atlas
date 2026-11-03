@@ -91,6 +91,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
         ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
         ├── memory-http.ts # Generic / Hindsight HTTP Memory Provider
+        ├── memory-distillation.ts # 对话结束后的自动记忆沉淀
+        ├── memory-maintenance.ts # TTL 后台维护
         ├── memory-observability.ts # 记忆指标 sink
         ├── events.ts     # SSE 事件协议定义
         └── public/       # ★ 前端构建产物（tsc 编译 src/client/**.ts，gitignore）
@@ -1015,9 +1017,9 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 文件悄悄写去了 `src/.setting/`（服务照常工作，极难察觉）。相对仓库根定位一律以
 **本文件自身位置**起算。
 
-### 3.26 `src/memory/*` + `src/tools-memory.ts` — 可插拔长期记忆（F1 升级）
+### 3.26 `src/memory/*` + `src/tools-memory.ts` — 生产级长期记忆
 
-**问题**：checkpoint 只解决同一会话的连续性；用户偏好、项目事实和纠错仍需要跨会话保存，而且通用 Agent 与租房 Agent 不能互相污染。
+**问题**：checkpoint 只解决同一会话连续性；用户偏好、项目事实和纠错需要跨会话保存。旧本地实现虽已 scope 隔离，但仍是单 JSON 全量重写，缺少自动沉淀、语义召回、TTL 与大规模存储。
 
 **分层**：
 
@@ -1025,64 +1027,76 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 Agent / tools / routes
         │
         ▼
-memory/slot.ts（统一门面：能力校验、降级、注入预算、指标 sink）
+memory/slot.ts（统一门面：能力、降级、注入预算、指标）
         │
         ├── providers/local.ts（默认）
-        │      ├── local-store.ts（schema / 原子写 / 迁移 / 隔离坏文件）
-        │      └── local-search.ts（确定性相关性排序）
-        └── server/memory-http.ts（Generic / Hindsight，可热切换）
+        │      ├── local-store.ts（内存索引、串行变更、保留策略）
+        │      ├── local-events.ts（manifest / scope 事件 / 快照代际）
+        │      ├── local-search.ts（确定性词法排序）
+        │      └── lifecycle.ts（TTL / stale / archive）
+        ├── semantic.ts + vector-index.ts（可选 Embedding / RRF）
+        └── server/memory-http.ts（Generic / Hindsight）
 ```
 
 | 层 | 关键约束 |
 |---|---|
-| `src/memory/provider.ts` | 纯领域接口；不 import server，Provider 差异不泄漏到图 |
-| `src/memory/scope.ts` | `general:local` / `estate:local` 严格隔离；未传 scope 的旧调用只回退 general |
-| `src/memory/providers/local-store.ts` | `.setting/memories.json` schema v2；v1 数组自动迁移；temp + fsync + rename；坏文件改名 `.corrupt-*`；未来版本拒绝写入 |
-| `src/memory/providers/local-search.ts` | key / tag / content / 中文 bigram / 最近使用加权；不使用 embedding |
-| `src/memory/slot.ts` | 默认 local；外部检索失败返回 degraded；最多 8 条 + 2400 字符；指标只写低基数标签 |
-| `src/tools-memory.ts` | 模型仍只看到 `memory_save` / `memory_recall`；scope 由工具工厂闭包注入，模型不能传 scope |
-| `src/agent/workflow.ts` | 每轮按最后一条用户消息检索当前 profile 的记忆，动态生成 system 注记，不写 checkpoint |
+| `src/memory/provider.ts` | 纯领域契约；记录含状态、类别、置信度、TTL、来源与替代关系 |
+| `src/memory/scope.ts` | `general` / `estate` / `job` 强隔离；工具闭包注入 scope，模型不能自选 |
+| `src/memory/providers/local-events.ts` | `.setting/memory-store` v3；scope 分目录追加事件；压缩生成新快照并原子切 manifest |
+| `src/memory/providers/local-store.ts` | v1/v2 → v3 迁移；损坏 manifest fail-closed；单进程串行变更；active/history 按 scope 限额 |
+| `src/memory/lifecycle.ts` | active 到期转 stale；宽限期后 archived；candidate 不注入 |
+| `src/memory/semantic.ts` | OpenAI 兼容 `/embeddings`；词法 + 向量 RRF；超时 / 坏响应 / 维度不符自动降级 |
+| `src/server/memory-distillation.ts` | 对话成功后异步自动沉淀；smart 只自动激活高置信非身份项；HTTP Provider 跳过 |
+| `src/tools-memory.ts` | 模型仍只见 `memory_save` / `memory_recall`，不能传 scope |
+| `src/agent/workflow.ts` | 每轮按最后用户消息召回当前 profile 的 active 记忆，动态注记不写 checkpoint |
 
-**写入策略**：
+**v3 存储**：
 
-- 同 scope + 同 key 的新内容把旧 active 版本标为 `superseded`，新内容生成 active 版本。
-- 内容完全相同只刷新 `updatedAt`，不制造重复历史。
-- 单条 key ≤ 50 字、content ≤ 500 字、tags ≤ 6 个；active 上限 500，历史上限 1000。
-- 默认拦截 API Key、Bearer token、私钥、password/secret 赋值、手机号和身份证。
-- PII 只有设置页显式允许后才可由用户手动保存；模型工具永远不能绕过。
-- 命中后更新 `lastUsedAt/useCount`，1 秒合并落盘，避免每轮重写。
+```text
+.setting/memory-store/
+  manifest.json
+  scopes/local--general/snapshot-*.json
+  scopes/local--general/events-*.ndjson
+  scopes/local--general/index/vectors.json
+```
 
-**HTTP 插槽**：
+- 变更先 append 事件，达到 500 条阈值或关停冲刷时生成新快照代际。
+- manifest 最后原子切换；崩溃前保留旧视图，崩溃后最多留下可回收孤儿文件。
+- usage 命中只在内存累计，1 秒合并后随快照落盘，避免每轮重写。
+- 旧 `memories.json` 迁移后保留 `.v2-backup`，迁移失败不删除原文件。
+- 5 万条基准（10k active + 40k history）：写入约 1s、恢复约 0.7s、词法检索均值约 32ms（Windows 本机实测）。
 
-- Generic：`GET /health`、`POST /memories/search`、`POST /memories`、`GET /memories`、`DELETE /memories/:id`。
-- Hindsight：按 scope 映射不同 bank，分别调用 recall / memories；当前不支持删除。
-- 统一限制：只允许 http(s)、拒绝 URL userinfo、拒绝重定向、超时、512KB 响应上限、白名单字段解析、连续失败熔断与半开恢复。
-- 外部故障不参与 `/readyz`，检索降级为空记忆，保存返回中文错误文本，不拖垮聊天。
+**自动沉淀与生命周期**：
+
+- `off` / `confirm` / `smart`；默认 smart，但每轮仅处理明确记忆信号。
+- 每轮最多 3 条、每小时 20 条；secret 永久拒绝，PII 默认拒绝，identity 永远人工确认。
+- candidate 可确认或拒绝；确认同主题时旧 active 转 superseded 并记录 `replacedBy`。
+- 偏好 / 项目事实 / 纠错 / 身份分别 180 / 120 / 365 / 365 天到期；stale 默认 30 天后归档。
+- 读取时和 6 小时后台维护都会推进状态。
 
 **Agent 边界**：
 
 - general 挂 `memory_save` / `memory_recall`，使用 `general` scope。
-- estate 使用独立 `estate` scope；默认不挂长期记忆工具。
-- 子 Agent 继续剔除记忆工具，后台黑盒任务无权写用户长期记忆。
-- 旧 v1 数据迁移时全部归入 `general`，不会被房产 Agent 继承。
+- estate / job 默认不挂记忆工具；自动沉淀仍只能写各自 scope。
+- 子 Agent 继续剔除记忆工具。
+- 外部 HTTP Provider 不参与自动沉淀，除非未来具备统一 candidate / confirm 契约。
 
-**管理与 API**：
+**API 与设置页**：
 
-- 设置页「长期记忆」支持 Provider 状态、HTTP 配置、连接测试、scope 筛选、搜索、历史版本、手动新增 / 删除、导出 / 导入。
-- `GET/POST /api/memories`、`DELETE /api/memories/:id`、`GET /api/memories/export`、`POST /api/memories/import`。
-- `GET/PUT /api/memory/config`、`POST /api/memory/test`、`GET /api/memory/status`。
-- API Key 只回掩码；空值更新保留旧 Key，显式清除才删除。
-- 导入整批校验后一次原子写入；替换模式只影响当前 scope。
+- `GET/POST /api/memories`、`DELETE /api/memories/:id`、导出 / 导入。
+- `GET /api/memories/candidates`、`POST /api/memories/:id/confirm|reject`。
+- `POST /api/memory/reindex`、`POST /api/memory/embedding/test`。
+- 设置页包含 Provider、HTTP、自动沉淀、生命周期、Embedding、索引状态、候选确认 / 拒绝和条目管理。
+- API Key 只回掩码；空值保留旧 Key，显式清除才删除。
 
 **备份与观测**：
 
-- 备份 manifest 记录 `memories.json` 的 schemaVersion=2；恢复后首次加载自动迁移 v1。
-- 指标：save / save_failed / recall / hit / injected / latency / degraded / sensitive_blocked / health。
-- 指标和日志不记录记忆正文、完整提示词、URL 或 Authorization。
-- `/api/diagnostics` 展示 Provider 与本地文件健康；HTTP 记忆故障只显示 degraded，不影响就绪探针。
+- 备份递归包含 `memory-store/` 全部文件，manifest 记录相对路径、大小、SHA-256 与 schemaVersion=3。
+- 指标新增 distillation candidate / auto-saved / model-failed、lifecycle maintenance failed。
+- 指标和日志不记录正文、查询词、URL、Authorization 或 Key。
+- `/api/diagnostics` 展示 v3 状态；Embedding / HTTP 故障只降级，不影响 `/readyz`。
 
-详细外部契约见 [`docs/memory-slot.md`](memory-slot.md)。
-
+详细契约见 [`docs/memory-slot.md`](memory-slot.md)。
 ### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
 
 **问题**：每轮 usage 事件从第一天起就写进 journal，但原页面只按“最后 30 个出现的日期”
@@ -1138,13 +1152,13 @@ reasoning 单轮最多落 20k 字符；超过 3000 事件上限时写 `storage`�
 **问题**：journal / 检查点 / 记忆 / 配置散在 `.setting/` 与仓库根
 `.web-config.json` —— 换机、误删、升级前没有一键带走全部状态的办法。
 
-**设计**：平铺目录快照（不压缩打包，肉眼可检）+ manifest.json：
+**设计**：可检目录快照（`memory-store/` 保真嵌套结构）+ manifest.json：
 `.setting/backups/backup-<yyyyMMdd-HHmmss-SSS>/`。
 
 | 机制 | 实现 |
 |---|---|
-| 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoriesFilePath` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
-| 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / audit）再拷贝 —— 「恢复前快照」也拿到完整状态 |
+| 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoryStoreDir` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
+| 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / memory usage / audit）再递归拷贝 —— 「恢复前快照」也拿到完整状态 |
 | 恢复 | `restoreBackup(name)`：名字白名单 `^backup-\d{8}-\d{6}(-\d+)*$`（纯数字段，天然防路径穿越）→ 先自动快照当前态 → 逐文件 temp+rename 原子写回 → **只动磁盘不动内存单例，必须重启生效**（内存 journal/配置会把旧态写回去） |
 | 前端 | 设置页「模型与供应商」底部区块（列表 / 创建 / 恢复按钮 + uiConfirm 重启提示）；audit 记 `backup.created` / `backup.restored` |
 
@@ -1706,6 +1720,9 @@ console.log(result.messages.at(-1).content);
 | 新会话能看到另一类 Agent 的记忆 | 旧 `memoryNoteForPrompt()` 没有 scope，workflow 直接读全局记忆 | 记忆记录必须有 `scope`；workflow 按 `profile.id` 取 note；estate 默认不挂记忆工具；v1 数据只迁 `general` |
 | 记忆文件坏了后下一次保存把原文覆盖掉 | 只清空内存、没有隔离原文件 | 坏 JSON 先改名 `.corrupt-<timestamp>`，再空记忆启动；未来 schemaVersion fail-closed 不写回 |
 | 外部记忆服务挂掉导致聊天整体失败 | HTTP Provider 的异常穿透到 workflow 或 `/readyz` | Slot 捕获检索失败返回 degraded；保存返回中文错误；HTTP 健康不参与 readyz；连续失败熔断 |
+| Embedding 失败后明明有词法结果却不注入 | `buildMemoryNote` 把任何 degraded 结果都判空 | 只有 records 为空才跳过；degraded + 词法回退结果继续注入 |
+| confirm 模式自动沉淀绕过确认直接写外部服务 | HTTP Provider 没有统一 candidate / confirm 契约，却被当作本地 Provider 调用 | 自动沉淀只在 active Provider=local 时运行；HTTP 模式跳过 |
+| v3 manifest 坏掉后保存把整个记忆目录清空 | 加载失败仍允许第一次写入生成空代际 | manifest / 回放错误一律 fail-closed，只读并提示恢复备份 |
 | Hindsight 两个 Agent 读到同一组记忆 | 两个 profile 共用 bank | `general` / `estate` bank 必填且不同，配置保存时拒绝共用；scope 仍由服务端注入 |
 | 导入到一半留下半批数据 | 导入逐条写文件，后一条校验失败时前面已落盘 | 先整批校验，再通过 `updateLocalRecords` 一次原子写入；替换模式只改当前 scope |
 | 记忆指标里出现用户隐私 | 把记忆正文或查询词当标签 | 指标只允许 provider / profile / operation / result 等低基数标签；日志不记录正文、URL、Authorization |
