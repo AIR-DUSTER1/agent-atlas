@@ -103,8 +103,10 @@ npm run data:check
 |---|---|
 | 设置页显示 HTTP 记忆不可用 | 检查 `/health`、Base URL、Bearer Key、代理和超时；HTTP 故障不会导致 `/readyz` 失败 |
 | 401 / 403 | 在设置页重新填写 Key；留空表示保留旧值，勾选清除才会删除 |
-| Hindsight 保存配置被拒 | `general` / `estate` bank 必须分别填写且不同 |
+| Hindsight 保存配置被拒 | `general` / `estate` / `job` bank 必须分别填写且互不相同 |
 | 记忆未注入 | 当前问题必须与 key、标签或内容相关；空查询和无关查询不会注入 |
 | 敏感内容被拒绝 | 密钥永远拒绝；PII 需在设置页显式允许后手动保存，导入同样受此规则约束 |
-| `memories.json.corrupt-*` 出现 | 原文件损坏已被隔离。修复或删除隔离副本前先备份；新写入从空记忆重建 |
+| `memories.json.corrupt-*` 出现 | 旧版记忆文件损坏已被隔离。修复或删除隔离副本前先备份 |
+| `memory-store` manifest 损坏 / 显示只读 | 应用按 fail-closed 拒绝覆盖。先整体备份，再从备份恢复 `memory-store/` 或修复 manifest |
+| 语义召回显示降级 | 检查 Embedding URL、模型、维度与 Key，并在设置页重建当前 Agent 索引；词法召回仍可用 |
 | 恢复备份后记忆未更新 | 恢复只写磁盘，重启服务后再检查 active / 历史条数 |

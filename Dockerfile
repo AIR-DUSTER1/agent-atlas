@@ -46,6 +46,7 @@ ENV NODE_ENV=production \
     SESSIONS_FILE=/data/sessions.ndjson \
     CHECKPOINT_FILE=/data/checkpoints.ndjson \
     MEMORIES_FILE=/data/memories.json \
+    MEMORY_STORE_DIR=/data/memory-store \
     SKILLS_DIR=/data/skills \
     AUDIT_FILE=/data/audit.ndjson \
     BACKUP_DIR=/data/backups

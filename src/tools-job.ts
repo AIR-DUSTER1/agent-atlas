@@ -1,8 +1,8 @@
 /**
  * ============================================================
- * tools-job.ts — 求职岗位 Agent 的工具集（job-hunter CLI 的模型接口）
+ * tools-job.ts — 求职岗位 Agent 的工具集（内置采集流程的模型接口）
  * ============================================================
- * 数据来自 server/job.ts 包装的 job-hunter 技能 CLI（BOSS直聘 / 智联 /
+ * 数据来自 server/job.ts 的内置浏览器采集器（BOSS直聘 / 智联 /
  * 前程无忧 / 猎聘 四平台采集 → 规则打分 → 排除外包 → Excel + HTML 报告交付）。
  *
  * 约定（与仓库其它工具一致）：
@@ -91,14 +91,14 @@ export const jobCollectTool = tool(
     }
     if (!JOB_SUPPORTED_CITIES.includes(city!.trim() as (typeof JOB_SUPPORTED_CITIES)[number])) {
       return badArgs(
-        `城市「${city}」目前不在技能支持列表内。可选：${JOB_SUPPORTED_CITIES.join("、")}。` +
-        "其它城市需要先在技能里补 CITY_* 编码，请如实告知用户。",
+        `城市「${city}」目前不在求职 Agent 支持列表内。可选：${JOB_SUPPORTED_CITIES.join("、")}。` +
+        "其它城市需要先补平台城市编码，请如实告知用户。",
       );
     }
 
     const outcome = await collectJobs({
       keywords: keywords!,
-      city: city!.trim(),
+      city: city!.trim() as (typeof JOB_SUPPORTED_CITIES)[number],
       salaryMin: salaryMin!,
       salaryMax: salaryMax!,
       years: years!,
@@ -119,19 +119,19 @@ export const jobCollectTool = tool(
       // 只给 Top N，避免把整张表灌进上下文
       returned: top.length,
       jobs: top.map(summarizeJob),
+      ...(outcome.xlsxPath ? { xlsxPath: outcome.xlsxPath } : {}),
       ...(outcome.htmlPath ? { htmlPath: outcome.htmlPath } : {}),
       ...(outcome.htmlError ? { htmlError: outcome.htmlError } : {}),
-      note: outcome.htmlPath
-        ? `Excel 与 HTML 报告已生成在技能数据目录的 out/ 下（HTML：${outcome.htmlPath}；技能清单是唯一权威数据源）。` +
+      note: outcome.xlsxPath
+        ? `Excel 与 HTML 报告已生成在求职数据目录的 out/ 下（Excel：${outcome.xlsxPath}；HTML：${outcome.htmlPath || "未生成"}；岗位清单 JSON 是唯一权威数据源）。` +
           "需要更多条目请用 job_query 加条件筛选，不要让我复述整张表。"
-        : "Excel 已生成在技能数据目录的 out/ 下；HTML 报告生成失败，请把错误转述给用户。" +
-          "需要更多条目请用 job_query 加条件筛选，不要让我复述整张表。",
+        : "Excel 生成失败，请把错误转述给用户。需要更多条目请用 job_query。",
     });
   },
   {
     name: "job_collect",
     description:
-      "从 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘 批量采集岗位，按匹配度打分、自动识别外包，并导出多 sheet Excel 与同名 HTML 报告。" +
+      "使用内置浏览器流程从 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘采集岗位，按匹配度打分、自动识别外包，并导出 Excel 与同名 HTML 报告；不依赖外部 Skill 或 Python。" +
       "何时用：用户想找工作、想筛岗位，且已明确「岗位方向 + 城市 + 期望月薪 + 工作年限」四项。" +
       "何时不用：用户只想看已有清单用 job_query；只想补 JD 详情用 job_enrich。" +
       "注意：这是重操作（3-5 分钟，会访问招聘站点），执行前系统会人工审批。",
@@ -143,7 +143,7 @@ export const jobCollectTool = tool(
       salaryMin: z.number().optional().describe("期望月薪下限（K，税前），如 10"),
       salaryMax: z.number().optional().describe("期望月薪上限（K，税前），如 20"),
       years: z.number().optional().describe("工作年限，如 2；应届填 0"),
-      pages: z.number().int().min(1).max(10).optional().describe("每个关键词翻页数，默认 2；翻越多越慢也越容易触发风控"),
+      pages: z.number().int().min(1).max(3).optional().describe("每个关键词翻页数，默认 1；最多 3 页，翻越多越容易触发风控"),
       platforms: z.array(z.enum(JOB_PLATFORMS)).optional().describe("只跑指定平台；不填表示四平台全跑"),
     }),
   }
@@ -220,7 +220,7 @@ export const jobEnrichTool = tool(
     description:
       "给已有清单补 JD 全文、工作地址、HR 最近活跃、公司规模等详情（逐条打开岗位页，只读）。" +
       "何时用：用户想看某类岗位的具体要求，或需要判断 HR 是否活跃再决定投不投。" +
-      "何时不用：刚采集完不要立刻补——技能文档明确要求与采集间隔几分钟，否则大概率被风控。" +
+      "何时不用：刚采集完不要立刻补——应与采集间隔几分钟，否则大概率被风控。" +
       "执行前系统会人工审批。",
     schema: z.object({
       limit: z.number().int().min(1).max(50).optional().describe("本次最多补几条，默认 10；条数越多越容易被风控"),
@@ -263,7 +263,7 @@ export const jobSummaryTool = tool(
       byDirection: Object.fromEntries(byDirection),
       byPlatform: Object.fromEntries(byPlatform),
       byStatus: Object.fromEntries(byStatus),
-      note: "这是概览口径；具体岗位请用 job_query。Excel 交付物在技能数据目录的 out/ 下。",
+      note: "这是概览口径；具体岗位请用 job_query。Excel 交付物在求职数据目录的 out/ 下。",
     });
   },
   {

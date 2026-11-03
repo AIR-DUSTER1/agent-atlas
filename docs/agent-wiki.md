@@ -80,6 +80,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
+        ├── job.ts / job-browser.ts / job-model.ts / job-workbook.ts # 求职 Agent 内置采集、规则、清单与 XLSX（§3.47）
         ├── health.ts     # /healthz 存活 + /readyz 就绪探针（§3.19）
         ├── lifecycle.ts  # 在途请求统计 + 优雅退出（§3.19）
         ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
@@ -91,6 +92,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── files.ts      # 文件上下文（项目/远程文件夹/本地上传，路径授权防穿越）
         ├── rag.ts        # 外部 RAG 接入：契约客户端 + 入库/检索 + 登记表（§3.13）
         ├── memory-http.ts # Generic / Hindsight HTTP Memory Provider
+        ├── memory-distillation.ts # 对话结束后的自动记忆沉淀
+        ├── memory-maintenance.ts # TTL 后台维护
         ├── memory-observability.ts # 记忆指标 sink
         ├── events.ts     # SSE 事件协议定义
         └── public/       # ★ 前端构建产物（tsc 编译 src/client/**.ts，gitignore）
@@ -686,10 +689,10 @@ Header: Authorization: Bearer <key>（可留空）
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后直接结束本轮，不再让模型重试工具 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
-**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
+**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
-4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）只信任 HTTPS host 白名单，下载
+4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/x64` 映射为官方 manifest 的 `windows/amd64`，并逐跳校验 GitHub Release 重定向；只信任 HTTPS host 白名单，下载
 缓冲溢出即拒，校验 sha256 后经 `.part` 临时名原子改名，tar 用 `%WINDIR%\System32\tar.exe`
 绝对路径；安装动作写审计（URL/version/sha256）。
 
@@ -725,7 +728,7 @@ npm / npx / pnpm / pnpx / yarn / python* 裸名）或必须 resolve 在该 Agent
 |---|---|---|
 | `config-store.ts` | `.web-config.json` 原子存储 | 写入「`.tmp` + fsync + rename」（Windows rename 抖动重试一次）；`.bak` 滚动备份 + 启动自动抢救（双坏降级 `{}` 不崩服务）；跨进程文件锁 `.web-config.lock`（O_EXCL 创建，**存活判断只能靠时间戳** —— `process.kill(pid,0)` 在 Windows 对在在/否/无权限一律 EPERM，纯 pid 探测不可靠）；`schemaVersion=2` 注入向后兼容 |
 | `session-store.ts` | 会话 journal | append-only NDJSON `.setting/sessions.ndjson`（gitignore）；事件：`session`（upsert，**白名单挑字段**——Session 含编译图/内存结构严禁整只序列化）、`approval`（pending 全量 payload）、`decided`（approve / reject / answered，一次性转移）、`delete`、`turn`（user + events）；坏行跳过告警；`JOURNAL_MAX_BYTES=2MB` 超限快照重写 + 轮转 `.1`；启动 `replaySessions()` 回放进内存 |
-| `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `runWithLimit("beike-cli", 2)` |
+| `limits.ts` | 并发/节流闸 | `acquireSessionSlot`（同会话唯一回答流）、`assertChatInterval`（1.5s）、`runWithLimit`（按 key 的全局桶，满即中文报错不排队）；chat/resume 都过槽位闸，贝壳 CLI 过 `ResourceGauge("beike", 1)`，相邻启动至少间隔 1.5 秒 |
 
 **sessions.ts 启动回放配套**（Phase 2）：`restoreSessions()` 把 journal 回放成内存会话
 （图按 kind 重建为空态 checkpointer）；`pendingApproval` 仍为 `status=pending` 的会话标
@@ -1015,9 +1018,9 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 文件悄悄写去了 `src/.setting/`（服务照常工作，极难察觉）。相对仓库根定位一律以
 **本文件自身位置**起算。
 
-### 3.26 `src/memory/*` + `src/tools-memory.ts` — 可插拔长期记忆（F1 升级）
+### 3.26 `src/memory/*` + `src/tools-memory.ts` — 生产级长期记忆
 
-**问题**：checkpoint 只解决同一会话的连续性；用户偏好、项目事实和纠错仍需要跨会话保存，而且通用 Agent 与租房 Agent 不能互相污染。
+**问题**：checkpoint 只解决同一会话连续性；用户偏好、项目事实和纠错需要跨会话保存。旧本地实现虽已 scope 隔离，但仍是单 JSON 全量重写，缺少自动沉淀、语义召回、TTL 与大规模存储。
 
 **分层**：
 
@@ -1025,64 +1028,76 @@ journal 只回放出「对话记录」（给人回放），模型记忆降级为
 Agent / tools / routes
         │
         ▼
-memory/slot.ts（统一门面：能力校验、降级、注入预算、指标 sink）
+memory/slot.ts（统一门面：能力、降级、注入预算、指标）
         │
         ├── providers/local.ts（默认）
-        │      ├── local-store.ts（schema / 原子写 / 迁移 / 隔离坏文件）
-        │      └── local-search.ts（确定性相关性排序）
-        └── server/memory-http.ts（Generic / Hindsight，可热切换）
+        │      ├── local-store.ts（内存索引、串行变更、保留策略）
+        │      ├── local-events.ts（manifest / scope 事件 / 快照代际）
+        │      ├── local-search.ts（确定性词法排序）
+        │      └── lifecycle.ts（TTL / stale / archive）
+        ├── semantic.ts + vector-index.ts（可选 Embedding / RRF）
+        └── server/memory-http.ts（Generic / Hindsight）
 ```
 
 | 层 | 关键约束 |
 |---|---|
-| `src/memory/provider.ts` | 纯领域接口；不 import server，Provider 差异不泄漏到图 |
-| `src/memory/scope.ts` | `general:local` / `estate:local` 严格隔离；未传 scope 的旧调用只回退 general |
-| `src/memory/providers/local-store.ts` | `.setting/memories.json` schema v2；v1 数组自动迁移；temp + fsync + rename；坏文件改名 `.corrupt-*`；未来版本拒绝写入 |
-| `src/memory/providers/local-search.ts` | key / tag / content / 中文 bigram / 最近使用加权；不使用 embedding |
-| `src/memory/slot.ts` | 默认 local；外部检索失败返回 degraded；最多 8 条 + 2400 字符；指标只写低基数标签 |
-| `src/tools-memory.ts` | 模型仍只看到 `memory_save` / `memory_recall`；scope 由工具工厂闭包注入，模型不能传 scope |
-| `src/agent/workflow.ts` | 每轮按最后一条用户消息检索当前 profile 的记忆，动态生成 system 注记，不写 checkpoint |
+| `src/memory/provider.ts` | 纯领域契约；记录含状态、类别、置信度、TTL、来源与替代关系 |
+| `src/memory/scope.ts` | `general` / `estate` / `job` 强隔离；工具闭包注入 scope，模型不能自选 |
+| `src/memory/providers/local-events.ts` | `.setting/memory-store` v3；scope 分目录追加事件；压缩生成新快照并原子切 manifest |
+| `src/memory/providers/local-store.ts` | v1/v2 → v3 迁移；损坏 manifest fail-closed；单进程串行变更；active/history 按 scope 限额 |
+| `src/memory/lifecycle.ts` | active 到期转 stale；宽限期后 archived；candidate 不注入 |
+| `src/memory/semantic.ts` | OpenAI 兼容 `/embeddings`；词法 + 向量 RRF；超时 / 坏响应 / 维度不符自动降级 |
+| `src/server/memory-distillation.ts` | 对话成功后异步自动沉淀；smart 只自动激活高置信非身份项；HTTP Provider 跳过 |
+| `src/tools-memory.ts` | 模型仍只见 `memory_save` / `memory_recall`，不能传 scope |
+| `src/agent/workflow.ts` | 每轮按最后用户消息召回当前 profile 的 active 记忆，动态注记不写 checkpoint |
 
-**写入策略**：
+**v3 存储**：
 
-- 同 scope + 同 key 的新内容把旧 active 版本标为 `superseded`，新内容生成 active 版本。
-- 内容完全相同只刷新 `updatedAt`，不制造重复历史。
-- 单条 key ≤ 50 字、content ≤ 500 字、tags ≤ 6 个；active 上限 500，历史上限 1000。
-- 默认拦截 API Key、Bearer token、私钥、password/secret 赋值、手机号和身份证。
-- PII 只有设置页显式允许后才可由用户手动保存；模型工具永远不能绕过。
-- 命中后更新 `lastUsedAt/useCount`，1 秒合并落盘，避免每轮重写。
+```text
+.setting/memory-store/
+  manifest.json
+  scopes/local--general/snapshot-*.json
+  scopes/local--general/events-*.ndjson
+  scopes/local--general/index/vectors.json
+```
 
-**HTTP 插槽**：
+- 变更先 append 事件，达到 500 条阈值或关停冲刷时生成新快照代际。
+- manifest 最后原子切换；崩溃前保留旧视图，崩溃后最多留下可回收孤儿文件。
+- usage 命中只在内存累计，1 秒合并后随快照落盘，避免每轮重写。
+- 旧 `memories.json` 迁移后保留 `.v2-backup`，迁移失败不删除原文件。
+- 5 万条基准（10k active + 40k history）：写入约 1s、恢复约 0.7s、词法检索均值约 32ms（Windows 本机实测）。
 
-- Generic：`GET /health`、`POST /memories/search`、`POST /memories`、`GET /memories`、`DELETE /memories/:id`。
-- Hindsight：按 scope 映射不同 bank，分别调用 recall / memories；当前不支持删除。
-- 统一限制：只允许 http(s)、拒绝 URL userinfo、拒绝重定向、超时、512KB 响应上限、白名单字段解析、连续失败熔断与半开恢复。
-- 外部故障不参与 `/readyz`，检索降级为空记忆，保存返回中文错误文本，不拖垮聊天。
+**自动沉淀与生命周期**：
+
+- `off` / `confirm` / `smart`；默认 smart，但每轮仅处理明确记忆信号。
+- 每轮最多 3 条、每小时 20 条；secret 永久拒绝，PII 默认拒绝，identity 永远人工确认。
+- candidate 可确认或拒绝；确认同主题时旧 active 转 superseded 并记录 `replacedBy`。
+- 偏好 / 项目事实 / 纠错 / 身份分别 180 / 120 / 365 / 365 天到期；stale 默认 30 天后归档。
+- 读取时和 6 小时后台维护都会推进状态。
 
 **Agent 边界**：
 
 - general 挂 `memory_save` / `memory_recall`，使用 `general` scope。
-- estate 使用独立 `estate` scope；默认不挂长期记忆工具。
-- 子 Agent 继续剔除记忆工具，后台黑盒任务无权写用户长期记忆。
-- 旧 v1 数据迁移时全部归入 `general`，不会被房产 Agent 继承。
+- estate / job 默认不挂记忆工具；自动沉淀仍只能写各自 scope。
+- 子 Agent 继续剔除记忆工具。
+- 外部 HTTP Provider 不参与自动沉淀，除非未来具备统一 candidate / confirm 契约。
 
-**管理与 API**：
+**API 与设置页**：
 
-- 设置页「长期记忆」支持 Provider 状态、HTTP 配置、连接测试、scope 筛选、搜索、历史版本、手动新增 / 删除、导出 / 导入。
-- `GET/POST /api/memories`、`DELETE /api/memories/:id`、`GET /api/memories/export`、`POST /api/memories/import`。
-- `GET/PUT /api/memory/config`、`POST /api/memory/test`、`GET /api/memory/status`。
-- API Key 只回掩码；空值更新保留旧 Key，显式清除才删除。
-- 导入整批校验后一次原子写入；替换模式只影响当前 scope。
+- `GET/POST /api/memories`、`DELETE /api/memories/:id`、导出 / 导入。
+- `GET /api/memories/candidates`、`POST /api/memories/:id/confirm|reject`。
+- `POST /api/memory/reindex`、`POST /api/memory/embedding/test`。
+- 设置页包含 Provider、HTTP、自动沉淀、生命周期、Embedding、索引状态、候选确认 / 拒绝和条目管理。
+- API Key 只回掩码；空值保留旧 Key，显式清除才删除。
 
 **备份与观测**：
 
-- 备份 manifest 记录 `memories.json` 的 schemaVersion=2；恢复后首次加载自动迁移 v1。
-- 指标：save / save_failed / recall / hit / injected / latency / degraded / sensitive_blocked / health。
-- 指标和日志不记录记忆正文、完整提示词、URL 或 Authorization。
-- `/api/diagnostics` 展示 Provider 与本地文件健康；HTTP 记忆故障只显示 degraded，不影响就绪探针。
+- 备份递归包含 `memory-store/` 全部文件，manifest 记录相对路径、大小、SHA-256 与 schemaVersion=3。
+- 指标新增 distillation candidate / auto-saved / model-failed、lifecycle maintenance failed。
+- 指标和日志不记录正文、查询词、URL、Authorization 或 Key。
+- `/api/diagnostics` 展示 v3 状态；Embedding / HTTP 故障只降级，不影响 `/readyz`。
 
-详细外部契约见 [`docs/memory-slot.md`](memory-slot.md)。
-
+详细契约见 [`docs/memory-slot.md`](memory-slot.md)。
 ### 3.27 `src/server/routes/stats.ts` — 使用统计（F2）
 
 **问题**：每轮 usage 事件从第一天起就写进 journal，但原页面只按“最后 30 个出现的日期”
@@ -1138,13 +1153,13 @@ reasoning 单轮最多落 20k 字符；超过 3000 事件上限时写 `storage`�
 **问题**：journal / 检查点 / 记忆 / 配置散在 `.setting/` 与仓库根
 `.web-config.json` —— 换机、误删、升级前没有一键带走全部状态的办法。
 
-**设计**：平铺目录快照（不压缩打包，肉眼可检）+ manifest.json：
+**设计**：可检目录快照（`memory-store/` 保真嵌套结构）+ manifest.json：
 `.setting/backups/backup-<yyyyMMdd-HHmmss-SSS>/`。
 
 | 机制 | 实现 |
 |---|---|
-| 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoriesFilePath` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
-| 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / audit）再拷贝 —— 「恢复前快照」也拿到完整状态 |
+| 备份集 | journal / 持久检查点 / 长期记忆 / 供应商配置 / 审计日志 —— 各 store 导出 path getter（`journalPath` / `checkpointFilePath` / `memoryStoreDir` / `SETTINGS_FILE` / `auditFilePath`），env 钩子隔离后路径随之变化；**不存在的文件不造空文件** |
+| 创建 | `createBackup()`：先 flush 全部在途写入（journal / checkpoint / memory usage / audit）再递归拷贝 —— 「恢复前快照」也拿到完整状态 |
 | 恢复 | `restoreBackup(name)`：名字白名单 `^backup-\d{8}-\d{6}(-\d+)*$`（纯数字段，天然防路径穿越）→ 先自动快照当前态 → 逐文件 temp+rename 原子写回 → **只动磁盘不动内存单例，必须重启生效**（内存 journal/配置会把旧态写回去） |
 | 前端 | 设置页「模型与供应商」底部区块（列表 / 创建 / 恢复按钮 + uiConfirm 重启提示）；audit 记 `backup.created` / `backup.restored` |
 
@@ -1580,7 +1595,9 @@ console.log(result.messages.at(-1).content);
 | 多配一个子代理后所有请求都变成「不确定」 | 直接用 `p_max` 当置信度，选项越多 `p_max` 越低 | 用按选项数归一化的 `confidence = (k·p_max−1)/(k−1)`（§3.45 守卫 G2） |
 | 新建求职会话却变成了通用 Agent | `routes/sessions.ts` 有一份独立的 kind 白名单，漏加新 kind 会被静默降级成 `"agent"` | 新增会话类型时必须同时改 `sessions.ts`、`session-store.ts`（两处各有一份 `SessionKind`）与 `routes/sessions.ts` 的白名单（§3.47） |
 | 求职采集能跑但模型说「缺少参数」却给了泛泛的 schema 报错 | zod 把 `city`/`salaryMin` 等设为必填，模型漏传时框架直接抛 `Invalid input: expected number`，模型读不懂 | 关键字段设为 optional，由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示（§3.47） |
-| 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 硬编码 `--enrich 0`，补详情必须单独调 `job_enrich` 且隔几分钟（§3.47） |
+| 求职 Agent 又要求填写 Skill 根目录/Python | 早期实现把外部 job-hunter CLI 当成产品依赖，Skill 升级、Python 3.10 与 DrissionPage 都会影响可用性 | 执行流程已内化到 `job-browser.ts` / `job-model.ts` / `job-workbook.ts`；设置页只保留浏览器、数据目录和平台登录（§3.47） |
+| 智联/BOSS 采集时被 Security Verification 拦住 | 站点对无头浏览器和短时间访问启用人机校验 | 采集默认使用可见浏览器窗口，用户可完成一次验证；导航带随机间隔与冷却，校验页会作为平台警告返回，不伪装成 0 条正常结果 |
+| 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 只抓列表；补详情必须单独调 `job_enrich`，两者间隔几分钟（§3.47） |
 | 澄清卡标题紧贴卡片左上角、文字顶着边框 | 澄清卡没套 `.approval-body`（审批卡靠它给内边距），早期版本直接把标题塞进 `.approval-card`，自身又没有 padding | `.clarify-head` / `.clarify-list` / `.clarify-foot` 各自带内边距（§3.48）；`chat-flow.test.ts` 有守门断言 |
 | 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
 | 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
@@ -1621,8 +1638,10 @@ console.log(result.messages.at(-1).content);
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
-| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |\n| `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
+| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |
+| 安装贝壳 CLI 报「暂无 win32/x64」或 `unexpected redirect` | 官方 manifest 使用 `windows/amd64`，不是 Node 的 `win32/x64`；GitHub Release 下载会 302 到 `release-assets.githubusercontent.com`。安装器现做平台名映射，并逐跳重新校验重定向 host |
+| `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
 | 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
 | 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agentatlas 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
 | Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
@@ -1706,6 +1725,9 @@ console.log(result.messages.at(-1).content);
 | 新会话能看到另一类 Agent 的记忆 | 旧 `memoryNoteForPrompt()` 没有 scope，workflow 直接读全局记忆 | 记忆记录必须有 `scope`；workflow 按 `profile.id` 取 note；estate 默认不挂记忆工具；v1 数据只迁 `general` |
 | 记忆文件坏了后下一次保存把原文覆盖掉 | 只清空内存、没有隔离原文件 | 坏 JSON 先改名 `.corrupt-<timestamp>`，再空记忆启动；未来 schemaVersion fail-closed 不写回 |
 | 外部记忆服务挂掉导致聊天整体失败 | HTTP Provider 的异常穿透到 workflow 或 `/readyz` | Slot 捕获检索失败返回 degraded；保存返回中文错误；HTTP 健康不参与 readyz；连续失败熔断 |
+| Embedding 失败后明明有词法结果却不注入 | `buildMemoryNote` 把任何 degraded 结果都判空 | 只有 records 为空才跳过；degraded + 词法回退结果继续注入 |
+| confirm 模式自动沉淀绕过确认直接写外部服务 | HTTP Provider 没有统一 candidate / confirm 契约，却被当作本地 Provider 调用 | 自动沉淀只在 active Provider=local 时运行；HTTP 模式跳过 |
+| v3 manifest 坏掉后保存把整个记忆目录清空 | 加载失败仍允许第一次写入生成空代际 | manifest / 回放错误一律 fail-closed，只读并提示恢复备份 |
 | Hindsight 两个 Agent 读到同一组记忆 | 两个 profile 共用 bank | `general` / `estate` bank 必填且不同，配置保存时拒绝共用；scope 仍由服务端注入 |
 | 导入到一半留下半批数据 | 导入逐条写文件，后一条校验失败时前面已落盘 | 先整批校验，再通过 `updateLocalRecords` 一次原子写入；替换模式只改当前 scope |
 | 记忆指标里出现用户隐私 | 把记忆正文或查询词当标签 | 指标只允许 provider / profile / operation / result 等低基数标签；日志不记录正文、URL、Authorization |
@@ -2200,55 +2222,49 @@ analyze → (clarify) → route → { routeAsk → dispatch, dispatch, agent }
 6 s 留足余量。若启用 systemone 的按需加载模式（每次 spawn 冷启动约 5.9 s），
 需要在设置页把它调到 15 s，否则 100% 超时。
 
-### 3.47 `src/server/job.ts` + `agent/job.ts` — 求职岗位 Agent（job-hunter 技能）
+### 3.47 `src/server/job*.ts` + `agent/job.ts` — 求职岗位 Agent（内置采集流程）
 
-**定位**：把 [job-hunter](https://github.com/AIR-DUSTER1/job-hunter) 技能做成第三个
-独立 Agent profile（`job`），与 `general` / `estate` 工具集与记忆 scope 全部隔离。
+**定位**：把原 [job-hunter](https://github.com/AIR-DUSTER1/job-hunter) 的执行流程内化到第三个
+独立 Agent profile（`job`）：需求澄清 → 四平台搜索 → 规则打分 → 外包识别 → 增量合并 →
+Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调用 `scripts/main.py`。
 
 **分层**：
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| profile | `agent/job.ts` | 提示词（浓缩技能工作流）+ 工具 allowlist + 领域分析/反思规则 |
+| profile | `agent/job.ts` | 提示词 + 工具 allowlist + 领域分析/反思规则 |
 | 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` |
-| 服务端 | `server/job.ts` | CLI 探测、子进程执行、清单 JSON 读取与投影 |
-| 报告 | `server/job-html.ts` | Excel 写完后把清单 JSON 渲染成同名自包含 HTML |
+| 领域规则 | `server/job-model.ts` | 岗位字段、同义词扩展、五维评分、外包识别、增量合并、纯本地查询 |
+| 浏览器执行 | `server/job-browser.ts` | Playwright 持久化 Profile、四平台搜索适配、详情补全、登录等待、导航限速 |
+| 编排与存储 | `server/job.ts` | 数据目录、采集/补详情编排、清单 JSON 原子写入 |
+| Excel | `server/job-workbook.ts` | 标准库生成最小 OOXML `.xlsx`；状态列带下拉校验 |
+| 报告 | `server/job-html.ts` | 与 Excel 同名的自包含 HTML 报告 |
 | 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor` |
-| 前端 | `views/job.ts` + `#job-mask` | 环境检查面板、路径配置、平台登录、自检 |
+| 前端 | `views/job.ts` + `#job-mask` | 浏览器检查、数据目录、平台登录、自检 |
 
-**为什么是一个独立 profile 而不是通用 Agent 的一个插件工具**：求职是「有明确
-工作流的多步任务」（问清四项意图 → 采集 → 筛外包 → 补详情 → 交付 Excel 与 HTML 报告），
-需要专属提示词约束「不许猜方向/城市/薪资/年限」、专属反思规则约束「不许把采到的
-说成已投递」。放进通用 Agent 会让这些约束稀释到几十个工具里。
+**为什么内化而不是引用 skill**：Skill 目录属于用户可安装/升级的外部文档与代码，作为产品能力交付时
+会出现路径配置、Python 版本、第三方包、脚本升级和生命周期不一致等额外故障面。现在岗位模型、
+评分规则、平台适配和交付物生成都在应用内，Agent profile 是唯一产品入口。
 
 **关键实现约束**：
 
-1. **必须在技能根目录执行 CLI**。`scripts` 是包名，`python -m scripts.main` 只能从
-   技能根目录解析，所以 `runJobCli` 强制 `cwd = skillDir`，换目录会 `ModuleNotFoundError`。
-2. **必须显式设 `JOBHUNT_HOME`**。不设的话登录态和产出写进技能目录，升级技能即丢。
-   `resolveDataDir()` 默认给 `<skillDir>/job-data`，也可在设置页覆盖。
-3. **采集与补详情必须分开**。站点风控看的是短时间请求总量；采集每个关键词 1-2 次，
-   补详情要逐条打开岗位页。`job_collect` 硬编码 `--enrich 0`，`job_enrich` 单独跑。
-4. **登录不封装成 Agent 工具**。登录要停下来等用户扫码（最长 5 分钟），
-   把它做成工具会让模型在无人可扫的场景下干等；只在设置页提供按钮。
-5. **采集的四个字段在 zod 里设为 optional**。设成必填时模型漏传会直接 schema
-   校验失败（`Invalid input: expected number, received undefined`），模型读不懂这种
-   报错；改成 optional 后由工具返回「还缺目标岗位方向、期望月薪区间」这类可操作提示。
-6. **清单读 JSON 不读 Excel**。技能同时产出 `最新岗位清单.json`（下次增量合并的基准，
-   含投递状态与 JD 全文）和 Excel（给人看）。模型上下文只吃 JSON 的摘要投影。
-7. **HTML 报告在 Excel 之后生成**。`collectJobs()` 等 CLI 成功退出并读到清单 JSON，
-   再由 `job-html.ts` 找最新 `.xlsx` 并写同名 `.html`；报告无脚本、全字段转义、
-   只放行 HTTP/HTTPS 链接。`enrichJobs()` 成功后也刷新同一报告。报告失败不影响
-   Excel 采集结果，但会把失败原因带回给模型转述。
+1. **持久化浏览器 Profile**：`launchPersistentContext(<dataDir>/.profile)`；登录按钮打开可见浏览器等待扫码，采集时复用同一登录态。
+2. **串行访问与导航冷却**：四平台按顺序访问；导航间隔 2–3.5 秒随机抖动，每 8 次导航冷却 7 秒，平台切换再等待 4 秒。
+3. **采集与补详情分开**：`job_collect` 只取列表与已有结构化字段，`job_enrich` 再打开岗位页补 JD；避免短时请求过量。
+4. **四要素 optional 校验**：岗位方向、城市、薪资、年限由工具返回可操作的中文缺口提示，不让 zod 直接抛难懂的 schema 错误。
+5. **增量合并**：岗位链接优先作为主键；旧记录的投递状态、备注不覆盖；本轮未采集的平台原样保留。
+6. **同义词在本地面扩展**：Agent/智能体/AI 应用/大模型应用等方向词参与标题评分，不依赖模型临时扩词。
+7. **不新增前端依赖**：XLSX 由 `job-workbook.ts` 用标准库构建 ZIP/OOXML；HTML 报告全字段转义，不执行站点内容。
+8. **登录不是 Agent 工具**：扫码是交互步骤，只由设置页按钮触发；模型只调采集/查询/补详情。
 
-**数据目录结构**（技能约定）：
+**数据目录结构**：
 
 ```
-<skillDir>/job-data/
-  .profile/            # 浏览器登录态（扫码后保存，所有采集复用）
-  out/最新岗位清单.json  # 权威数据源（增量合并基准，保留投递状态）
+.setting/job-data/
+  .profile/             # Chrome/Edge 持久化登录态
+  out/最新岗位清单.json  # 权威数据源，含完整岗位字段
   out/岗位清单_<时间>.xlsx
-  out/岗位清单_<时间>.html  # 与 Excel 同名的自包含报告
+  out/岗位清单_<时间>.html
 ```
 
 **新增 Agent profile 的接入清单**（本次实际改动点，供后续加第四个 Agent 参考）：
@@ -2387,3 +2403,34 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 **为什么不直接把 iframe 当浏览器**：跨域 iframe 无法被 Agent 读取或点击，且登录流程没有稳定的 DOM 访问；服务端 BrowserContext + 认证截图既能在 Web 模式工作，也能在 Electron 内保持同一套行为。当前面板面向「观察 + AI 操作」，不是用户手动远程控制浏览器。
 
 **子代理边界**：`browser_*` 固定列入 `NEVER_DELEGABLE`。浏览器有界面、有状态、需要用户审批，只允许主 Agent 操作，避免子代理在父会话看不到的上下文里提交表单。
+
+### 3.52 工具调用分类展示：`client/modules/tool-presentation.ts`
+
+工具卡不再只显示原始函数名和一串 JSON。展示层先把工具归入稳定类别，再根据类别提取
+路径、命令、检索词、URL 或任务摘要；原始工具名始终保留，避免“分类清楚但看不出到底调了哪个工具”。
+
+| 类别 | 典型工具 | 参数摘要 |
+|---|---|---|
+| 文件读取 | `read_file`、`list_dir` | 文件 / 目录路径 |
+| 文件写入 | `write_file` | 路径 + 内容字符数 |
+| 编辑文件 | `edit_file`、`apply_patch` | 目标路径 |
+| 读取图片 | `read_image`、`computer_screenshot` | 图片路径 / 当前屏幕 |
+| 运行命令 | `terminal` | 原始命令单行摘要 |
+| 文件检索 | `grep_search` | 正则 + 搜索起点 |
+| 浏览器 / 网页 | `browser_*`、`browser_fetch` | 动作、URL 或元素 ref |
+| 知识 / 记忆 / 子代理 | `retrieve_docs`、`memory_*`、`delegate_agent` | query / key / 子代理与任务 |
+| 电脑 / 业务 / MCP | `computer_*`、`house_*`、`job_*`、`mcp__*` | 动作、查询条件或首个有效参数 |
+
+**关键约束**：
+
+1. 分类是**纯函数**，只依赖 `toolName + argsText`，刷新历史记录和离线回放不依赖新增事件字段；
+2. 未知工具与 MCP 缺名片时回落到「工具调用」，不能因分类器不认识而隐藏卡片；
+3. 分类判断集中在新模块，`render/parts.ts` 不再维护 `TOOL_ICONS` 或按工具名散落判断；
+4. 同批超过两个工具时仍折叠成一个 `tools` 分组，但分组内部按类别分区，摘要同时显示
+   「类别 × 次数」与「原始工具名 × 次数」；工具名晚到时可原地重新分类；
+5. 类别色只用于图标、胶囊和分区标题，运行 / 待审批 / 成功 / 失败继续使用独立状态色，
+   不让分类色掩盖风险状态。
+
+**测试**：`tests/unit/tool-presentation.test.ts` 覆盖文件、图片、命令、MCP 与未知工具；
+`tests/unit/chat-flow.test.ts` 守分类接线和分组结构；`app.spec.ts` 在真实浏览器里校验
+类别、原始工具名与参数摘要。

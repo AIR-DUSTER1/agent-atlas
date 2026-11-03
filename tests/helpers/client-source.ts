@@ -35,6 +35,7 @@ export const CLIENT_SOURCES = [
   "ui/scroll-to-bottom.ts",
   // 协议与纯函数模块
   "modules/format.ts",
+  "modules/tool-presentation.ts",
   "modules/chat-flow.ts",
   "modules/clarify.ts",
   "modules/agent-profile.ts",

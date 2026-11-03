@@ -6,6 +6,7 @@
  */
 import type {
   MemoryProvider,
+  MemoryListOptions,
   MemoryProviderHealth,
   MemoryProviderId,
   MemoryRecord,
@@ -67,7 +68,8 @@ function buildMemoryNote(
   limit: number,
   budget: number
 ): string | null {
-  if (result.degraded || !result.records.length) return null;
+  // Embedding 降级时 records 已是词法回退结果，仍应注入；完全无记录才不注入。
+  if (!result.records.length) return null;
   const selected = result.records.slice(0, limit);
   const header = "【跨会话长期记忆（当前 Agent 专属，按本轮问题筛选；与用户最新说法冲突时以最新说法为准）】";
   let body = "";
@@ -170,7 +172,7 @@ export const memorySlot = {
     }
   },
 
-  async list(scope: MemoryScope, options: { includeHistory?: boolean } = {}): Promise<MemoryRecord[]> {
+  async list(scope: MemoryScope, options: MemoryListOptions = {}): Promise<MemoryRecord[]> {
     ensureReady();
     const provider = getActiveMemoryProvider();
     if (!provider.capabilities.read) return [];
@@ -182,6 +184,20 @@ export const memorySlot = {
     const provider = getActiveMemoryProvider();
     if (!provider.capabilities.delete) throw new Error(`记忆 Provider「${provider.id}」不支持删除`);
     return provider.delete(id, scope);
+  },
+
+  async confirm(id: string, scope: MemoryScope, options: { expiresAt?: number } = {}): Promise<MemoryRecord | null> {
+    ensureReady();
+    const provider = getActiveMemoryProvider();
+    if (!provider.confirm) throw new Error(`记忆 Provider「${provider.id}」不支持候选确认`);
+    return provider.confirm(id, scope, options);
+  },
+
+  async reject(id: string, scope: MemoryScope): Promise<boolean> {
+    ensureReady();
+    const provider = getActiveMemoryProvider();
+    if (!provider.reject) throw new Error(`记忆 Provider「${provider.id}」不支持候选拒绝`);
+    return provider.reject(id, scope);
   },
 
   async note(options: MemoryNoteOptions): Promise<string | null> {

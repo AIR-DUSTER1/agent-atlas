@@ -20,6 +20,7 @@ async function prepareEnv() {
     SESSIONS_FILE: join(dir, "sessions.ndjson"),
     CHECKPOINT_FILE: join(dir, "checkpoints.ndjson"),
     MEMORIES_FILE: join(dir, "memories.json"),
+    MEMORY_STORE_DIR: join(dir, "memory-store"),
     WEB_CONFIG_FILE: join(dir, "web-config.json"),
     AUDIT_FILE: join(dir, "audit.ndjson"),
     BACKUP_DIR: join(dir, "backups"),
@@ -46,27 +47,26 @@ test("备份与恢复全链路：创建 → 破坏 → 恢复 → 内容回来",
     const created = await backup.createBackup();
     assert.match(created.name, /^backup-\d{8}-\d{6}/, "名字带时间戳（防同秒碰撞还有毫秒段）");
     assert.ok(created.files.includes("sessions.ndjson"), "journal 必须进备份");
-    assert.ok(created.files.includes("memories.json"), "记忆必须进备份");
+    assert.ok(created.files.some((file) => file.startsWith("memory-store/")), "记忆存储目录必须进备份");
     assert.ok(!created.files.includes("checkpoints.ndjson"), "不存在的文件不进备份");
 
     const list = await backup.listBackups();
     assert.equal(list.length, 1);
     assert.equal(list[0].name, created.name);
 
-    // 破坏：把记忆与 journal 改坏（模拟误删/损坏）
-    await writeFile(env.MEMORIES_FILE, "[]", "utf8");
+    // 破坏：移除 v3 记忆目录与 journal（模拟误删/损坏）
+    await rm(join(dir, "memory-store"), { recursive: true, force: true });
     await writeFile(env.SESSIONS_FILE, "", "utf8");
 
     // 恢复：内容回来，且自动生成恢复前快照
     const restored = await backup.restoreBackup(created.name);
-    assert.ok(restored.restored.includes("memories.json"));
+    assert.ok(restored.restored.includes("memory-store/manifest.json"));
     assert.ok(restored.restored.includes("sessions.ndjson"));
     assert.ok(restored.autoSnapshot);
-    assert.match(await readFile(env.MEMORIES_FILE, "utf8"), /结论先行/);
     const memoryStore = await import("../../src/memory-store.js");
     memoryStore.resetMemoryStore();
     assert.equal(await memoryStore.loadMemories("general"), 1);
-    assert.equal(memoryStore.memoryStoreStatus().state, "migrated", "v1 备份恢复后应自动升级 v2");
+    assert.equal(memoryStore.memoryStoreStatus().state, "ok", "v3 记忆目录恢复后直接可用");
     assert.match(await readFile(env.SESSIONS_FILE, "utf8"), /s1/);
 
     const afterRestore = await backup.listBackups();

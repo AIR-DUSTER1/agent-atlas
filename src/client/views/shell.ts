@@ -79,7 +79,7 @@ export function buildDemoCards(container: HTMLElement | null): void {
     }));
   }
 
-  // 求职岗位 Agent 是 job-hunter 技能的入口；同样按插件开关隐藏。
+  // 求职岗位 Agent 是内置采集能力的入口；同样按插件开关隐藏。
   const job = AGENT_PROFILES.job;
   if (state.plugins?.enabled.job !== false) {
     container.appendChild(agentCard({

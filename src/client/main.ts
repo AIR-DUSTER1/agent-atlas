@@ -443,7 +443,7 @@ async function init(): Promise<void> {
 
   bindBrowserDock();
 
-  // 求职数据源（job-hunter 技能）：面板开关 / 保存路径 / 登录 / 自检
+  // 求职数据源（内置采集）：面板开关 / 数据目录 / 登录 / 自检
   bindJob();
 
   on("send-btn", "click", () => { void send(); });

@@ -18,7 +18,7 @@ import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
   updateThinkingPart, updateToolCard, upsertModelRetry,
 } from "../render/parts.js";
-import { TOOL_ICONS } from "../modules/format.js";
+
 import type {
   AgentEvent, AssistantBlock, AssistantPart, InterruptPayload,
   TextPart, ToolPart, UsageInfo,
@@ -65,17 +65,8 @@ export function upsertToolCall(
     mountPart(ablock, created);
     return;
   }
-  // 名字可能晚于首个分片到达：补进卡片头部（图标也一起换）
-  if (ev.name && !part.name) {
-    part.name = ev.name;
-    const refs = partEls.get(part);
-    if (refs) {
-      const nameEl = refs.el.querySelector(".tool-name");
-      if (nameEl) nameEl.textContent = ev.name;
-      const iconEl = refs.el.querySelector(".tool-icon");
-      if (iconEl) iconEl.textContent = TOOL_ICONS[ev.name] || "🔧";
-    }
-  }
+  // 名字可能晚于首个分片到达；updateToolCard 会同步重算分类、图标和摘要。
+  if (ev.name && !part.name) part.name = ev.name;
   part.argsText += ev.argsFragment || "";
   updateToolCard(part);
   if (visible) scrollBottom();

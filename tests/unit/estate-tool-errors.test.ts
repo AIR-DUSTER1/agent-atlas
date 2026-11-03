@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { beikeBusinessError, extractBeikeLoginUrl, isBeikeAuthFailure } from "../../src/server/estate.js";
+import { assertTrustedInstallUrl, beikeBusinessError, extractBeikeLoginUrl, isBeikeAuthFailure } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -58,9 +58,30 @@ test("认证门禁只准备登录链接，手动入口才打开浏览器", async
   assert.doesNotMatch(source, /已自动打开浏览器登录页/);
 });
 
+test("Windows 安装器使用官方 manifest 的 windows 平台键", async () => {
+  const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
+  assert.match(source, /pickLatestBinary\("windows", "amd64"\)/);
+  assert.doesNotMatch(source, /pickLatestBinary\("win32", "x64"\)/);
+  assert.doesNotMatch(source, /pickLatestBinary\("windows", "x64"\)/);
+});
+
+test("保存 Key 的失败原因完整展示，不回退成未知错误", async () => {
+  const [client, route] = await Promise.all([
+    readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/server/routes/estate.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(client, /message\?: string; error\?: string/);
+  assert.match(client, /res\.message \|\| res\.error/);
+  assert.match(route, /error: r\.message/);
+  const estate = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
+  assert.match(estate, /previousKey = await fsp\.readFile/);
+  assert.match(estate, /fsp\.writeFile\(BEIKE_CRED_FILE, previousKey/);
+});
+
 test("外链打开器拒绝非白名单协议与域名", () => {
   const allow = new Set(["building.ke.com"]);
   assert.equal(assertAllowedExternalUrl("https://building.ke.com/login", allow).hostname, "building.ke.com");
+  assert.equal(assertTrustedInstallUrl("https://release-assets.githubusercontent.com/asset?signature=x", "二进制下载地址"), undefined);
   assert.throws(() => assertAllowedExternalUrl("http://building.ke.com/login", allow), /HTTPS/);
   assert.throws(() => assertAllowedExternalUrl("https://evil.example/login", allow), /白名单/);
 });

@@ -66,7 +66,7 @@ import { lifecycle } from "./lifecycle.js";
 import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { flushJournal, journalPath } from "./session-store.js";
 import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
-import { loadMemories, memoriesFilePath, flushMemoryUsage } from "../memory-store.js";
+import { loadMemories, memoryStoreDir, flushMemoryUsage } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
@@ -77,6 +77,7 @@ import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/ob
 import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { applyMemoryRuntime } from "./memory-http.js";
 import { installMemoryMetricsSink } from "./memory-observability.js";
+import { startMemoryMaintenance, stopMemoryMaintenance } from "./memory-maintenance.js";
 import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -88,8 +89,14 @@ import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalA
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject, handlePickProjectDirectory } from "./routes/projects.js";
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
-import { handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories } from "./routes/memories.js";
-import { handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, handleMemoryStatus } from "./routes/memory.js";
+import {
+  handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories,
+  handleListMemoryCandidates, handleConfirmMemory, handleRejectMemory,
+} from "./routes/memories.js";
+import {
+  handleGetMemoryConfig, handleUpdateMemoryConfig, handleTestMemory, handleMemoryStatus,
+  handleTestEmbeddingMemory, handleReindexMemory,
+} from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
@@ -179,7 +186,7 @@ try {
   await loadSubagentSettings();
   await assertProductionRuntimeReady({
     apiKey: config.apiKey,
-    dataFiles: [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoriesFilePath(), auditFilePath()],
+    dataFiles: [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoryStoreDir(), auditFilePath()],
   });
   await loadProjects();
   await loadExternalAgents();
@@ -191,6 +198,7 @@ try {
   await loadMemories();
   installMemoryMetricsSink();
   await applyMemoryRuntime();
+  startMemoryMaintenance();
   // MCP：启动时连接已配置的 server 并把工具注入 general profile。
   // 单个 server 连不上只记日志并跳过，不能让整个服务起不来。
   await refreshMcpTools();
@@ -423,16 +431,34 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/memory/config" && req.method === "GET") { await handleGetMemoryConfig(res); return; }
     if (pathname === "/api/memory/config" && req.method === "PUT") { await handleUpdateMemoryConfig(res, req); return; }
     if (pathname === "/api/memory/test" && req.method === "POST") { await handleTestMemory(res, req); return; }
-    if (pathname === "/api/memory/status" && req.method === "GET") { await handleMemoryStatus(res); return; }
+    if (pathname === "/api/memory/embedding/test" && req.method === "POST") { await handleTestEmbeddingMemory(res, req); return; }
+    if (pathname === "/api/memory/reindex" && req.method === "POST") { await handleReindexMemory(res, req); return; }
+    if (pathname === "/api/memory/status" && req.method === "GET") {
+      await handleMemoryStatus(res, url.searchParams.get("profileId"));
+      return;
+    }
 
     // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
     if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
     if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
+    if (pathname === "/api/memories/candidates" && req.method === "GET") {
+      await handleListMemoryCandidates(res, url.searchParams.get("profileId"));
+      return;
+    }
     if (pathname === "/api/memories/export" && req.method === "GET") {
       await handleExportMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1");
       return;
     }
     if (pathname === "/api/memories/import" && req.method === "POST") { await handleImportMemories(res, req); return; }
+    const memoryActionMatch = pathname.match(/^\/api\/memories\/([\w-]+)\/(confirm|reject)$/);
+    if (memoryActionMatch && req.method === "POST") {
+      if (memoryActionMatch[2] === "confirm") {
+        await handleConfirmMemory(res, memoryActionMatch[1], url.searchParams.get("profileId"));
+      } else {
+        await handleRejectMemory(res, memoryActionMatch[1], url.searchParams.get("profileId"));
+      }
+      return;
+    }
     const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
     if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1], url.searchParams.get("profileId")); return; }
 
@@ -507,7 +533,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/estate/login" && req.method === "POST") { await handleStartBeikeLogin(res, req); return; }
     if (pathname === "/api/estate/key" && req.method === "POST") { await handleSaveBeikeKey(res, req); return; }
 
-    // 求职岗位 Agent（job-hunter 技能 CLI）：状态 / 路径配置 / 登录 / 自检
+    // 求职岗位 Agent（内置浏览器采集）：状态 / 数据目录 / 登录 / 自检
     if (pathname === "/api/job" && req.method === "GET") { await handleGetJob(res); return; }
     if (pathname === "/api/job" && req.method === "PUT") { await handleSaveJob(res, req); return; }
     if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }
@@ -598,6 +624,7 @@ function handleSignal(signal: string): void {
       await flushAudit();
       await flushCheckpointLog();
       await flushMemoryUsage();
+      stopMemoryMaintenance();
       await closeAllBrowserSessions();
   await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
     },

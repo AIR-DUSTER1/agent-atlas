@@ -18,6 +18,10 @@ import { sameMemoryScope } from "../memory/scope.js";
 import { memorySlot } from "../memory/slot.js";
 import { LocalMemoryProvider } from "../memory/providers/local.js";
 import { log } from "./logging.js";
+import { configureLocalMemoryRetention } from "../memory/providers/local-store.js";
+import { configureMemoryLifecycle } from "../memory/lifecycle.js";
+import { configureSemanticMemory } from "../memory/semantic.js";
+import { configureMemoryDistillation } from "./memory-distillation.js";
 import {
   DEFAULT_MEMORY_CONFIG,
   readMemoryConfig,
@@ -366,6 +370,19 @@ export async function applyMemoryRuntime(config?: MemoryConfig): Promise<MemoryR
     });
     resolved = structuredClone(DEFAULT_MEMORY_CONFIG);
   }
+  // 新配置在注册 Provider 之前生效：存储限额、TTL、Embedding 与自动沉淀共享同一份快照。
+  configureLocalMemoryRetention(resolved.retention);
+  configureMemoryLifecycle(resolved.retention);
+  configureSemanticMemory({
+    enabled: resolved.embedding.enabled,
+    baseURL: resolved.embedding.baseURL,
+    model: resolved.embedding.model,
+    apiKey: resolved.embedding.apiKey,
+    timeoutMs: resolved.embedding.timeoutMs,
+    dimensions: resolved.embedding.dimensions,
+    minSimilarity: resolved.embedding.minSimilarity,
+  });
+  configureMemoryDistillation(resolved.distillation);
   memorySlot.register(new LocalMemoryProvider(), {
     replace: true,
     activate: resolved.activeProvider === "local",

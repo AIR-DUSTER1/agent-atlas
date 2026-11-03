@@ -13,7 +13,7 @@ import { analyzeEstateTurn } from "../estate.js";
 import { resolveChatFiles, buildUserContent, type ChatFileRef } from "../files.js";
 import { ingestChatAttachments } from "../rag.js";
 import {
-  getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord,
+  getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord, isAgentKind,
   recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
 import { getActiveId, getActiveModality, getContextWindowForActive } from "../settings.js";
@@ -26,6 +26,7 @@ import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
 import { runWithModelSlot, acquireModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
+import { scheduleMemoryDistillation } from "../memory-distillation.js";
 import {
   beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
   renderTaskLedger, taskSnapshot,
@@ -85,7 +86,8 @@ async function streamToClient(
   req: import("node:http").IncomingMessage,
   session: Session,
   produce: (signal: AbortSignal) => AsyncGenerator<AgentEvent>,
-  onDone?: (events: AgentEvent[]) => void
+  onDone?: (events: AgentEvent[]) => void,
+  memoryUserText?: string,
 ): Promise<void> {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -256,6 +258,19 @@ async function streamToClient(
     }
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过
     onDone?.(collected);
+    if (turnStatus === "completed" && memoryUserText && isAgentKind(session.kind) && session.agentProfileId) {
+      const assistantText = collected
+        .map((event) => event.type === "token" ? event.text : event.type === "ai_message" ? event.content : "")
+        .join("")
+        .trim();
+      scheduleMemoryDistillation({
+        sessionId: session.id,
+        turnId: turn?.turnId ?? "",
+        profileId: session.agentProfileId,
+        userText: memoryUserText,
+        assistantText,
+      });
+    }
     log("info", "agent_turn_finished", {
       sessionId: session.id,
       turnId: turn?.turnId ?? "",
@@ -370,7 +385,7 @@ async function handleChatInner(
     session.turns += 1; // 轮次递增，供模拟用量（上下文增长 / 缓存命中率）使用
     await streamToClient(res, req, session, (signal) =>
       mockRun({ message: typeof fullMessage === "string" ? fullMessage : message, rawMessage: message, kind: session.kind, turnIndex: session.turns - 1, signal })
-    , (events) => completeTurnRecord(session, events));
+    , (events) => completeTurnRecord(session, events), message);
     return;
   }
 
@@ -405,7 +420,7 @@ async function handleChatInner(
       headless,
       continuous,
     })
-  , (events) => completeTurnRecord(session, events));
+  , (events) => completeTurnRecord(session, events), message);
 }
 
 export async function handleResume(

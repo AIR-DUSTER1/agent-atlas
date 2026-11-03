@@ -46,7 +46,8 @@ export async function handleSaveBeikeKey(res: import("node:http").ServerResponse
     // beike auth --save：Key 只进 CLI 本地凭证，agentatlas 不落盘不回显
     const r = await saveBeikeKey(body.apiKey);
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(r));
+    // 兼容旧前端读取 error 字段；新前端优先使用完整 message。
+    res.end(JSON.stringify(r.ok ? r : { ...r, error: r.message }));
   } catch (err) {
     if (err instanceof BodyTooLargeError) respondBadRequest(res, req, err);
     else {

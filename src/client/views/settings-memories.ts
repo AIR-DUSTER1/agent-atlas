@@ -21,6 +21,7 @@ import type {
 
 let memStatusTimer: ReturnType<typeof setTimeout> | undefined;
 let allMemories: MemoryEntry[] = [];
+let allCandidates: MemoryEntry[] = [];
 let currentConfig: MemorySlotConfig | null = null;
 
 function currentMemoryProfile(): "general" | "estate" | "job" {
@@ -49,6 +50,7 @@ function stateText(state: string): string {
   if (state === "missing") return "待创建";
   if (state === "corrupt") return "已隔离坏文件";
   if (state === "future") return "版本过新";
+  if (state === "degraded") return "部分降级";
   return "异常";
 }
 
@@ -84,16 +86,27 @@ function setHealthBadge(health: MemoryProviderHealth): void {
 function renderStatus(status: MemorySlotStatus): void {
   setHealthBadge(status.health);
   const active = $("mem-local-active");
+  const candidates = $("mem-local-candidates");
   const history = $("mem-local-history");
   const state = $("mem-local-state");
   if (active) active.textContent = String(status.localStore.activeCount);
+  if (candidates) candidates.textContent = String(status.localStore.candidateCount);
   if (history) history.textContent = String(status.localStore.historyCount);
-  if (state) state.textContent = stateText(status.localStore.state);
+  if (state) state.textContent = status.semantic.enabled
+    ? `${status.semantic.indexed} 条`
+    : stateText(status.localStore.state);
   const detail = $("mem-provider-detail");
   if (detail) {
     const latency = typeof status.health.latencyMs === "number" ? ` · ${status.health.latencyMs}ms` : "";
     const message = status.health.message ? ` · ${status.health.message}` : "";
-    detail.textContent = `当前：${status.activeProvider === "http" ? "HTTP 外部记忆" : "内置本地记忆"}${latency}${message}`;
+    const size = typeof status.localStore.bytes === "number" ? ` · ${(status.localStore.bytes / 1024).toFixed(1)}KB` : "";
+    detail.textContent = `当前：${status.activeProvider === "http" ? "HTTP 外部记忆" : "内置本地记忆"}${latency}${message}${size}`;
+  }
+  const semantic = $("mem-semantic-status");
+  if (semantic) {
+    semantic.textContent = status.semantic.enabled
+      ? `语义索引：${status.semantic.model || "未命名模型"} · ${status.semantic.indexed} 条 · ${status.semantic.dimensions || "自动"} 维${status.semantic.message ? ` · ${status.semantic.message}` : ""}`
+      : "语义召回未启用，当前使用零依赖词法召回";
   }
 }
 
@@ -133,6 +146,36 @@ function applyConfig(config: MemorySlotConfig): void {
   if (keyState) keyState.textContent = config.http.hasApiKey ? `已保存 ${config.http.keyMasked || "••••"}；留空保持不变` : "尚未保存；留空保持不变";
   const clearKey = input("mem-http-clear-key");
   if (clearKey) clearKey.checked = false;
+
+  if (select("mem-distill-mode")) select("mem-distill-mode")!.value = config.distillation.mode;
+  if (input("mem-distill-max-turn")) input("mem-distill-max-turn")!.value = String(config.distillation.maxPerTurn);
+  if (input("mem-distill-hourly")) input("mem-distill-hourly")!.value = String(config.distillation.hourlyLimit);
+  if (input("mem-stale-grace-days")) input("mem-stale-grace-days")!.value = String(config.retention.staleGraceDays);
+  if (input("mem-preference-days")) input("mem-preference-days")!.value = String(config.retention.preferenceDays);
+  if (input("mem-project-days")) input("mem-project-days")!.value = String(config.retention.projectFactDays);
+  if (input("mem-correction-days")) input("mem-correction-days")!.value = String(config.retention.correctionDays);
+  if (input("mem-identity-days")) input("mem-identity-days")!.value = String(config.retention.identityDays);
+  if (input("mem-retention-active")) input("mem-retention-active")!.value = String(config.retention.activePerScope);
+  if (input("mem-retention-history")) input("mem-retention-history")!.value = String(config.retention.historyPerScope);
+
+  if (input("mem-embedding-enabled")) input("mem-embedding-enabled")!.checked = config.embedding.enabled;
+  if (input("mem-embedding-base-url")) input("mem-embedding-base-url")!.value = config.embedding.baseURL;
+  if (input("mem-embedding-model")) input("mem-embedding-model")!.value = config.embedding.model;
+  if (input("mem-embedding-timeout")) input("mem-embedding-timeout")!.value = String(config.embedding.timeoutMs);
+  if (input("mem-embedding-dimensions")) input("mem-embedding-dimensions")!.value = String(config.embedding.dimensions);
+  if (input("mem-embedding-similarity")) input("mem-embedding-similarity")!.value = String(config.embedding.minSimilarity);
+  const embeddingKey = input("mem-embedding-api-key");
+  if (embeddingKey) {
+    embeddingKey.value = "";
+    embeddingKey.placeholder = config.embedding.hasApiKey ? `已保存 ${config.embedding.keyMasked || "••••"}` : "未保存 API Key";
+  }
+  const embeddingKeyState = $("mem-embedding-key-state");
+  if (embeddingKeyState) {
+    embeddingKeyState.textContent = config.embedding.hasApiKey
+      ? `已保存 ${config.embedding.keyMasked || "••••"}；留空保持不变`
+      : "尚未保存 Embedding API Key；留空保持不变";
+  }
+  if (input("mem-embedding-clear-key")) input("mem-embedding-clear-key")!.checked = false;
   toggleHttpFields();
 }
 
@@ -147,6 +190,7 @@ function toggleHttpFields(): void {
 function formPatch() {
   const httpEnabled = Boolean(input("mem-http-enabled")?.checked);
   const apiKey = input("mem-http-api-key")?.value.trim() || "";
+  const embeddingKey = input("mem-embedding-api-key")?.value.trim() || "";
   return {
     activeProvider: select("mem-active-provider")?.value === "http" ? "http" : "local",
     local: { allowPII: Boolean(input("mem-allow-pii")?.checked) },
@@ -166,6 +210,32 @@ function formPatch() {
         job: input("mem-http-bank-job")?.value.trim() || "",
       },
     },
+    distillation: {
+      mode: select("mem-distill-mode")?.value === "off" || select("mem-distill-mode")?.value === "confirm"
+        ? select("mem-distill-mode")!.value
+        : "smart",
+      maxPerTurn: Number(input("mem-distill-max-turn")?.value || 3),
+      hourlyLimit: Number(input("mem-distill-hourly")?.value || 20),
+    },
+    embedding: {
+      enabled: Boolean(input("mem-embedding-enabled")?.checked),
+      baseURL: input("mem-embedding-base-url")?.value.trim() || "",
+      model: input("mem-embedding-model")?.value.trim() || "",
+      ...(embeddingKey ? { apiKey: embeddingKey } : {}),
+      clearApiKey: Boolean(input("mem-embedding-clear-key")?.checked),
+      timeoutMs: Number(input("mem-embedding-timeout")?.value || 8000),
+      dimensions: Number(input("mem-embedding-dimensions")?.value || 0),
+      minSimilarity: Number(input("mem-embedding-similarity")?.value || 0.25),
+    },
+    retention: {
+      activePerScope: Number(input("mem-retention-active")?.value || 2000),
+      historyPerScope: Number(input("mem-retention-history")?.value || 5000),
+      staleGraceDays: Number(input("mem-stale-grace-days")?.value || 30),
+      preferenceDays: Number(input("mem-preference-days")?.value || 180),
+      projectFactDays: Number(input("mem-project-days")?.value || 120),
+      correctionDays: Number(input("mem-correction-days")?.value || 365),
+      identityDays: Number(input("mem-identity-days")?.value || 365),
+    },
   };
 }
 
@@ -180,14 +250,25 @@ function validateConfigForm(): boolean {
     return false;
   }
   if (patch.http.enabled && patch.http.preset === "hindsight") {
-    if (!patch.http.banks.general || !patch.http.banks.estate) {
-      setHttpStatus("Hindsight 必须分别填写 general / estate bank", "err");
+    const banks = patch.http.banks;
+    if (!banks.general || !banks.estate || !banks.job) {
+      setHttpStatus("Hindsight 必须分别填写 general / estate / job bank", "err");
       return false;
     }
-    if (patch.http.banks.general === patch.http.banks.estate) {
-      setHttpStatus("general 与 estate bank 不能相同", "err");
+    if (new Set([banks.general, banks.estate, banks.job]).size !== 3) {
+      setHttpStatus("general / estate / job bank 必须互不相同", "err");
       return false;
     }
+  }
+  if (patch.embedding.enabled && (!patch.embedding.baseURL || !patch.embedding.model)) {
+    const el = $("mem-embedding-status");
+    if (el) { el.textContent = "启用语义召回必须填写 Embedding Base URL 和模型名"; el.className = "settings-status err"; }
+    return false;
+  }
+  if (patch.retention.historyPerScope < patch.retention.activePerScope) {
+    const el = $("mem-embedding-status");
+    if (el) { el.textContent = "历史保留上限不能小于 active 上限"; el.className = "settings-status err"; }
+    return false;
   }
   return true;
 }
@@ -206,7 +287,7 @@ function renderMemories(): void {
     if (!query) return true;
     return `${entry.key}\n${entry.content}\n${entry.tags.join(" ")}`.toLocaleLowerCase().includes(query);
   });
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "memories-empty";
@@ -218,7 +299,7 @@ function renderMemories(): void {
   }
   for (const entry of visible) {
     const row = document.createElement("div");
-    row.className = "memory-item" + (entry.status === "superseded" ? " superseded" : "");
+    row.className = "memory-item" + (entry.status === "superseded" || entry.status === "archived" ? " superseded" : entry.status === "candidate" ? " candidate" : "");
     row.innerHTML = `
       <div class="m-body">
         <div class="m-key"></div>
@@ -233,9 +314,15 @@ function renderMemories(): void {
     const when = new Date(entry.updatedAt).toLocaleString();
     const metaEl = row.querySelector(".m-meta");
     if (metaEl) {
-      const status = entry.status === "superseded" ? " · 历史版本" : "";
+      const statusLabel = entry.status === "candidate" ? " · 待确认"
+        : entry.status === "stale" ? " · 已过期待确认"
+          : entry.status === "superseded" ? " · 历史版本"
+            : entry.status === "archived" ? " · 已归档"
+              : "";
       const tags = entry.tags.length ? ` · #${entry.tags.join(" #")}` : "";
-      metaEl.textContent = `${sourceLabel(entry.source)} · ${(entry.scope.profileId === "estate" ? "租房 Agent" : entry.scope.profileId === "job" ? "求职 Agent" : "通用 Agent")} · 命中 ${entry.useCount ?? 0} 次${status}${tags} · ${when}`;
+      const confidence = typeof entry.confidence === "number" && entry.confidence < 1 ? ` · 置信度 ${(entry.confidence * 100).toFixed(0)}%` : "";
+      const expiry = entry.expiresAt ? ` · 到期 ${new Date(entry.expiresAt).toLocaleDateString()}` : "";
+      metaEl.textContent = `${sourceLabel(entry.source)} · ${(entry.scope.profileId === "estate" ? "租房 Agent" : entry.scope.profileId === "job" ? "求职 Agent" : "通用 Agent")} · 命中 ${entry.useCount ?? 0} 次${statusLabel}${confidence}${expiry}${tags} · ${when}`;
     }
     row.querySelector(".p-del")?.addEventListener("click", async () => {
       if (!(await uiConfirm(`删除记忆「${entry.key}」？删除后无法恢复。`, { title: "删除记忆", okText: "删除", danger: true }))) return;
@@ -251,6 +338,67 @@ function renderMemories(): void {
   }
 }
 
+function renderCandidates(): void {
+  const list = $("mem-candidates-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!allCandidates.length) {
+    const empty = document.createElement("p");
+    empty.className = "memories-empty";
+    empty.textContent = "当前没有待确认的自动沉淀。";
+    list.appendChild(empty);
+    return;
+  }
+  for (const entry of allCandidates) {
+    const row = document.createElement("div");
+    row.className = "memory-item candidate";
+    const body = document.createElement("div");
+    body.className = "m-body";
+    const keyEl = document.createElement("div");
+    keyEl.className = "m-key";
+    keyEl.textContent = entry.key;
+    const contentEl = document.createElement("div");
+    contentEl.className = "m-content";
+    contentEl.textContent = entry.content;
+    const metaEl = document.createElement("div");
+    metaEl.className = "m-meta";
+    const confidence = typeof entry.confidence === "number" ? `${(entry.confidence * 100).toFixed(0)}%` : "未知";
+    metaEl.textContent = `自动沉淀 · 置信度 ${confidence}${entry.category ? ` · ${entry.category}` : ""} · ${new Date(entry.updatedAt).toLocaleString()}`;
+    body.append(keyEl, contentEl, metaEl);
+    const actions = document.createElement("div");
+    actions.className = "memory-candidate-actions";
+    const confirmButton = document.createElement("button");
+    confirmButton.className = "p-del candidate-confirm";
+    confirmButton.type = "button";
+    confirmButton.textContent = "确认";
+    const rejectButton = document.createElement("button");
+    rejectButton.className = "p-del candidate-reject";
+    rejectButton.type = "button";
+    rejectButton.textContent = "拒绝";
+    actions.append(confirmButton, rejectButton);
+    row.append(body, actions);
+    confirmButton.addEventListener("click", async () => {
+      try {
+        await api(`/api/memories/${encodeURIComponent(entry.id)}/confirm?profileId=${currentMemoryProfile()}`, { method: "POST" });
+        await refreshMemories();
+        memStatus("候选记忆已确认并生效", "ok");
+      } catch (err) {
+        memStatus(`✗ ${(err as Error).message}`, "err");
+      }
+    });
+    rejectButton.addEventListener("click", async () => {
+      try {
+        await api(`/api/memories/${encodeURIComponent(entry.id)}/reject?profileId=${currentMemoryProfile()}`, { method: "POST" });
+        await refreshMemories();
+        memStatus("候选记忆已拒绝", "ok");
+      } catch (err) {
+        memStatus(`✗ ${(err as Error).message}`, "err");
+      }
+    });
+    list.appendChild(row);
+  }
+}
+
 export async function refreshMemories(): Promise<MemoryEntry[]> {
   const profileId = currentMemoryProfile();
   const history = Boolean(input("mem-history-toggle")?.checked);
@@ -258,14 +406,17 @@ export async function refreshMemories(): Promise<MemoryEntry[]> {
     `/api/memories?profileId=${profileId}${history ? "&history=1" : ""}`
   );
   allMemories = data.memories || [];
+  const candidateData = await api<{ memories?: MemoryEntry[] }>(`/api/memories/candidates?profileId=${profileId}`);
+  allCandidates = candidateData.memories || [];
   renderMemories();
+  renderCandidates();
   return allMemories;
 }
 
 export async function refreshMemorySettings(): Promise<void> {
   const [configResult, status] = await Promise.all([
     api<{ config: MemorySlotConfig }>("/api/memory/config"),
-    api<MemorySlotStatus>("/api/memory/status"),
+    api<MemorySlotStatus>(`/api/memory/status?profileId=${currentMemoryProfile()}`),
   ]);
   applyConfig(configResult.config);
   renderStatus(status);
@@ -283,7 +434,7 @@ export async function saveMemoryConfigFromForm(): Promise<void> {
       body: JSON.stringify(formPatch()),
     });
     applyConfig(result.config);
-    const status = await api<MemorySlotStatus>("/api/memory/status");
+    const status = await api<MemorySlotStatus>(`/api/memory/status?profileId=${currentMemoryProfile()}`);
     renderStatus(status);
     await refreshMemories();
     setHttpStatus(`已保存，当前 Provider：${result.providerId}`, "ok");
@@ -310,6 +461,59 @@ export async function testMemoryHttpFromForm(): Promise<void> {
     setHttpStatus(result.ok ? `连接成功${latency}` : `连接失败${latency}${detail}`, result.ok ? "ok" : "err");
   } catch (err) {
     setHttpStatus(`✗ ${(err as Error).message}`, "err");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+export async function testMemoryEmbeddingFromForm(): Promise<void> {
+  if (!validateConfigForm()) return;
+  const button = $("mem-test-embedding-btn") as HTMLButtonElement | null;
+  const status = $("mem-embedding-status");
+  if (button) button.disabled = true;
+  if (status) { status.textContent = "正在测试 Embedding 服务…"; status.className = "settings-status"; }
+  try {
+    const result = await api<{ ok: boolean; dimensions: number; model: string }>("/api/memory/embedding/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formPatch()),
+    });
+    if (status) {
+      status.textContent = `Embedding 可用：${result.model} · ${result.dimensions} 维`;
+      status.className = "settings-status ok";
+    }
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ ${(err as Error).message}`;
+      status.className = "settings-status err";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+export async function reindexMemoryFromForm(): Promise<void> {
+  const button = $("mem-reindex-btn") as HTMLButtonElement | null;
+  const status = $("mem-embedding-status");
+  if (button) button.disabled = true;
+  if (status) { status.textContent = "正在重建当前 Agent 向量索引…"; status.className = "settings-status"; }
+  try {
+    const result = await api<{ ok: boolean; status: { indexed: number; model: string } }>("/api/memory/reindex", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profileId: currentMemoryProfile() }),
+    });
+    if (status) {
+      status.textContent = `索引已重建：${result.status.indexed} 条 · ${result.status.model}`;
+      status.className = "settings-status ok";
+    }
+    const latest = await api<MemorySlotStatus>(`/api/memory/status?profileId=${currentMemoryProfile()}`);
+    renderStatus(latest);
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ ${(err as Error).message}`;
+      status.className = "settings-status err";
+    }
   } finally {
     if (button) button.disabled = false;
   }
@@ -405,8 +609,10 @@ export function bindMemorySettings(): void {
   select("mem-http-preset")?.addEventListener("change", toggleHttpFields);
   $("mem-save-config-btn")?.addEventListener("click", () => { void saveMemoryConfigFromForm(); });
   $("mem-test-http-btn")?.addEventListener("click", () => { void testMemoryHttpFromForm(); });
+  $("mem-test-embedding-btn")?.addEventListener("click", () => { void testMemoryEmbeddingFromForm(); });
+  $("mem-reindex-btn")?.addEventListener("click", () => { void reindexMemoryFromForm(); });
   select("mem-profile-filter")?.addEventListener("change", () => {
-    void refreshMemories().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
+    void refreshMemorySettings().catch((err) => memStatus(`✗ ${(err as Error).message}`, "err"));
   });
   input("mem-search")?.addEventListener("input", renderMemories);
   input("mem-history-toggle")?.addEventListener("change", () => {

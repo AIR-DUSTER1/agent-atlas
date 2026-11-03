@@ -59,12 +59,8 @@ function readiness(plugin: BuiltinPlugin): { ready: boolean; label: string } {
   if (plugin.id === "job") {
     const status = state.job;
     if (!status) return { ready: false, label: "未检测" };
-    // 「就绪」必须三者齐备：技能目录存在 + python 可用 + 依赖装齐
-    const ready = status.installed && status.pythonOK && status.depsOK;
-    if (!status.installed) return { ready: false, label: "未找到技能" };
-    if (!status.pythonOK) return { ready: false, label: "缺少 Python" };
-    if (!status.depsOK) return { ready: false, label: "缺少依赖" };
-    return { ready, label: `就绪 · ${status.lastRunJobs} 条岗位` };
+    if (!status.browserOK) return { ready: false, label: "未找到浏览器" };
+    return { ready: true, label: `就绪 · ${status.lastRunJobs} 条岗位` };
   }
   if (plugin.id === "browser") {
     const status = state.browser;

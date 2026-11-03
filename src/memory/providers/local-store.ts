@@ -1,68 +1,86 @@
 /**
- * providers/local-store.ts — 本地记忆文件、schema 迁移与原子持久化
+ * providers/local-store.ts — 本地记忆内存索引、v2 迁移与事件存储适配
  * ============================================================
- * 职责：唯一接触 `.setting/memories.json` 的模块。对外只暴露记录快照与串行变更，
- * 让上层 Provider 专注语义、检索模块专注排序，避免三处各自读写文件。
+ * 职责：唯一接触 `.setting/memory-store/` 的模块。对外只暴露记录快照与串行变更；
+ * 事件日志、快照和 manifest 由 local-events 处理，生命周期由 lifecycle 处理。
  *
- * 设计立场：本地记忆是小体量白名单，采用内存副本 + 全量原子重写；v1 数组
- * 自动迁移为 v2 对象，坏文件改名隔离而不是静默覆盖，未来版本文件 fail-closed。
+ * 设计立场：单进程内维护记录索引，所有写操作串行；每次变更先 append 事件再更新
+ * 内存，达到阈值后生成新快照代际。损坏文件隔离而不是静默覆盖，未来版本 fail-closed。
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { MemoryRecord, MemoryScope, MemorySource, MemoryStatus } from "../provider.js";
+import { readFile, rename } from "node:fs/promises";
+import type { MemoryCategory, MemoryRecord, MemoryScope, MemorySource, MemoryStatus } from "../provider.js";
 import { DEFAULT_MEMORY_PROFILE, memoryScope, sameMemoryScope, scopeKey } from "../scope.js";
+import { applyLifecycleTransitions } from "../lifecycle.js";
+import {
+  MEMORY_STORE_SCHEMA_VERSION,
+  MemoryStoreFutureError,
+  appendStoreChanges,
+  loadV3Store,
+  readStoreManifest,
+  shouldCompact,
+  storeFootprint,
+  writeStoreGenerations,
+  type MemoryStoreManifest,
+  type StoreChange,
+} from "./local-events.js";
+import {
+  resolveLegacyMemoryFile,
+  resolveMemoryStoreDir,
+} from "./local-store-paths.js";
 
-export const MEMORY_SCHEMA_VERSION = 2;
-export const MAX_ACTIVE_MEMORIES = 500;
-export const MAX_HISTORY_RECORDS = 1000;
+export const MEMORY_SCHEMA_VERSION = MEMORY_STORE_SCHEMA_VERSION;
+export const MAX_ACTIVE_MEMORIES = 2000;
+export const MAX_HISTORY_RECORDS = 5000;
 export const MAX_KEY_CHARS = 50;
 export const MAX_CONTENT_CHARS = 500;
 export const MAX_TAGS = 6;
 export const MAX_TAG_CHARS = 32;
 
-const DEFAULT_FILE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  ".setting",
-  "memories.json"
-);
-
-export type LocalStoreState = "ok" | "missing" | "migrated" | "corrupt" | "future" | "error";
+export type LocalStoreState = "ok" | "missing" | "migrated" | "corrupt" | "future" | "error" | "degraded";
 
 export interface LocalMemoryStoreStatus {
   state: LocalStoreState;
   file: string;
+  storeDir: string;
   loaded: boolean;
   migratedFrom?: number;
   quarantinedTo?: string;
   message?: string;
   activeCount: number;
+  candidateCount: number;
+  staleCount: number;
   historyCount: number;
+  eventCount: number;
+  bytes?: number;
 }
 
-interface MemoryFileV2 {
-  schemaVersion: 2;
-  entries: MemoryRecord[];
-}
-
+let activePerScope = MAX_ACTIVE_MEMORIES;
+let historyPerScope = MAX_HISTORY_RECORDS;
 let records: MemoryRecord[] = [];
 let loaded = false;
 let loading: Promise<void> | null = null;
 let blocked = false;
-let storeFile = resolveFile();
+let storeDir = resolveMemoryStoreDir();
+let legacyFile = resolveLegacyMemoryFile();
+let manifest: MemoryStoreManifest | null = null;
 let statusState: LocalStoreState = "missing";
-let statusExtra: Pick<LocalMemoryStoreStatus, "migratedFrom" | "quarantinedTo" | "message"> = {};
+let statusExtra: Pick<LocalMemoryStoreStatus, "migratedFrom" | "quarantinedTo" | "message" | "bytes"> = {};
 let writeQueue: Promise<void> = Promise.resolve();
 let usageDirty = false;
 let usageTimer: ReturnType<typeof setTimeout> | undefined;
+let eventCount = 0;
 
-function resolveFile(): string {
-  return process.env.MEMORIES_FILE || DEFAULT_FILE;
+export function configureLocalMemoryRetention(options: { activePerScope?: number; historyPerScope?: number }): void {
+  if (Number.isInteger(options.activePerScope) && options.activePerScope! > 0) activePerScope = options.activePerScope!;
+  if (Number.isInteger(options.historyPerScope) && options.historyPerScope! > 0) historyPerScope = options.historyPerScope!;
+  if (historyPerScope < activePerScope) historyPerScope = activePerScope;
 }
+
+export function activeMemoryLimit(): number { return activePerScope; }
+export function historyMemoryLimit(): number { return historyPerScope; }
+export function memoryStoreDir(): string { return storeDir; }
+export function memoriesFilePath(): string { return legacyFile; }
 
 function finiteTime(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
@@ -99,12 +117,34 @@ function normalizeSource(value: unknown): MemorySource {
 }
 
 function normalizeStatus(value: unknown): MemoryStatus {
-  return value === "superseded" ? "superseded" : "active";
+  return value === "candidate" || value === "stale" || value === "superseded" || value === "archived"
+    ? value
+    : "active";
+}
+
+function normalizeCategory(value: unknown): MemoryCategory {
+  return value === "preference" || value === "project_fact" || value === "correction" || value === "identity"
+    ? value
+    : "other";
+}
+
+function normalizeOrigin(value: unknown): MemoryRecord["origin"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const rec = value as Record<string, unknown>;
+  const mode = rec.mode === "manual" || rec.mode === "agent_tool" || rec.mode === "auto" || rec.mode === "import" || rec.mode === "http"
+    ? rec.mode
+    : undefined;
+  if (!mode) return undefined;
+  return {
+    mode,
+    ...(typeof rec.sessionId === "string" ? { sessionId: rec.sessionId.slice(0, 160) } : {}),
+    ...(typeof rec.turnId === "string" ? { turnId: rec.turnId.slice(0, 160) } : {}),
+  };
 }
 
 function normalizeRecord(item: unknown, fallbackScope: MemoryScope): MemoryRecord | null {
   if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-  const rec = item as Partial<MemoryRecord> & { source?: unknown; status?: unknown; tags?: unknown };
+  const rec = item as Partial<MemoryRecord> & { source?: unknown; status?: unknown; tags?: unknown; origin?: unknown };
   const key = cleanText(rec.key);
   const content = cleanText(rec.content);
   if (!key || !content) return null;
@@ -112,6 +152,9 @@ function normalizeRecord(item: unknown, fallbackScope: MemoryScope): MemoryRecor
   const createdAt = finiteTime(rec.createdAt, now);
   const updatedAt = finiteTime(rec.updatedAt, createdAt);
   const lastUsedAt = finiteTime(rec.lastUsedAt, 0);
+  const expiresAt = finiteTime(rec.expiresAt, 0);
+  const staleAt = finiteTime(rec.staleAt, 0);
+  const lastConfirmedAt = finiteTime(rec.lastConfirmedAt, 0);
   return {
     id: typeof rec.id === "string" && rec.id.trim() ? rec.id.trim() : randomUUID(),
     scope: normalizeScope(rec.scope ?? fallbackScope),
@@ -120,6 +163,15 @@ function normalizeRecord(item: unknown, fallbackScope: MemoryScope): MemoryRecor
     tags: normalizeTags(rec.tags),
     source: normalizeSource(rec.source),
     status: normalizeStatus(rec.status),
+    category: normalizeCategory(rec.category),
+    confidence: typeof rec.confidence === "number" && Number.isFinite(rec.confidence)
+      ? Math.max(0, Math.min(1, rec.confidence))
+      : 1,
+    ...(expiresAt ? { expiresAt } : {}),
+    ...(staleAt ? { staleAt } : {}),
+    ...(lastConfirmedAt ? { lastConfirmedAt } : {}),
+    ...(normalizeOrigin(rec.origin) ? { origin: normalizeOrigin(rec.origin) } : {}),
+    ...(typeof rec.replacedBy === "string" && rec.replacedBy ? { replacedBy: rec.replacedBy } : {}),
     createdAt,
     updatedAt,
     ...(lastUsedAt ? { lastUsedAt } : {}),
@@ -150,137 +202,144 @@ function cloneScope(scope: MemoryScope): MemoryScope {
 }
 
 function cloneRecord(record: MemoryRecord): MemoryRecord {
-  return { ...record, scope: cloneScope(record.scope), tags: [...record.tags] };
+  return {
+    ...record,
+    scope: cloneScope(record.scope),
+    tags: [...record.tags],
+    ...(record.origin ? { origin: { ...record.origin } } : {}),
+  };
 }
 
 function cloneRecords(items: MemoryRecord[]): MemoryRecord[] {
   return items.map(cloneRecord);
 }
 
-/** 历史只保留最近 1000 条；优先淘汰最老的 superseded，绝不为了腾位置删 active。 */
+/** 每个 scope 独立裁剪：preserve 状态优先，剩余槽位按更新时间保留最新的历史版本。 */
 function pruneHistory(items: MemoryRecord[]): MemoryRecord[] {
-  if (items.length <= MAX_HISTORY_RECORDS) return items;
-  const remove = new Set<string>();
-  const candidates = items
-    .filter((item) => item.status === "superseded")
-    .sort((a, b) => a.updatedAt - b.updatedAt);
-  for (const item of candidates) {
-    if (items.length - remove.size <= MAX_HISTORY_RECORDS) break;
-    remove.add(item.id);
+  const groups = new Map<string, MemoryRecord[]>();
+  for (const item of items) {
+    const key = scopeKey(item.scope);
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
   }
-  return items.filter((item) => !remove.has(item.id));
+  const keep = new Set<string>();
+  for (const group of groups.values()) {
+    const preserve = group.filter((item) => item.status !== "superseded" && item.status !== "archived");
+    const removable = group
+      .filter((item) => item.status === "superseded" || item.status === "archived")
+      .sort((a, b) => a.updatedAt - b.updatedAt);
+    for (const item of preserve) keep.add(item.id);
+    const slots = Math.max(0, historyPerScope - preserve.length);
+    for (const item of removable.slice(-slots)) keep.add(item.id);
+  }
+  return items.filter((item) => keep.has(item.id));
 }
 
-async function persist(next: MemoryRecord[]): Promise<void> {
-  const file: MemoryFileV2 = { schemaVersion: MEMORY_SCHEMA_VERSION, entries: next };
-  await mkdir(dirname(storeFile), { recursive: true });
-  const tmp = `${storeFile}.tmp`;
-  const handle = await open(tmp, "w");
+function normalizeAfterMutation(next: unknown[]): MemoryRecord[] {
+  return pruneHistory(normalizeRecords(next, memoryScope(DEFAULT_MEMORY_PROFILE)))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function changeList(previous: MemoryRecord[], next: MemoryRecord[]): StoreChange[] {
+  const before = new Map(previous.map((record) => [record.id, record]));
+  const after = new Map(next.map((record) => [record.id, record]));
+  const changes: StoreChange[] = [];
+  for (const [id, record] of after) {
+    const old = before.get(id);
+    if (!old || JSON.stringify(old) !== JSON.stringify(record)) {
+      changes.push({ type: "upsert", record });
+    }
+  }
+  for (const [id, record] of before) {
+    if (!after.has(id)) changes.push({ type: "delete", record });
+  }
+  return changes;
+}
+
+async function readLegacyRecords(): Promise<{ entries: unknown[]; version: number } | null> {
+  let raw: string;
   try {
-    await handle.writeFile(JSON.stringify(file, null, 2), "utf8");
-    await handle.sync();
-    await handle.close();
+    raw = await readFile(legacyFile, "utf8");
   } catch (error) {
-    await handle.close().catch(() => {});
-    await unlink(tmp).catch(() => {});
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
     throw error;
   }
+  let parsed: unknown;
   try {
-    await rename(tmp, storeFile);
+    parsed = JSON.parse(raw);
   } catch {
-    // Windows 偶发 EPERM/ENOENT：清掉旧目标后重试一次；失败时保留 tmp 供排障。
-    await unlink(storeFile).catch(() => {});
-    await rename(tmp, storeFile);
+    const quarantineTarget = `${legacyFile}.corrupt-${Date.now()}`;
+    await rename(legacyFile, quarantineTarget).catch(() => {});
+    statusState = "corrupt";
+    statusExtra = { ...(quarantineTarget ? { quarantinedTo: quarantineTarget } : {}), message: "旧记忆文件不是合法 JSON" };
+    return { entries: [], version: 2 };
   }
-}
-
-async function quarantine(): Promise<string | undefined> {
-  const target = `${storeFile}.corrupt-${Date.now()}`;
-  try {
-    await rename(storeFile, target);
-    return target;
-  } catch {
-    return undefined;
+  const legacy = Array.isArray(parsed);
+  const object = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as { schemaVersion?: unknown; entries?: unknown }
+    : null;
+  const version = legacy ? 1 : Number(object?.schemaVersion ?? 0);
+  if (version > 2) throw new Error(`旧记忆文件 schemaVersion=${version} 不受支持`);
+  const entries = legacy ? parsed as unknown[] : object?.entries;
+  if (!Array.isArray(entries)) {
+    const quarantineTarget = `${legacyFile}.corrupt-${Date.now()}`;
+    await rename(legacyFile, quarantineTarget).catch(() => {});
+    statusState = "corrupt";
+    statusExtra = { ...(quarantineTarget ? { quarantinedTo: quarantineTarget } : {}), message: "旧记忆文件缺少 entries 数组" };
+    return { entries: [], version: 2 };
   }
+  return { entries, version };
 }
 
 async function load(): Promise<void> {
-  let raw: string;
+  storeDir = resolveMemoryStoreDir();
+  legacyFile = resolveLegacyMemoryFile();
   try {
-    raw = await readFile(storeFile, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+    const existing = await readStoreManifest(storeDir);
+    if (existing) {
+      manifest = existing;
+      const loadedStore = await loadV3Store(storeDir, existing);
+      records = normalizeAfterMutation(loadedStore.records);
+      eventCount = loadedStore.eventCount;
+      loaded = true;
+      blocked = false;
+      statusState = loadedStore.badLines ? "degraded" : "ok";
+      statusExtra = loadedStore.badLines ? { message: `已跳过 ${loadedStore.badLines} 条损坏记忆记录` } : {};
+      return;
+    }
+
+    const legacy = await readLegacyRecords();
+    if (!legacy) {
       records = [];
+      manifest = null;
       loaded = true;
       blocked = false;
       statusState = "missing";
       statusExtra = {};
       return;
     }
-    records = [];
+    records = normalizeAfterMutation(legacy.entries);
+    manifest = await writeStoreGenerations(storeDir, records);
+    eventCount = 0;
+    const backup = `${legacyFile}.v2-backup`;
+    await rename(legacyFile, backup).catch(() => {});
     loaded = true;
     blocked = false;
-    statusState = "error";
-    statusExtra = { message: error instanceof Error ? error.message : String(error) };
-    return;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
+    statusState = statusState === "corrupt" ? "corrupt" : "migrated";
+    statusExtra = { ...statusExtra, migratedFrom: legacy.version };
   } catch (error) {
     records = [];
     loaded = true;
-    blocked = false;
-    const quarantinedTo = await quarantine();
-    statusState = "corrupt";
-    statusExtra = {
-      ...(quarantinedTo ? { quarantinedTo } : {}),
-      message: error instanceof Error ? error.message : String(error),
-    };
-    return;
-  }
-
-  const legacy = Array.isArray(parsed);
-  const object = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? parsed as { schemaVersion?: unknown; entries?: unknown }
-    : null;
-  const version = legacy ? 1 : object?.schemaVersion;
-  if (typeof version === "number" && version > MEMORY_SCHEMA_VERSION) {
-    records = [];
-    loaded = true;
+    // v3 manifest 或回放出错时必须 fail-closed：宁可只读，也不能用空内存覆盖原存储。
     blocked = true;
-    statusState = "future";
-    statusExtra = { message: `记忆文件 schemaVersion=${version} 高于当前支持的 ${MEMORY_SCHEMA_VERSION}，已拒绝写入；请升级或回滚应用` };
-    return;
-  }
-  const entries = legacy ? parsed as unknown[] : object?.entries;
-  if (!Array.isArray(entries)) {
-    records = [];
-    loaded = true;
-    blocked = false;
-    const quarantinedTo = await quarantine();
-    statusState = "corrupt";
-    statusExtra = { ...(quarantinedTo ? { quarantinedTo } : {}), message: "根对象缺少 entries 数组" };
-    return;
-  }
-
-  const normalized = pruneHistory(normalizeRecords(entries, memoryScope(DEFAULT_MEMORY_PROFILE)));
-  records = normalized;
-  loaded = true;
-  blocked = false;
-  if (legacy) {
-    try {
-      await persist(records);
-      statusState = "migrated";
-      statusExtra = { migratedFrom: 1 };
-    } catch (error) {
+    if (error instanceof MemoryStoreFutureError) {
+      statusState = "future";
+      statusExtra = { message: error.message };
+    } else {
       statusState = "error";
-      statusExtra = { message: `v1 迁移写入失败：${error instanceof Error ? error.message : String(error)}` };
+      statusExtra = { message: error instanceof Error ? error.message : String(error) };
     }
-  } else {
-    statusState = "ok";
-    statusExtra = {};
   }
 }
 
@@ -302,33 +361,59 @@ export function loadedLocalRecords(): MemoryRecord[] {
   return cloneRecords(records);
 }
 
-function normalizeAfterMutation(next: MemoryRecord[]): MemoryRecord[] {
-  return pruneHistory(normalizeRecords(next, memoryScope(DEFAULT_MEMORY_PROFILE)))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+async function persistState(previous: MemoryRecord[], next: MemoryRecord[]): Promise<void> {
+  const changes = changeList(previous, next);
+  if (!changes.length) return;
+  if (!manifest) {
+    manifest = await writeStoreGenerations(storeDir, next);
+    eventCount = 0;
+  } else {
+    manifest = await appendStoreChanges(storeDir, manifest, changes, next);
+    eventCount += changes.length;
+    if (shouldCompact(eventCount)) {
+      manifest = await writeStoreGenerations(storeDir, next);
+      eventCount = 0;
+    }
+  }
+  usageDirty = false;
+  if (usageTimer) clearTimeout(usageTimer);
+  usageTimer = undefined;
+  statusState = "ok";
+  statusExtra = {};
 }
 
-/** 串行变更：加载、修改、全量落盘必须在一个临界区内完成。 */
+/** 串行变更：生命周期推进、加载、修改、事件落盘必须在一个临界区内完成。 */
 export async function updateLocalRecords<T>(mutator: (draft: MemoryRecord[]) => T): Promise<T> {
   let result!: T;
   const run = writeQueue.then(async () => {
     await ensureLocalStoreLoaded();
-    if (blocked) {
-      throw new Error(statusExtra.message || "记忆文件版本不受支持，已拒绝写入");
-    }
-    const draft = cloneRecords(records);
+    if (blocked) throw new Error(statusExtra.message || "记忆文件版本不受支持，已拒绝写入");
+    const lifecycle = applyLifecycleTransitions(records);
+    const base = lifecycle.records;
+    const draft = cloneRecords(base);
     result = mutator(draft);
     const normalized = normalizeAfterMutation(draft);
-    await persist(normalized);
+    await persistState(records, normalized);
     records = normalized;
-    usageDirty = false;
-    if (usageTimer) clearTimeout(usageTimer);
-    usageTimer = undefined;
-    statusState = "ok";
-    statusExtra = {};
   });
   writeQueue = run.catch(() => {});
   await run;
   return result;
+}
+
+/** 读列表中短暂推进到期状态；没有变化时零写盘。 */
+export async function refreshLocalLifecycle(): Promise<void> {
+  const run = writeQueue.then(async () => {
+    await ensureLocalStoreLoaded();
+    if (blocked) return;
+    const lifecycle = applyLifecycleTransitions(records);
+    if (!lifecycle.changed) return;
+    const normalized = normalizeAfterMutation(lifecycle.records);
+    await persistState(records, normalized);
+    records = normalized;
+  });
+  writeQueue = run.catch(() => {});
+  await run;
 }
 
 function scheduleUsagePersist(): void {
@@ -340,10 +425,7 @@ function scheduleUsagePersist(): void {
   usageTimer.unref?.();
 }
 
-/**
- * 检索命中后只更新内存计数，1 秒合并落盘；高频对话不会每轮都重写整份文件。
- * 返回值是带最新 useCount/lastUsedAt 的副本，供本轮注入直接使用。
- */
+/** 检索命中后只更新内存计数，1 秒合并落盘；高频对话不会每轮都重写整份索引。 */
 export function touchLocalRecords(ids: string[], now = Date.now()): MemoryRecord[] {
   if (!loaded || blocked || !ids.length) return [];
   const targets = new Set(ids);
@@ -361,11 +443,13 @@ export function touchLocalRecords(ids: string[], now = Date.now()): MemoryRecord
   return touched;
 }
 
-/** 测试、关停或设置页刷新前可强制冲刷命中统计。 */
+/** 关停、测试或设置页刷新前强制把命中计数并回快照。 */
 export async function flushLocalUsage(): Promise<void> {
   const run = writeQueue.then(async () => {
-    if (!usageDirty) return;
-    await persist(records);
+    await ensureLocalStoreLoaded();
+    if (!usageDirty || blocked) return;
+    manifest = await writeStoreGenerations(storeDir, records);
+    eventCount = 0;
     usageDirty = false;
     statusState = "ok";
     statusExtra = {};
@@ -387,29 +471,37 @@ export function countActiveRecords(items: MemoryRecord[], scope?: MemoryScope): 
 export function localMemoryStoreStatus(): LocalMemoryStoreStatus {
   return {
     state: statusState,
-    file: storeFile,
+    file: legacyFile,
+    storeDir,
     loaded,
     ...statusExtra,
     activeCount: countActiveRecords(records),
+    candidateCount: records.filter((item) => item.status === "candidate").length,
+    staleCount: records.filter((item) => item.status === "stale").length,
     historyCount: records.length,
+    eventCount,
   };
 }
 
-export function memoriesFilePath(): string {
-  return storeFile;
+export async function localMemoryStoreStatusAsync(): Promise<LocalMemoryStoreStatus> {
+  const status = localMemoryStoreStatus();
+  const footprint = await storeFootprint(storeDir);
+  return { ...status, bytes: footprint.bytes };
 }
 
-/** 测试与恢复后重载：清空内存态并重绑 MEMORIES_FILE。 */
+/** 测试与恢复后重载：清空内存态并重绑路径。 */
 export function resetLocalStore(): void {
   records = [];
   loaded = false;
   loading = null;
   blocked = false;
-  storeFile = resolveFile();
+  storeDir = resolveMemoryStoreDir();
+  legacyFile = resolveLegacyMemoryFile();
+  manifest = null;
   statusState = "missing";
   statusExtra = {};
   writeQueue = Promise.resolve();
   usageDirty = false;
-  if (usageTimer) clearTimeout(usageTimer);
   usageTimer = undefined;
+  eventCount = 0;
 }

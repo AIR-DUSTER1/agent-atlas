@@ -11,8 +11,11 @@
  */
 
 import {
-  ensureMarkdownRenderer, fmtArgs, nodeIcon, nodeLabel, renderMarkdown, TOOL_ICONS,
+  ensureMarkdownRenderer, fmtArgs, nodeIcon, nodeLabel, renderMarkdown,
 } from "../modules/format.js";
+import {
+  TOOL_CATEGORIES, TOOL_CATEGORY_ORDER, describeTool, type ToolCategoryId,
+} from "../modules/tool-presentation.js";
 import {
   blockBodies, partEls, saveLocal, state, textTimers, thinkingTimers,
 } from "../core/state.js";
@@ -136,7 +139,115 @@ export function mountToolCard(block: AssistantBlock, card: HTMLElement): void {
   blockBodies.get(block)?.appendChild(card);
 }
 
-/** 将 tools 节点前紧邻的工具卡折叠成一个可展开分组，摘要保留工具名与次数。 */
+function isToolCategoryId(value: string): value is ToolCategoryId {
+  return value in TOOL_CATEGORIES;
+}
+
+function createToolCategorySection(categoryId: ToolCategoryId): HTMLElement {
+  const category = TOOL_CATEGORIES[categoryId];
+  const section = h("section", {
+    class: "tool-category-section",
+    dataset: { categorySection: categoryId, toolCategory: categoryId },
+  },
+    h("div", { class: "tool-category-heading" },
+      h("span", { class: "tool-category-heading-icon" }, icon(category.icon, { size: 12 })),
+      h("span", { class: "tool-category-heading-label" }, category.label),
+      h("span", { class: "tool-category-heading-count" }),
+    ),
+    h("div", { class: "tool-category-items" }),
+  );
+  return section;
+}
+
+/** 找到（或创建）一个分类区；工具名晚到导致类别变化时也能原地迁移。 */
+function ensureToolCategorySection(items: HTMLElement, categoryId: ToolCategoryId): HTMLElement {
+  const existing = [...items.children].find(
+    (child): child is HTMLElement => child instanceof HTMLElement &&
+      child.dataset.categorySection === categoryId,
+  );
+  if (existing) return existing;
+  const section = createToolCategorySection(categoryId);
+  items.appendChild(section);
+  return section;
+}
+
+/** 动态刷新分组：类别、工具名、次数与审批/运行/失败状态都以卡片 DOM 为准。 */
+function refreshToolGroup(group: HTMLElement | null): void {
+  if (!group) return;
+  const items = group.querySelector<HTMLElement>(".tool-group-items");
+  if (!items) return;
+  const cards = [...group.querySelectorAll<HTMLElement>(".tool-card")];
+
+  for (const card of cards) {
+    const raw = card.dataset.toolCategory || "other";
+    const categoryId = isToolCategoryId(raw) ? raw : "other";
+    const section = ensureToolCategorySection(items, categoryId);
+    const categoryItems = section.querySelector<HTMLElement>(".tool-category-items");
+    if (categoryItems && card.parentElement !== categoryItems) categoryItems.appendChild(card);
+  }
+
+  const sections = [...items.children].filter(
+    (child): child is HTMLElement => child instanceof HTMLElement && Boolean(child.dataset.categorySection),
+  );
+  for (const section of sections) {
+    const count = section.querySelectorAll(".tool-card").length;
+    if (!count) {
+      section.remove();
+      continue;
+    }
+    const countEl = section.querySelector<HTMLElement>(".tool-category-heading-count");
+    if (countEl) countEl.textContent = `${count} 次`;
+  }
+  sections.sort((a, b) => {
+    const ai = TOOL_CATEGORY_ORDER.indexOf(a.dataset.categorySection as ToolCategoryId);
+    const bi = TOOL_CATEGORY_ORDER.indexOf(b.dataset.categorySection as ToolCategoryId);
+    return (ai < 0 ? TOOL_CATEGORY_ORDER.length : ai) - (bi < 0 ? TOOL_CATEGORY_ORDER.length : bi);
+  });
+  for (const section of sections) items.appendChild(section);
+
+  // 富结果可能在分组创建后才返回；第一次识别到地图/户型图时自动展开，之后尊重用户手动折叠。
+  if (!group.dataset.richOpened && cards.some((card) => card.classList.contains("estate-rich"))) {
+    if (group instanceof HTMLDetailsElement) group.open = true;
+    group.dataset.richOpened = "1";
+  }
+  const categoryCounts = new Map<ToolCategoryId, number>();
+  const nameCounts = new Map<string, number>();
+  for (const card of cards) {
+    const raw = card.dataset.toolCategory || "other";
+    const categoryId = isToolCategoryId(raw) ? raw : "other";
+    categoryCounts.set(categoryId, (categoryCounts.get(categoryId) || 0) + 1);
+    const rawName = card.querySelector(".tool-name")?.textContent?.trim() || "tool";
+    nameCounts.set(rawName, (nameCounts.get(rawName) || 0) + 1);
+  }
+  const categorySummary = [...categoryCounts.entries()]
+    .sort((a, b) => TOOL_CATEGORY_ORDER.indexOf(a[0]) - TOOL_CATEGORY_ORDER.indexOf(b[0]))
+    .map(([id, count]) => `${TOOL_CATEGORIES[id].label} ×${count}`)
+    .join(" · ");
+  const nameSummary = [...nameCounts.entries()]
+    .map(([name, count]) => count > 1 ? `${name} ×${count}` : name)
+    .join(" · ");
+  const summaryText = [categorySummary, nameSummary].filter(Boolean).join("｜");
+
+  const countEl = group.querySelector(".tool-group-count");
+  if (countEl) countEl.textContent = `${cards.length} 次调用`;
+  const namesEl = group.querySelector(".tool-group-names");
+  if (namesEl) namesEl.textContent = summaryText;
+  const statusEl = group.querySelector(".tool-group-status");
+  if (statusEl) {
+    const awaiting = cards.filter((card) => card.classList.contains("awaiting")).length;
+    const running = cards.filter((card) => card.classList.contains("running")).length;
+    const errors = cards.filter((card) => card.classList.contains("err")).length;
+    statusEl.textContent = awaiting
+      ? `${awaiting} 个待审批${running ? ` · ${running} 个运行中` : ""}`
+      : running ? `${running} 个运行中`
+        : errors ? `${errors} 个失败`
+          : "全部完成";
+    statusEl.className = `tool-group-status${errors && !running && !awaiting ? " err" : ""}`;
+  }
+  group.title = `${cards.length} 次工具调用：${summaryText}`;
+}
+
+/** 将 tools 节点前紧邻的工具卡按类别分组；摘要同时保留类别与原始工具名。 */
 export function groupToolCallsIfNeeded(
   block: AssistantBlock, body: HTMLElement, nodePart: NodePart
 ): HTMLElement | null {
@@ -149,46 +260,31 @@ export function groupToolCallsIfNeeded(
   const firstCard = partEls.get(tools[0])?.el;
   if (!firstCard || firstCard.parentElement !== body) return null;
 
-  const counts = new Map<string, number>();
-  for (const tool of tools) {
-    const name = tool.name || "tool";
-    counts.set(name, (counts.get(name) || 0) + 1);
-  }
-  const nameSummary = [...counts.entries()]
-    .map(([name, count]) => count > 1 ? `${name} ×${count}` : name)
-    .join(" · ");
-  const running = tools.filter((tool) => !tool.result).length;
-  const errors = tools.filter((tool) => tool.result?.isError).length;
-  const status = running ? `${running} 个运行中` : errors ? `${errors} 个失败` : "全部完成";
-
   // 地图/户型图这类富结果属于交付物，不是调试轨迹；包含它们时分组默认展开。
   const hasRichResult = tools.some((tool) => partEls.get(tool)?.el.classList.contains("estate-rich"));
   const details = h("details", { class: "tool-group", ...(hasRichResult ? { open: true } : {}) },
     h("summary", { class: "tool-group-summary" },
       h("span", { class: "tool-group-caret" }, "▶"),
       h("span", { class: "tool-group-icon" }, icon("Wrench", { size: 13 })),
-      h("span", { class: "tool-group-title" }, "tools"),
+      h("span", { class: "tool-group-title" }, "工具调用"),
       h("span", { class: "tool-group-count" }),
       h("span", { class: "tool-group-names" }),
       h("span", { class: "tool-group-status" }),
     ),
     h("div", { class: "tool-group-items" }),
   );
-  const countEl = details.querySelector(".tool-group-count");
-  if (countEl) countEl.textContent = `${tools.length} 次调用`;
-  const namesEl = details.querySelector(".tool-group-names");
-  if (namesEl) namesEl.textContent = nameSummary;
-  const statusEl = details.querySelector(".tool-group-status");
-  if (statusEl) statusEl.textContent = status;
-  details.title = `${tools.length} 次工具调用：${nameSummary}`;
-  const items = details.querySelector(".tool-group-items");
   firstCard.parentElement.insertBefore(details, firstCard);
+  const items = details.querySelector<HTMLElement>(".tool-group-items");
   if (items) {
     for (const tool of tools) {
-      const el = partEls.get(tool)?.el;
-      if (el) items.appendChild(el);
+      const card = partEls.get(tool)?.el;
+      if (!card) continue;
+      const categoryId = describeTool(tool).category.id;
+      const section = ensureToolCategorySection(items, categoryId);
+      section.querySelector<HTMLElement>(".tool-category-items")?.appendChild(card);
     }
   }
+  refreshToolGroup(details);
   return details;
 }
 
@@ -196,9 +292,24 @@ export function updateToolCard(part: ToolPart): void {
   const refs = partEls.get(part);
   if (!refs) return;
   const card = refs.el;
-  const firstLine = (part.result?.content || part.argsText || "").split("\n")[0] || "";
+  const presentation = describeTool(part);
+  card.dataset.toolCategory = presentation.category.id;
+
+  const iconEl = card.querySelector<HTMLElement>(".tool-icon");
+  if (iconEl && iconEl.dataset.categoryIcon !== presentation.category.icon) {
+    iconEl.dataset.categoryIcon = presentation.category.icon;
+    iconEl.replaceChildren(icon(presentation.category.icon, { size: 13 }));
+  }
+  const categoryEl = card.querySelector(".tool-category");
+  if (categoryEl) categoryEl.textContent = presentation.category.label;
+  const nameEl = card.querySelector(".tool-name");
+  if (nameEl) nameEl.textContent = presentation.rawName;
   const preview = card.querySelector(".tool-args-preview");
-  if (preview) preview.textContent = firstLine.slice(0, 120);
+  if (preview) preview.textContent = presentation.summary;
+  const labels = card.querySelectorAll<HTMLElement>(".tool-label");
+  if (labels[0]) labels[0].textContent = presentation.category.argsLabel;
+  if (labels[1]) labels[1].textContent = presentation.category.resultLabel;
+
   const argsPre = card.querySelector(".args-pre");
   if (argsPre) argsPre.textContent = fmtArgs(part);
 
@@ -228,8 +339,8 @@ export function updateToolCard(part: ToolPart): void {
   }
   // 委派卡在参数阶段就显示目标与授权边界，结果到达后原地替换为执行摘要。
   if (part.name === "delegate_agent") renderDelegateInToolCard(part, card);
+  refreshToolGroup(card.closest<HTMLElement>(".tool-group"));
 }
-
 /* ---------------------------------------------------------------------------
  * 正文文本
  * ------------------------------------------------------------------------- */
@@ -431,20 +542,17 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     card.replaceChildren(
       h("div", { class: "tool-head" },
         h("span", { class: "tool-icon" }),
+        h("span", { class: "tool-category" }),
         h("span", { class: "tool-name" }),
         h("span", { class: "tool-args-preview" }),
         h("span", { class: "tool-status" }, h("span", { class: "spinner" }), "运行中"),
         h("span", { class: "chevron" }, "▶"),
       ),
       h("div", { class: "tool-body" },
-        h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "参数 (流式)"), h("pre", { class: "args-pre" })),
+        h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "参数"), h("pre", { class: "args-pre" })),
         h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "结果"), h("pre", { class: "result-pre" }, "…")),
       ),
     );
-    const iconEl = card.querySelector(".tool-icon");
-    if (iconEl) iconEl.textContent = TOOL_ICONS[part.name] || "🔧";
-    const nameEl = card.querySelector(".tool-name");
-    if (nameEl) nameEl.textContent = part.name || "tool";
     card.querySelector(".tool-head")?.addEventListener("click", () => card.classList.toggle("open"));
     mountToolCard(block, card);
     partEls.set(part, { el: card });

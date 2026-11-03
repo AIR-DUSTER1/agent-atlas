@@ -103,7 +103,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "0.9.0-beta.14");
+  assert.equal(pkg.version, "0.9.0-beta.15");
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);
@@ -120,6 +120,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(runtime, /USER node/);
   assert.match(runtime, /CHECKPOINT_FILE=\/data\/checkpoints\.ndjson/);
   assert.match(runtime, /MEMORIES_FILE=\/data\/memories\.json/);
+  assert.match(runtime, /MEMORY_STORE_DIR=\/data\/memory-store/);
   assert.match(runtime, /scripts\/data-cli\.ts/);
   // 运行层只选择性复制 src/ 子目录；任何新增的顶层运行目录都必须显式进入镜像。
   for (const entry of await readdir("src", { withFileTypes: true })) {

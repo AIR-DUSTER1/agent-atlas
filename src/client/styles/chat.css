@@ -230,6 +230,54 @@
 .tool-card.ok { border-left-color: var(--green); }
 .tool-card.err { border-left-color: var(--red); }
 .tool-card.needs-approval { border-left-color: var(--amber); }
+/* 工具类别色只用于图标、类别胶囊和分类分区标题；运行/完成/失败仍由左侧状态色表达。 */
+.tool-card[data-tool-category="file-read"],
+.tool-card[data-tool-category="file-search"],
+.tool-card[data-tool-category="browser"],
+.tool-card[data-tool-category="web"],
+.tool-card[data-tool-category="agent"],
+.tool-category-section[data-tool-category="file-read"],
+.tool-category-section[data-tool-category="file-search"],
+.tool-category-section[data-tool-category="browser"],
+.tool-category-section[data-tool-category="web"],
+.tool-category-section[data-tool-category="agent"] {
+  --tool-category-color: var(--accent-soft);
+  --tool-category-bg: rgba(91,140,255,.09);
+}
+.tool-card[data-tool-category="file-write"],
+.tool-card[data-tool-category="command"],
+.tool-card[data-tool-category="computer"],
+.tool-category-section[data-tool-category="file-write"],
+.tool-category-section[data-tool-category="command"],
+.tool-category-section[data-tool-category="computer"] {
+  --tool-category-color: var(--amber-soft);
+  --tool-category-bg: rgba(226,161,60,.09);
+}
+.tool-card[data-tool-category="file-edit"],
+.tool-card[data-tool-category="image-read"],
+.tool-card[data-tool-category="memory"],
+.tool-card[data-tool-category="mcp"],
+.tool-category-section[data-tool-category="file-edit"],
+.tool-category-section[data-tool-category="image-read"],
+.tool-category-section[data-tool-category="memory"],
+.tool-category-section[data-tool-category="mcp"] {
+  --tool-category-color: var(--accent-2-soft);
+  --tool-category-bg: rgba(139,92,246,.09);
+}
+.tool-card[data-tool-category="knowledge"],
+.tool-card[data-tool-category="estate"],
+.tool-card[data-tool-category="job"],
+.tool-category-section[data-tool-category="knowledge"],
+.tool-category-section[data-tool-category="estate"],
+.tool-category-section[data-tool-category="job"] {
+  --tool-category-color: var(--green-soft);
+  --tool-category-bg: rgba(63,185,111,.09);
+}
+.tool-card[data-tool-category="other"],
+.tool-category-section[data-tool-category="other"] {
+  --tool-category-color: var(--text-2);
+  --tool-category-bg: var(--tag-bg);
+}
 
 .tool-head {
   display: flex; align-items: center; gap: 9px;
@@ -239,8 +287,20 @@
   font-size: 12.5px;
 }
 .tool-head:hover { background: var(--bg-hover); }
-.tool-icon { font-size: 13px; }
-.tool-name { color: var(--accent-soft-2); font-weight: 600; }
+.tool-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; color: var(--tool-category-color, var(--accent-soft)); }
+.tool-icon .ui-icon { --icon-size: 13px; }
+.tool-category {
+  flex: none; padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--tool-category-color, var(--accent-soft)) 28%, transparent);
+  border-radius: 999px;
+  background: var(--tool-category-bg, rgba(91,140,255,.08));
+  color: var(--tool-category-color, var(--accent-soft));
+  font-family: var(--sans); font-size: 10px; font-weight: 650; white-space: nowrap;
+}
+.tool-name {
+  flex: none; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--accent-soft-2); font-weight: 600;
+}
 .tool-args-preview {
   flex: 1; min-width: 0;
   color: var(--text-3);
@@ -318,6 +378,35 @@
   background: var(--bg-input);
 }
 .tool-group-items .tool-card { margin: 0; }
+/* 批量工具按类别分区；原始工具名仍保留在每张卡的 tool-name 中。 */
+.tool-category-section {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--tool-category-color, var(--border)) 18%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tool-category-bg, transparent) 55%, transparent);
+}
+.tool-category-heading {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--tool-category-color, var(--text-2));
+  font-size: 10.5px;
+}
+.tool-category-heading-icon { display: inline-flex; }
+.tool-category-heading-icon .ui-icon { --icon-size: 12px; }
+.tool-category-heading-label { font-weight: 650; }
+.tool-category-heading-count { margin-left: auto; color: var(--text-3); font-family: var(--mono); font-size: 9.5px; }
+.tool-category-items { display: grid; gap: 6px; padding: 6px; }
+.tool-category-items .tool-card { margin: 0; }
+.tool-group-status.err { color: var(--red); }
+@media (max-width: 640px) {
+  .tool-head { gap: 6px; padding: 8px 9px; }
+  .tool-category { padding: 1px 6px; font-size: 9.5px; }
+  .tool-name { max-width: 30%; font-size: 11.5px; }
+  .tool-args-preview { font-size: 10.5px; }
+  .tool-category-heading { padding: 0 7px; }
+  .tool-category-items { padding: 5px; }
+}
 /* --- 审批卡片（Human-in-the-loop） --- */
 .approval-card {
   min-width: 0; max-width: 100%;

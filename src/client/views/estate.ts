@@ -95,10 +95,10 @@ export async function saveEstateKey(): Promise<void> {
   }
   s2.textContent = "校验中…";
   try {
-    const res = await api<{ ok: boolean; error?: string }>("/api/estate/key", {
+    const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/estate/key", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: value }),
     });
-    s2.textContent = res.ok ? "✓ 校验通过，贝壳找房已可用（回到找房对话直接提需求）" : `✗ 校验未通过：${res.error || "未知错误"}`;
+    s2.textContent = res.ok ? "✓ 校验通过，贝壳找房已可用（回到找房对话直接提需求）" : `✗ 校验未通过：${res.message || res.error || "未知错误"}`;
     s2.style.color = res.ok ? "" : "var(--red)";
     if (res.ok) {
       const keyEl = $("estate-key") as HTMLInputElement | null;

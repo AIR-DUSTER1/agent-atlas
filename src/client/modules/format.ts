@@ -15,21 +15,6 @@ export const NODE_ICONS: Record<string, string> = {
   agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️",
 };
 export const NODE_LABELS: Record<string, string> = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思" };
-export const TOOL_ICONS: Record<string, string> = {
-  calculator: "🧮", get_weather: "☁️", get_current_time: "⏰", send_email: "📧",
-  delegate: "🧭", retrieve_docs: "📚",
-  // 多智能体协同（委派子 Agent）
-  delegate_agent: "👥",
-  // 跨会话长期记忆
-  memory_save: "🧠", memory_recall: "🔎",
-  // 房产 Agent（贝壳）
-  house_search: "🏙", house_lookup: "🔍", house_market: "📈", house_map: "🗺️",
-  house_agents: "👤", house_appoint: "📅", house_contact: "🤝",
-  // Browser Use（右侧实时浏览器）
-  browser_open: "🌐", browser_snapshot: "🧭", browser_navigate: "↔️",
-  browser_scroll: "↕️", browser_act: "🖱️",
-};
-
 export function nodeIcon(name: string): string {
   return NODE_ICONS[name.split("/")[0]] || "⚙️";
 }

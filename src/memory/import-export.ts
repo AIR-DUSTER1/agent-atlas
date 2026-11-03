@@ -17,8 +17,8 @@ import {
   updateLocalRecords,
 } from "./providers/local-store.js";
 
-export interface MemoryExportV2 {
-  schemaVersion: 2;
+export interface MemoryExportV3 {
+  schemaVersion: 3;
   exportedAt: number;
   scope: MemoryScope;
   memories: MemoryRecord[];
@@ -54,7 +54,18 @@ function normalizeImported(item: unknown, scope: MemoryScope, index: number, use
     content,
     tags: Array.isArray(rec.tags) ? rec.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 6) : [],
     source: "import",
-    status: rec.status === "superseded" ? "superseded" : "active",
+    status: rec.status === "candidate" || rec.status === "stale" || rec.status === "superseded" || rec.status === "archived"
+      ? rec.status
+      : "active",
+    category: rec.category === "preference" || rec.category === "project_fact" || rec.category === "correction" || rec.category === "identity"
+      ? rec.category
+      : "other",
+    confidence: typeof rec.confidence === "number" ? Math.max(0, Math.min(1, rec.confidence)) : 1,
+    ...(typeof rec.expiresAt === "number" ? { expiresAt: rec.expiresAt } : {}),
+    ...(typeof rec.staleAt === "number" ? { staleAt: rec.staleAt } : {}),
+    ...(typeof rec.lastConfirmedAt === "number" ? { lastConfirmedAt: rec.lastConfirmedAt } : {}),
+    ...(rec.origin ? { origin: { ...rec.origin } } : {}),
+    ...(typeof rec.replacedBy === "string" ? { replacedBy: rec.replacedBy } : {}),
     createdAt: time(rec.createdAt, now),
     updatedAt: time(rec.updatedAt, now),
     ...(typeof rec.lastUsedAt === "number" ? { lastUsedAt: rec.lastUsedAt } : {}),
@@ -65,13 +76,13 @@ function normalizeImported(item: unknown, scope: MemoryScope, index: number, use
 export async function exportLocalMemories(
   scope: MemoryScope,
   options: { includeHistory?: boolean } = {}
-): Promise<MemoryExportV2> {
+): Promise<MemoryExportV3> {
   await ensureLocalStoreLoaded();
   const memories = (await readLocalRecords())
     .filter((item) => sameMemoryScope(item.scope, scope))
     .filter((item) => options.includeHistory || item.status === "active")
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  return { schemaVersion: 2, exportedAt: Date.now(), scope: { ...scope }, memories };
+  return { schemaVersion: 3, exportedAt: Date.now(), scope: { ...scope }, memories };
 }
 
 export async function importLocalMemories(
@@ -82,7 +93,7 @@ export async function importLocalMemories(
   const root = payload && typeof payload === "object" && !Array.isArray(payload)
     ? payload as { memories?: unknown; entries?: unknown; schemaVersion?: unknown }
     : null;
-  if (typeof root?.schemaVersion === "number" && root.schemaVersion > 2) {
+  if (typeof root?.schemaVersion === "number" && root.schemaVersion > 3) {
     throw new Error("导入文件来自更高 schema 版本，请升级应用后再导入");
   }
   const raw = Array.isArray(payload)

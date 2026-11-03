@@ -157,7 +157,7 @@ export function buildGraph(
   if (kind === "agent") return createAgentGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
   if (kind === "estate") return createEstateGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
-  // 求职岗位 Agent：job-hunter 技能工具集 + 同一形态（ReAct + 审批 + 反思）
+  // 求职岗位 Agent：内置求职工具集 + 同一形态（ReAct + 审批 + 反思）
   if (kind === "job") return createJobGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined);
   switch (demo) {
     case 1: return createBasicGraph(sessionId);

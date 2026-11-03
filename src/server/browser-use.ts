@@ -120,7 +120,7 @@ function executableCandidates(): string[] {
   return [...new Set(candidates)];
 }
 
-function findBrowserExecutable(): string | null {
+export function findBrowserExecutable(): string | null {
   if (executableCache) return executableCache;
   const found = executableCandidates().find((candidate) => existsSync(candidate)) ?? null;
   // 只缓存成功结果：用户安装浏览器后无需重启服务即可重新检测到。
@@ -128,7 +128,7 @@ function findBrowserExecutable(): string | null {
   return found;
 }
 
-function browserDisplayName(executable: string): string {
+export function browserDisplayName(executable: string): string {
   const name = basename(executable).toLowerCase();
   if (name.includes("msedge")) return "Microsoft Edge";
   if (name.includes("chrome")) return "Google Chrome";

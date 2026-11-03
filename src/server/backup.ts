@@ -13,11 +13,11 @@
  */
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { PROJECT_ROOT } from "./files.js";
 import { journalPath, flushJournal, JOURNAL_SCHEMA_VERSION } from "./session-store.js";
 import { checkpointFilePath, flushCheckpointLog, CHECKPOINT_SCHEMA_VERSION } from "../checkpoint.js";
-import { memoriesFilePath } from "../memory-store.js";
+import { memoriesFilePath, memoryStoreDir, flushMemoryUsage } from "../memory-store.js";
 import { MEMORY_SCHEMA_VERSION } from "../memory/providers/local-store.js";
 import { CONFIG_SCHEMA_VERSION, SETTINGS_FILE, configSecretsState } from "./config-store.js";
 import { auditArchivePaths, auditFilePath, flushAudit, writeAudit } from "./audit.js";
@@ -29,16 +29,36 @@ export function backupRoot(): string {
   return process.env.BACKUP_DIR || DEFAULT_BACKUP_DIR;
 }
 
+async function expandDirectoryTargets(root: string, keyPrefix: string, schemaVersion: number | null) {
+  const result: Array<{ key: string; path: string; schemaVersion: number | null }> = [];
+  async function walk(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+      } else if (entry.isFile()) {
+        const rel = relative(root, path).split("\\").join("/");
+        result.push({ key: `${keyPrefix}/${rel}`, path, schemaVersion });
+      }
+    }
+  }
+  await walk(root);
+  return result;
+}
+
 async function backupTargets(): Promise<Array<{ key: string; path: string; schemaVersion: number | null }>> {
   const archives = (await auditArchivePaths()).map((entry) => ({
     key: `audit.archive.${entry.name}`,
     path: entry.path,
     schemaVersion: null,
   }));
+  const memoryFiles = await expandDirectoryTargets(memoryStoreDir(), "memory-store", MEMORY_SCHEMA_VERSION);
   return [
     { key: "sessions.ndjson", path: journalPath(), schemaVersion: JOURNAL_SCHEMA_VERSION },
     { key: "checkpoints.ndjson", path: checkpointFilePath(), schemaVersion: CHECKPOINT_SCHEMA_VERSION },
-    { key: "memories.json", path: memoriesFilePath(), schemaVersion: MEMORY_SCHEMA_VERSION },
+    { key: "memories.json", path: memoriesFilePath(), schemaVersion: 2 },
+    ...memoryFiles,
     { key: "web-config.json", path: SETTINGS_FILE, schemaVersion: CONFIG_SCHEMA_VERSION },
     { key: "audit.ndjson", path: auditFilePath(), schemaVersion: null },
     ...archives,
@@ -173,6 +193,14 @@ async function loadManifest(name: string): Promise<BackupManifestV1 | BackupMani
   }
 }
 
+function manifestFilePath(root: string, key: string): string {
+  const parts = key.split(/[\\/]+/);
+  if (!parts.length || parts.some((part) => !part || part === "." || part === "..")) {
+    throw new Error(`备份文件路径非法：${key}`);
+  }
+  return join(root, ...parts);
+}
+
 async function verifyManifest(name: string, manifest: BackupManifestV1 | BackupManifestV2): Promise<void> {
   const dir = join(backupRoot(), name);
   if (manifest.version === 1) {
@@ -184,7 +212,7 @@ async function verifyManifest(name: string, manifest: BackupManifestV1 | BackupM
   }
   if (!manifest.files.length) throw new Error(`备份 ${name} 里没有数据文件，无法恢复`);
   for (const entry of manifest.files) {
-    const path = join(dir, basename(entry.name));
+    const path = manifestFilePath(dir, entry.name);
     const st = await stat(path).catch(() => null);
     if (!st?.isFile()) throw new Error(`备份文件缺失：${entry.name}`);
     if (st.size !== entry.bytes) throw new Error(`备份文件大小不匹配：${entry.name}`);
@@ -230,6 +258,7 @@ async function pruneBackups(): Promise<number> {
 export async function createBackup(): Promise<BackupInfo> {
   await flushJournal();
   await flushCheckpointLog();
+  await flushMemoryUsage();
   await flushAudit();
   await mkdir(backupRoot(), { recursive: true });
   await secureFilePermissions(backupRoot(), true);
@@ -247,7 +276,8 @@ export async function createBackup(): Promise<BackupInfo> {
       schemaVersions[target.key] = target.schemaVersion;
       continue;
     }
-    const destination = join(dir, target.key);
+    const destination = join(dir, ...target.key.split("/"));
+    await mkdir(dirname(destination), { recursive: true });
     await copyFile(target.path, destination);
     await secureFilePermissions(destination);
     fileEntries.push({
@@ -308,6 +338,16 @@ export async function auditBackups(): Promise<BackupAudit> {
   return { total: dirs.length, valid: dirs.length - issues.length, invalid: issues.length, issues };
 }
 
+function restoreDestination(key: string, targets: Map<string, string>): string | null {
+  if (!key.startsWith("memory-store/")) return targets.get(key) ?? null;
+  const rel = key.slice("memory-store/".length);
+  try {
+    return manifestFilePath(memoryStoreDir(), rel);
+  } catch {
+    return null;
+  }
+}
+
 /** 恢复：先校验全部文件，再快照当前态；写回失败时从快照回滚已替换项。 */
 export async function restoreBackup(name: string): Promise<{ restored: string[]; autoSnapshot: string; verified: boolean }> {
   const manifest = await loadManifest(name);
@@ -320,17 +360,24 @@ export async function restoreBackup(name: string): Promise<{ restored: string[];
   const selected: Array<{ key: string; source: string; dest: string; tmp: string }> = [];
   for (const file of manifest.files) {
     const key = typeof file === "string" ? file : file.name;
-    const safeKey = basename(key);
-    const dest = targets.get(safeKey);
-    if (!dest) continue;
-    const source = join(sourceDir, safeKey);
+    const dest = restoreDestination(key, targets);
+    if (!dest || key.startsWith("/") || key.split("/").some((part) => part === "..")) continue;
+    let source: string;
+    try {
+      source = manifestFilePath(sourceDir, key);
+    } catch {
+      continue;
+    }
     if (!(await fileExists(source))) continue;
-    selected.push({ key: safeKey, source, dest, tmp: `${dest}.restore.tmp` });
+    selected.push({ key, source, dest, tmp: `${dest}.restore.tmp` });
   }
   if (!selected.length) throw new Error(`备份 ${name} 没有可恢复的文件`);
 
   try {
-    for (const item of selected) await copyFile(item.source, item.tmp);
+    for (const item of selected) {
+      await mkdir(dirname(item.tmp), { recursive: true });
+      await copyFile(item.source, item.tmp);
+    }
   } catch (err) {
     await Promise.all(selected.map((item) => unlink(item.tmp).catch(() => {})));
     throw err;
@@ -344,8 +391,8 @@ export async function restoreBackup(name: string): Promise<{ restored: string[];
     }
   } catch (err) {
     for (const key of restored) {
-      const dest = targets.get(key)!;
-      const snapshotFile = join(snapshotDir, key);
+      const dest = restoreDestination(key, targets)!;
+      const snapshotFile = manifestFilePath(snapshotDir, key);
       if (await fileExists(snapshotFile)) {
         const rollbackTmp = `${dest}.rollback.tmp`;
         await copyFile(snapshotFile, rollbackTmp).catch(() => {});
