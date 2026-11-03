@@ -19,6 +19,7 @@ import {
   loadedLocalRecords,
   localMemoryStoreStatus,
   memoriesFilePath,
+  memoryStoreDir,
   resetLocalStore,
 } from "./memory/providers/local-store.js";
 import { getLocalMemoryProvider } from "./memory/providers/local.js";
@@ -123,7 +124,7 @@ export function flushMemoryUsage(): Promise<void> {
   return flushLocalUsage();
 }
 
-export { memoriesFilePath };
+export { memoriesFilePath, memoryStoreDir };
 
 /** 测试专用：清空本地内存态、重绑 MEMORIES_FILE，并重置 Slot 注册表。 */
 export function resetMemoryStore(): void {

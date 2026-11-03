@@ -93,7 +93,7 @@ function dataFiles(root: string, env: NodeJS.ProcessEnv): string[] {
     env.WEB_CONFIG_FILE || join(root, ".setting", "web-config.json"),
     env.SESSIONS_FILE || join(root, ".setting", "sessions.ndjson"),
     env.CHECKPOINT_FILE || join(root, ".setting", "checkpoints.ndjson"),
-    env.MEMORIES_FILE || join(root, ".setting", "memories.json"),
+    env.MEMORY_STORE_DIR || (env.MEMORIES_FILE ? join(dirname(env.MEMORIES_FILE), "memory-store") : join(root, ".setting", "memory-store")),
     env.AUDIT_FILE || join(root, ".setting", "audit.ndjson"),
   ];
 }

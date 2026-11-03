@@ -86,6 +86,21 @@ async function check(): Promise<void> {
   console.log(`${checkpoint.report.badLines ? "FAIL" : "PASS"} checkpoint：${checkpoint.report.validLines}/${checkpoint.report.totalLines} 行有效，版本 ${checkpoint.report.schemaVersion}`);
   if (checkpoint.report.badLines) failures.push(`checkpoint 有 ${checkpoint.report.badLines} 行损坏`);
 
+  try {
+    const { memoryStoreDir } = await import("../src/memory-store.js");
+    const { readStoreManifest, loadV3Store } = await import("../src/memory/providers/local-events.js");
+    const manifest = await readStoreManifest(memoryStoreDir());
+    if (!manifest) {
+      console.log("PASS 长期记忆 v3 尚未创建（首次使用时建库或迁移旧 memories.json）");
+    } else {
+      const loaded = await loadV3Store(memoryStoreDir(), manifest);
+      console.log(`PASS 长期记忆 v3：${loaded.records.length} 条记录，${loaded.eventCount} 条事件`);
+      if (loaded.badLines) failures.push(`长期记忆 v3 有 ${loaded.badLines} 条损坏记录`);
+    }
+  } catch (err) {
+    failures.push(`长期记忆 v3 无法读取：${(err as Error).message}`);
+  }
+
   const { auditBackups } = await import("../src/server/backup.js");
   const backups = await auditBackups();
   console.log(`${backups.invalid ? "FAIL" : "PASS"} 备份：${backups.valid}/${backups.total} 份通过校验`);

@@ -12,7 +12,7 @@ import { productionEnvironmentChecks, inspectWritableDirectories, isProductionMo
 import { SETTINGS_FILE } from "../src/server/config-store.js";
 import { journalPath } from "../src/server/session-store.js";
 import { checkpointFilePath } from "../src/checkpoint.js";
-import { memoriesFilePath } from "../src/memory-store.js";
+import { memoryStoreDir } from "../src/memory-store.js";
 import { auditFilePath } from "../src/server/audit.js";
 
 const REQUIRED_ARTIFACTS = [
@@ -77,7 +77,7 @@ async function checkLockfile(): Promise<ReadinessCheck[]> {
 }
 
 async function main(): Promise<void> {
-  const dataFiles = [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoriesFilePath(), auditFilePath()];
+  const dataFiles = [SETTINGS_FILE, journalPath(), checkpointFilePath(), memoryStoreDir(), auditFilePath()];
   const checks = [
     check("production-mode", isProductionMode(), "PRODUCTION=1 已启用", "deployment"),
     ...productionEnvironmentChecks(),

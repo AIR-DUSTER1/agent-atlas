@@ -28,6 +28,7 @@ import { memorySlot } from "../../src/memory/slot.js";
 import { exportLocalMemories, importLocalMemories } from "../../src/memory/import-export.js";
 import { memorySave, memoryRecall, createMemoryTools } from "../../src/tools-memory.js";
 import { rankMemories } from "../../src/memory/providers/local-search.js";
+import { readStoreManifest } from "../../src/memory/providers/local-events.js";
 import type { MemoryProvider, MemoryRecord } from "../../src/memory/provider.js";
 import { memoryScope } from "../../src/memory/scope.js";
 import { buildAgentContext } from "../../src/agent/context-builder.js";
@@ -58,7 +59,7 @@ async function dropStore(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-test("v1 数组自动迁移 v2：原字段保留，旧记忆默认归入 general", async () => {
+test("v1 数组自动迁移 v3：原字段保留，旧记忆默认归入 general", async () => {
   const { dir, file } = await freshStore();
   try {
     await writeFile(file, JSON.stringify([
@@ -73,12 +74,13 @@ test("v1 数组自动迁移 v2：原字段保留，旧记忆默认归入 general
     assert.deepEqual(general[0].scope, { profileId: "general", userId: "local" });
     assert.equal(general[0].status, "active");
 
-    const persisted = JSON.parse(await readFile(file, "utf8")) as {
-      schemaVersion: number;
-      entries: Array<{ scope: { profileId: string } }>;
-    };
-    assert.equal(persisted.schemaVersion, 2);
-    assert.equal(persisted.entries[0].scope.profileId, "general");
+    const backup = JSON.parse(await readFile(`${file}.v2-backup`, "utf8")) as unknown[];
+    assert.equal(Array.isArray(backup), true, "旧 v1 文件必须保留为 .v2-backup");
+    const manifest = await readStoreManifest(join(dir, "memory-store"));
+    assert.equal(manifest?.schemaVersion, 3);
+    resetMemoryStore();
+    assert.equal(await loadMemories("general"), 1, "重启后从 v3 快照恢复");
+    assert.equal((await listMemoriesAsync("general"))[0].scope.profileId, "general");
     assert.equal(await loadMemories("estate"), 0, "旧数据不能被房产 Agent 继承");
   } finally {
     await dropStore(dir);
@@ -86,7 +88,7 @@ test("v1 数组自动迁移 v2：原字段保留，旧记忆默认归入 general
 });
 
 test("存储核心：同 scope 同 key 新内容进入历史，跨 scope 不覆盖", async () => {
-  const { dir, file } = await freshStore();
+  const { dir } = await freshStore();
   try {
     const first = await saveMemory("回答风格", "结论先行", "agent", "general");
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -99,9 +101,10 @@ test("存储核心：同 scope 同 key 新内容进入历史，跨 scope 不覆�
     assert.equal(listMemories("general").length, 1);
     assert.equal(listMemories("estate").length, 1);
 
-    const persisted = JSON.parse(await readFile(file, "utf8")) as { schemaVersion: number; entries: unknown[] };
-    assert.equal(persisted.schemaVersion, 2);
-    assert.equal(persisted.entries.length, 3, "general 两条历史 + estate 一条 active");
+    resetMemoryStore();
+    assert.equal(await loadMemories("general"), 1);
+    assert.equal(await loadMemories("estate"), 1);
+    assert.equal(memoryStoreStatus().historyCount, 3, "general 两条历史 + estate 一条 active");
   } finally {
     await dropStore(dir);
   }
@@ -195,7 +198,7 @@ test("轻量检索：多词 OR、大小写不敏感、空查询返回当前 scop
 });
 
 test("历史版本：内容变化保留 superseded，完全相同只刷新不新增", async () => {
-  const { dir, file } = await freshStore();
+  const { dir } = await freshStore();
   try {
     const first = await saveMemory("回答风格", "结论先行", "agent", "general");
     const second = await saveMemory("回答风格", "结论先行，少用列表", "user", "general");
@@ -210,8 +213,11 @@ test("历史版本：内容变化保留 superseded，完全相同只刷新不新
     await saveMemory("回答风格", "结论先行，少用列表", "agent", "general");
     assert.equal((await listMemoriesAsync("general", { includeHistory: true })).length, 2, "同内容不新增历史");
 
-    const persisted = JSON.parse(await readFile(file, "utf8")) as { entries: Array<{ status: string }> };
-    assert.equal(persisted.entries.filter((item) => item.status === "active").length, 1);
+    resetMemoryStore();
+    assert.equal(await loadMemories("general"), 1);
+    const persisted = await listMemoriesAsync("general", { includeHistory: true });
+    assert.equal(persisted.filter((item) => item.status === "active").length, 1);
+    assert.equal(persisted.find((item) => item.id === first.id)?.status, "superseded");
   } finally {
     await dropStore(dir);
   }
@@ -247,7 +253,7 @@ test("注入预算：最多 8 条且总字符不超过 2400，空查询不注入
 });
 
 test("命中统计：searchMemories 更新 useCount/lastUsedAt，并节流后落盘", async () => {
-  const { dir, file } = await freshStore();
+  const { dir } = await freshStore();
   try {
     await saveMemory("回答风格", "结论先行", "agent", "general");
     const hits = await searchMemories("回答风格", 8, "general");
@@ -255,9 +261,11 @@ test("命中统计：searchMemories 更新 useCount/lastUsedAt，并节流后落
     assert.equal(hits[0].useCount, 1);
     assert.ok(hits[0].lastUsedAt);
     await flushMemoryUsage();
-    const persisted = JSON.parse(await readFile(file, "utf8")) as { entries: Array<{ useCount?: number; lastUsedAt?: number }> };
-    assert.equal(persisted.entries[0].useCount, 1);
-    assert.ok(persisted.entries[0].lastUsedAt);
+    resetMemoryStore();
+    await loadMemories("general");
+    const persisted = (await listMemoriesAsync("general", { includeHistory: true }))[0];
+    assert.equal(persisted.useCount, 1);
+    assert.ok(persisted.lastUsedAt);
   } finally {
     await dropStore(dir);
   }
@@ -287,7 +295,7 @@ test("导入导出：scope 隔离、批量原子写入、秘密内容整批拒�
     await saveMemory("通用偏好", "结论先行", "user", "general");
     await saveMemory("房产偏好", "只看整租", "user", "estate");
     const snapshot = await exportLocalMemories(memoryScope("general"));
-    assert.equal(snapshot.schemaVersion, 2);
+    assert.equal(snapshot.schemaVersion, 3);
     assert.equal(snapshot.memories.length, 1);
     assert.equal(snapshot.memories[0].key, "通用偏好");
 
