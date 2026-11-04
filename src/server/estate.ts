@@ -37,12 +37,11 @@ import { log } from "./logging.js";
 import { isPluginEnabled } from "../plugin-state.js";
 import { openExternalUrl } from "./external-open.js";
 
-/** 贝壳 CLI 资源桶：登录、需求上报与业务查询全走同一串行队列，避免并发触发风控。 */
+/** 贝壳 CLI 资源桶：需求上报与业务查询全走同一串行队列，避免并发触发风控。 */
 const BEIKE_CLI_CONCURRENCY = 1;
 const BEIKE_CLI_MIN_INTERVAL_MS = 1_500;
 const BEIKE_BREAKER_FAILURES = 2;
 const BEIKE_BREAKER_COOLDOWN_MS = 60_000;
-const BEIKE_LOGIN_COOLDOWN_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // 常量（限量即上限）
@@ -59,7 +58,6 @@ const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
 
 const BEIKE_RUN_TIMEOUT_MS = 90_000;      // 单条 beike 子进程最长执行时间
 const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出时间
-const BEIKE_LOGIN_TIMEOUT_MS = 15_000;    // 仅打开官方登录页，不等待用户扫码
 const BEIKE_INSTALL_TIMEOUT_MS = 600_000; // 整个安装流程（下载 ~32MB + 解压）
 const MANIFEST_TIMEOUT_MS = 30_000;
 const KEY_AUTH_TIMEOUT_MS = 30_000;
@@ -222,20 +220,6 @@ export function isBeikeAuthFailure(text: string): boolean {
   ].some((pattern) => pattern.test(text));
 }
 
-/** 从 `beike login` 的人类可读输出中提取官方登录页（仅 building.ke.com）。 */
-export function extractBeikeLoginUrl(text: string): string | null {
-  for (const match of text.matchAll(/https:\/\/building\.ke\.com\/[^\s<>"']+/gi)) {
-    const raw = match[0].replace(/[),.;，。；]+$/u, "");
-    try {
-      const url = new URL(raw);
-      if (url.protocol === "https:" && BEIKE_LOGIN_HOST_ALLOW.has(url.hostname.toLowerCase())) {
-        return url.href;
-      }
-    } catch { /* 忽略日志里的残缺 URL，继续找下一条 */ }
-  }
-  return null;
-}
-
 /** 不保存 Key 本身，只保存足以识别“用户已换凭证”的短指纹。 */
 function beikeCredentialFingerprint(): string {
   const envKey = process.env.BEIKE_MCP_API_KEY?.trim();
@@ -271,8 +255,6 @@ let beikeLoginGate: BeikeLoginGate | null = null;
 let beikeLoginLaunch: Promise<BeikeLoginLaunch> | null = null;
 /** 只有 doctor / 业务调用证明 Key 可用后才允许 analyze 附加上报，避免首轮双请求撞风控。 */
 let beikeCredentialVerified = false;
-let beikeLastLoginAt = 0;
-let beikeLastLoginUrl = BEIKE_KEY_URL;
 
 /** 凭证文件变化即自动解除门禁，不要求服务重启或重复点击“重新检测”。 */
 function currentBeikeLoginGate(): BeikeLoginGate | null {
@@ -282,45 +264,33 @@ function currentBeikeLoginGate(): BeikeLoginGate | null {
   return beikeLoginGate;
 }
 
-/** 调官方 `beike login` 取登录页；默认由手动入口打开系统浏览器，同一时刻只执行一次。 */
+/**
+ * 打开贝壳官方登录页。不能先跑 `beike login`：该子命令自身会拉起浏览器，
+ * 再调用 openExternalUrl 会让一次点击叠出两个页签。
+ */
 export function startBeikeLogin(options: BeikeLoginOptions = {}): Promise<BeikeLoginLaunch> {
-  const shouldOpen = options.open !== false;
+  const url = BEIKE_KEY_URL;
+  if (options.open === false) {
+    writeAudit("beike.loginUrlPrepared", { opened: false, url });
+    return Promise.resolve({ ok: true, url, opened: false });
+  }
+  // 并发点击复用同一次系统浏览器拉起；准备链接的调用不进入这里，避免吞掉用户点击。
   if (beikeLoginLaunch) return beikeLoginLaunch;
   beikeLoginLaunch = (async () => {
-    let url = beikeLastLoginUrl;
-    let cliError = "";
-    const recent = beikeLastLoginAt > 0 && Date.now() - beikeLastLoginAt < BEIKE_LOGIN_COOLDOWN_MS;
-    if (!recent) {
-      // 先占住冷却时间，手动按钮在 60 秒内只会复用链接并打开，不再重复调 login。
-      beikeLastLoginAt = Date.now();
-      beikeLastLoginUrl = BEIKE_KEY_URL;
-      try {
-        const bin = await ensureBeike();
-        const result = await runBeikeThrottled(bin.path, ["login"], BEIKE_LOGIN_TIMEOUT_MS);
-        url = extractBeikeLoginUrl(`${result.stdout}\n${result.stderr}`) ?? url;
-        beikeLastLoginUrl = url;
-        if (result.code !== 0) cliError = "beike login 未能生成登录链接，已使用官方默认登录页";
-      } catch (err) {
-        cliError = err instanceof Error ? err.message : String(err);
-      }
-    }
-
     let opened = false;
     let openError = "";
-    if (shouldOpen) {
-      try {
-        await openExternalUrl(url, BEIKE_LOGIN_HOST_ALLOW);
-        opened = true;
-      } catch (err) {
-        openError = err instanceof Error ? err.message : String(err);
-      }
+    try {
+      await openExternalUrl(url, BEIKE_LOGIN_HOST_ALLOW);
+      opened = true;
+    } catch (err) {
+      openError = err instanceof Error ? err.message : String(err);
     }
-    writeAudit(shouldOpen ? "beike.loginPageOpened" : "beike.loginUrlPrepared", { opened, url, reused: recent });
+    writeAudit("beike.loginPageOpened", { opened, url });
     return {
-      ok: opened || !shouldOpen,
+      ok: opened,
       url,
       opened,
-      ...(openError || cliError ? { error: openError || cliError } : {}),
+      ...(openError ? { error: openError } : {}),
     };
   })().finally(() => { beikeLoginLaunch = null; });
   return beikeLoginLaunch;

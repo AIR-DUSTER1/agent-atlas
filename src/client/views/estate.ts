@@ -217,7 +217,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   try { data = JSON.parse(part.result?.content || "") as EstatePayload; } catch { return; }
   if (!data || typeof data !== "object") return;
 
-  // 登录失效 → 明确的登录卡；浏览器已由服务端自动拉起，按钮只负责重开。
+  // 登录失效 → 明确的登录卡；浏览器只在用户点击后打开，避免自动流程重复拉起。
   if (data.authRequired) {
     const extra = estateExtra(card);
     const box = document.createElement("div");

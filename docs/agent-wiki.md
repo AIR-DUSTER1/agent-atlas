@@ -687,11 +687,11 @@ Header: Authorization: Bearer <key>（可留空）
 
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
-| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 login / analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，调用官方 `beike login` 只准备 `building.ke.com` 登录链接，手动按钮才打开浏览器；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；连续 2 次认证/业务失败熔断 60 秒，login 链接 60 秒内复用；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
+| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com` 登录链接，用户点击后系统浏览器只拉起一次；不执行会自行开页签的 `beike login`；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后直接结束本轮，不再让模型重试工具 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
-**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_LOGIN_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_LOGIN_TIMEOUT_MS=15_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
+**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录页只允许 HTTPS + `building.ke.com` 精确 host，系统浏览器由参数数组启动，禁止 shell 拼接。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
 4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/x64` 映射为官方 manifest 的 `windows/amd64`，并逐跳校验 GitHub Release 重定向；只信任 HTTPS host 白名单，下载
@@ -1643,8 +1643,8 @@ console.log(result.messages.at(-1).content);
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。官方登录页自身可能先保留 `building.ke.com` 页签再打开 `ai-auth.ke.com` 扫码页签，这是回调流程，不是 agentatlas 重复拉起 |
-| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 login / analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL） |
+| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |
 | 安装贝壳 CLI 报「暂无 win32/x64」或 `unexpected redirect` | 官方 manifest 使用 `windows/amd64`，不是 Node 的 `win32/x64`；GitHub Release 下载会 302 到 `release-assets.githubusercontent.com`。安装器现做平台名映射，并逐跳重新校验重定向 host |
 | `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
 | 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
