@@ -16,6 +16,7 @@ const HEADERS = [
 ] as const;
 const WIDTHS = [14, 28, 28, 14, 18, 12, 10, 10, 10, 26, 18, 20, 14, 18, 12, 12, 18, 34, 34, 12, 40, 20, 42, 18, 20];
 const STATUS_COLUMN = 20;
+const APPLY_LINK_COLUMN = 21;
 
 function xml(value: unknown): string {
   return String(value ?? "")
@@ -56,6 +57,7 @@ function rowXml(rowNumber: number, job: JobRecord): string {
   const cells = values.map((value, index) => {
     const ref = `${columnName(index + 1)}${rowNumber}`;
     if (typeof value === "number") return numberCell(ref, value);
+    if (index === APPLY_LINK_COLUMN - 1 && value) return inlineCell(ref, "点击投递", 3);
     if (index === HEADERS.length - 1 && value) return inlineCell(ref, value, 2);
     if (index === 17 || index === 18 || index === 22) return inlineCell(ref, value, 2);
     return inlineCell(ref, value);
@@ -70,22 +72,30 @@ function sheetXml(manifest: JobManifest): string {
   const cols = WIDTHS.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
   const statusValues = JOB_STATUS_OPTIONS.join(",");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>
 <sheetFormatPr defaultRowHeight="18"/><cols>${cols}</cols><sheetData>${header}${rows}</sheetData>
 <autoFilter ref="A1:${columnName(HEADERS.length)}${maxRow}"/>
 <dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="投递状态" error="请选择清单中的投递状态" sqref="T2:T${maxRow}"><formula1>"${statusValues}"</formula1></dataValidation></dataValidations>
+${manifest.jobs.length ? `<hyperlinks>${manifest.jobs.map((job, index) => job.applyUrl ? `<hyperlink ref="U${index + 2}" r:id="rId${index + 1}" display="点击投递"/>` : "").join("")}</hyperlinks>` : ""}
 <pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>
 </worksheet>`;
 }
 
+function sheetRels(manifest: JobManifest): string {
+  const links = manifest.jobs.map((job, index) => job.applyUrl
+    ? `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(job.applyUrl)}" TargetMode="External"/>`
+    : "").join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${links}</Relationships>`;
+}
+
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="2"><font><sz val="10"/><name val="Microsoft YaHei"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Microsoft YaHei"/></font></fonts>
+<fonts count="3"><font><sz val="10"/><name val="Microsoft YaHei"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Microsoft YaHei"/></font><font><u/><color rgb="FF0563C1"/><sz val="10"/><name val="Microsoft YaHei"/></font></fonts>
 <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill></fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>
+<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
@@ -169,6 +179,7 @@ export async function writeJobWorkbook(manifest: JobManifest, outDir: string): P
     { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(workbookRels(), "utf8") },
     { name: "xl/styles.xml", data: Buffer.from(STYLES, "utf8") },
     { name: "xl/worksheets/sheet1.xml", data: Buffer.from(sheetXml(manifest), "utf8") },
+    { name: "xl/worksheets/_rels/sheet1.xml.rels", data: Buffer.from(sheetRels(manifest), "utf8") },
   ]);
   await fsp.writeFile(path, data);
   return path;

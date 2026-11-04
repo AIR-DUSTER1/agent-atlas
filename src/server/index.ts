@@ -100,7 +100,7 @@ import {
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
-import { handleGetJob, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
 } from "./routes/browser-use.js";
@@ -538,6 +538,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/job" && req.method === "PUT") { await handleSaveJob(res, req); return; }
     if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }
     if (pathname === "/api/job/doctor" && req.method === "POST") { await handleJobDoctor(res, req); return; }
+      if (pathname === "/api/job/diagnose" && req.method === "POST") { await handleJobDiagnose(res, req); return; }
 
     // Browser Use（通用 Agent 插件）：状态 / 实时画面 / 关闭会话
     if (pathname === "/api/browser/status" && req.method === "GET") { handleBrowserStatus(res); return; }

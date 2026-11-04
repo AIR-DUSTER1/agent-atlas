@@ -72,7 +72,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
-    ├── tools-job.ts      # 求职岗位工具：job_collect / job_query / job_enrich / job_summary（§3.47）
+    ├── tools-job.ts      # 求职岗位工具：job_collect / job_query / job_enrich / job_summary / job_diagnose（§3.47）
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
     ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
     ├── agent/            # profile + 共享工作流 + 通用/房产/求职 Agent + 5 个示例的图定义
@@ -80,7 +80,9 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── cli.ts            # CLI 入口：交互菜单 + token 流式 + 节点日志 + 审批交互
     └── server/           # Web 界面（参考 ZCode 聊天 UI）
         ├── index.ts      # node:http 服务：静态页面 + SSE 接口 + 探针 + 信号处理
-        ├── job.ts / job-browser.ts / job-model.ts / job-workbook.ts # 求职 Agent 内置采集、规则、清单与 XLSX（§3.47）
+        ├── job.ts / job-browser.ts / job-model.ts / job-workbook.ts # 求职 Agent 编排、采集、规则与 XLSX（§3.47）
+        ├── job-selectors.json / job-selectors.ts / job-dom.ts      # 选择器候选链、本地覆盖、结构推断（§3.47）
+        ├── job-cards.ts / job-health.ts / job-diagnose.ts           # 卡片解析、健康分级与站点诊断（§3.47）
         ├── health.ts     # /healthz 存活 + /readyz 就绪探针（§3.19）
         ├── lifecycle.ts  # 在途请求统计 + 优雅退出（§3.19）
         ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
@@ -1598,6 +1600,9 @@ console.log(result.messages.at(-1).content);
 | 求职 Agent 又要求填写 Skill 根目录/Python | 早期实现把外部 job-hunter CLI 当成产品依赖，Skill 升级、Python 3.10 与 DrissionPage 都会影响可用性 | 执行流程已内化到 `job-browser.ts` / `job-model.ts` / `job-workbook.ts`；设置页只保留浏览器、数据目录和平台登录（§3.47） |
 | 智联/BOSS 采集时被 Security Verification 拦住 | 站点对无头浏览器和短时间访问启用人机校验 | 采集默认使用可见浏览器窗口，用户可完成一次验证；导航带随机间隔与冷却，校验页会作为平台警告返回，不伪装成 0 条正常结果 |
 | 求职采集后立刻补详情被站点风控 | 采集每个关键词 1-2 次请求，补详情逐条打开岗位页；混跑会突破短时间请求阈值 | `job_collect` 只抓列表；补详情必须单独调 `job_enrich`，两者间隔几分钟（§3.47） |
+| 站点改版后采集静默返回 0 条，和真实没岗位/被风控分不清 | 旧适配器把四平台选择器硬编码在各处，容器失效没有统一诊断证据 | `job_diagnose` 按卡片数 + 字段填充率给出 OK/降级/结构变更/被风控；异常时保存 HTML/PNG 快照并推断候选（§3.47） |
+| 自动推断的选择器把下次采集改坏 | 推断结果只代表当前页面，盲写会污染长期配置 | 采集只在内存临时覆盖并重试；永久固化必须 `apply=true` 且候选在真实页面 `verified=true`，写前留 `.bak` 并记 `learned`（§3.47） |
+| BOSS 诊断偶发显示薪资 0/15、被误判结构变更 | BOSS 虚拟列表周期性重渲染，元素引用等待后失效 | 卡片解析紧跟取元素；页面文案探测用 300ms 短超时；整批薪资为空时重新取卡片解析一次（§3.47） |
 | 澄清卡标题紧贴卡片左上角、文字顶着边框 | 澄清卡没套 `.approval-body`（审批卡靠它给内边距），早期版本直接把标题塞进 `.approval-card`，自身又没有 padding | `.clarify-head` / `.clarify-list` / `.clarify-foot` 各自带内边距（§3.48）；`chat-flow.test.ts` 有守门断言 |
 | 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
 | 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
@@ -2233,13 +2238,16 @@ Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调
 | 层 | 文件 | 职责 |
 |---|---|---|
 | profile | `agent/job.ts` | 提示词 + 工具 allowlist + 领域分析/反思规则 |
-| 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` |
+| 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` / `job_diagnose` |
 | 领域规则 | `server/job-model.ts` | 岗位字段、同义词扩展、五维评分、外包识别、增量合并、纯本地查询 |
-| 浏览器执行 | `server/job-browser.ts` | Playwright 持久化 Profile、四平台搜索适配、详情补全、登录等待、导航限速 |
+| 选择器与 DOM | `server/job-selectors.json` / `job-selectors.ts` / `job-dom.ts` | 默认候选链、本地覆盖与 learned、候选链读取、结构推断与快照 |
+| 卡片解析 | `server/job-cards.ts` | 四平台 RawCard → JobRecord、智联 Vue 列表、51job sensorsdata |
+| 结构诊断 | `server/job-health.ts` / `job-diagnose.ts` | 字段填充率分级、候选真实验证、临时自愈与显式固化 |
+| 浏览器执行 | `server/job-browser.ts` | Playwright 持久化 Profile、四平台搜索适配、自愈重试、详情补全、登录等待、导航限速 |
 | 编排与存储 | `server/job.ts` | 数据目录、采集/补详情编排、清单 JSON 原子写入 |
 | Excel | `server/job-workbook.ts` | 标准库生成最小 OOXML `.xlsx`；状态列带下拉校验 |
 | 报告 | `server/job-html.ts` | 与 Excel 同名的自包含 HTML 报告 |
-| 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor` |
+| 路由 | `routes/job.ts` | `GET/PUT /api/job`、`POST /api/job/login`、`POST /api/job/doctor`、`POST /api/job/diagnose` |
 | 前端 | `views/job.ts` + `#job-mask` | 浏览器检查、数据目录、平台登录、自检 |
 
 **为什么内化而不是引用 skill**：Skill 目录属于用户可安装/升级的外部文档与代码，作为产品能力交付时
@@ -2256,12 +2264,17 @@ Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调
 6. **同义词在本地面扩展**：Agent/智能体/AI 应用/大模型应用等方向词参与标题评分，不依赖模型临时扩词。
 7. **不新增前端依赖**：XLSX 由 `job-workbook.ts` 用标准库构建 ZIP/OOXML；HTML 报告全字段转义，不执行站点内容。
 8. **登录不是 Agent 工具**：扫码是交互步骤，只由设置页按钮触发；模型只调采集/查询/补详情。
+9. **选择器单一真源**：站点 DOM 候选链只放在 `job-selectors.json`；用户验证后的覆盖写入数据目录 `selectors.json`，不改源码，写前保留 `.bak` 并记录 `learned` 证据。
+10. **结构自愈两层**：采集时只做内存临时覆盖并重试一次；永久修复必须由 `job_diagnose` 在真实页面验证 `titleRate/linkRate` 后显式 apply，禁止盲写。
+11. **BOSS 虚拟列表**：卡片会在短时间内重渲染；解析紧跟取元素、页面文案探测使用短超时，整批薪资为空时重新取卡片解析一次。
 
 **数据目录结构**：
 
 ```
 .setting/job-data/
   .profile/             # Chrome/Edge 持久化登录态
+  selectors.json        # 用户验证后的选择器覆盖（可选；同目录保留 .bak）
+  out/diagnose/         # 结构诊断 JSON、HTML/PNG 快照
   out/最新岗位清单.json  # 权威数据源，含完整岗位字段
   out/岗位清单_<时间>.xlsx
   out/岗位清单_<时间>.html

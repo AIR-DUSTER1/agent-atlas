@@ -457,6 +457,29 @@ export interface JobState {
   error?: string;
 }
 
+/** 求职站点结构诊断；对应 POST /api/job/diagnose。 */
+export interface JobDiagnosisResponse {
+  ok: boolean;
+  summary: string;
+  output: string;
+  reportPath: string;
+  error?: string;
+  report: {
+    at: string;
+    overall: "OK" | "DEGRADED" | "BROKEN" | "BLOCKED";
+    applied: Array<{ platform: string; selector: string; path: string }>;
+    platforms: Array<{
+      platform: string;
+      verdict: "OK" | "DEGRADED" | "BROKEN" | "BLOCKED";
+      cardCount: number;
+      jobs: number;
+      notes: string[];
+      candidates: Array<{ selector?: string; verified?: boolean; titleRate?: number; linkRate?: number }>;
+      snapshots: Record<string, string>;
+    }>;
+  };
+}
+
 export interface BackupEntry {
   name: string;
   createdAt: number;

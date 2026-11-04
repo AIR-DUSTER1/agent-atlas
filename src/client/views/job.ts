@@ -8,7 +8,7 @@ import { $ } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
-import type { JobState } from "../modules/types.js";
+import type { JobDiagnosisResponse, JobState } from "../modules/types.js";
 
 const PLATFORM_BUTTONS = [
   { id: "boss", label: "BOSS直聘" },
@@ -121,6 +121,35 @@ async function doctor(): Promise<void> {
   }
 }
 
+async function diagnose(apply: boolean, button: HTMLButtonElement): Promise<void> {
+  const diagnoseButton = $("job-diagnose-btn") as HTMLButtonElement | null;
+  const applyButton = $("job-diagnose-apply-btn") as HTMLButtonElement | null;
+  if (diagnoseButton) diagnoseButton.disabled = true;
+  if (applyButton) applyButton.disabled = true;
+  button.textContent = apply ? "正在诊断并修复…" : "正在诊断…";
+  setStatus(
+    apply
+      ? "正在逐平台诊断；只会固化本次在真实页面验证通过的候选，可能需要几分钟…"
+      : "正在逐平台检查页面结构与字段命中率，可能需要几分钟…",
+  );
+  try {
+    const result = await api<JobDiagnosisResponse>("/api/job/diagnose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply }),
+    });
+    const box = $("job-doctor-output");
+    if (box) box.textContent = result.output || result.summary || "（诊断没有输出）";
+    setStatus(result.ok ? `✓ ${result.summary}` : `诊断发现异常：${result.summary}`, result.ok ? "ok" : "err");
+  } catch (err) {
+    setStatus(`✗ ${(err as Error).message}`, "err");
+  } finally {
+    if (diagnoseButton) diagnoseButton.disabled = false;
+    if (applyButton) applyButton.disabled = false;
+    button.textContent = apply ? "诊断并修复" : "结构诊断";
+  }
+}
+
 export function renderJobManage(): void {
   const platforms = $("job-platforms");
   if (!platforms) return;
@@ -164,6 +193,10 @@ export function bindJob(): void {
   $("job-close")?.addEventListener("click", () => closeJob());
   $("job-save-btn")?.addEventListener("click", () => { void save(); });
   $("job-doctor-btn")?.addEventListener("click", () => { void doctor(); });
+  const diagnoseButton = $("job-diagnose-btn") as HTMLButtonElement | null;
+  const applyButton = $("job-diagnose-apply-btn") as HTMLButtonElement | null;
+  diagnoseButton?.addEventListener("click", () => { void diagnose(false, diagnoseButton); });
+  applyButton?.addEventListener("click", () => { void diagnose(true, applyButton); });
   const mask = $("job-mask");
   mask?.addEventListener("click", (event) => { if (event.target === mask) closeJob(); });
   document.addEventListener("keydown", (event) => {

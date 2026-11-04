@@ -15,6 +15,9 @@ import { jobProfile } from "../../src/agent/job.js";
 import { JOB_SUPPORTED_CITIES, readManifest } from "../../src/server/job.js";
 import { writeJobHtmlReport } from "../../src/server/job-html.js";
 import { writeJobWorkbook } from "../../src/server/job-workbook.js";
+import { checkJobListHealth } from "../../src/server/job-health.js";
+import { applyJobSelector, loadJobSelectorRuntime } from "../../src/server/job-selectors.js";
+import { parseNativeCard } from "../../src/server/job-cards.js";
 import {
   createJobRecord, detectOutsourcing, mergeJobRecords, normalizeStoredJob, parseSalaryK, queryJobRecords, scoreJob, type JobManifest, type JobRecord,
 } from "../../src/server/job-model.js";
@@ -27,8 +30,8 @@ const byName = (name: string): { invoke: (input: unknown) => Promise<unknown> } 
 
 const profile = { keywords: ["Agent开发"], city: "青岛" as const, salaryMin: 10, salaryMax: 20, years: 2 };
 
-test("工具集：四个工具都在，且名字符合 job_ 前缀约定", () => {
-  assert.deepEqual(jobTools.map((item) => item.name).sort(), ["job_collect", "job_enrich", "job_query", "job_summary"]);
+test("工具集：五个工具都在，且名字符合 job_ 前缀约定", () => {
+  assert.deepEqual(jobTools.map((item) => item.name).sort(), ["job_collect", "job_diagnose", "job_enrich", "job_query", "job_summary"]);
 });
 
 test("职业 profile：只绑定 job_* 与基础工具，不带开发/知识库/找房工具", () => {
@@ -43,12 +46,14 @@ test("职业 profile：只绑定 job_* 与基础工具，不带开发/知识库/
 test("审批登记：采集与补详情必须审批，查询与概览不登记", () => {
   assert.ok(jobApprovals.job_collect);
   assert.ok(jobApprovals.job_enrich);
+  assert.ok(jobApprovals.job_diagnose);
   assert.equal(jobApprovals.job_query, undefined);
   assert.equal(jobApprovals.job_summary, undefined);
   const text = jobApprovals.job_collect({ city: "青岛", keywords: ["Agent开发"], salaryMin: 10, salaryMax: 20, years: 2 });
   assert.match(text, /青岛/);
   assert.match(text, /Agent开发/);
   assert.match(text, /10-20K/);
+  assert.match(jobApprovals.job_diagnose({ platforms: ["boss"], apply: true }), /selectors\.json/);
 });
 
 test("采集：缺少薪资或年限时拒绝，并说明缺什么", async () => {
@@ -133,6 +138,9 @@ test("原生 XLSX 与同名 HTML：ZIP 头、投递状态列和 HTML 转义", as
     const bytes = await readFile(xlsx);
     assert.equal(bytes.subarray(0, 2).toString(), "PK");
     assert.ok(bytes.length > 1_000);
+    const rawWorkbook = bytes.toString("utf8");
+    assert.match(rawWorkbook, /点击投递/);
+    assert.match(rawWorkbook, /TargetMode="External"/);
     const loaded = await readManifest(dataDir);
     assert.ok(loaded);
     const html = await writeJobHtmlReport(loaded);
@@ -144,6 +152,49 @@ test("原生 XLSX 与同名 HTML：ZIP 头、投递状态列和 HTML 转义", as
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
+});
+
+test("选择器注册表：默认候选可用，本地固化带备份并记录 learned 证据", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "job-selectors-"));
+  try {
+    const initial = await loadJobSelectorRuntime(dataDir);
+    assert.equal(initial.source, "default");
+    assert.equal(initial.primary("boss", "card"), "css:.job-card-wrap");
+    const first = await applyJobSelector(dataDir, "boss", "card", "css:.new-card", { titleRate: 0.9 });
+    assert.deepEqual(first.next[0], "css:.new-card");
+    assert.ok(first.next.includes("css:.job-card-wrap"));
+    const loaded = await loadJobSelectorRuntime(dataDir);
+    assert.equal(loaded.source, "override");
+    assert.equal(loaded.primary("boss", "card"), "css:.new-card");
+    await applyJobSelector(dataDir, "boss", "card", "css:.newer-card");
+    const backup = await readFile(join(dataDir, "selectors.json.bak"), "utf8");
+    assert.match(backup, /\.new-card/);
+    const saved = JSON.parse(await readFile(join(dataDir, "selectors.json"), "utf8")) as { learned: Array<{ key: string }> };
+    assert.equal(saved.learned.length, 2);
+    assert.equal(saved.learned[0]?.key, "card");
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("结构健康：正常列表 OK，容器失效 BROKEN，Vue 有数据但 DOM 失效降级", () => {
+  assert.equal(checkJobListHealth("boss", [job()], 3).verdict, "OK");
+  assert.equal(checkJobListHealth("boss", [], 0).verdict, "BROKEN");
+  assert.equal(checkJobListHealth("zhilian", [job({ platform: "智联招聘" })], 0, { linkless: true }).verdict, "DEGRADED");
+});
+
+test("卡片解析：绝对投递链接不能被空 base 丢掉，结构自愈才能验证链接率", () => {
+  const parsed = parseNativeCard("boss", {
+    text: "Agent开发 15-25K 示例科技 青岛·市南 3-5年 本科",
+    title: "Agent开发",
+    salary: "15-25K",
+    href: "https://example.com/job_detail/1?from=list",
+    company: "示例科技",
+    companyUrl: "",
+    tags: ["五险一金", "双休"],
+  }, "Agent开发");
+  assert.ok(parsed);
+  assert.equal(parsed.applyUrl, "https://example.com/job_detail/1");
 });
 
 test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚本或子进程 CLI", async () => {

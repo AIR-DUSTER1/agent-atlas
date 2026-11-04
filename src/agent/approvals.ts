@@ -55,4 +55,8 @@ export const jobApprovals: ApprovalDescriptions = {
   },
   job_enrich: (a) =>
     `补岗位详情：逐条打开岗位页抓 JD 全文、地址与 HR 活跃（最多 ${String(a.limit ?? 10)} 条，会访问招聘站点）`,
+  job_diagnose: (a) => {
+    const platforms = Array.isArray(a.platforms) && a.platforms.length ? a.platforms.map(String).join("、") : "四平台全部";
+    return `诊断招聘站点结构：${platforms}${a.apply === true ? "，并固化真实验证通过的选择器（会写入 selectors.json）" : "，只读检查，不固化选择器"}`;
+  },
 };

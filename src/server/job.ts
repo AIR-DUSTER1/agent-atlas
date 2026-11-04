@@ -11,6 +11,8 @@ import { readConfig, mergeConfig } from "./config-store.js";
 import { writeJobHtmlReport } from "./job-html.js";
 import { writeJobWorkbook } from "./job-workbook.js";
 import { collectNativeJobs, enrichNativeJobs, getJobBrowserInfo, loginNativeJob } from "./job-browser.js";
+import { diagnoseNativeJobSites, type JobDiagnosisResult } from "./job-diagnose.js";
+import { JOB_VERDICT_LABEL } from "./job-health.js";
 import {
   JOB_MAX_KEYWORDS, JOB_MAX_PAGES, JOB_PLATFORMS, JOB_PLATFORM_LABELS, JOB_SUPPORTED_CITIES,
   MAX_JOBS_IN_RESULT, jobIdentity, mergeJobRecords, normalizeStoredJob, queryJobRecords, scoreJob,
@@ -136,6 +138,23 @@ export interface CollectInput extends JobSearchProfile {
   platforms?: JobPlatform[];
 }
 
+export interface JobDiagnoseInput {
+  keywords?: string[];
+  city?: string;
+  platforms?: JobPlatform[];
+  apply?: boolean;
+  detail?: number;
+  simulate?: JobPlatform;
+}
+
+export interface JobDiagnoseOutcome {
+  ok: boolean;
+  summary: string;
+  output: string;
+  reportPath: string;
+  report: JobDiagnosisResult;
+}
+
 export interface CliOutcome {
   ok: boolean;
   summary: string;
@@ -256,6 +275,52 @@ export async function startLogin(platform: JobPlatform): Promise<CliOutcome> {
   await ensureLoaded();
   const result = await loginNativeJob(platform, resolveJobDataDir());
   return { ok: result.ok, summary: result.output, output: result.output };
+}
+
+export async function diagnoseJobs(input: JobDiagnoseInput = {}): Promise<JobDiagnoseOutcome> {
+  await ensureLoaded();
+  const keywords = [...new Set((input.keywords ?? []).map((item) => item.trim()).filter(Boolean))].slice(0, JOB_MAX_KEYWORDS);
+  if (!keywords.length) keywords.push("Agent开发");
+  const city = (input.city?.trim() || saved.lastCity || "青岛") as JobSearchProfile["city"];
+  if (!JOB_SUPPORTED_CITIES.includes(city)) throw new Error(`暂不支持城市「${city}」；可选：${JOB_SUPPORTED_CITIES.join("、")}`);
+  const simulate = input.simulate && JOB_PLATFORMS.includes(input.simulate) ? input.simulate : undefined;
+  const platforms = simulate
+    ? [simulate]
+    : [...new Set(input.platforms?.length ? input.platforms : JOB_PLATFORMS)].filter((item): item is JobPlatform => JOB_PLATFORMS.includes(item));
+  if (!platforms.length) throw new Error(`至少选择一个诊断平台；可选：${JOB_PLATFORMS.join(" / ")}`);
+  const profile: JobSearchProfile = { keywords, city, salaryMin: 10, salaryMax: 20, years: 2 };
+  const report = await diagnoseNativeJobSites(resolveJobDataDir(), profile, platforms, {
+    detail: input.detail,
+    apply: Boolean(input.apply),
+    simulate,
+  });
+  const reportDir = join(resolveJobDataDir(), "out", "diagnose");
+  await fsp.mkdir(reportDir, { recursive: true });
+  const stamp = report.at.replace(/[-:]/g, "").replace(/T/, "_").replace(/\..+/, "");
+  const reportPath = join(reportDir, `结构诊断_${stamp}.json`);
+  await fsp.writeFile(reportPath, `${JSON.stringify({ ...report, profile }, null, 2)}\n`, "utf8");
+  writeAudit("job.diagnose", {
+    city,
+    platforms,
+    overall: report.overall,
+    applied: report.applied,
+    reportPath,
+  });
+  recordDependency("job", report.ok ? "ok" : "degraded", `岗位结构诊断：${JOB_VERDICT_LABEL[report.overall]}`);
+  const lines = report.platforms.map((item) => {
+    const fields = item.fields.filter((field) => field.total).map((field) => `${field.name} ${Math.round(field.rate * 100)}%`).join(" ");
+    return `[${JOB_VERDICT_LABEL[item.verdict]}] ${JOB_PLATFORM_LABELS[item.platform]}：${item.cardCount} 张卡片 / ${item.jobs} 条${fields ? `；${fields}` : ""}${item.notes.length ? `；${item.notes.join("；")}` : ""}`;
+  });
+  const appliedText = report.applied.length
+    ? `；已固化 ${report.applied.map((item) => `${JOB_PLATFORM_LABELS[item.platform]} ${item.selector}`).join("、")}`
+    : "";
+  return {
+    ok: report.ok,
+    summary: `结构诊断完成：${JOB_VERDICT_LABEL[report.overall]}${appliedText}`,
+    output: [...lines, `报告：${reportPath}`].join("\n"),
+    reportPath,
+    report,
+  };
 }
 
 export async function doctorJob(): Promise<{ ok: boolean; text: string }> {

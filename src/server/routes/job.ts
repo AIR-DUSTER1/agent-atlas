@@ -5,6 +5,7 @@
  * PUT    /api/job            保存技能目录 / python / 数据目录
  * POST   /api/job/login      打开内置浏览器完成平台扫码（长请求，最长 5 分钟）
  * POST   /api/job/doctor     内置执行器自检
+ * POST   /api/job/diagnose   站点结构诊断；apply=true 时固化真实验证过的候选
  *
  * 设计立场：
  *  - 登录是**交互步骤**，必须停下来等用户扫码，所以不封装成 Agent 工具，
@@ -13,7 +14,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
-import { doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
+import { diagnoseJobs, doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
 import { bumpConfigVersion } from "../sessions.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -75,6 +76,30 @@ export async function handleJobDoctor(res: ServerResponse, req: IncomingMessage)
   try {
     sendJson(res, 200, await doctorJob());
   } catch (err) {
+    sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export async function handleJobDiagnose(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  try {
+    const raw = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const platforms = Array.isArray(raw.platforms)
+      ? raw.platforms.filter((item): item is JobPlatform => typeof item === "string" && JOB_PLATFORMS.includes(item as JobPlatform))
+      : undefined;
+    if (Array.isArray(raw.platforms) && raw.platforms.length && !platforms?.length) {
+      throw new Error(`没有可诊断的平台；可选：${JOB_PLATFORMS.join(" / ")}`);
+    }
+    const outcome = await diagnoseJobs({
+      keywords: Array.isArray(raw.keywords) ? raw.keywords.map(String) : undefined,
+      city: typeof raw.city === "string" ? raw.city : undefined,
+      platforms,
+      apply: raw.apply === true,
+      detail: typeof raw.detail === "number" ? raw.detail : undefined,
+      simulate: typeof raw.simulate === "string" && JOB_PLATFORMS.includes(raw.simulate as JobPlatform) ? raw.simulate as JobPlatform : undefined,
+    });
+    sendJson(res, 200, outcome);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
     sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 }

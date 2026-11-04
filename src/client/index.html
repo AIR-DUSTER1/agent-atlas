@@ -1498,6 +1498,8 @@
       <div class="kb-actions">
         <button id="job-save-btn" class="btn btn-approve">保存并重新探测</button>
         <button id="job-doctor-btn" class="ghost-btn">运行自检</button>
+        <button id="job-diagnose-btn" class="ghost-btn" title="检查四个平台的页面结构，不写入选择器">结构诊断</button>
+        <button id="job-diagnose-apply-btn" class="ghost-btn" title="诊断后仅固化本次真实验证通过的候选选择器">诊断并修复</button>
         <span id="job-status" class="settings-status" role="status" aria-live="polite"></span>
       </div>
       <pre id="job-doctor-output" class="job-doctor-output"></pre>
@@ -1513,7 +1515,7 @@
         <span class="spacer"></span>
         <button id="job-close" class="ghost-btn">关闭</button>
       </div>
-      <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary</code>；执行流程、评分规则和平台适配均在应用内，Excel / HTML 交付物写入数据目录的 <code>out/</code>。</p>
+      <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary / job_diagnose（人工审批）</code>；执行流程、评分规则、选择器自愈和平台适配均在应用内，Excel / HTML 交付物写入数据目录的 <code>out/</code>。</p>
     </div>
   </div>
 

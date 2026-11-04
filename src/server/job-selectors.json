@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "platforms": {
+    "boss": {
+      "card": ["css:.job-card-wrap"],
+      "card_title": ["css:.job-name", "css:.job-title", "css:[class*='job-name']"],
+      "card_salary": ["css:.job-salary", "css:[class*='salary']"],
+      "card_footer": ["css:.job-card-footer", "css:[class*='company-name']"],
+      "card_link": ["css:a[href*='/job_detail']", "css:a[href*='job']"],
+      "card_company_link": ["css:a[href*='/gongsi/']"],
+      "card_tags": ["css:.tag-list span", "css:[class*='tag-list'] span"],
+      "detail_panel": ["css:.job-detail-box"],
+      "detail_active": ["css:.boss-active-time"],
+      "logged_in": ["xpath://a[@href='https://www.zhipin.com/web/geek/recommend']//img", "css:.nav-figure, .user-nav .figure, .header-user"],
+      "unlogged_marker": ["css:.header-login-btn", "css:.btn-outline"]
+    },
+    "zhilian": {
+      "card": ["css:.job-card", "css:.joblist-box__item", "css:[class*='job-card']"],
+      "card_title": ["css:.job-name", "css:[class*='job-name']", "css:[class*='job-title']"],
+      "card_salary": ["css:.job-salary", "css:[class*='salary']"],
+      "card_link": ["css:a[href*='jobdetail']", "css:a[href*='job']"],
+      "card_skill_tags": ["css:.joblist-box__item-tag"],
+      "detail_panel": ["css:.job-detail-modules__body", "css:[class*='job-detail']"],
+      "company_header": ["css:.job-company-info__header"],
+      "publisher_name": ["css:.job-detail-publisher__name"],
+      "publisher_title": ["css:.job-detail-publisher__job-title"],
+      "publisher_online": ["css:.job-detail-publisher__online"],
+      "vue_host": ["css:.job-card", "css:.joblist-box__item"],
+      "logged_in": ["css:.user-info", "css:.user-head", "css:.header-user", "css:[class*='userInfo']"],
+      "unlogged_marker": ["css:.header-login-btn", "css:[class*='login']"]
+    },
+    "job51": {
+      "card": ["css:.joblist-item"],
+      "card_title": ["css:.joblist-item-title", "css:.jname", "css:[class*='job-title']"],
+      "card_salary": ["css:.joblist-item-salary", "css:.salary", "css:[class*='salary']"],
+      "card_link": ["css:a[href*='jobs.51job.com']", "css:a[href]"],
+      "company_link": ["css:a.comp"],
+      "company_name": ["css:.cname", "css:a.comp .cname"],
+      "company_info": ["css:.dc", "css:a.comp .dc"],
+      "hr_tip": ["css:.joblist-item-jobinfo .tip", "css:.tip"],
+      "tags": ["css:.tag"],
+      "card_payload": ["css:[sensorsdata]"],
+      "logged_in": ["css:.uname", "css:.user-name", "css:.header-user", "css:[class*='userName']"],
+      "unlogged_marker": ["css:.header-login-btn", "css:[class*='login']"]
+    },
+    "liepin": {
+      "card": ["css:.jobDetailBox", "css:[class*='job-detail-box']"],
+      "card_title": ["css:.job-title-box", "css:[class*='job-title']"],
+      "card_salary": ["css:.job-salary", "css:[class*='salary']"],
+      "card_link": ["tag:a", "css:a[href*='job']"],
+      "jd_box": ["css:[class*='job-intro']", "css:[class*='job-description']"],
+      "logged_in": ["css:.user-info", "css:.user-name", "css:.header-user", "css:[class*='userInfo']"],
+      "unlogged_marker": ["css:.header-login-btn", "css:[class*='login']"]
+    }
+  },
+  "unsupported_fields": {
+    "zhilian": ["hr_active"],
+    "liepin": ["hr_active"]
+  },
+  "learned": []
+}

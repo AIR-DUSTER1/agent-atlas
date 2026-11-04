@@ -16,7 +16,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import {
-  collectJobs, enrichJobs, queryJobs, readManifest,
+  collectJobs, diagnoseJobs, enrichJobs, queryJobs, readManifest,
   JOB_PLATFORMS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT,
   type JobRecord,
 } from "./server/job.js";
@@ -276,4 +276,59 @@ export const jobSummaryTool = tool(
   }
 );
 
-export const jobTools = [jobCollectTool, jobQueryTool, jobEnrichTool, jobSummaryTool];
+// ---------------------------------------------------------------------------
+// 5. job_diagnose：站点结构诊断；用户明确要求修复时才固化候选
+// ---------------------------------------------------------------------------
+export const jobDiagnoseTool = tool(
+  async ({ platforms, keywords, city, apply, detail }) => {
+    const off = pluginOff();
+    if (off) return badArgs(off);
+    try {
+      const outcome = await diagnoseJobs({
+        ...(platforms?.length ? { platforms } : {}),
+        ...(keywords?.length ? { keywords } : {}),
+        ...(city?.trim() ? { city: city.trim() } : {}),
+        apply: apply === true,
+        ...(typeof detail === "number" ? { detail } : {}),
+      });
+      return payload({
+        ok: outcome.ok,
+        summary: outcome.summary,
+        reportPath: outcome.reportPath,
+        applied: outcome.report.applied,
+        platforms: outcome.report.platforms.map((item) => ({
+          platform: item.platform,
+          verdict: item.verdict,
+          cardCount: item.cardCount,
+          jobs: item.jobs,
+          fields: item.fields,
+          candidates: item.candidates.slice(0, 3),
+          notes: item.notes,
+          snapshots: item.snapshots,
+        })),
+        note: outcome.report.ok
+          ? "各平台结构正常。"
+          : "把异常平台、命中率和快照位置如实告诉用户；只有 verified=true 的候选才可建议 apply。",
+      });
+    } catch (err) {
+      return badArgs(err instanceof Error ? err.message : String(err));
+    }
+  },
+  {
+    name: "job_diagnose",
+    description:
+      "诊断 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘的页面结构，区分被风控、真实空结果和站点改版；结构异常时会推断候选并在真实页面验证。" +
+      "何时用：采集返回 0 条、提示结构变化、字段大量缺失，或用户明确要求检查招聘站点适配。" +
+      "何时不用：正常采集用 job_collect；只想看已有清单用 job_query。" +
+      "apply=true 只固化本次验证通过的候选，会写入求职数据目录的 selectors.json 并保留 .bak；执行前系统会人工审批。",
+    schema: z.object({
+      platforms: z.array(z.enum(JOB_PLATFORMS)).optional().describe("只诊断指定平台；不填表示四平台全检"),
+      keywords: z.array(z.string()).optional().describe("诊断用搜索词；不填沿用 Agent开发"),
+      city: z.string().optional().describe(`诊断城市；不填沿用上次采集城市或青岛。支持：${JOB_SUPPORTED_CITIES.join("、")}`),
+      apply: z.boolean().optional().describe("是否固化本次真实验证通过的选择器，默认 false"),
+      detail: z.number().int().min(0).max(3).optional().describe("每个平台补几条详情一起检查，默认 1；0 表示只看列表"),
+    }),
+  }
+);
+
+export const jobTools = [jobCollectTool, jobQueryTool, jobEnrichTool, jobSummaryTool, jobDiagnoseTool];

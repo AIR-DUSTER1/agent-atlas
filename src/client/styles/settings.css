@@ -998,6 +998,7 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
   border: 1px solid var(--border-soft);
 }
 #job-modal h2 { margin: 0 0 6px; font-size: var(--font-md); }
+#job-modal .kb-actions { flex-wrap: wrap; }
 .job-check-list { display: grid; gap: 4px; margin: 8px 0 12px; }
 .job-check-row { display: flex; gap: 10px; align-items: baseline; font-size: var(--font-sm); }
 .job-check-label { flex: none; width: 180px; color: var(--text-3); }

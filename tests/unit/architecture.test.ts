@@ -73,8 +73,8 @@ test("求职 Agent 与通用 / 房产 Agent 的工具集互不越界", async () 
   assert.doesNotMatch(job, /tools-dev|tools-rag|tools-estate|terminal|retrieve_docs/);
   assert.doesNotMatch(job, /house_(search|lookup|appoint|contact|market)/);
   // 其它 Agent 不得反向引入求职工具
-  assert.doesNotMatch(general, /tools-job|job_(collect|query|enrich|summary)/);
-  assert.doesNotMatch(estate, /tools-job|job_(collect|query|enrich|summary)/);
+  assert.doesNotMatch(general, /tools-job|job_(collect|query|enrich|summary|diagnose)/);
+  assert.doesNotMatch(estate, /tools-job|job_(collect|query|enrich|summary|diagnose)/);
 });
 
 test("路由层不依赖 server：RAG 与熔断等跨层能力由 server 注入", async () => {
