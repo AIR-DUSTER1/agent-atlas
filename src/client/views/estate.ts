@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert } from "../ui/dialog.js";
+import { uiAlert, uiPrompt } from "../ui/dialog.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
 import { renderPluginCards } from "./settings-plugins.js";
 import type { EstateState, ToolPart } from "../modules/types.js";
@@ -138,13 +138,62 @@ export async function openEstateLogin(): Promise<void> {
     const result = await requestEstateLogin();
     if (status) {
       status.textContent = result.opened
-        ? "✓ 登录页已打开，请扫码登录后复制页面显示的 Key"
+        ? "✓ 登录页已打开，请扫码；若回调页显示 Not Found，立即复制地址栏完整链接并点「回调页 404？完成登录」"
         : `浏览器未能自动打开，请手动访问：${result.url}`;
       status.style.color = result.opened ? "" : "var(--amber)";
     }
   } catch (err) {
     if (status) {
       status.textContent = `✗ 打开登录页失败：${(err as Error).message}`;
+      status.style.color = "var(--red)";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/**
+ * 贝壳官方 /auth/callback 当前可能直接 404。用户在 state 过期前粘贴完整回调地址，
+ * 由本地服务调用官方换票接口并直接保存、校验 Bearer Key。
+ */
+export async function recoverEstateLogin(): Promise<void> {
+  const button = $("estate-login-recover") as HTMLButtonElement | null;
+  const status = $("estate-status2");
+  const callbackUrl = await uiPrompt(
+    "粘贴扫码后出现 Not Found 的完整地址（含 building.ke.com/auth/callback?state=...）。地址只用于本次换票，不会保存：",
+    {
+      title: "处理贝壳 404 回调",
+      placeholder: "https://building.ke.com/auth/callback?state=...",
+      okText: "完成登录",
+    }
+  );
+  if (typeof callbackUrl !== "string" || !callbackUrl.trim()) return;
+  if (button) button.disabled = true;
+  if (status) {
+    status.textContent = "正在用一次性回调 state 换取并校验 Bearer Key…";
+    status.style.color = "var(--amber)";
+  }
+  try {
+    const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/estate/login/recover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callbackUrl: callbackUrl.trim() }),
+    });
+    if (status) {
+      status.textContent = res.ok
+        ? `✓ ${res.message || "Key 已保存并通过校验"}`
+        : `✗ ${res.message || res.error || "回调换票失败"}`;
+      status.style.color = res.ok ? "" : "var(--red)";
+    }
+    if (res.ok) {
+      state.estate = { ...(state.estate || { installed: true }), loginRequired: false };
+      const keyEl = $("estate-key") as HTMLInputElement | null;
+      if (keyEl) keyEl.value = "";
+      renderPluginCards();
+    }
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ ${(err as Error).message}`;
       status.style.color = "var(--red)";
     }
   } finally {

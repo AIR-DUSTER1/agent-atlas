@@ -1,11 +1,11 @@
 /**
- * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 登录页 / 保存 Key
+ * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 登录页 / 回调救援 / 保存 Key
  * ============================================================
  * getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await 再回 200；
  * installBeike 是几十秒级的下载解压，失败回 500。
  */
 import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
-import { getEstatePublic, installBeike, saveBeikeKey, startBeikeLogin } from "../estate.js";
+import { getEstatePublic, installBeike, recoverBeikeLogin, saveBeikeKey, startBeikeLogin } from "../estate.js";
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -54,6 +54,24 @@ export async function handleSaveBeikeKey(res: import("node:http").ServerResponse
       res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     }
+  }
+}
+
+/** 官方 /auth/callback 404 时，用用户刚复制的完整回调地址完成换票并保存 Key。 */
+export async function handleRecoverBeikeLogin(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  try {
+    const body = JSON.parse((await readBody(req)) || "{}") as { callbackUrl?: unknown };
+    if (typeof body.callbackUrl !== "string" || !body.callbackUrl.trim()) {
+      throw new Error("callbackUrl 不能为空：请粘贴出现 Not Found 的完整地址");
+    }
+    const result = await recoverBeikeLogin(body.callbackUrl);
+    sendJson(res, 200, result.ok ? result : { ...result, error: result.message });
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
+    sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 }
 

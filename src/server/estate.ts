@@ -53,6 +53,12 @@ const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=beike_skill";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
+/** 官方扫码回调 404 时的本地救援入口；只调用官方前端使用的同源接口。 */
+const BEIKE_AUTH_API_BASE = "https://building.ke.com/proxyApi/agent";
+const BEIKE_LOGIN_CALLBACK_PATH = "/auth/callback";
+const BEIKE_LOGIN_RECOVERY_TIMEOUT_MS = 30_000;
+const BEIKE_LOGIN_CALLBACK_MAX_CHARS = 4_096;
+const BEIKE_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
 const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
 
@@ -538,6 +544,138 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
     ok: false,
     message: restoreError ? `${detail}；旧凭证恢复失败：${restoreError}` : detail,
   };
+}
+
+/**
+ * 从扫码后的回调地址里取一次性 state。只接受官方 host/path，错误信息不回显 state。
+ * 官方前端当前会把 /auth/callback 直接 404，救援时把同一条地址交给本地服务即可。
+ */
+export function parseBeikeCallbackState(raw: string): string {
+  const value = raw.trim();
+  if (!value || value.length > BEIKE_LOGIN_CALLBACK_MAX_CHARS) {
+    throw new Error("回调地址为空或过长：请复制出现 Not Found 的完整地址栏链接");
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("回调地址格式不正确：请复制出现 Not Found 的完整地址栏链接");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.hostname.toLowerCase() !== "building.ke.com" ||
+    (url.port !== "" && url.port !== "443") ||
+    (url.pathname !== BEIKE_LOGIN_CALLBACK_PATH && url.pathname !== `${BEIKE_LOGIN_CALLBACK_PATH}/`)
+  ) {
+    throw new Error("只接受 building.ke.com/auth/callback 的 HTTPS 回调地址");
+  }
+  const state = (url.searchParams.get("state") || "").trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(state)) {
+    throw new Error("回调地址缺少有效 state：请在扫码后立即复制完整地址");
+  }
+  return state;
+}
+
+/** 吸收服务端 Set-Cookie 的 name=value，只在本次换票内存中复用。 */
+function absorbBeikeSetCookies(headers: Headers, jar: Map<string, string>): void {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  const values = typeof getSetCookie === "function" ? getSetCookie.call(headers) : [];
+  for (const raw of values) {
+    const pair = raw.split(";", 1)[0]?.trim() || "";
+    const eq = pair.indexOf("=");
+    if (eq > 0) jar.set(pair.slice(0, eq), pair.slice(eq + 1));
+  }
+}
+
+function beikeCookieHeader(jar: Map<string, string>): string {
+  return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readNestedString(value: unknown, key: string): string {
+  const root = asRecord(value);
+  if (!root) return "";
+  const direct = root[key];
+  if (typeof direct === "string") return direct;
+  if (typeof direct === "number") return String(direct);
+  const data = asRecord(root.data);
+  const nested = data?.[key];
+  return typeof nested === "string" ? nested : typeof nested === "number" ? String(nested) : "";
+}
+
+/**
+ * 官方回调 404 时的人工救援：用用户刚复制的一次性 state 调官方 complete，
+ * 再用返回的 .ke.com 会话换 Bearer Key。state/Key/Cookie 均不写日志、不落盘。
+ */
+export async function recoverBeikeLogin(
+  callbackUrl: string,
+  saveKey: (key: string) => Promise<{ ok: boolean; message: string }> = saveBeikeKey
+): Promise<{ ok: boolean; message: string }> {
+  const state = parseBeikeCallbackState(callbackUrl);
+  const jar = new Map<string, string>();
+  const baseHeaders: Record<string, string> = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Origin": "https://building.ke.com",
+    "Referer": "https://building.ke.com/auth/callback",
+    "User-Agent": BEIKE_WEB_USER_AGENT,
+  };
+  const complete = await fetch(`${BEIKE_AUTH_API_BASE}/chat/open/v1/auth/qr-code/complete`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify({ state, from: "building.ke.com" }),
+    signal: AbortSignal.timeout(BEIKE_LOGIN_RECOVERY_TIMEOUT_MS),
+  });
+  absorbBeikeSetCookies(complete.headers, jar);
+  const completeText = await complete.text();
+  let completePayload: unknown = null;
+  try { completePayload = completeText ? JSON.parse(completeText) : null; } catch { /* 非 JSON 按失败处理 */ }
+  const completeRoot = asRecord(completePayload);
+  const ucid = readNestedString(completePayload, "ucid");
+  if (!complete.ok || !ucid) {
+    const code = completeRoot?.code;
+    const expired = code === 40401 || code === "40401";
+    writeAudit("beike.loginRecovery", { ok: false, stage: "complete", expired });
+    return {
+      ok: false,
+      message: expired
+        ? "回调 state 已过期或已被使用。请重新扫码，出现 Not Found 后立即复制地址栏的完整链接"
+        : `贝壳回调换票失败（HTTP ${complete.status}），请重新扫码后立即重试`,
+    };
+  }
+
+  const register = await fetch(`${BEIKE_AUTH_API_BASE}/api/v1/bear_key/web_silent_register`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders,
+      "Cookie": beikeCookieHeader(jar),
+    },
+    body: JSON.stringify({ source: "beike_skill" }),
+    signal: AbortSignal.timeout(BEIKE_LOGIN_RECOVERY_TIMEOUT_MS),
+  });
+  absorbBeikeSetCookies(register.headers, jar);
+  const registerText = await register.text();
+  let registerPayload: unknown = null;
+  try { registerPayload = registerText ? JSON.parse(registerText) : null; } catch { /* 非 JSON 按失败处理 */ }
+  const key = readNestedString(registerPayload, "bear_key");
+  if (!register.ok || !key) {
+    writeAudit("beike.loginRecovery", { ok: false, stage: "register", status: register.status });
+    return {
+      ok: false,
+      message: register.status === 401
+        ? "登录会话未建立，无法换取 Bearer Key。请重新扫码并立即复制 404 回调地址"
+        : `贝壳未返回 Bearer Key（HTTP ${register.status}），请重新扫码后立即重试`,
+    };
+  }
+
+  const saved = await saveKey(key);
+  writeAudit("beike.loginRecovery", { ok: saved.ok, stage: "saved" });
+  return saved;
 }
 
 // ---------------------------------------------------------------------------
