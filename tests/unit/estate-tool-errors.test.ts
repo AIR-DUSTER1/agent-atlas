@@ -6,7 +6,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure, parseBeikeCallbackState, recoverBeikeLogin } from "../../src/server/estate.js";
+import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure } from "../../src/server/estate.js";
+import { beikeCallbackRelayHtml } from "../../src/server/estate-login-browser.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -40,76 +41,34 @@ test("贝壳 CLI 查询串行限速，认证失败后熔断冷却", async () => 
   assert.match(source, /beikeCredentialVerified = true/);
 });
 
-test("贝壳 404 回调救援只接受官方 callback state", () => {
-  const state = "1502b09bb4a046b6acf634cc0caeda09";
-  assert.equal(
-    parseBeikeCallbackState(`https://building.ke.com/auth/callback?state=${state}`),
-    state,
-  );
-  assert.throws(
-    () => parseBeikeCallbackState("https://building.ke.com.evil.example/auth/callback?state=0123456789abcdef"),
-    /只接受/,
-  );
-  assert.throws(
-    () => parseBeikeCallbackState("https://building.ke.com/auth/callback?ticket=0123456789abcdef"),
-    /state/,
-  );
-  assert.throws(
-    () => parseBeikeCallbackState("http://building.ke.com/auth/callback?state=0123456789abcdef"),
-    /只接受/,
-  );
+test("贝壳受控登录回调页只在同源 opener 间转发一次性票据", () => {
+  const html = beikeCallbackRelayHtml();
+  assert.match(html, /type: "alps-state"/);
+  assert.match(html, /type: "cas-ticket"/);
+  assert.match(html, /location\.origin/);
+  assert.match(html, /window\.close/);
+  assert.doesNotMatch(html, /bear_key|localStorage|sessionStorage/);
 });
 
-test("贝壳 404 回调救援会转发会话 Cookie 并返回 Key 给保存函数", async () => {
-  const originalFetch = globalThis.fetch;
-  let seenCookie = "";
-  let savedKey = "";
-  try {
-    globalThis.fetch = (async (input, init) => {
-      const url = String(input);
-      if (url.endsWith("/auth/qr-code/complete")) {
-        const headers = new Headers();
-        headers.append("set-cookie", "lianjia_ssid=session-1; Domain=.ke.com; Path=/");
-        return new Response(JSON.stringify({ ucid: "user-1" }), { status: 200, headers });
-      }
-      seenCookie = new Headers(init?.headers).get("cookie") || "";
-      const headers = new Headers();
-      headers.append("set-cookie", "lianjia_uuid=uuid-1; Domain=.ke.com; Path=/");
-      return new Response(JSON.stringify({ errno: 0, data: { bear_key: "test-bearer-key" } }), { status: 200, headers });
-    }) as typeof fetch;
-    const result = await recoverBeikeLogin(
-      "https://building.ke.com/auth/callback?state=0123456789abcdef0123456789abcdef",
-      async (key) => {
-        savedKey = key;
-        return { ok: true, message: "test saved" };
-      },
-    );
-    assert.equal(result.ok, true);
-    assert.equal(savedKey, "test-bearer-key");
-    assert.match(seenCookie, /lianjia_ssid=session-1/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("贝壳 404 回调救援已接入路由和设置页", async () => {
-  const [estate, route, index, client, html] = await Promise.all([
+test("贝壳受控登录窗口已接入服务端、设置页和登录卡", async () => {
+  const [estate, browserLogin, client, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/server/routes/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/server/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/server/estate-login-browser.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/index.html", import.meta.url), "utf8"),
   ]);
-  assert.match(estate, /export async function recoverBeikeLogin/);
-  assert.match(estate, /qr-code\/complete/);
-  assert.match(estate, /web_silent_register/);
-  assert.match(route, /handleRecoverBeikeLogin/);
-  assert.match(index, /\/api\/estate\/login\/recover/);
-  assert.match(client, /recoverEstateLogin/);
-  assert.match(html, /estate-login-recover/);
+  assert.match(estate, /loginBeikeInManagedBrowser\(saveBeikeKey\)/);
+  assert.match(estate, /beike\.loginManaged/);
+  assert.doesNotMatch(estate, /openExternalUrl/);
+  assert.match(browserLogin, /context\.route\(BEIKE_CALLBACK_ROUTE/);
+  assert.match(browserLogin, /localStorage\.getItem\("bk_bearer_key"\)/);
+  assert.match(browserLogin, /headless: options\.headless === true/);
+  assert.match(client, /打开受控登录窗口/);
+  assert.match(html, /登录窗口由 agentatlas 托管/);
+  assert.doesNotMatch(html, /estate-login-recover/);
 });
 
-test("认证门禁只准备登录链接，手动入口只拉起一次浏览器", async () => {
+test("认证门禁只准备登录链接，手动入口启动受控登录", async () => {
   const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
   const start = source.slice(
     source.indexOf("export function startBeikeLogin"),
@@ -118,8 +77,8 @@ test("认证门禁只准备登录链接，手动入口只拉起一次浏览器",
   assert.match(source, /startBeikeLogin\(\{ open: false \}\)/);
   assert.match(source, /beike\.loginUrlPrepared/);
   assert.match(start, /const url = BEIKE_KEY_URL/);
-  assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
-  assert.doesNotMatch(start, /\["login"\]/);
+  assert.match(start, /loginBeikeInManagedBrowser\(saveBeikeKey\)/);
+  assert.doesNotMatch(start, /openExternalUrl|\["login"\]/);
   assert.doesNotMatch(source, /已自动打开浏览器登录页/);
 });
 
