@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { assertTrustedInstallUrl, beikeBusinessError, extractBeikeLoginUrl, isBeikeAuthFailure } from "../../src/server/estate.js";
+import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -29,32 +29,28 @@ test("贝壳登录失效识别：覆盖当前 CLI 与常见 401 文案", () => {
   assert.equal(isBeikeAuthFailure("Unknown tool: rent_market_search"), false);
 });
 
-test("贝壳登录链接提取：只接受 building.ke.com HTTPS", () => {
-  assert.equal(
-    extractBeikeLoginUrl("请打开 https://building.ke.com/?action=get-key&source=beike_skill。"),
-    "https://building.ke.com/?action=get-key&source=beike_skill",
-  );
-  assert.equal(extractBeikeLoginUrl("https://building.ke.com.evil.example/?action=get-key"), null);
-  assert.equal(extractBeikeLoginUrl("http://building.ke.com/?action=get-key"), null);
-});
-
-test("贝壳 CLI 串行限速，认证失败后熔断冷却", async () => {
+test("贝壳 CLI 查询串行限速，认证失败后熔断冷却", async () => {
   const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
   assert.match(source, /BEIKE_CLI_CONCURRENCY = 1/);
   assert.match(source, /BEIKE_CLI_MIN_INTERVAL_MS = 1_500/);
   assert.match(source, /BEIKE_BREAKER_FAILURES = 2/);
   assert.match(source, /BEIKE_BREAKER_COOLDOWN_MS = 60_000/);
-  assert.match(source, /BEIKE_LOGIN_COOLDOWN_MS = 60_000/);
   assert.match(source, /runBeikeThrottled\(/);
   assert.match(source, /!beikeCredentialVerified\) return/);
   assert.match(source, /beikeCredentialVerified = true/);
 });
 
-test("认证门禁只准备登录链接，手动入口才打开浏览器", async () => {
+test("认证门禁只准备登录链接，手动入口只拉起一次浏览器", async () => {
   const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
+  const start = source.slice(
+    source.indexOf("export function startBeikeLogin"),
+    source.indexOf("async function activateBeikeLoginGate"),
+  );
   assert.match(source, /startBeikeLogin\(\{ open: false \}\)/);
-  assert.match(source, /options\.open !== false/);
   assert.match(source, /beike\.loginUrlPrepared/);
+  assert.match(start, /const url = BEIKE_KEY_URL/);
+  assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
+  assert.doesNotMatch(start, /\["login"\]/);
   assert.doesNotMatch(source, /已自动打开浏览器登录页/);
 });
 
