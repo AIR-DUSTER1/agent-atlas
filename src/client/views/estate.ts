@@ -13,7 +13,7 @@
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert, uiPrompt } from "../ui/dialog.js";
+import { uiAlert } from "../ui/dialog.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
 import { renderPluginCards } from "./settings-plugins.js";
 import type { EstateState, ToolPart } from "../modules/types.js";
@@ -114,6 +114,7 @@ interface BeikeLoginLaunch {
   ok: boolean;
   url: string;
   opened: boolean;
+  message?: string;
   error?: string;
 }
 
@@ -125,67 +126,24 @@ async function requestEstateLogin(): Promise<BeikeLoginLaunch> {
   });
 }
 
-/** 设置页手动打开官方登录页；Agent 认证失败时服务端也会自动调用同一入口。 */
+/** 设置页手动启动受控登录窗口；官方回调由浏览器内中转页接住并自动保存 Key。 */
 export async function openEstateLogin(): Promise<void> {
   const button = $("estate-login-open") as HTMLButtonElement | null;
   const status = $("estate-status2");
   if (button) button.disabled = true;
   if (status) {
-    status.textContent = "正在打开贝壳官方登录页…";
+    status.textContent = "正在启动受控登录浏览器，请在新窗口扫码并确认授权（最多 3 分钟）…";
     status.style.color = "var(--amber)";
   }
   try {
     const result = await requestEstateLogin();
     if (status) {
-      status.textContent = result.opened
-        ? "✓ 登录页已打开，请扫码；若回调页显示 Not Found，立即复制地址栏完整链接并点「回调页 404？完成登录」"
-        : `浏览器未能自动打开，请手动访问：${result.url}`;
-      status.style.color = result.opened ? "" : "var(--amber)";
+      status.textContent = result.ok
+        ? `✓ ${result.message || "登录完成，Key 已保存并通过校验"}`
+        : `✗ ${result.message || result.error || "登录未完成，请重新尝试"}`;
+      status.style.color = result.ok ? "" : "var(--red)";
     }
-  } catch (err) {
-    if (status) {
-      status.textContent = `✗ 打开登录页失败：${(err as Error).message}`;
-      status.style.color = "var(--red)";
-    }
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-/**
- * 贝壳官方 /auth/callback 当前可能直接 404。用户在 state 过期前粘贴完整回调地址，
- * 由本地服务调用官方换票接口并直接保存、校验 Bearer Key。
- */
-export async function recoverEstateLogin(): Promise<void> {
-  const button = $("estate-login-recover") as HTMLButtonElement | null;
-  const status = $("estate-status2");
-  const callbackUrl = await uiPrompt(
-    "粘贴扫码后出现 Not Found 的完整地址（含 building.ke.com/auth/callback?state=...）。地址只用于本次换票，不会保存：",
-    {
-      title: "处理贝壳 404 回调",
-      placeholder: "https://building.ke.com/auth/callback?state=...",
-      okText: "完成登录",
-    }
-  );
-  if (typeof callbackUrl !== "string" || !callbackUrl.trim()) return;
-  if (button) button.disabled = true;
-  if (status) {
-    status.textContent = "正在用一次性回调 state 换取并校验 Bearer Key…";
-    status.style.color = "var(--amber)";
-  }
-  try {
-    const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/estate/login/recover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callbackUrl: callbackUrl.trim() }),
-    });
-    if (status) {
-      status.textContent = res.ok
-        ? `✓ ${res.message || "Key 已保存并通过校验"}`
-        : `✗ ${res.message || res.error || "回调换票失败"}`;
-      status.style.color = res.ok ? "" : "var(--red)";
-    }
-    if (res.ok) {
+    if (result.ok) {
       state.estate = { ...(state.estate || { installed: true }), loginRequired: false };
       const keyEl = $("estate-key") as HTMLInputElement | null;
       if (keyEl) keyEl.value = "";
@@ -193,7 +151,7 @@ export async function recoverEstateLogin(): Promise<void> {
     }
   } catch (err) {
     if (status) {
-      status.textContent = `✗ ${(err as Error).message}`;
+      status.textContent = `✗ 启动登录失败：${(err as Error).message}`;
       status.style.color = "var(--red)";
     }
   } finally {
@@ -266,17 +224,17 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   try { data = JSON.parse(part.result?.content || "") as EstatePayload; } catch { return; }
   if (!data || typeof data !== "object") return;
 
-  // 登录失效 → 明确的登录卡；浏览器只在用户点击后打开，避免自动流程重复拉起。
+  // 登录失效 → 受控登录窗口；扫码回调在浏览器内完成，Key 自动保存。
   if (data.authRequired) {
     const extra = estateExtra(card);
     const box = document.createElement("div");
     box.className = "estate-setup";
     const copy = document.createElement("div");
     const title = document.createElement("b");
-    title.textContent = data.loginOpened ? "🔐 登录已失效，浏览器登录页已打开" : "🔐 需要登录贝壳账号";
+    title.textContent = "🔐 需要登录贝壳账号";
     const message = document.createElement("div");
     message.className = "err-line";
-    message.textContent = data.error || "请完成登录后在设置中保存页面显示的 Key";
+    message.textContent = data.error || "点击下方按钮启动受控登录窗口，完成后 Key 会自动保存";
     copy.append(title, message);
 
     const actions = document.createElement("div");
@@ -284,13 +242,19 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const reopen = document.createElement("button");
     reopen.type = "button";
     reopen.className = "btn btn-approve";
-    reopen.textContent = "重新打开登录页";
+    reopen.textContent = "打开受控登录窗口";
     reopen.addEventListener("click", async () => {
       reopen.disabled = true;
-      reopen.textContent = "正在打开…";
+      reopen.textContent = "请在新窗口扫码，等待自动完成…";
       try {
         const result = await requestEstateLogin();
-        reopen.textContent = result.opened ? "✓ 登录页已打开" : "请使用下方手动链接";
+        if (result.ok) {
+          title.textContent = "🔐 登录已完成";
+          message.textContent = result.message || "Bearer Key 已保存并通过校验";
+          reopen.textContent = "✓ 登录完成";
+        } else {
+          reopen.textContent = `✗ ${result.message || result.error || "登录未完成"}`;
+        }
       } catch (err) {
         reopen.textContent = `打开失败：${(err as Error).message}`;
       } finally {
@@ -298,9 +262,6 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
       }
     });
     actions.appendChild(reopen);
-
-    const href = safeHref(data.loginUrl || data.keyUrl);
-    if (href) actions.appendChild(linkButton("手动打开登录页", href));
     box.append(copy, actions);
     extra.appendChild(box);
     return;
