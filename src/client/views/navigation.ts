@@ -22,9 +22,10 @@ import { finalize, setStatus, syncComposerState } from "../stream/turn.js";
 import { markInterruptsResolved, markLatestInterruptPending, renderSessions } from "./sessions.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
+import { renderWorkflowPlan } from "./workflow-plan.js";
 import { projectById } from "./projects.js";
 import { PRODUCT_NAME } from "../modules/product.js";
-import type { ChatBlock, PermissionModeId, Session } from "../modules/types.js";
+import type { AgentEvent, ChatBlock, PermissionModeId, Session } from "../modules/types.js";
 
 const DEMO_BADGE_TEXT: Record<number, string> = {
   1: "示例 1 · 基础 ReAct", 2: "示例 2 · 对话记忆",
@@ -98,6 +99,7 @@ export function showWelcomeState(mode: WelcomeMode = "default"): void {
   $("empty-session")?.classList.add("hidden");
   messagesEl.innerHTML = "";
   $("context-bar")?.classList.add("hidden");
+  $("workflow-panel")?.classList.add("hidden");
   inputEl.disabled = true;
   sendBtn.disabled = true;
   sendBtn.classList.remove("hidden");
@@ -131,8 +133,9 @@ export function showChatState(session: Session): void {
     ? "这是历史会话（服务已重启），仅供查看 —— 点击「＋ 新建对话」继续"
     : "给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）";
   renderPermChip(session);
-  // 会话切换和新建后都要重算容量条；否则新会话会残留上一会话的用量。
+  // 会话切换和新建后都要重算容量条与流程窗体；否则会残留上一会话状态。
   updateContextBar();
+  renderWorkflowPlan();
   // 输入区按“当前会话自己的”流状态恢复：后台会话可继续生成，但不会锁住这里。
   syncComposerState(session.id);
 }
@@ -287,7 +290,12 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
       for (const rec of data.records || []) {
         if (!isContinuationRecord(rec)) delete state.usage[s.id];
         for (const ev of rec.events || []) {
-          if ((ev as { type?: string }).type === "usage") applyUsage(ev as never, undefined, s.id);
+          const type = (ev as { type?: string }).type;
+          if (type === "usage") applyUsage(ev as never, undefined, s.id);
+          // 旧浏览器缓存里可能还没有流程状态；即使正文已存在也补最新流程。
+          if (type === "workflow_plan") {
+            state.workflowPlans[s.id] = (ev as Extract<AgentEvent, { type: "workflow_plan" }>).plan;
+          }
         }
       }
     }
@@ -302,6 +310,7 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
     if (state.currentId === s.id) {
       if (!hadLocal) renderAll();
       updateContextBar();
+      renderWorkflowPlan();
       chatScroll.scrollTop = chatScroll.scrollHeight;
     }
   } catch { /* 服务端也没有记录（会话从未对话过 / 服务重启过）→ 保持现状 */ }

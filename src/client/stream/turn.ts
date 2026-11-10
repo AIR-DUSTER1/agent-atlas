@@ -20,6 +20,7 @@ import { renderAttachChips } from "../views/attachments.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { renderSessions } from "../views/sessions.js";
 import { renderAll } from "../render/messages.js";
+import { clearWorkflowPlan, renderWorkflowPlan } from "../views/workflow-plan.js";
 import { showChatState } from "../views/navigation.js";
 import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
@@ -78,6 +79,8 @@ export async function send(): Promise<void> {
   if (goal) state.continuousTurns[sid] = true;
   else delete state.continuousTurns[sid];
   exitGoalMode();
+  // 新回合不继承上一轮的可视流程；服务端会在 analyze 后再发权威计划。
+  clearWorkflowPlan(sid);
   saveLocal();
 
   // 参考 ZCode：请求耗时期间保留上一轮主模型 context used 与当前模型窗口，
@@ -272,6 +275,7 @@ export async function createSession(
   renderSessions();
   showChatState(created);
   renderAll();
+  renderWorkflowPlan();
   closeModalImpl();
   if (prefill) {
     inputEl.value = prefill;

@@ -13,6 +13,7 @@
 import { partEls, saveLocal, state, transcript } from "../core/state.js";
 import { scrollBottom } from "../core/dom.js";
 import { updateContextBar } from "../views/composer-bar.js";
+import { setWorkflowPlan } from "../views/workflow-plan.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
 import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
@@ -270,6 +271,7 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
       break;
     }
     case "interrupt": addInterrupt(ablock, ev.payload, sid, visible); break;
+    case "workflow_plan": setWorkflowPlan(ev.plan, sid); break;
     case "clarification_note": {
       // 无头模式：澄清没有挂起，只把「问了什么 + 假设了什么」留成一条引用块，
       // 否则下游看到的是一个凭空执行的任务，无从判断假设是否合理。

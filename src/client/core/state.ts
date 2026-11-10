@@ -16,7 +16,7 @@ import type { AppState, ChatBlock } from "../modules/types.js";
 import { PRODUCT_NAME } from "../modules/product.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-11-04-03";
+export const APP_VERSION = "web-2026-11-10-01";
 
 console.log(
   `%c[${PRODUCT_NAME}] 前端脚本已加载 ` + APP_VERSION,
@@ -26,6 +26,7 @@ console.log(
 export const LS_TRANSCRIPTS = "lg-agent-transcripts";
 export const LS_SESSIONS = "lg-agent-sessions-meta";
 export const LS_USAGE = "lg-agent-usage";
+export const LS_WORKFLOW_PLANS = "lg-agent-workflow-plans";
 export const LS_PROJECT_VIEW = "lg-agent-project-view";
 export const LS_PROJ_COLLAPSED = "lg-agent-proj-collapsed";
 export const LS_THEME = "lg-agent-theme";
@@ -49,6 +50,7 @@ export const state: AppState = {
   currentId: null,
   blocks: {},          // sessionId -> [block]
   usage: {},           // sessionId -> 本轮 usage
+  workflowPlans: {},   // sessionId -> 当前/最近一轮自主执行流程
   streams: {},         // sessionId -> 正在流式的回合（不同会话可并行）
   compacting: {},      // sessionId -> /压缩上下文是否进行中（仅互斥同一会话）
   settingsView: "models",
@@ -91,6 +93,12 @@ export function loadLocal(): void {
     const parsed = JSON.parse(localStorage.getItem(LS_USAGE) || "{}") as unknown;
     state.usage = (parsed && typeof parsed === "object" ? parsed : {}) as AppState["usage"];
   } catch { state.usage = {}; }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LS_WORKFLOW_PLANS) || "{}") as unknown;
+    state.workflowPlans = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as AppState["workflowPlans"]
+      : {};
+  } catch { state.workflowPlans = {}; }
   state.projectView = localStorage.getItem(LS_PROJECT_VIEW) || "all";
   // /goal 连续回合标记：按会话记；坏值一律回退空表
   try {
@@ -112,6 +120,7 @@ export function saveLocal(): void {
     try {
       localStorage.setItem(LS_TRANSCRIPTS, JSON.stringify(state.blocks));
       localStorage.setItem(LS_USAGE, JSON.stringify(state.usage));
+      localStorage.setItem(LS_WORKFLOW_PLANS, JSON.stringify(state.workflowPlans));
       localStorage.setItem(LS_PROJECT_VIEW, state.projectView);
       localStorage.setItem(LS_PROJ_COLLAPSED, JSON.stringify(state.projCollapsed));
       localStorage.setItem(LS_CONTINUOUS_TURNS, JSON.stringify(state.continuousTurns));
