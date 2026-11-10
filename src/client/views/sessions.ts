@@ -21,6 +21,11 @@ import { icon } from "../ui/icon.js";
 import { uiAlert } from "../ui/dialog.js";
 import { toast } from "../ui/toast.js";
 import { selectSession, showWelcomeState } from "./navigation.js";
+import {
+  PROJECT_VIEW_ALL,
+  PROJECT_VIEW_NONE,
+  sessionMatchesProjectView,
+} from "../modules/project-view.js";
 import type { ProjectEntry, Session } from "../modules/types.js";
 
 /** 未归属项目的会话在折叠状态里用这个键，避免与真实 projectId 冲突。 */
@@ -131,7 +136,7 @@ function renderProjectGroupHead(
   h("span", { class: "g-icon" }, icon(cloud ? "Globe" : "Folder", { size: 14 })),
   h("span", { class: "g-name" }, project?.name ?? "未归属"),
   h("span", { class: "g-count" }, String(count)),
-  h("span", { class: "p-type-tag" }, project ? (cloud ? "云端" : "本地") : "已移除"),
+  h("span", { class: "p-type-tag" }, project ? (cloud ? "云端" : "本地") : key === ORPHAN_GROUP_KEY ? "无项目" : "已移除"),
   );
 }
 
@@ -176,7 +181,11 @@ export function renderSessions(): void {
   if (!list.children.length) {
     list.appendChild(h("div", { class: "fs-empty" }, term
       ? "没有命中搜索的会话"
-      : state.projectView === "all" ? "还没有会话，点上方「＋ 新建对话」" : "该项目下还没有会话"));
+      : state.projectView === PROJECT_VIEW_ALL
+        ? "还没有会话，点上方「＋ 新建对话」"
+        : state.projectView === PROJECT_VIEW_NONE
+          ? "还没有不选择项目的会话，点上方「＋ 新建对话」"
+          : "该项目下还没有会话"));
   }
 }
 

@@ -13,6 +13,7 @@ import { h } from "../ui/h.js";
 import { icon, type IconName } from "../ui/icon.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
 import { toast } from "../ui/toast.js";
+import { isNoProjectView, PROJECT_VIEW_ALL, PROJECT_VIEW_NONE } from "../modules/project-view.js";
 import type { ProjectEntry } from "../modules/types.js";
 
 let menuController: MenuController | null = null;
@@ -48,7 +49,7 @@ export async function loadProjects(): Promise<void> {
     // 有更新的请求已经发出（或已完成），本次结果作废，避免旧列表覆盖新状态。
     if (seq !== projectsRequestSeq) return;
     state.projects = data.projects || [];
-    if (state.projectView !== "all" && !projectById(state.projectView)) state.projectView = "all";
+    if (state.projectView !== PROJECT_VIEW_ALL && state.projectView !== PROJECT_VIEW_NONE && !projectById(state.projectView)) state.projectView = PROJECT_VIEW_ALL;
     renderProjectSwitcher();
     onProjectsChanged();
   } catch { /* 服务重启等临时失败不阻塞主界面 */ }
@@ -100,11 +101,12 @@ function chooseProject(projectId: string): void {
 
 export function renderProjectSwitcher(): void {
   const view = state.projectView;
-  const active = view === "all" ? null : projectById(view);
+  const noProject = isNoProjectView(view);
+  const active = view === PROJECT_VIEW_ALL || noProject ? null : projectById(view);
   const iconHost = $("project-btn-icon");
   const textEl = $("project-btn-text");
-  iconHost?.replaceChildren(icon(active ? projectIcon(active) : "FolderTree", { size: 15 }));
-  if (textEl) textEl.textContent = active ? active.name : "全部项目";
+  iconHost?.replaceChildren(icon(noProject ? "Folder" : active ? projectIcon(active) : "FolderTree", { size: 15 }));
+  if (textEl) textEl.textContent = noProject ? "不选择项目" : active ? active.name : "全部项目";
 
   const menu = $("project-menu");
   if (!menu) return;
@@ -114,12 +116,25 @@ export function renderProjectSwitcher(): void {
   menu.appendChild(h("button", {
     type: "button",
     role: "menuitem",
-    class: "pm-item" + (view === "all" ? " active" : ""),
-    onclick: () => chooseProject("all"),
+    class: "pm-item" + (view === PROJECT_VIEW_ALL ? " active" : ""),
+    onclick: () => chooseProject(PROJECT_VIEW_ALL),
   },
   h("span", { class: "pm-ic" }, icon("FolderTree", { size: 15 })),
   h("span", { class: "pm-name" }, "全部项目"),
-  h("span", { class: "pm-check" }, view === "all" ? "✓" : ""),
+  h("span", { class: "pm-check" }, view === PROJECT_VIEW_ALL ? "✓" : ""),
+  ));
+
+  menu.appendChild(h("button", {
+    type: "button",
+    role: "menuitem",
+    class: "pm-item" + (noProject ? " active" : ""),
+    title: "创建会话时不绑定任何项目",
+    onclick: () => chooseProject(PROJECT_VIEW_NONE),
+  },
+  h("span", { class: "pm-ic" }, icon("Folder", { size: 15 })),
+  h("span", { class: "pm-name" }, "不选择项目"),
+  h("span", { class: "pm-sub none" }, "无项目上下文"),
+  h("span", { class: "pm-check" }, noProject ? "✓" : ""),
   ));
 
   for (const project of state.projects) {

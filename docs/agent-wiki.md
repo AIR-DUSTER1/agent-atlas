@@ -585,6 +585,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   菜单里 ⟳ = `git pull`，删除 = 撤销授权并清缓存，其会话归入「未归属」）。
   本地目录通过系统目录选择框取得绝对路径：Electron 走主进程 `dialog.showOpenDialog`，
   Web 模式走本机服务端 `POST /api/projects/pick-directory`；无桌面会话时才显式降级为手动路径。
+  菜单额外提供「不选择项目」：侧栏只展示内部 `default` 的未归属会话，新会话也不会继承
+  上一次选中的项目；映射集中在 `client/modules/project-view.ts`，避免筛选和创建语义漂移。
   列表持久化在 `.web-config.json` 的 `projects/activeProjectId` 字段，
   启动时校验目录仍在才恢复；项目列表为空时，首屏与「新建对话」直接进入主区
   Agent 选择页，通用 / 房产 Agent 固定排在示例前，旧未归属会话仍可从侧栏恢复；

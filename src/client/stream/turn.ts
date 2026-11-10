@@ -26,6 +26,7 @@ import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
 import { toast } from "../ui/toast.js";
 import { parseGoalCommand } from "../modules/goal.js";
+import { projectIdForNewSession } from "../modules/project-view.js";
 import { exitGoalMode } from "../composer/goal.js";
 import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind, SessionStreamState } from "../modules/types.js";
 
@@ -259,8 +260,8 @@ export function stopStreaming(): void {
 export async function createSession(
   kind?: SessionKind | null, demo?: number | null, prefill?: string | null, agentId?: string
 ): Promise<void> {
-  // 新会话归属当前选中的项目（「全部项目」视图下归入未归属）
-  const projectId = state.projectView !== "all" ? state.projectView : "default";
+  // 新会话归属当前项目视图；「全部项目」和「不选择项目」都落到内部 default。
+  const projectId = projectIdForNewSession(state.projectView);
   const { api } = await import("../core/api.js");
   const data = await api<{ id: string }>("/api/sessions", {
     method: "POST",

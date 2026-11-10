@@ -24,6 +24,7 @@ import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
 import { renderWorkflowPlan } from "./workflow-plan.js";
 import { projectById } from "./projects.js";
+import { PROJECT_VIEW_NONE } from "../modules/project-view.js";
 import { PRODUCT_NAME } from "../modules/product.js";
 import type { AgentEvent, ChatBlock, PermissionModeId, Session } from "../modules/types.js";
 
@@ -78,7 +79,9 @@ export function showWelcomeState(mode: WelcomeMode = "default"): void {
   if (breadcrumb) {
     breadcrumb.textContent = pickingAgent
       ? "新会话"
-      : projectById(state.projectView)?.name ?? PRODUCT_NAME;
+      : state.projectView === PROJECT_VIEW_NONE
+        ? "不选择项目"
+        : projectById(state.projectView)?.name ?? PRODUCT_NAME;
   }
   const welcomeTitle = $("welcome-title");
   if (welcomeTitle) {
