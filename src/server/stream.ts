@@ -29,9 +29,10 @@ import { log } from "./logging.js";
 import { getActiveModelLabel } from "./settings.js";
 import { AGENT_RECURSION_LIMIT, config } from "../config.js";
 import { incCounter } from "./observability/metrics.js";
+import { WORKFLOW_PLAN_TOOL_NAME, type WorkflowPlanSnapshot } from "../workflow-plan.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
-const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools", "route", "routeAsk", "dispatch"]);
+const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools", "planProgress", "route", "routeAsk", "dispatch"]);
 
 /**
  * 连续模式的超步保险丝：一个回炉周期 ≈ 3-6 超步（agent/tools/review 各算一次），
@@ -309,6 +310,26 @@ function routeDecisionOf(update: unknown): Extract<AgentEvent, { type: "route_de
   };
 }
 
+/**
+ * 流程快照只从图节点的自定义更新字段读取。返回 undefined 表示本次更新没有
+ * 流程字段；null 表示本轮明确无流程（前端据此隐藏旧窗体）。
+ */
+function workflowPlanOf(update: unknown): WorkflowPlanSnapshot | null | undefined {
+  if (!update || typeof update !== "object") return undefined;
+  if (!Object.prototype.hasOwnProperty.call(update, "workflowPlan")) return undefined;
+  const value = (update as { workflowPlan?: unknown }).workflowPlan;
+  if (value === null) return null;
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.revision !== "number" ||
+    typeof record.goal !== "string" ||
+    !Array.isArray(record.steps) ||
+    (record.status !== "running" && record.status !== "completed" && record.status !== "failed")
+  ) return undefined;
+  return value as WorkflowPlanSnapshot;
+}
 /** 从 messages 模式的 metadata 里取出可读的节点标签（子图显示为 "父节点/内层节点"） */
 function nodeLabel(meta: Record<string, unknown> | undefined): string | undefined {
   if (!meta) return undefined;
@@ -390,6 +411,9 @@ export async function* runGraphEvents(
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
   const announcedTools = new Set<string>();
   const loggedToolResults = new Set<string>();
+  // 流程工具是编排控制面，不展示成普通工具卡，也不计入用户工具调用统计。
+  const suppressedPlanToolIds = new Set<string>();
+  let emittedPlanSignature = "";
   // 用量分片累积（Anthropic 系 input/output 分片到达）；同一调用只落一次快照。
   let usageAccum: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number } | null = null;
   let usageNode: string | undefined;
@@ -487,6 +511,8 @@ export async function* runGraphEvents(
           }
           const name = typeof tc.name === "string" && tc.name ? tc.name : undefined;
           const frag = typeof tc.args === "string" ? tc.args : tc.args ? JSON.stringify(tc.args) : "";
+          if (name === WORKFLOW_PLAN_TOOL_NAME) suppressedPlanToolIds.add(id);
+          if (suppressedPlanToolIds.has(id)) continue;
           if (name && !announcedTools.has(id)) {
             announcedTools.add(id);
             incCounter("agent_tool_calls_total", { tool: name, status: "requested", agentProfileId: options.agentProfileId ?? "none" });
@@ -509,6 +535,10 @@ export async function* runGraphEvents(
         if (msg.id) streamedIds.add(msg.id);
         streamedSinceBoundary = false;
         const resultId = msg.tool_call_id ?? "";
+        if (msg.name === WORKFLOW_PLAN_TOOL_NAME || suppressedPlanToolIds.has(resultId)) {
+          resetUsageCall();
+          continue;
+        }
         if (!loggedToolResults.has(resultId)) {
           loggedToolResults.add(resultId);
           incCounter("agent_tool_results_total", { tool: msg.name ?? "unknown", status: msg.status ?? "success", agentProfileId: options.agentProfileId ?? "none" });
@@ -566,13 +596,26 @@ export async function* runGraphEvents(
           }
           continue;
         }
+        // 流程是独立窗体，不混进工具卡；同一 revision 只发一次，避免
+        // updates 模式回显父状态时重复刷新。
+        const planUpdate = workflowPlanOf(update);
+        if (planUpdate !== undefined) {
+          const signature = planUpdate === null
+            ? "null"
+            : `${planUpdate.id}:${planUpdate.revision}:${planUpdate.status}`;
+          if (signature !== emittedPlanSignature) {
+            emittedPlanSignature = signature;
+            yield { type: "workflow_plan", plan: planUpdate };
+          }
+        }
         if (!nodeKey.startsWith("__")) {
           log("debug", "agent_step_started", {
             agentProfileId: options.agentProfileId,
             turnId: options.turnId,
             step: nodeKey,
           });
-          yield { type: "node", name: nodeKey };
+          // planProgress 是纯状态迁移节点，进度由 workflow_plan 事件表达，不再刷节点徽章。
+          if (nodeKey !== "planProgress") yield { type: "node", name: nodeKey };
           // 无头模式：clarify 节点不挂起，而是给出自动假设。这里把它翻成
           // 显式事件，让任何调用方（外部评测 / 批量脚本）都能看到「本该问什么」。
           const assumption = headlessAssumptionOf(update);
@@ -593,6 +636,10 @@ export async function* runGraphEvents(
             if (internalNode && !isToolNodeName(nodeKey)) continue;
             if (msg.id) streamedIds.add(msg.id);
             streamedSinceBoundary = false;
+            if (msg.name === WORKFLOW_PLAN_TOOL_NAME || suppressedPlanToolIds.has(msg.tool_call_id ?? "")) {
+              resetUsageCall();
+              continue;
+            }
             const riskUsage = extractRiskUsage(msg);
             const riskUsageKey = riskUsage?.callId || msg.id || msg.tool_call_id || "risk-usage";
             if (riskUsage && !emittedRiskUsageIds.has(riskUsageKey)) {
@@ -647,6 +694,7 @@ export async function* runGraphEvents(
             if (msg.tool_calls?.length) {
               // 兜底场景里的工具调用：补一张静态卡片
               for (const call of msg.tool_calls) {
+                if (call.name === WORKFLOW_PLAN_TOOL_NAME) continue;
                 yield { type: "tool_call", id: call.id ?? `tool-${toolSeq++}`, name: call.name, argsFragment: JSON.stringify(call.args ?? {}) };
               }
             }

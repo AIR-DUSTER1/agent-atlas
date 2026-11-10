@@ -19,6 +19,7 @@ import type { AgentProfile } from "../../src/agent/profile.js";
 import { generalProfile } from "../../src/agent/general.js";
 import { estateProfile } from "../../src/agent/estate.js";
 import { calculator } from "../../src/tools.js";
+import { AGENT_RECURSION_LIMIT } from "../../src/config.js";
 
 const testProfile: AgentProfile = {
   id: "general",
@@ -381,7 +382,7 @@ test("连续模式：每轮有工具动作时不受三次回炉上限约束，�
   }, { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("构建并验证项目")] },
-    { configurable: { thread_id: `continuous-${randomUUID()}`, continuous: true } },
+    { recursionLimit: AGENT_RECURSION_LIMIT, configurable: { thread_id: `continuous-${randomUUID()}`, continuous: true } },
   ) as unknown as { messages: Array<{ content: unknown }>; reviewAttempts?: number; continuousMode?: boolean };
 
   // 标记必须写入图状态：审批 resume 走同一线程检查点，靠它续存
@@ -408,7 +409,7 @@ test("连续模式：反思连续失败且期间无任何工具动作时，三�
   }, { checkpointer: new MemorySaver() });
   const result = await graph.invoke(
     { messages: [new HumanMessage("做一个大项目")] },
-    { configurable: { thread_id: `idle-${randomUUID()}`, continuous: true } },
+    { recursionLimit: AGENT_RECURSION_LIMIT, configurable: { thread_id: `idle-${randomUUID()}`, continuous: true } },
   ) as unknown as { messages: Array<{ content: unknown }>; reviewAttempts?: number };
 
   // 熔断在第 3 次失败反思后生效：第 4 个纯文本回答不应存在
