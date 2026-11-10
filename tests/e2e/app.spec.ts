@@ -24,6 +24,23 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await expect(page.locator("#provider-list")).toBeVisible();
   await page.locator("#add-provider-btn").click();
   await expect(page.locator("#provider-modal")).toBeVisible();
+  const configInput = page.locator("#pf-name");
+  const inputStyle = await configInput.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      minHeight: parseFloat(style.minHeight),
+      borderStyle: style.borderStyle,
+      borderRadius: parseFloat(style.borderTopLeftRadius),
+      backgroundColor: style.backgroundColor,
+    };
+  });
+  expect(inputStyle.minHeight).toBeGreaterThanOrEqual(38);
+  expect(inputStyle.borderStyle).toBe("solid");
+  expect(inputStyle.borderRadius).toBeGreaterThanOrEqual(8);
+  expect(inputStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  await configInput.focus();
+  const focusedShadow = await configInput.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(focusedShadow).not.toBe("none");
   await page.locator("#provider-modal-close").click();
   await expect(page.locator("#provider-modal")).toBeHidden();
 

@@ -48,6 +48,15 @@ test("CSS 变量要么在样式里定义，要么由运行时内联注入", asyn
   assert.deepEqual(missing, [], `以下 CSS 变量既未定义也非运行时注入：${missing.join(", ")}`);
 });
 
+test("配置表单输入框共享高度、焦点环与占位样式", async () => {
+  const css = await readFile(join(CLIENT, "styles", "ui.css"), "utf8");
+  assert.match(css, /配置表单控件统一基线/);
+  assert.match(css, /:is\(#settings-page, #provider-modal/);
+  assert.match(css, /min-height:\s*38px/);
+  assert.match(css, /\.memory-add-row > textarea[\s\S]*?min-height:\s*88px/);
+  assert.match(css, /:focus\s*\{[^}]*border-color:\s*var\(--border-focus\)[^}]*box-shadow:\s*0 0 0 3px var\(--info-bg\)/s);
+  assert.match(css, /::placeholder\s*\{[^}]*color:\s*var\(--text-3\)/s);
+});
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const html = await readFile(join(CLIENT, "index.html"), "utf8");
   const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");

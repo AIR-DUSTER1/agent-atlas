@@ -64,6 +64,158 @@
 .ui-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--info-bg); outline: none; }
 .ui-textarea { min-height: 92px; resize: vertical; line-height: 1.6; }
 
+/* ---------------------------------------------------------------------------
+ * 配置表单控件统一基线
+ * 设置页与配置弹窗里的文本 / 下拉控件共用同一高度、圆角、占位色和焦点环。
+ * 搜索框、开关、滑杆和文件选择器保持各自交互语义，不套用输入框样式。
+ * ------------------------------------------------------------------------- */
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+    .field > select,
+    .key-row > input:not([type="checkbox"]):not([type="radio"]),
+    .pf-select,
+    .cap-ctx,
+    .routing-field > input:not([type="range"]),
+    .routing-field > select,
+    .routing-test-row > input
+  ) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-input);
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  outline: none;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > textarea,
+    .key-row > textarea,
+    .memory-add-row > textarea,
+    .reason-custom
+  ) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-input);
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(.memory-add-row > textarea) {
+  min-height: 88px;
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input[spellcheck="false"],
+    .field > input[type="url"],
+    .field > input[type="password"],
+    .field > input[type="number"],
+    .field > textarea[spellcheck="false"],
+    .key-row > input[spellcheck="false"],
+    .reason-custom
+  ) {
+  font-family: var(--mono);
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(select, .pf-select) {
+  cursor: pointer;
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+    .field > select,
+    .field > textarea,
+    .key-row > input:not([type="checkbox"]):not([type="radio"]),
+    .key-row > textarea,
+    .pf-select,
+    .cap-ctx,
+    .reason-custom,
+    .routing-field > input:not([type="range"]),
+    .routing-field > select,
+    .routing-test-row > input,
+    .memory-add-row > textarea
+  ):hover {
+  border-color: var(--border-strong);
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+    .field > select,
+    .field > textarea,
+    .key-row > input:not([type="checkbox"]):not([type="radio"]),
+    .key-row > textarea,
+    .pf-select,
+    .cap-ctx,
+    .reason-custom,
+    .routing-field > input:not([type="range"]),
+    .routing-field > select,
+    .routing-test-row > input,
+    .memory-add-row > textarea
+  ):focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--info-bg);
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+    .field > select,
+    .field > textarea,
+    .key-row > input:not([type="checkbox"]):not([type="radio"]),
+    .key-row > textarea,
+    .pf-select,
+    .cap-ctx,
+    .reason-custom,
+    .routing-field > input:not([type="range"]),
+    .routing-field > select,
+    .routing-test-row > input,
+    .memory-add-row > textarea
+  )::placeholder {
+  color: var(--text-3);
+  opacity: 1;
+}
+
+:is(#settings-page, #provider-modal, #fs-modal, #kb-modal, #estate-modal, #job-modal)
+  :is(
+    .field > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+    .field > select,
+    .field > textarea,
+    .key-row > input:not([type="checkbox"]):not([type="radio"]),
+    .key-row > textarea,
+    .pf-select,
+    .cap-ctx,
+    .reason-custom,
+    .routing-field > input:not([type="range"]),
+    .routing-field > select,
+    .routing-test-row > input,
+    .memory-add-row > textarea
+  ):disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
 .ui-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .ui-field-label { color: var(--content-1); font-size: var(--font-sm); font-weight: 600; }
 .ui-field-hint { margin: 0; color: var(--content-3); font-size: var(--font-xs); line-height: 1.6; }
