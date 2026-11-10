@@ -80,6 +80,10 @@ test("思考过程使用默认折叠的 details，点击摘要可手动展开", 
   assert.doesNotMatch(app, /details\.open\s*=\s*true/, "思考内容不能默认展开");
   assert.match(app, /thinking-node/);
   assert.match(app, /details\.addEventListener\("toggle"/);
+  assert.match(app, /refs\.metaEl\.textContent = part\.streaming \? "思考中" : ""/);
+  assert.match(app, /refs\.metaEl\.classList\.toggle\("hidden", !part\.streaming\)/);
+  assert.doesNotMatch(app, /\$\{part\.text\.length\} 字/);
+  assert.doesNotMatch(app, /refs\.el instanceof HTMLDetailsElement && refs\.el\.open \? "收起" : "展开"/);
   assert.match(css, /\.thinking-block\s*\{/);
   assert.match(css, /\.thinking-block\[open\]\s*\{/);
   assert.match(css, /\.thinking-text\s*\{[^}]*white-space:\s*pre-wrap/s);
