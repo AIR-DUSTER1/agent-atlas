@@ -180,7 +180,7 @@ test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await page.locator("#stop-btn").click();
   await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
   await expect(page.locator("#send-btn")).toBeVisible();
-  await expect(page.locator("#composer-hint")).toBeVisible();
+  await expect(page.locator("#composer-hint")).toHaveCount(0);
 });
 
 test("多个会话可并行生成，切换会话不弹等待框", async ({ page }) => {

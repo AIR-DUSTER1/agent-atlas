@@ -112,7 +112,6 @@
     white-space: nowrap;
   }
   .topbar-breadcrumb #session-title { max-width: 150px; }
-  #composer-hint { display: none; }
   .workflow-summary { gap: 7px; padding-left: 9px; padding-right: 9px; }
   .workflow-meter, .workflow-count { display: none; }
   .workflow-percent { margin-left: auto; }
