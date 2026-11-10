@@ -39,6 +39,15 @@ test("设置页包含返回按钮、全部分区与集中面板", async () => {
   assert.doesNotMatch(html, /id="(settings|memories|stats)-mask"/);
 });
 
+test("设置页大标题不再重复展示说明文案", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+  const start = html.indexOf('id="settings-page"');
+  const end = html.indexOf("<!-- 供应商连接配置", start);
+  assert.ok(start >= 0 && end > start);
+  const settingsPage = html.slice(start, end);
+  assert.doesNotMatch(settingsPage, /<p class="settings-sub">/);
+  assert.doesNotMatch(settingsPage, /模型、插件、子代理、长期记忆与使用统计集中管理/);
+});
 test("前端通过独立页面函数切换分区并统一关闭", async () => {
     const app = await readClientSource();
   assert.match(app, /function openSettings\(view = "models"/);
