@@ -72,6 +72,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
+    ├── workflow-plan.ts  # 自主执行流程领域状态与规划提示词（§3.53）
+    ├── tools-plan.ts     # update_workflow_plan 内部受控工具（§3.53）
     ├── tools-job.ts      # 求职岗位工具：job_collect / job_query / job_enrich / job_summary / job_diagnose（§3.47）
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
     ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
@@ -519,8 +521,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
   （`[mode, payload]` 元组、子图回显整段历史），统一翻译成归一化的 `AgentEvent`
-  （node / reasoning / token / tool_call / tool_result / interrupt / clarification_note /
-  usage / task_usage / ai_message / error）。完整定义见 `server/events.ts`，前端
+  （node / reasoning / token / tool_call / tool_result / interrupt / workflow_plan /
+  clarification_note / usage / task_usage / ai_message / error）。完整定义见 `server/events.ts`，前端
   `stream/events.ts` 的 switch 尾部有 `never` 断言强制穷尽。
   内容只认 messages 模式，updates 只取「节点名 + interrupt + 兜底消息」，按消息 id 去重；
   默认工作流的 `analyze / clarify / review` 是内部节点，正文 token 与整段消息会被过滤，
@@ -2448,3 +2450,39 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 **测试**：`tests/unit/tool-presentation.test.ts` 覆盖文件、图片、命令、MCP 与未知工具；
 `tests/unit/chat-flow.test.ts` 守分类接线和分组结构；`app.spec.ts` 在真实浏览器里校验
 类别、原始工具名与参数摘要。
+### 3.53 自主执行流程：从需求理解到可见步骤进度（`workflow-plan.ts` + `tools-plan.ts` + `client/views/workflow-plan.ts`）
+
+**定位**：让 Agent 在理解需求后先形成可验证的执行流程，再按步骤执行；执行过程中把
+进度同步到输入框上方，而不是把规划结果混进聊天正文或普通工具卡。
+
+**分层**：
+
+| 层 | 实现 | 关键约束 |
+|---|---|---|
+| 领域状态 | `src/workflow-plan.ts` | 2-8 步、单一 `in_progress`、revision 单调递增；完成后自动收口为 `completed`，有失败步骤则为 `failed` |
+| 规划入口 | `src/agent/workflow.ts` 的 `ANALYZE_PROMPT` | 只有复杂任务才产出 plan；简单问答、单次查询保持 `plan:null` |
+| 受控推进 | `src/tools-plan.ts` + `planProgress` 节点 | 模型只能通过 `update_workflow_plan` 创建/推进步骤；状态迁移由服务端节点落 checkpoint，不信任模型口述 |
+| 流协议 | `src/server/stream.ts` | 产出 `workflow_plan` 快照；`update_workflow_plan` 的 tool_call/tool_result 被过滤，不进入普通工具卡和工具统计 |
+| 前端 | `src/client/views/workflow-plan.ts` + `composer.css` | 窗体默认折叠、无计划隐藏；按会话持久化；步骤文本用 `textContent` 写入 |
+| 完成守门 | `reviewNode` | 存在 pending / in_progress / failed 步骤时反思不能通过；completed 必须能对应工具结果或明确产出 |
+
+**事件顺序**：
+
+```text
+analyze(update) ──workflow_plan(created)──▶ agent
+agent(tool_call update_workflow_plan) ──tools──▶ planProgress
+planProgress(update) ──workflow_plan(revision+1)──▶ agent
+agent(final answer) ──review(pass)──▶ workflow_plan(completed)
+```
+
+**为什么把规划做成工具而不是另起一次模型调用**：规划本身要在同一个 ReAct 上下文中
+看到工具结果并动态调整；用受控工具复用现有图，不额外增加一次“规划模型”调用，也不会
+让内部 JSON 混入用户正文。后台子 Agent 通过 `enablePlanning:false` 关闭流程，避免没有
+窗体消费者时浪费 token。
+
+**可观测性**：每个快照只发一次（按 plan id + revision 去重）；SSE 重放、刷新恢复和
+多会话并行都使用同一份 `workflow_plan` 事件。Mock 模式在命中「自主规划 / 分步骤」
+指令时会生成三段演示流程，便于不配置模型直接验收。
+
+**测试**：`workflow-plan.test.ts` 覆盖状态机与 LangGraph 推进；`stream.test.ts` 覆盖
+流程工具过滤；`app.spec.ts` 覆盖窗体默认折叠、无计划隐藏、完成后 3/3 步骤展示。
