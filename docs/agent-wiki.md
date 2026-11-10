@@ -2488,3 +2488,24 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 
 **测试**：`workflow-plan.test.ts` 覆盖状态机与 LangGraph 推进；`stream.test.ts` 覆盖
 流程工具过滤；`app.spec.ts` 覆盖窗体默认折叠、无计划隐藏、完成后 3/3 步骤展示。
+### 3.54 配置表单公共组件：`client/ui/config-control.ts`
+
+**定位**：把设置页与配置弹窗里的输入框、文本域和下拉框收敛为一个可复用组件层，
+避免每个页面复制控件样式、焦点态和可访问性约定。
+
+| 入口 | 用途 |
+|---|---|
+| `configField({ control, label, hint, error })` | 新表单组合 `field + input`，自动挂公共组件类 |
+| `enhanceConfigControl(control)` | 给单个控件幂等补 `ui-config-control` / `ui-config-textarea` |
+| `enhanceConfigFields(root)` | 启动时扫描既有静态 HTML，渐进增强所有配置控件 |
+
+**约束**：
+
+1. 搜索框、开关、滑杆和文件选择器不属于配置值控件，不进入组件集合；
+2. 公共样式只依赖稳定组件类，页面不再维护 `#settings-page ... .field input` 的超长选择器；
+3. 动态表单直接使用 `configField()`，静态表单由 `main.ts` 启动时调用一次 `enhanceConfigFields()`；
+4. 控件仍保留原有 id、name、事件绑定和 `aria-describedby`，组件只是增强，不接管业务状态；
+5. 公共组件统一提供 38px 最小高度、焦点环、hover、placeholder、disabled 与文本域纵向缩放。
+
+**测试**：`ui-primitives.test.ts` 验证组件类标记；`ui-styles.test.ts` 守护公共样式；
+`app.spec.ts` 在真实浏览器检查供应商配置输入的尺寸、边框、背景和焦点环。

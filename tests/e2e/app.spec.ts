@@ -25,6 +25,8 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await page.locator("#add-provider-btn").click();
   await expect(page.locator("#provider-modal")).toBeVisible();
   const configInput = page.locator("#pf-name");
+  await expect(configInput).toHaveAttribute("data-ui-component", "config-control");
+  await expect(configInput).toHaveClass(/ui-config-control/);
   const inputStyle = await configInput.evaluate((el) => {
     const style = getComputedStyle(el);
     return {
