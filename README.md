@@ -38,6 +38,8 @@ AI_PROTOCOL=openai
 npm run models
 ```
 
+左下角 **设置** 会打开独立设置页，集中管理模型与供应商、插件、子代理、路由、长期记忆、自定义命令、技能、MCP 和使用统计；左上角返回会话，按 `Esc` 也可退出。
+
 其他入口：
 
 ```bash
@@ -58,14 +60,15 @@ docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
 | 电脑操作（Computer Use 插件） | 截图、点击、双击、右键、文本输入、组合按键与滚轮；仅 Windows，默认关闭，开启后仍受会话权限与高风险审批约束 |
 | 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因；思考型网关（DeepSeek 等）的多步续传自动回传 `reasoning_content`，网关不接受该字段时自动降级重试 |
 | 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
-| 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议；DeepSeek 仅展示原生 none / low / high / max，GLM-5.3 仅展示 low / high / max |
+| 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议；左侧供应商列表，选择后集中管理该供应商的模型；新增/编辑供应商使用独立弹窗，不打断当前页面状态；DeepSeek 仅展示原生 none / low / high / max，GLM-5.3 仅展示 low / high / max |
 | 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
 | 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
 | 记忆 | LangGraph checkpoint、可插拔长期记忆（本地 / HTTP）、Agent scope 隔离、相关性注入、上下文压缩 |
 | 文件与项目 | 附件、本地项目系统目录选择、远程文件夹、文件搜索与读取；项目菜单支持「不选择项目」，只展示并创建未归属会话 |
 | 工具分类 | 写入、编辑、读取文件、读取图片、运行命令、文件检索、浏览器、知识库、记忆、子代理、电脑与 MCP 工具统一分类；显示原始工具名及路径/命令摘要，批量调用按类别分区展示 |
-| 扩展 | 设置与配置弹窗的输入控件统一使用公共组件；设置 → 插件统一启停 RAG / 贝壳 / 求职 / Browser Use / Computer Use；设置 → 子代理支持搜索筛选，新增、编辑、启停、删除与模型覆盖；MCP（完整命令粘贴解析、Windows npx/npm 兼容、全局暂停、单服务器启停、JSON 导入、连接测试：点击即显示测试中，结果就地显示通过/失败与工具数）；技能库（触发词/名称/ID 命中，每轮最多 2 个）；可搜索并管理自定义命令；第三方 Agent |
-| 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、使用统计 |
+| 扩展 | 设置 → 插件统一启停 RAG / 贝壳 / 求职 / Browser Use / Computer Use；设置 → 子代理支持搜索筛选，新增、编辑、启停、删除与模型覆盖；MCP（完整命令粘贴解析、Windows npx/npm 兼容、全局暂停、单服务器启停、JSON 导入、连接测试：点击即显示测试中，结果就地显示通过/失败与工具数）；技能库（触发词/名称/ID 命中，每轮最多 2 个）；可搜索并管理自定义命令；第三方 Agent |
+| 设置与 UI | 左下角设置入口打开独立设置页，左上角返回；记忆、统计、模型与供应商、插件、子代理、路由、命令、技能和 MCP 分区管理；配置输入框、文本域、下拉框统一由 `ui/config-control` 公共组件提供样式与交互 |
+| 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、近 7 天 / 30 天使用统计与图表 |
 | 桌面端 | 本机便利壳，不是正式桌面发行版 |
 
 这些能力仍有未完成项，尤其是真实供应商兼容、复杂会话恢复、房产 Agent 数据链路和桌面端发行流程。
@@ -223,6 +226,19 @@ docs/          用户文档与运维参考
 ```
 
 详细模块说明见 [docs/agent-wiki.md](docs/agent-wiki.md)。
+
+### 配置控件公共组件
+
+设置页与配置弹窗的输入框、文本域、下拉框统一由 `src/client/ui/config-control.ts` 增强，样式集中在 `src/client/styles/ui.css`。
+
+- 动态表单使用 `configField({ control, label, hint, error })`；
+- 单个控件使用 `enhanceConfigControl(control)`；
+- 既有静态 HTML 由 `src/client/main.ts` 启动时调用 `enhanceConfigFields()` 渐进增强；
+- 稳定组件类为 `ui-config-control` / `ui-config-textarea`，并标记 `data-ui-component="config-control"`；
+- 搜索框、开关、滑杆和文件选择器不属于配置值控件，不进入这套组件；
+- 增强不改变原 `id`、`name`、事件绑定或 `aria-describedby`。
+
+新增设置表单时优先复用上述入口，不要在页面级 CSS 中复制输入框、焦点态和错误态规则。
 
 ## 配置与数据
 
