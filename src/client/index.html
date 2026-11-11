@@ -207,6 +207,30 @@
           </div>
           <div class="cm-spacer"></div>
         </div>
+        <!-- Agent 自主执行流程：默认折叠；没有 workflow_plan 时完全隐藏 -->
+        <details id="workflow-panel" class="workflow-panel hidden">
+          <summary class="workflow-summary" aria-label="展开或收起执行流程">
+            <span class="workflow-summary-icon"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i></span>
+            <span class="workflow-summary-copy">
+              <strong>执行流程</strong>
+              <span id="workflow-active">准备执行</span>
+            </span>
+            <span id="workflow-status" class="workflow-status status-running">执行中</span>
+            <span id="workflow-count" class="workflow-count">0/0 步</span>
+            <span id="workflow-meter" class="workflow-meter" role="progressbar" aria-label="执行流程进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="workflow-meter-fill" class="workflow-meter-fill status-running"></span>
+            </span>
+            <span id="workflow-percent" class="workflow-percent">0%</span>
+            <span class="workflow-chevron" aria-hidden="true"><i class="ui-icon" data-icon="ChevronRight"></i></span>
+          </summary>
+          <div class="workflow-body">
+            <div class="workflow-goal-row">
+              <span class="workflow-goal-label">目标</span>
+              <span id="workflow-goal" class="workflow-goal"></span>
+            </div>
+            <ol id="workflow-steps" class="workflow-steps" aria-label="执行步骤"></ol>
+          </div>
+        </details>
         <div id="input-box">
           <button id="attach-btn" class="attach-btn" title="附加文件：项目文件 / 远程文件夹 / 本地上传">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
@@ -223,7 +247,7 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </div>
-        <div id="composer-hint" class="composer-hint">可附加项目文件 / 远程文件夹 / 本地文件 · 输入 / 压缩上下文 · /goal 连续任务 · @ 搜索文件 · 可切换会话权限（只读 / 审批 / 自主 / 自动）</div>
+
       </footer>
     </main>
   </div>
@@ -251,7 +275,6 @@
       </button>
       <div class="settings-page-heading">
         <h1 id="settings-title">设置</h1>
-        <p>模型、插件、子代理、长期记忆与使用统计集中管理</p>
       </div>
       <button id="settings-logout-btn" class="settings-logout-btn hidden" type="button" title="退出当前访问会话">退出登录</button>
     </header>
@@ -315,7 +338,6 @@
         <section id="settings-view-models" class="settings-view" data-settings-panel="models" role="tabpanel">
           <div id="settings-modal" role="region" aria-labelledby="models-title">
             <h2 id="models-title"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i> 模型与供应商</h2>
-            <p class="settings-sub">一个供应商 = 一套网关凭据（BASE_URL + Key + 协议），下面可以挂任意多个模型；启用任意「供应商 × 模型」组合即可切换聊天用的模型</p>
 
             <div class="provider-workspace">
               <aside class="provider-picker" aria-label="供应商列表">
@@ -437,16 +459,14 @@
         <section id="settings-view-plugins" class="settings-view hidden" data-settings-panel="plugins" role="tabpanel" aria-labelledby="plugins-title">
           <div id="plugins-panel" role="region" aria-labelledby="plugins-title">
             <h2 id="plugins-title"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i> 插件</h2>
-            <p class="settings-sub">扩展 Agent 能力的独立工具与数据源。每项按真实接入方式管理，不把 HTTP / CLI 插件伪装成 MCP。</p>
             <div class="plugin-transport-guide">
               <span><b>HTTP</b> 自定义 REST 契约</span>
               <span><b>CLI</b> 本地子进程</span>
               <span><b>内置</b> 应用本地能力</span>
-              <span><b>MCP</b> 标准 server（后续插件使用）</span>
             </div>
             <div id="plugin-list" class="plugin-list"></div>
             <div id="plugin-status" class="settings-status" role="status" aria-live="polite"></div>
-            <p class="settings-note">开关只改变 Agent 可调用的插件工具，不会删除 RAG / CLI 的已有配置。MCP 是独立扩展类型，请到左侧「MCP 服务器」统一启停。</p>
+            <p class="settings-note">开关只改变 Agent 可调用的插件工具，不会删除 RAG / CLI 的已有配置。</p>
           </div>
         </section>
 
@@ -456,7 +476,6 @@
               <div class="subagents-heading">
                 <span class="subagents-kicker"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i> Runtime delegation</span>
                 <h2 id="subagents-title"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i> 子代理</h2>
-                <p class="settings-sub">在这里定义“谁可以被委派”和默认使用的模型；具体任务、专项提示词与工具子集由主 Agent 每次运行时授予。</p>
               </div>
               <button id="subagent-add-btn" type="button" class="ui-button ui-button-primary subagent-add-btn">
                 <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 新建子代理
@@ -635,7 +654,6 @@
               <div>
                 <span class="routing-kicker"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> Agent routing</span>
                 <h2 id="routing-title"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> 路由决策</h2>
-                <p class="settings-sub">开启后，每条消息会先判断该交给哪个子代理：规则匹配 → 向量比对 → 决策模型，任一层没把握就问你。默认关闭，行为与开启前完全一致。</p>
               </div>
               <label class="routing-switch" title="启用路由决策">
                 <input id="routing-enabled" type="checkbox" role="switch" aria-label="启用路由决策" />
@@ -748,7 +766,6 @@
             <div class="settings-section-heading">
               <div>
                 <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 长期记忆插槽</h2>
-                <p class="settings-sub">默认使用零依赖本地记忆，也可以连接兼容 Generic HTTP 契约或 Hindsight 的外部服务。通用 / 房产 / 求职 Agent 的 scope 严格隔离。</p>
               </div>
               <button id="mem-refresh-btn" type="button" class="ghost-btn small" title="刷新记忆插槽状态">刷新状态</button>
             </div>
@@ -1005,8 +1022,6 @@
             <div class="commands-page-head">
               <div class="commands-page-copy">
                 <h2 id="commands-title"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i> 自定义命令</h2>
-                <p class="settings-sub">在输入框敲 <code>/</code> 选择命令。选中后只填充提示词模板，不会自动发送；模板支持
-                  <code>{{selection}}</code> 与 <code>{{date}}</code>。</p>
               </div>
               <button id="cmd-new-btn" type="button" class="ui-button ui-button-primary commands-new-btn">
                 <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 新建命令
@@ -1145,7 +1160,6 @@
             <div class="mcp-page-head">
               <div>
                 <h2 id="mcp-title"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i> MCP Servers</h2>
-                <p class="settings-sub">通过标准 MCP server 接入外部工具。工具默认需要审批；接入第三方程序前请确认来源可信。</p>
               </div>
               <span id="mcp-summary" class="mcp-summary">共 0 个服务器</span>
             </div>
@@ -1264,7 +1278,6 @@
             <div class="stats-page-head">
               <div>
                 <h2 id="stats-title"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i> 使用统计</h2>
-                <p class="settings-sub">同时统计近 7 天与近 30 天。数据来自会话 journal 的逐轮 usage，重启回放后仍可查看。</p>
               </div>
               <button id="stats-refresh" type="button" class="ghost-btn small"><i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i> 刷新</button>
             </div>
@@ -1471,7 +1484,7 @@
         <button id="estate-key-save" class="btn btn-approve">保存 Key</button>
         <span id="estate-status2" class="settings-status"></span>
       </div>
-      <p class="settings-note">登录窗口由 agentatlas 托管：扫码后会接住贝壳官方的 404 回调，自动取得并校验 Bearer Key，随后关闭浏览器窗口。</p>
+      <p class="settings-note">使用系统默认浏览器打开官方登录页，只打开一次；请手动扫码并把页面显示的 Key 粘贴保存。不要在短时间内反复扫码或连续重试。</p>
 
       <div class="kb-footer-actions">
         <span class="spacer"></span>

@@ -55,6 +55,8 @@ test("Electron 与浏览器两条目录选择链路都已接线", async () => {
   assert.match(projects, /pickLocalProjectDirectory/);
   assert.match(projects, /\/api\/projects\/pick-directory/);
   assert.match(projects, /添加本地文件夹（系统选择）/);
+  assert.match(projects, /不选择项目/);
+  assert.match(projects, /PROJECT_VIEW_NONE/);
   assert.match(projects, /是否改为手动输入服务器绝对路径/);
   assert.match(projects, /err instanceof ApiError && err\.code === "DIRECTORY_PICKER_BUSY"/);
   assert.match(projects, /projectAddInFlight/);

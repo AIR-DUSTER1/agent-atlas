@@ -20,11 +20,13 @@ import { renderAttachChips } from "../views/attachments.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { renderSessions } from "../views/sessions.js";
 import { renderAll } from "../render/messages.js";
+import { clearWorkflowPlan, renderWorkflowPlan } from "../views/workflow-plan.js";
 import { showChatState } from "../views/navigation.js";
 import { mountTyping } from "../render/parts.js";
 import { consumeSSE, handleEvent } from "./events.js";
 import { toast } from "../ui/toast.js";
 import { parseGoalCommand } from "../modules/goal.js";
+import { projectIdForNewSession } from "../modules/project-view.js";
 import { exitGoalMode } from "../composer/goal.js";
 import type { AssistantBlock, ChatBlock, PendingFile, Session, SessionKind, SessionStreamState } from "../modules/types.js";
 
@@ -78,6 +80,8 @@ export async function send(): Promise<void> {
   if (goal) state.continuousTurns[sid] = true;
   else delete state.continuousTurns[sid];
   exitGoalMode();
+  // 新回合不继承上一轮的可视流程；服务端会在 analyze 后再发权威计划。
+  clearWorkflowPlan(sid);
   saveLocal();
 
   // 参考 ZCode：请求耗时期间保留上一轮主模型 context used 与当前模型窗口，
@@ -256,8 +260,8 @@ export function stopStreaming(): void {
 export async function createSession(
   kind?: SessionKind | null, demo?: number | null, prefill?: string | null, agentId?: string
 ): Promise<void> {
-  // 新会话归属当前选中的项目（「全部项目」视图下归入未归属）
-  const projectId = state.projectView !== "all" ? state.projectView : "default";
+  // 新会话归属当前项目视图；「全部项目」和「不选择项目」都落到内部 default。
+  const projectId = projectIdForNewSession(state.projectView);
   const { api } = await import("../core/api.js");
   const data = await api<{ id: string }>("/api/sessions", {
     method: "POST",
@@ -272,6 +276,7 @@ export async function createSession(
   renderSessions();
   showChatState(created);
   renderAll();
+  renderWorkflowPlan();
   closeModalImpl();
   if (prefill) {
     inputEl.value = prefill;

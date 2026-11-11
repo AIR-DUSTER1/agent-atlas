@@ -72,6 +72,8 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
     ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
     ├── tools-rag.ts      # retrieve_docs：外部 RAG 知识检索工具（§3.13）
+    ├── workflow-plan.ts  # 自主执行流程领域状态与规划提示词（§3.53）
+    ├── tools-plan.ts     # update_workflow_plan 内部受控工具（§3.53）
     ├── tools-job.ts      # 求职岗位工具：job_collect / job_query / job_enrich / job_summary / job_diagnose（§3.47）
     ├── memory/           # 长期记忆领域层：Provider / Slot / local store / search / import-export（§3.26）
     ├── memory-store.ts   # 旧 API 兼容门面，内部委托 Memory Slot
@@ -519,8 +521,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   其余多级路径一律 404（防穿越）；
 - **事件翻译层 `stream.ts`**：`streamMode: ["messages","updates"]` 的原始事件形状复杂
   （`[mode, payload]` 元组、子图回显整段历史），统一翻译成归一化的 `AgentEvent`
-  （node / reasoning / token / tool_call / tool_result / interrupt / clarification_note /
-  usage / task_usage / ai_message / error）。完整定义见 `server/events.ts`，前端
+  （node / reasoning / token / tool_call / tool_result / interrupt / workflow_plan /
+  clarification_note / usage / task_usage / ai_message / error）。完整定义见 `server/events.ts`，前端
   `stream/events.ts` 的 switch 尾部有 `never` 断言强制穷尽。
   内容只认 messages 模式，updates 只取「节点名 + interrupt + 兜底消息」，按消息 id 去重；
   默认工作流的 `analyze / clarify / review` 是内部节点，正文 token 与整段消息会被过滤，
@@ -583,6 +585,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   菜单里 ⟳ = `git pull`，删除 = 撤销授权并清缓存，其会话归入「未归属」）。
   本地目录通过系统目录选择框取得绝对路径：Electron 走主进程 `dialog.showOpenDialog`，
   Web 模式走本机服务端 `POST /api/projects/pick-directory`；无桌面会话时才显式降级为手动路径。
+  菜单额外提供「不选择项目」：侧栏只展示内部 `default` 的未归属会话，新会话也不会继承
+  上一次选中的项目；映射集中在 `client/modules/project-view.ts`，避免筛选和创建语义漂移。
   列表持久化在 `.web-config.json` 的 `projects/activeProjectId` 字段，
   启动时校验目录仍在才恢复；项目列表为空时，首屏与「新建对话」直接进入主区
   Agent 选择页，通用 / 房产 Agent 固定排在示例前，旧未归属会话仍可从侧栏恢复；
@@ -687,12 +691,11 @@ Header: Authorization: Bearer <key>（可留空）
 
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
-| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com` 登录链接，手动入口启动受控可见浏览器；不执行会自行开页签的 `beike login`；浏览器内拦截官方 `/auth/callback` 404 并用同源 `postMessage` 交还 state，让 building.ke.com 原页面用自身会话完成换 Key，再从同源 localStorage 取出并走 doctor 校验；ticket/Key 均不写日志；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
-| `server/estate-login-browser.ts` | 受控登录 | 启动本机 Chrome / Edge 可见窗口；`context.route` 只拦截 `building.ke.com/auth/callback`，返回内存中转页并通过同源 `postMessage` 把 state/ticket 交回官方原页；轮询 `localStorage.bk_bearer_key`，保存成功后自动关窗。Cookie、state、Key 均不写日志；超时 3 分钟 |
+| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 固定 beike_skill）→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com` 登录链接；手动入口只在系统默认浏览器打开一次，不执行会自行开页签的 `beike login`，不自动点击、不代扫、不后台换票；回调页由贝壳官方自身处理，用户扫码后复制页面显示的 Key 并由 `saveBeikeKey` 走 doctor 校验；凭证文件指纹变化或新 Key 通过 doctor 后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
 | `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后直接结束本轮，不再让模型重试工具 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
-**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录只访问 HTTPS + `building.ke.com` 精确 host；404 回调拦截只存在于受控浏览器内存，不代理或持久化登录票据。
+**关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录只访问 HTTPS + `building.ke.com` 精确 host；一次点击只打开一次系统浏览器，不做自动点击、轮询或代填登录票据。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
 4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/x64` 映射为官方 manifest 的 `windows/amd64`，并逐跳校验 GitHub Release 重定向；只信任 HTTPS host 白名单，下载
@@ -1644,8 +1647,8 @@ console.log(result.messages.at(-1).content);
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
 | 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL）。若扫码后停在 `building.ke.com/auth/callback?state=...` 的 `Not Found`，这是贝壳官方回调路由当前直接返回 404。agentatlas 的「打开官方登录页」已改为受控可见浏览器：在浏览器内拦截该回调并交还 state，由官方原页使用浏览器自身 Cookie 完成换 Key，随后自动保存并关闭窗口。不要改用系统默认浏览器直接打开 |
-| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL）。贝壳官方 `/auth/callback` 现在已恢复为正常页面；应使用系统默认浏览器手动扫码并复制 Key。若再次出现 `Not Found`，先停止重试并等待贝壳修复，不要用自动化浏览器、脚本点击或后台换票绕过风控 |
+| 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒。登录阶段只用系统浏览器打开一次，不预点击、不代扫；出现验证页时停止 10-30 分钟，不使用换 IP、伪装 UA 或脚本重试规避 |
 | 安装贝壳 CLI 报「暂无 win32/x64」或 `unexpected redirect` | 官方 manifest 使用 `windows/amd64`，不是 Node 的 `win32/x64`；GitHub Release 下载会 302 到 `release-assets.githubusercontent.com`。安装器现做平台名映射，并逐跳重新校验重定向 host |
 | `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
 | 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
@@ -2448,3 +2451,60 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 **测试**：`tests/unit/tool-presentation.test.ts` 覆盖文件、图片、命令、MCP 与未知工具；
 `tests/unit/chat-flow.test.ts` 守分类接线和分组结构；`app.spec.ts` 在真实浏览器里校验
 类别、原始工具名与参数摘要。
+### 3.53 自主执行流程：从需求理解到可见步骤进度（`workflow-plan.ts` + `tools-plan.ts` + `client/views/workflow-plan.ts`）
+
+**定位**：让 Agent 在理解需求后先形成可验证的执行流程，再按步骤执行；执行过程中把
+进度同步到输入框上方，而不是把规划结果混进聊天正文或普通工具卡。
+
+**分层**：
+
+| 层 | 实现 | 关键约束 |
+|---|---|---|
+| 领域状态 | `src/workflow-plan.ts` | 2-8 步、单一 `in_progress`、revision 单调递增；完成后自动收口为 `completed`，有失败步骤则为 `failed` |
+| 规划入口 | `src/agent/workflow.ts` 的 `ANALYZE_PROMPT` | 只有复杂任务才产出 plan；简单问答、单次查询保持 `plan:null` |
+| 受控推进 | `src/tools-plan.ts` + `planProgress` 节点 | 模型只能通过 `update_workflow_plan` 创建/推进步骤；状态迁移由服务端节点落 checkpoint，不信任模型口述 |
+| 流协议 | `src/server/stream.ts` | 产出 `workflow_plan` 快照；`update_workflow_plan` 的 tool_call/tool_result 被过滤，不进入普通工具卡和工具统计 |
+| 前端 | `src/client/views/workflow-plan.ts` + `composer.css` | 窗体默认折叠、无计划隐藏；按会话持久化；步骤文本用 `textContent` 写入 |
+| 完成守门 | `reviewNode` | 存在 pending / in_progress / failed 步骤时反思不能通过；completed 必须能对应工具结果或明确产出 |
+
+**事件顺序**：
+
+```text
+analyze(update) ──workflow_plan(created)──▶ agent
+agent(tool_call update_workflow_plan) ──tools──▶ planProgress
+planProgress(update) ──workflow_plan(revision+1)──▶ agent
+agent(final answer) ──review(pass)──▶ workflow_plan(completed)
+```
+
+**为什么把规划做成工具而不是另起一次模型调用**：规划本身要在同一个 ReAct 上下文中
+看到工具结果并动态调整；用受控工具复用现有图，不额外增加一次“规划模型”调用，也不会
+让内部 JSON 混入用户正文。后台子 Agent 通过 `enablePlanning:false` 关闭流程，避免没有
+窗体消费者时浪费 token。
+
+**可观测性**：每个快照只发一次（按 plan id + revision 去重）；SSE 重放、刷新恢复和
+多会话并行都使用同一份 `workflow_plan` 事件。Mock 模式在命中「自主规划 / 分步骤」
+指令时会生成三段演示流程，便于不配置模型直接验收。
+
+**测试**：`workflow-plan.test.ts` 覆盖状态机与 LangGraph 推进；`stream.test.ts` 覆盖
+流程工具过滤；`app.spec.ts` 覆盖窗体默认折叠、无计划隐藏、完成后 3/3 步骤展示。
+### 3.54 配置表单公共组件：`client/ui/config-control.ts`
+
+**定位**：把设置页与配置弹窗里的输入框、文本域和下拉框收敛为一个可复用组件层，
+避免每个页面复制控件样式、焦点态和可访问性约定。
+
+| 入口 | 用途 |
+|---|---|
+| `configField({ control, label, hint, error })` | 新表单组合 `field + input`，自动挂公共组件类 |
+| `enhanceConfigControl(control)` | 给单个控件幂等补 `ui-config-control` / `ui-config-textarea` |
+| `enhanceConfigFields(root)` | 启动时扫描既有静态 HTML，渐进增强所有配置控件 |
+
+**约束**：
+
+1. 搜索框、开关、滑杆和文件选择器不属于配置值控件，不进入组件集合；
+2. 公共样式只依赖稳定组件类，页面不再维护 `#settings-page ... .field input` 的超长选择器；
+3. 动态表单直接使用 `configField()`，静态表单由 `main.ts` 启动时调用一次 `enhanceConfigFields()`；
+4. 控件仍保留原有 id、name、事件绑定和 `aria-describedby`，组件只是增强，不接管业务状态；
+5. 公共组件统一提供 38px 最小高度、焦点环、hover、placeholder、disabled 与文本域纵向缩放。
+
+**测试**：`ui-primitives.test.ts` 验证组件类标记；`ui-styles.test.ts` 守护公共样式；
+`app.spec.ts` 在真实浏览器检查供应商配置输入的尺寸、边框、背景和焦点环。

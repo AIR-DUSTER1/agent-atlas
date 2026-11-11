@@ -18,6 +18,7 @@ import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
 import { installClientErrorReporting } from "./observability/client-errors.js";
 import { icon, initIconHydration } from "./ui/icon.js";
+import { enhanceConfigFields } from "./ui/config-control.js";
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { exitGoalMode, handleGoalKeydown, syncGoalDraftFromInput } from "./composer/goal.js";
@@ -100,6 +101,7 @@ bindCompactAction(async () => {
  * ------------------------------------------------------------------------- */
 async function init(): Promise<void> {
   document.documentElement.dataset.appReady = "loading";
+  enhanceConfigFields();
   loadLocal();
   initIconHydration();
   bindScrollToBottom();

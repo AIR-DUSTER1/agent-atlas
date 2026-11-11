@@ -4,6 +4,7 @@ import { AIMessage, AIMessageChunk, ToolMessage } from "@langchain/core/messages
 import { AGENT_RECURSION_LIMIT } from "../../src/config.js";
 import { runGraphEvents } from "../../src/server/stream.js";
 import type { AgentEvent } from "../../src/server/events.js";
+import { WORKFLOW_PLAN_TOOL_NAME, type WorkflowPlanSnapshot } from "../../src/workflow-plan.js";
 
 test("stream：长任务递归保护固定为 1000", async () => {
   let seenOptions: Record<string, unknown> | undefined;
@@ -257,4 +258,53 @@ test("stream：tools 节点风险审查 JSON 不进入用户正文，但工具�
   const usage = events.filter((event) => event.type === "usage");
   assert.equal(usage.length, 1);
   assert.equal(usage[0].internal, true);
+});
+test("stream：流程工具不出普通工具卡，只产出 workflow_plan 快照", async () => {
+  const plan: WorkflowPlanSnapshot = {
+    id: "plan-stream",
+    revision: 2,
+    goal: "修复并验证",
+    steps: [
+      { id: "step-1", title: "读取代码", status: "completed", note: "已定位" },
+      { id: "step-2", title: "运行测试", status: "in_progress" },
+    ],
+    status: "running",
+    activeStepId: "step-2",
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const graph = {
+    stream: async () =>
+      (async function* () {
+        yield ["messages", [
+          new AIMessageChunk({
+            id: "plan-call-message",
+            content: "",
+            tool_call_chunks: [{
+              id: "plan-call-1",
+              index: 0,
+              name: WORKFLOW_PLAN_TOOL_NAME,
+              args: '{"updates":[{"stepId":"step-1","status":"completed"}]}',
+            }],
+          }),
+          { langgraph_node: "agent", checkpoint_ns: "agent" },
+        ]];
+        yield ["messages", [
+          new ToolMessage({
+            content: "执行流程更新已接收",
+            tool_call_id: "plan-call-1",
+            name: WORKFLOW_PLAN_TOOL_NAME,
+          }),
+          { langgraph_node: "tools", checkpoint_ns: "tools" },
+        ]];
+        yield ["updates", { planProgress: { workflowPlan: plan } }];
+      })(),
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of runGraphEvents(graph, {}, { threadId: "workflow-plan-stream" })) events.push(event);
+  const planEvents = events.filter((event) => event.type === "workflow_plan");
+  assert.equal(planEvents.length, 1);
+  assert.equal(planEvents[0].type === "workflow_plan" ? planEvents[0].plan?.revision : 0, 2);
+  assert.equal(events.filter((event) => event.type === "tool_call" || event.type === "tool_result").length, 0);
+  assert.equal(events.filter((event) => event.type === "node" && event.name === "planProgress").length, 0);
 });

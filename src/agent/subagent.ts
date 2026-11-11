@@ -198,6 +198,8 @@ export async function runSubagent(
     checkpointer: new MemorySaver(),
     sessionId: threadId,
     modelRuntime,
+    // 子 Agent 没有流程窗体消费者；把规划工具留给主 Agent 控制，避免后台黑盒多绕一轮。
+    enablePlanning: false,
     onModelUsage: (_node, response) => {
       const usage = usageFromMessage(response);
       if (usage) observedUsage.push(usage);

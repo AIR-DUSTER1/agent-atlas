@@ -27,6 +27,7 @@ export const CLIENT_SOURCES = [
   "ui/button.ts",
   "ui/input.ts",
   "ui/field.ts",
+  "ui/config-control.ts",
   "ui/card.ts",
   "ui/empty.ts",
   "ui/dialog.ts",

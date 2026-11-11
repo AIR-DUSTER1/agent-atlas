@@ -17,6 +17,7 @@
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import type { AgentEvent, ApprovalPayload } from "./events.js";
 import { PRODUCT_NAME } from "../product.js";
+import { applyWorkflowPlanToolInput, createWorkflowPlanFromDraft, normalizeWorkflowPlanDraft, type WorkflowPlanSnapshot } from "../workflow-plan.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -53,8 +54,36 @@ function fabricateUsage(message: string, turnIndex: number, outputChars: number)
  * 模拟运行入口：新消息走 scenario，resume 走审批分支。
  * 外层包装负责在流结束后补发一条合成的 usage 事件（协议与真实图一致）。
  */
+/** 模拟模式下让复杂任务也能演示流程窗体；真实模式由 analyze 模型决定是否规划。 */
+function mockPlanFor(message: string): WorkflowPlanSnapshot | null {
+  if (!/(自主规划|执行流程|分步骤|按步骤|规划并)/.test(message)) return null;
+  const draft = normalizeWorkflowPlanDraft({
+    goal: message.slice(0, 240),
+    steps: [
+      { id: "step-1", title: "确认目标与边界" },
+      { id: "step-2", title: "执行核心操作" },
+      { id: "step-3", title: "验证结果并汇总" },
+    ],
+  });
+  return draft ? createWorkflowPlanFromDraft(draft) : null;
+}
+
+function advanceMockPlan(plan: WorkflowPlanSnapshot): WorkflowPlanSnapshot {
+  const active = plan.activeStepId;
+  if (!active) return plan;
+  const next = plan.steps.find((step) => step.status === "pending");
+  return applyWorkflowPlanToolInput(plan, {
+    updates: [
+      { stepId: active, status: "completed", note: "模拟执行完成" },
+      ...(next ? [{ stepId: next.id, status: "in_progress" as const }] : []),
+    ],
+  }) ?? plan;
+}
+
 export async function* mockRun(input: MockInput): AsyncGenerator<AgentEvent> {
   let outputChars = 0;
+  let plan = mockPlanFor(input.rawMessage ?? input.message ?? "");
+  if (plan && !input.signal?.aborted) yield { type: "workflow_plan", plan };
   // 有附件时先播报一句（模拟模式无法真正分析文件内容，真实模型则会直接读到）
   const attachNames = [...(input.message ?? "").matchAll(/--- 附件 \d+: (.+?)(?:（超长已截断）)? ---/g)].map((m) => m[1]);
   if (attachNames.length && !input.signal?.aborted) {
@@ -69,6 +98,17 @@ export async function* mockRun(input: MockInput): AsyncGenerator<AgentEvent> {
   for await (const ev of mockScenario(input)) {
     if (ev.type === "token") outputChars += ev.text.length;
     yield ev;
+    if (plan && ev.type === "tool_result" && !input.signal?.aborted) {
+      plan = advanceMockPlan(plan);
+      yield { type: "workflow_plan", plan };
+    }
+  }
+  if (plan && !input.signal?.aborted && plan.status === "running") {
+    const updates = plan.steps
+      .filter((step) => step.status === "pending" || step.status === "in_progress")
+      .map((step) => ({ stepId: step.id, status: "completed" as const, note: "模拟执行完成" }));
+    plan = applyWorkflowPlanToolInput(plan, { updates }) ?? plan;
+    yield { type: "workflow_plan", plan };
   }
   if (!input.signal?.aborted) {
     yield {

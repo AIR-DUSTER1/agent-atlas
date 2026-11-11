@@ -246,7 +246,7 @@ export interface ComposerTrigger {
  * 全局状态
  * ------------------------------------------------------------------------- */
 
-import type { AppConfig, PendingFile, RagState, EstateState, JobState, BrowserUseState, ExternalAgent, PluginSettingsState, RoutingSnapshot, SubagentSettingsState } from "./types-api.js";
+import type { AppConfig, PendingFile, RagState, EstateState, JobState, BrowserUseState, ExternalAgent, PluginSettingsState, RoutingSnapshot, SubagentSettingsState, WorkflowPlanSnapshot } from "./types-api.js";
 
 export interface SessionStreamState {
   ctrl: AbortController;
@@ -272,6 +272,8 @@ export interface AppState {
   currentId: string | null;
   blocks: Record<string, ChatBlock[]>;
   usage: Record<string, UsageInfo>;
+  /** 会话 id → 当前/最近一轮自主执行流程；null 表示明确无流程。 */
+  workflowPlans: Record<string, WorkflowPlanSnapshot | null>;
   /** 会话 id → 正在运行的 SSE 回合；允许多个会话并行生成。 */
   streams: Record<string, SessionStreamState>;
   /** 会话 id → 是否正在压缩上下文；只互斥同一会话。 */

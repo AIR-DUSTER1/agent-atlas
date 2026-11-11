@@ -8,16 +8,25 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { h } from "../../src/client/ui/h.js";
 import { safeHref, safeImageSrc, safeUrl } from "../../src/client/ui/safe-url.js";
+import { configField, enhanceConfigControl } from "../../src/client/ui/config-control.js";
+import { textInput } from "../../src/client/ui/input.js";
 
 class FakeStyle {
   readonly values = new Map<string, string>();
   setProperty(name: string, value: string): void { this.values.set(name, value); }
 }
 
+class FakeClassList {
+  readonly values = new Set<string>();
+  add(...tokens: string[]): void { for (const token of tokens) this.values.add(token); }
+  contains(token: string): boolean { return this.values.has(token); }
+}
+
 class FakeElement {
   readonly tagName: string;
   readonly attributes = new Map<string, string>();
   readonly dataset: Record<string, string> = {};
+  readonly classList = new FakeClassList();
   readonly style = new FakeStyle();
   readonly children: FakeElement[] = [];
   readonly listeners = new Map<string, EventListener>();
@@ -96,6 +105,35 @@ test("h() 对危险 URL 只留下拒绝标记", () => {
   assert.equal(fakeImage.getAttribute("data-invalid-url"), "src");
 });
 
+test("配置控件公共组件为文本类和文本域类加稳定标记", () => {
+  const input = enhanceConfigControl(new FakeElement("input") as unknown as HTMLInputElement);
+  const inputFake = input as unknown as FakeElement;
+  assert.equal(inputFake.dataset.uiComponent, "config-control");
+  assert.equal(inputFake.classList.contains("ui-input"), true);
+  assert.equal(inputFake.classList.contains("ui-config-control"), true);
+
+  const area = enhanceConfigControl(new FakeElement("textarea") as unknown as HTMLTextAreaElement);
+  const areaFake = area as unknown as FakeElement;
+  assert.equal(areaFake.dataset.uiComponent, "config-control");
+  assert.equal(areaFake.classList.contains("ui-config-textarea"), true);
+  assert.equal(areaFake.classList.contains("ui-config-control"), false);
+});
+test("configField 组合字段壳与公共配置控件", () => {
+  const control = textInput({ id: "cfg-name", placeholder: "名称" });
+  const wrapper = configField({
+    id: "cfg-name",
+    label: "名称",
+    hint: "用于识别配置",
+    control,
+  });
+  const wrapperFake = wrapper as unknown as FakeElement;
+  const controlFake = control as unknown as FakeElement;
+  assert.match(wrapperFake.getAttribute("class") ?? "", /\bui-field\b/);
+  assert.equal(wrapperFake.children[1], controlFake);
+  assert.equal(controlFake.classList.contains("ui-input"), true);
+  assert.equal(controlFake.classList.contains("ui-config-control"), true);
+  assert.equal(control.getAttribute("aria-describedby"), "cfg-name-hint");
+});
 test("safe-url 仅放行约定的协议与相对地址", () => {
   assert.equal(safeHref("/api/sessions"), "/api/sessions");
   assert.equal(safeHref("../docs"), "../docs");

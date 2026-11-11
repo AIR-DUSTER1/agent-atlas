@@ -62,6 +62,29 @@ export interface ClarificationPayload {
 
 export type InterruptPayload = ApprovalPayload | ClarificationPayload;
 
+export type WorkflowStepStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
+export type WorkflowPlanStatus = "running" | "completed" | "failed";
+
+export interface WorkflowPlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  status: WorkflowStepStatus;
+  note?: string;
+}
+
+/** 输入框上方流程窗体的完整快照；revision 单调递增，可安全覆盖旧状态。 */
+export interface WorkflowPlanSnapshot {
+  id: string;
+  revision: number;
+  goal: string;
+  steps: WorkflowPlanStep[];
+  status: WorkflowPlanStatus;
+  activeStepId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** 服务端 → 前端的规范化事件流；新增变体必须同步 stream/events.ts 的 switch */
 export type AgentEvent =
   | { type: "node"; name: string }
@@ -100,6 +123,8 @@ export type AgentEvent =
       taskActiveMs?: number;
     }
   | { type: "interrupt"; payload: InterruptPayload }
+  /** 自主执行流程快照；null 表示本轮没有流程，窗体隐藏。 */
+  | { type: "workflow_plan"; plan: WorkflowPlanSnapshot | null }
   /** 无头模式自动采用的澄清假设：不挂起，但要让人知道「本该问什么」 */
   | {
       type: "clarification_note";

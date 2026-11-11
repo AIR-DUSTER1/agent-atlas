@@ -64,7 +64,64 @@
 .ui-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--info-bg); outline: none; }
 .ui-textarea { min-height: 92px; resize: vertical; line-height: 1.6; }
 
-.ui-field { display: flex; flex-direction: column; gap: var(--space-1); }
+/* ---------------------------------------------------------------------------
+ * 配置表单公共组件：ui/config-control.ts
+ * 动态字段与静态 HTML 水合后都落到这两个稳定类，页面不再各自复制输入框样式。
+ * ------------------------------------------------------------------------- */
+.ui-config-control,
+.ui-config-textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-input);
+  color: var(--content-1);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  outline: none;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+.ui-config-control { min-height: 38px; }
+.ui-config-textarea { line-height: 1.6; resize: vertical; }
+.memory-add-row > .ui-config-textarea { min-height: 88px; }
+
+.ui-config-control[spellcheck="false"],
+.ui-config-control[type="url"],
+.ui-config-control[type="password"],
+.ui-config-control[type="number"],
+.ui-config-textarea[spellcheck="false"],
+.ui-config-textarea.reason-custom {
+  font-family: var(--mono);
+}
+
+select.ui-config-control { cursor: pointer; }
+
+.ui-config-control:hover,
+.ui-config-textarea:hover {
+  border-color: var(--border-strong);
+}
+
+.ui-config-control:focus,
+.ui-config-textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--info-bg);
+}
+
+.ui-config-control::placeholder,
+.ui-config-textarea::placeholder {
+  color: var(--text-3);
+  opacity: 1;
+}
+
+.ui-config-control:disabled,
+.ui-config-textarea:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}.ui-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .ui-field-label { color: var(--content-1); font-size: var(--font-sm); font-weight: 600; }
 .ui-field-hint { margin: 0; color: var(--content-3); font-size: var(--font-xs); line-height: 1.6; }
 .ui-field-error { margin: 0; color: var(--danger); font-size: var(--font-xs); line-height: 1.6; }

@@ -44,8 +44,11 @@ export function updateThinkingPart(part: ThinkingPart): void {
   const refs = partEls.get(part);
   if (!refs) return;
   if (refs.textEl) refs.textEl.textContent = part.text;
-  const stateText = part.streaming ? "思考中" : `${part.text.length} 字`;
-  if (refs.metaEl) refs.metaEl.textContent = `${stateText} · ${refs.el instanceof HTMLDetailsElement && refs.el.open ? "收起" : "展开"}`;
+  // 摘要只保留“思考中”这一临时状态；完成后不再显示字数或展开/收起文案。
+  if (refs.metaEl) {
+    refs.metaEl.textContent = part.streaming ? "思考中" : "";
+    refs.metaEl.classList.toggle("hidden", !part.streaming);
+  }
 }
 
 /** 思考内容节流渲染：token 很碎，逐片重排会拖慢长回答。 */

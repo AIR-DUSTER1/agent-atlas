@@ -52,6 +52,18 @@ import { dispatchToAgent } from "../tools-team.js";
 import { renderBriefing, parseOutOfScope, OUT_OF_SCOPE_MARKER } from "../routing/briefing.js";
 import type { RouteDecision } from "../routing/types.js";
 import { toolResultsStopTurn } from "./turn-stop.js";
+import {
+  applyWorkflowPlanToolInput,
+  createWorkflowPlanFromDraft,
+  finalizeWorkflowPlan,
+  normalizeWorkflowPlanDraft,
+  workflowPlanPrompt,
+  workflowPlanSummary,
+  WORKFLOW_PLAN_TOOL_NAME,
+  type WorkflowPlanDraft,
+  type WorkflowPlanSnapshot,
+} from "../workflow-plan.js";
+import { updateWorkflowPlanTool } from "../tools-plan.js";
 
 const MAX_USER_TEXT = 8_000;
 const MAX_BRIEF_TEXT = 1_200;
@@ -121,6 +133,7 @@ interface RequirementAnalysis {
   understood: boolean;
   brief: string;
   questions: ClarificationQuestion[];
+  plan: WorkflowPlanDraft | null;
 }
 
 interface ReviewResult {
@@ -134,6 +147,11 @@ const WorkflowState = Annotation.Root({
   requirementBrief: Annotation<string>({
     reducer: (_previous, next) => next ?? "",
     default: () => "",
+  }),
+  /** 本轮执行流程；analyze 每轮先清空，简单问答保持 null，前端据此隐藏流程窗体。 */
+  workflowPlan: Annotation<WorkflowPlanSnapshot | null>({
+    reducer: (_previous, next) => next,
+    default: () => null,
   }),
   clarification: Annotation<ClarificationRequest | null>({
     reducer: (_previous, next) => next,
@@ -216,10 +234,14 @@ const ANALYZE_PROMPT = [
   "6. 每道题给 2-4 个互斥选项，选项必须有 id（A/B/C/D）、简短 label 和一句 description；选项 id 只在本道题内唯一。",
   "7. 不要生成「其它」选项，前端支持用户自定义输入。",
   "8. 「上一轮澄清」是用户此前做出的选择；当前请求依赖它时沿用，不要重复询问。",
+  "9. 需求已明确且任务需要两个以上可验证步骤、多次工具调用或依赖顺序时，同时给出 plan；简单问答、单次查询、纯计算给 null，不要为了展示而硬造流程。",
+  "10. plan.steps 必须 2-8 步，id 用 step-1、step-2 这类稳定短 id；每步只描述一个可验证动作，不写空泛的「分析一下」。",
   "只输出一个 JSON 对象，不要 Markdown，不要解释。不需要澄清时：",
-  '{"understood":true,"brief":"一句话复述你的理解","questions":[]}',
-  "需要澄清时（questions 里每道题都有题面与选项）：",
-  '{"understood":false,"brief":"一句话复述已知信息","questions":[{"id":"q1","question":"需要用户确认的问题","options":[{"id":"A","label":"选项标题","description":"选项说明"},{"id":"B","label":"另一选项","description":"选项说明"}]},{"id":"q2","question":"第二道问题","options":[{"id":"A","label":"选项标题"},{"id":"B","label":"另一选项"}]}]}',
+  '{"understood":true,"brief":"一句话复述你的理解","questions":[],"plan":null}',
+  "需要执行流程时：",
+  '{"understood":true,"brief":"一句话复述你的理解","questions":[],"plan":{"goal":"一句话目标","steps":[{"id":"step-1","title":"先完成什么","detail":"可选执行说明"},{"id":"step-2","title":"再完成什么"}]}}',
+  "需要澄清时（plan 固定为 null，questions 里每道题都有题面与选项）：",
+  '{"understood":false,"brief":"一句话复述已知信息","questions":[{"id":"q1","question":"需要用户确认的问题","options":[{"id":"A","label":"选项标题","description":"选项说明"},{"id":"B","label":"另一选项","description":"选项说明"}]},{"id":"q2","question":"第二道问题","options":[{"id":"A","label":"选项标题"},{"id":"B","label":"另一选项"}]}],"plan":null}',
   "questions 数组顺序即提问顺序，前端按这个顺序渲染。",
 ].join("\n");
 
@@ -230,6 +252,7 @@ const REVIEW_PROMPT = [
   "或：",
   '{"passes":false,"reason":"未通过原因","feedback":"给助手的具体修订指令"}',
   "判定失败仅限：没有回答核心问题、遗漏用户明确要求、与工具结果或需求理解矛盾、信息已足够却继续追问。",
+  "执行流程中存在 pending / in_progress / failed 步骤时不得判定通过；completed 必须有工具结果或明确产出作为证据。",
   "不要因为文风、长度、措辞或个人偏好判定失败；没有明显问题时一律 passes=true。",
 ].join("\n");
 
@@ -245,6 +268,7 @@ const CONTINUOUS_REVIEW_PROMPT = [
   '{"passes":false,"reason":"未完成的原因","feedback":"下一步行动指令"}',
   "判定失败仅限：目标动作没有执行完、执行了但没有验证（构建/测试没跑或没通过）、遗漏用户明确要求、与工具结果矛盾、声称完成但工具结果里没有证据。",
   "passes=true 仅当：目标已达成且有工具结果佐证；或用户请求本身是纯问答且回答已经完整。",
+  "执行流程中存在 pending / in_progress / failed 步骤时不得判定完成；completed 必须有工具结果或明确产出作为证据。",
   "不要因为文风、长度或措辞判定失败。feedback 必须是「下一步做什么」的具体指令（还差什么、如何验证）。",
 ].join("\n");
 
@@ -340,7 +364,7 @@ function normalizeQuestions(value: unknown): ClarificationQuestion[] {
  */
 export function parseRequirementAnalysis(raw: string): RequirementAnalysis {
   const record = asRecord(extractJson(raw));
-  if (!record) return { understood: true, brief: "", questions: [] };
+  if (!record) return { understood: true, brief: "", questions: [], plan: null };
 
   const brief = asText(record.brief).slice(0, MAX_BRIEF_TEXT);
   let questions = normalizeQuestions(record.questions);
@@ -360,9 +384,14 @@ export function parseRequirementAnalysis(raw: string): RequirementAnalysis {
     (!explicitPass && questions.length > 0);
 
   if (needsClarification && questions.length) {
-    return { understood: false, brief, questions };
+    return { understood: false, brief, questions, plan: null };
   }
-  return { understood: true, brief, questions: [] };
+  return {
+    understood: true,
+    brief,
+    questions: [],
+    plan: normalizeWorkflowPlanDraft(record.plan),
+  };
 }
 
 /** 解析反思 JSON。解析失败时默认通过，避免把网关的坏格式变成无限回炉。 */
@@ -490,9 +519,15 @@ export function createWorkflowGraph(
      * 单测注入假执行器即可覆盖「派发 → 回填 → 收尾」全链路，不碰真实网关。
      */
     dispatchRunner?: typeof dispatchToAgent;
+    /** 主 Agent 默认启用可见执行流程；后台子 Agent 传 false，避免无消费者时浪费 token。 */
+    enablePlanning?: boolean;
   }
 ) {
-  const tools = profile.tools;
+  const planningEnabled = options?.enablePlanning !== false;
+  const hasPlanTool = profile.tools.some((item) => item.name === WORKFLOW_PLAN_TOOL_NAME);
+  const tools = planningEnabled && !hasPlanTool
+    ? [...profile.tools, updateWorkflowPlanTool]
+    : profile.tools;
   const modelOptions = { sessionId: options?.sessionId, runtime: options?.modelRuntime };
   const agentModel = models?.agent
     ?? withModelRetries(createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel, options?.sessionId);
@@ -534,6 +569,7 @@ export function createWorkflowGraph(
       : "";
     const fallback = {
       requirementBrief: [userText, history].filter(Boolean).join("\n").slice(0, MAX_BRIEF_TEXT),
+      workflowPlan: null,
       clarification: null,
       reviewFeedback: "",
       reviewAttempts: 0,
@@ -558,7 +594,11 @@ export function createWorkflowGraph(
       const analysis = parseRequirementAnalysis(contentText(response.content));
       const brief = (analysis.brief || userText).slice(0, MAX_BRIEF_TEXT);
       if (analysis.understood) {
-        return { ...fallback, requirementBrief: brief };
+        return {
+          ...fallback,
+          requirementBrief: brief,
+          workflowPlan: analysis.plan ? createWorkflowPlanFromDraft(analysis.plan) : null,
+        };
       }
       return {
         ...fallback,
@@ -720,6 +760,7 @@ export function createWorkflowGraph(
         scope: memoryScope(profile.id),
         query: lastUserText,
       })) ?? undefined,
+      workflowPlanNote: planningEnabled ? workflowPlanPrompt(state.workflowPlan) : undefined,
       skillNote: skillNote ?? undefined,
       dispatchBrief: state.dispatchBrief
         ? `【子代理已完成的工作（作为你的已知事实，不要重复调用相同工具）】\n${state.dispatchBrief}`
@@ -738,6 +779,35 @@ export function createWorkflowGraph(
     return { messages: [sanitizeCheckpointMessage(response)] };
   }
 
+  /**
+   * 流程状态迁移节点：只读上一批工具调用，把 update_workflow_plan 的参数写回图状态。
+   * 独立成节点而不是在 agentNode 里扫描历史，保证审批 resume 重放时仍按当前批次幂等应用。
+   */
+  async function planProgressNode(state: WorkflowStateType) {
+    if (!planningEnabled) return {};
+    let cursor = state.messages.length - 1;
+    while (cursor >= 0 && state.messages[cursor]?.getType() === "tool") cursor -= 1;
+    const lastAi = cursor >= 0 && state.messages[cursor]?.getType() === "ai"
+      ? state.messages[cursor] as AIMessage
+      : undefined;
+    const calls = (lastAi?.tool_calls ?? []).filter((call) => call.name === WORKFLOW_PLAN_TOOL_NAME);
+    let plan = state.workflowPlan;
+    let changed = false;
+    for (const call of calls) {
+      const next = applyWorkflowPlanToolInput(plan, call.args);
+      if (next !== plan) changed = true;
+      plan = next;
+    }
+    // 工具结果已经标记 stopAgent 时不再回模型；若已有流程，把当前状态显式收口为失败，
+    // 避免窗体永远停在一个“进行中”的假进度。
+    if (plan && toolResultsStopTurn(state.messages)) {
+      const finalized = finalizeWorkflowPlan(plan, "failed");
+      if (finalized !== plan) changed = true;
+      plan = finalized;
+    }
+    return changed ? { workflowPlan: plan } : {};
+  }
+
   async function reviewNode(state: WorkflowStateType, nodeConfig?: { signal?: AbortSignal }) {
     const last = state.messages.at(-1);
     const lastAi = last?.getType() === "ai" ? (last as AIMessage) : undefined;
@@ -754,8 +824,14 @@ export function createWorkflowGraph(
       lastReviewMessageCount: state.messages.length,
     };
     const continuous = state.continuousMode;
+    const plan = state.workflowPlan;
+    const planSummary = workflowPlanSummary(plan);
+    const unfinishedPlanSteps = plan?.steps.filter(
+      (step) => step.status !== "completed" && step.status !== "skipped",
+    ) ?? [];
     // 回炉上限：普通模式 3 次防死循环；连续模式放宽到保险丝级，靠空转熔断与异常兜底
     const cap = continuous ? MAX_CONTINUOUS_REVISIONS : MAX_REVIEW_REVISIONS;
+    const finishPlan = (status: "completed" | "failed") => finalizeWorkflowPlan(plan, status);
     try {
       const response = await invokeModel(reviewerModel, [
         { role: "system", content: continuous ? continuousReviewPrompt : reviewPrompt },
@@ -764,25 +840,50 @@ export function createWorkflowGraph(
           content:
             `用户本轮需求/理解：\n${state.requirementBrief || "（无）"}\n\n` +
             `上一轮澄清（仅在相关时参考）：\n${state.clarificationHistory || "（无）"}\n\n` +
+            `执行流程：\n${planSummary}\n\n` +
             `最近工具结果：\n${recentToolResults(state.messages) || "（无）"}\n\n` +
             `助手最新回答：\n${answer || "（空回答）"}`,
         },
       ], nodeConfig?.signal, options?.sessionId);
       observeModel("review", response);
       const review = parseReviewResult(contentText(response.content));
+      // 计划是可见承诺：有未完成/失败步骤时，即使模型说 passes 也不能提前收尾。
+      if (review.passes && unfinishedPlanSteps.length && attempts < cap) {
+        const names = unfinishedPlanSteps.slice(0, 6).map((step) => step.title).join("、");
+        return {
+          reviewFeedback: `执行流程仍有未完成或失败的步骤：${names}。请继续执行，并用 update_workflow_plan 同步证据；无法完成的步骤标记 failed 或 skipped 并说明原因。`,
+          reviewAttempts: attempts + 1,
+          ...bookkeeping,
+        };
+      }
       if (review.passes || attempts >= cap) {
-        return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
+        return {
+          reviewFeedback: "",
+          reviewAttempts: attempts + 1,
+          ...bookkeeping,
+          ...(plan ? { workflowPlan: finishPlan(unfinishedPlanSteps.length ? "failed" : "completed") } : {}),
+        };
       }
       // 连续模式空转熔断：反思连续多轮不通过且期间没有任何工具动作，
       // 继续回炉只是烧钱；把控制权交还用户比第 N 次换措辞重说更有价值。
       if (continuous && bookkeeping.idleReviewRounds >= MAX_IDLE_REVIEW_ROUNDS) {
-        return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
+        return {
+          reviewFeedback: "",
+          reviewAttempts: attempts + 1,
+          ...bookkeeping,
+          ...(plan ? { workflowPlan: finishPlan("failed") } : {}),
+        };
       }
       const feedback = (review.feedback || review.reason || "回答没有完全满足需求，请检查遗漏并补齐。")
         .slice(0, MAX_FEEDBACK_TEXT);
       return { reviewFeedback: feedback, reviewAttempts: attempts + 1, ...bookkeeping };
     } catch {
-      return { reviewFeedback: "", reviewAttempts: attempts + 1, ...bookkeeping };
+      return {
+        reviewFeedback: "",
+        reviewAttempts: attempts + 1,
+        ...bookkeeping,
+        ...(plan ? { workflowPlan: finishPlan(unfinishedPlanSteps.length ? "failed" : "completed") } : {}),
+      };
     }
   }
 
@@ -895,8 +996,7 @@ export function createWorkflowGraph(
     return last?.tool_calls?.length ? "tools" : "review";
   }
 
-  /** 工具返回明确的终止标记时不回模型，避免登录失效等状态触发重试循环。 */
-  function afterTools(state: WorkflowStateType): "agent" | typeof END {
+  function afterPlanProgress(state: WorkflowStateType): "agent" | typeof END {
     return toolResultsStopTurn(state.messages) ? END : "agent";
   }
 
@@ -904,7 +1004,7 @@ export function createWorkflowGraph(
     return state.reviewFeedback ? "agent" : END;
   }
 
-  return new StateGraph(WorkflowState)
+  let graph = new StateGraph(WorkflowState)
     .addNode("analyze", analyzeNode)
     .addNode("clarify", clarifyNode)
     .addNode("route", routeNode)
@@ -912,6 +1012,7 @@ export function createWorkflowGraph(
     .addNode("dispatch", dispatchNode)
     .addNode("agent", agentNode)
     .addNode("tools", toolsNode)
+    .addNode("planProgress", planProgressNode)
     .addNode("review", reviewNode)
     .addEdge(START, "analyze")
     .addConditionalEdges("analyze", afterAnalyze)
@@ -920,7 +1021,10 @@ export function createWorkflowGraph(
     .addEdge("routeAsk", "dispatch")
     .addConditionalEdges("dispatch", afterDispatch)
     .addConditionalEdges("agent", afterAgent)
-    .addConditionalEdges("tools", afterTools)
+    .addEdge("tools", "planProgress")
+    .addConditionalEdges("planProgress", afterPlanProgress);
+
+  return graph
     .addConditionalEdges("review", afterReview)
     .compile({
       // 默认挂共享持久检查点（重启续命，见 src/checkpoint.ts）；

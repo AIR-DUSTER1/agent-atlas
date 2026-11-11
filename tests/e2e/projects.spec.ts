@@ -6,7 +6,7 @@
  */
 import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
-import { login } from "./helpers.js";
+import { createChat, login } from "./helpers.js";
 
 test("添加本地文件夹先打开系统目录选择接口，不再弹出手输路径框", async ({ page }) => {
   const pageErrors: string[] = [];
@@ -44,6 +44,21 @@ test("添加本地文件夹先打开系统目录选择接口，不再弹出手�
   await expect(page.locator("#modal-mask")).toBeVisible();
   await page.locator("#modal-close").click();
   await expect(page.locator("#modal-mask")).toBeHidden();
+
+  // 项目菜单里的“不选择项目”必须真正落成内部 default，而不是继续使用上一个项目。
+  await page.locator("#project-btn").click();
+  const noProject = page.getByRole("menuitem", { name: /不选择项目/ });
+  await expect(noProject).toBeVisible();
+  await noProject.click();
+  await expect(page.locator("#project-btn-text")).toHaveText("不选择项目");
+
+  const sessionCreated = page.waitForResponse(
+    (res) => res.url().includes("/api/sessions") && res.request().method() === "POST",
+  );
+  await createChat(page);
+  const createdSession = await (await sessionCreated).json() as { projectId?: string };
+  expect(createdSession.projectId).toBe("default");
+  await expect(page.locator("#breadcrumb-project")).toHaveText("未归属项目");
   expect(pageErrors).toEqual([]);
 });
 test("目录选择框已经打开时提示切回系统窗口，不降级成手动路径", async ({ page }) => {

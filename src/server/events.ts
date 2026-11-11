@@ -20,12 +20,15 @@
  *   interrupt   → Human-in-the-loop 审批卡片 / 需求澄清选项
  *   clarification_note → 无头模式下自动采用的假设（不挂起、不等人）
  *   route_decision → 路由决策卡片（派给谁 / 依据 / 来自哪一层 / 可解释分数）
+ *   workflow_plan → 输入框上方的自主执行流程快照（创建 / 步骤推进 / 收口）
  *   usage       → 本轮模型调用的 token 用量（驱动上下文容量条 + 缓存占比）
  *   task_usage  → 本轮结束时的任务累计用量（下游统计的权威口径）
  *   ai_message  → 整段助手消息兜底（极少数网关不支持 token 流时使用）
  *   shutdown    → 服务端优雅退出通知（前端提示「稍后刷新重连」）
  *   error/done  → 错误提示 / 本轮流结束
  */
+
+import type { WorkflowPlanSnapshot } from "../workflow-plan.js";
 
 /** 与 hitl.ts 复用审批载荷形状（避免循环依赖，这里独立声明同构类型）。 */
 export interface ApprovalPayload {
@@ -176,6 +179,8 @@ export type AgentEvent =
     }
   /** HITL：图已暂停，等待人工审批或需求澄清 */
   | { type: "interrupt"; payload: InterruptPayload }
+  /** 自主执行流程快照；plan=null 表示本轮没有流程，前端隐藏窗体。 */
+  | { type: "workflow_plan"; plan: WorkflowPlanSnapshot | null }
   /** 自主审批的自动决定：仅供服务端审计，写 SSE 也无害（前端可忽略） */
   | {
       type: "risk_decision";

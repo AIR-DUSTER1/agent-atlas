@@ -90,6 +90,7 @@
 .pm-item .pm-sub { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 4px; flex: none; }
 .pm-item .pm-sub.local { background: var(--tag-bg); color: var(--text-3); }
 .pm-item .pm-sub.cloud { background: rgba(63,185,111,.14); color: var(--green); }
+.pm-item .pm-sub.none { background: var(--tag-bg); color: var(--text-3); }
 .pm-item .pm-x { margin-left: 4px; color: var(--text-3); padding: 2px 5px; border-radius: 5px; flex: none; }
 .pm-item .pm-x:hover { color: var(--red); background: rgba(229,96,79,.12); }
 

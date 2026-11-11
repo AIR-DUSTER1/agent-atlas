@@ -24,6 +24,25 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await expect(page.locator("#provider-list")).toBeVisible();
   await page.locator("#add-provider-btn").click();
   await expect(page.locator("#provider-modal")).toBeVisible();
+  const configInput = page.locator("#pf-name");
+  await expect(configInput).toHaveAttribute("data-ui-component", "config-control");
+  await expect(configInput).toHaveClass(/ui-config-control/);
+  const inputStyle = await configInput.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      minHeight: parseFloat(style.minHeight),
+      borderStyle: style.borderStyle,
+      borderRadius: parseFloat(style.borderTopLeftRadius),
+      backgroundColor: style.backgroundColor,
+    };
+  });
+  expect(inputStyle.minHeight).toBeGreaterThanOrEqual(38);
+  expect(inputStyle.borderStyle).toBe("solid");
+  expect(inputStyle.borderRadius).toBeGreaterThanOrEqual(8);
+  expect(inputStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  await configInput.focus();
+  const focusedShadow = await configInput.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(focusedShadow).not.toBe("none");
   await page.locator("#provider-modal-close").click();
   await expect(page.locator("#provider-modal")).toBeHidden();
 
@@ -157,6 +176,21 @@ test("工具卡展示统一分类、原始工具名与可读参数摘要", async
   await expect(card.locator(".tool-args-preview")).toContainText("北京");
   await expect(card).toHaveAttribute("data-tool-category", "other");
 });
+test("自主执行流程窗体默认折叠、无计划隐藏并实时同步步骤", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  // 新会话还没有流程，窗体不能占用输入框上方空间。
+  await expect(page.locator("#workflow-panel")).toBeHidden();
+  await sendMessage(page, "请自主规划并分步骤完成：先查北京天气，再写一句总结");
+  await expect(page.locator("#workflow-panel")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#workflow-panel")).not.toHaveAttribute("open", "");
+  await expect(page.locator("#workflow-steps")).toBeHidden({ timeout: 2_000 });
+  await expect(page.locator("#workflow-status")).toHaveText("已完成", { timeout: 20_000 });
+  await expect(page.locator("#workflow-count")).toHaveText("3/3 步");
+  await page.locator("#workflow-panel .workflow-summary").click();
+  await expect(page.locator("#workflow-steps .workflow-step")).toHaveCount(3);
+  await expect(page.locator("#workflow-steps .workflow-step.status-completed")).toHaveCount(3);
+});
 test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await login(page);
   await createChat(page);
@@ -165,7 +199,7 @@ test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await page.locator("#stop-btn").click();
   await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
   await expect(page.locator("#send-btn")).toBeVisible();
-  await expect(page.locator("#composer-hint")).toBeVisible();
+  await expect(page.locator("#composer-hint")).toHaveCount(0);
 });
 
 test("多个会话可并行生成，切换会话不弹等待框", async ({ page }) => {
