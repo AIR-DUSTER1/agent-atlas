@@ -25,6 +25,8 @@ export interface AgentContextInput {
   reviewFeedback?: string;
   /** 会话权限模式注记（permission.ts 生成；approve 默认行为时为空串不注入） */
   permissionNote?: string;
+  /** 用户设置的个性化默认上下文；每轮稳定注入，与本轮明确要求冲突时本轮优先。 */
+  personalizationContext?: string;
   /** 跨会话长期记忆注记（memory-store 生成；无记忆时为空不注入） */
   memoryNote?: string;
   /** 技能注记（skills.ts 按用户消息关键词命中生成；未命中为 undefined，零开销） */
@@ -214,6 +216,7 @@ export function buildAgentContext(input: AgentContextInput): AgentContextResult 
     revisionNote,
     input.reviewFeedback ? `【上一轮反思反馈】${input.reviewFeedback}` : "",
     input.permissionNote || "",
+    input.personalizationContext ? `【个性化上下文（默认背景，与本轮明确要求冲突时以本轮为准）】${input.personalizationContext}` : "",
     input.memoryNote || "",
     input.skillNote || "",
     input.workflowPlanNote || "",

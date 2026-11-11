@@ -124,21 +124,24 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
   assert.match(html, /id="kb-key" type="password"/);
   assert.match(html, /id="estate-key" type="password"/);
   assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);
-  assert.match(forms, /setFieldError\("mem-key"/);
   assert.match(forms, /setFieldError\("cmd-name"/);
   assert.match(forms, /aria-invalid/);
 });
-test("长期记忆插槽：本地 / HTTP 配置、连接测试、scope 与导入导出齐备", async () => {
+test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导入导出齐备", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
   const source = await readClientFiles(["views/settings-memories.ts", "views/settings.ts"]);
   for (const id of [
     "mem-active-provider", "mem-health-badge", "mem-http-enabled", "mem-http-preset",
     "mem-http-base-url", "mem-http-api-key", "mem-test-http-btn", "mem-save-config-btn",
+    "mem-personalization-enabled", "mem-personalization-text", "mem-personalization-save-btn",
     "mem-profile-filter", "mem-search", "mem-history-toggle", "mem-export-btn", "mem-import-file",
   ]) assert.match(html, new RegExp(`id="${id}"`), id);
   assert.match(html, /id="mem-http-api-key" type="password"/);
   assert.match(source, /refreshMemorySettings/);
   assert.match(source, /testMemoryHttpFromForm/);
+  assert.match(source, /savePersonalizationFromForm/);
+  assert.match(source, /personalization: \{ enabled, text \}/);
+  assert.doesNotMatch(html, /id="mem-(?:key|content|add-btn)"/);
   assert.match(source, /snapshot/);
   assert.match(source, /authFetch\(`\/api\/memories\/export/);
   assert.doesNotMatch(source, /innerHTML\s*=\s*`[^`]*\$\{[^}]*apiKey/);

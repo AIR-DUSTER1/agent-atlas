@@ -2,7 +2,7 @@
  * ============================================================
  * views/settings-memories.ts — 长期记忆插槽设置与条目管理
  * ============================================================
- * 职责：本地 / HTTP Provider 配置、连接测试、状态展示、scope 列表、导入导出。
+ * 职责：个性化默认上下文、本地 / HTTP Provider 配置、连接测试、状态展示、scope 列表与导入导出。
  * 设计立场：
  *  - 所有动态正文用 textContent，配置 URL / bank / Key 不拼进 innerHTML；
  *  - 配置保存和连接测试使用同一份表单快照，避免“测 A 存 B”；
@@ -11,13 +11,14 @@
 import { $ } from "../core/dom.js";
 import { api, authFetch } from "../core/api.js";
 import { uiConfirm } from "../ui/dialog.js";
-import { clearFieldError, setFieldError } from "../ui/field.js";
 import type {
   MemoryEntry,
   MemoryProviderHealth,
   MemorySlotConfig,
   MemorySlotStatus,
 } from "../modules/types.js";
+
+const MAX_PERSONALIZATION_CHARS = 4_000;
 
 let memStatusTimer: ReturnType<typeof setTimeout> | undefined;
 let allMemories: MemoryEntry[] = [];
@@ -112,6 +113,8 @@ function renderStatus(status: MemorySlotStatus): void {
 
 function applyConfig(config: MemorySlotConfig): void {
   currentConfig = config;
+  if (input("mem-personalization-enabled")) input("mem-personalization-enabled")!.checked = config.personalization.enabled;
+  if (input("mem-personalization-text")) input("mem-personalization-text")!.value = config.personalization.text;
   const active = select("mem-active-provider");
   if (active) active.value = config.activeProvider;
   const allowPii = input("mem-allow-pii");
@@ -276,7 +279,7 @@ function validateConfigForm(): boolean {
 function sourceLabel(source: MemoryEntry["source"]): string {
   if (source === "agent") return "Agent 保存";
   if (source === "import") return "导入";
-  return "手动添加";
+  return "对话内保存";
 }
 
 function renderMemories(): void {
@@ -293,7 +296,7 @@ function renderMemories(): void {
     empty.className = "memories-empty";
     empty.textContent = query
       ? "没有符合筛选条件的记忆。"
-      : "当前 Agent 范围还没有长期记忆。可以在对话里说「记住：…」或用下面表单手动添加。";
+      : "当前 Agent 范围还没有长期记忆。完成对话后，系统会自动提取可复用的偏好与事实。";
     list.appendChild(empty);
     return;
   }
@@ -519,28 +522,30 @@ export async function reindexMemoryFromForm(): Promise<void> {
   }
 }
 
-export async function saveMemoryFromForm(): Promise<void> {
-  const keyEl = input("mem-key");
-  const contentEl = $("mem-content") as HTMLTextAreaElement | null;
-  const key = (keyEl?.value || "").trim();
-  const content = (contentEl?.value || "").trim();
-  clearFieldError("mem-key");
-  clearFieldError("mem-content");
-  if (!key) setFieldError("mem-key", "请填写记忆主题");
-  if (!content) setFieldError("mem-content", "请填写记忆内容");
-  if (!key || !content) { memStatus("请先修正表单中的必填项", "err"); return; }
+export async function savePersonalizationFromForm(): Promise<void> {
+  const enabled = Boolean(input("mem-personalization-enabled")?.checked);
+  const textEl = $("mem-personalization-text") as HTMLTextAreaElement | null;
+  const text = (textEl?.value || "").trim();
+  const status = $("mem-personalization-status");
+  const button = $("mem-personalization-save-btn") as HTMLButtonElement | null;
+  if (text.length > MAX_PERSONALIZATION_CHARS) {
+    if (status) { status.textContent = "个性化上下文不能超过 4000 字"; status.className = "settings-status err"; }
+    return;
+  }
+  if (button) button.disabled = true;
+  if (status) { status.textContent = "正在保存…"; status.className = "settings-status"; }
   try {
-    await api("/api/memories", {
-      method: "POST",
+    const result = await api<{ config: MemorySlotConfig }>("/api/memory/config", {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profileId: currentMemoryProfile(), key, content }),
+      body: JSON.stringify({ personalization: { enabled, text } }),
     });
-    if (keyEl) keyEl.value = "";
-    if (contentEl) contentEl.value = "";
-    await refreshMemories();
-    memStatus("已保存（下轮对话即生效）", "ok");
+    applyConfig(result.config);
+    if (status) { status.textContent = "已保存；下一轮对话起默认注入"; status.className = "settings-status ok"; }
   } catch (err) {
-    memStatus(`✗ ${(err as Error).message}`, "err");
+    if (status) { status.textContent = `✗ ${(err as Error).message}`; status.className = "settings-status err"; }
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -608,6 +613,7 @@ export function bindMemorySettings(): void {
   input("mem-http-enabled")?.addEventListener("change", toggleHttpFields);
   select("mem-http-preset")?.addEventListener("change", toggleHttpFields);
   $("mem-save-config-btn")?.addEventListener("click", () => { void saveMemoryConfigFromForm(); });
+  $("mem-personalization-save-btn")?.addEventListener("click", () => { void savePersonalizationFromForm(); });
   $("mem-test-http-btn")?.addEventListener("click", () => { void testMemoryHttpFromForm(); });
   $("mem-test-embedding-btn")?.addEventListener("click", () => { void testMemoryEmbeddingFromForm(); });
   $("mem-reindex-btn")?.addEventListener("click", () => { void reindexMemoryFromForm(); });

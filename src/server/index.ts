@@ -90,7 +90,7 @@ import { handleListProjects, handleAddProject, handleSetActiveProject, handleDel
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import {
-  handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories,
+  handleListMemories, handleDeleteMemory, handleExportMemories, handleImportMemories,
   handleListMemoryCandidates, handleConfirmMemory, handleRejectMemory,
 } from "./routes/memories.js";
 import {
@@ -440,7 +440,6 @@ const server = createServer(async (req, res) => {
 
     // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
     if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
-    if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     if (pathname === "/api/memories/candidates" && req.method === "GET") {
       await handleListMemoryCandidates(res, url.searchParams.get("profileId"));
       return;

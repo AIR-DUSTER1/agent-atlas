@@ -53,7 +53,6 @@ test("配置表单公共组件共享高度、焦点环与占位样式", async ()
   assert.match(css, /配置表单公共组件：ui\/config-control\.ts/);
   assert.match(css, /\.ui-config-control\s*\{\s*min-height:\s*38px/s);
   assert.match(css, /\.ui-config-textarea\s*\{[^}]*resize:\s*vertical/s);
-  assert.match(css, /\.memory-add-row > \.ui-config-textarea\s*\{\s*min-height:\s*88px/s);
   assert.match(css, /\.ui-config-control:focus[\s\S]*?border-color:\s*var\(--border-focus\)[^}]*box-shadow:\s*0 0 0 3px var\(--info-bg\)/s);
   assert.match(css, /\.ui-config-control::placeholder[\s\S]*?color:\s*var\(--text-3\)/s);
 });

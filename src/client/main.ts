@@ -49,7 +49,6 @@ import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-sub
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
-import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { bindCommandSettings, refreshCommands } from "./views/settings-commands.js";
 import {
   filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
@@ -220,7 +219,6 @@ async function init(): Promise<void> {
   bindSubagentSettings();
   bindCommandSettings();
   on("stats-refresh", "click", refreshStats);
-  on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   });
@@ -508,10 +506,6 @@ async function init(): Promise<void> {
     if (e.key === "Enter" && ["pf-name", "pf-base-url", "pf-api-key"].includes(target.id)) {
       e.preventDefault();
       void saveProvider();
-    }
-    if (e.key === "Enter" && (target.id === "mem-key" || (target.id === "mem-content" && (e.ctrlKey || e.metaKey)))) {
-      e.preventDefault();
-      void saveMemoryFromForm();
     }
     if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(target.id)) {
       e.preventDefault();

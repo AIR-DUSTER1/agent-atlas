@@ -1055,7 +1055,7 @@ memory/slot.ts（统一门面：能力、降级、注入预算、指标）
 | `src/memory/semantic.ts` | OpenAI 兼容 `/embeddings`；词法 + 向量 RRF；超时 / 坏响应 / 维度不符自动降级 |
 | `src/server/memory-distillation.ts` | 对话成功后异步自动沉淀；smart 只自动激活高置信非身份项；HTTP Provider 跳过 |
 | `src/tools-memory.ts` | 模型仍只见 `memory_save` / `memory_recall`，不能传 scope |
-| `src/agent/workflow.ts` | 每轮按最后用户消息召回当前 profile 的 active 记忆，动态注记不写 checkpoint |
+| `src/agent/workflow.ts` | 每轮注入个性化上下文，并按最后用户消息召回当前 profile 的 active 记忆；动态注记不写 checkpoint |
 
 **v3 存储**：
 
@@ -1090,10 +1090,11 @@ memory/slot.ts（统一门面：能力、降级、注入预算、指标）
 
 **API 与设置页**：
 
-- `GET/POST /api/memories`、`DELETE /api/memories/:id`、导出 / 导入。
+- `GET /api/memories`、`DELETE /api/memories/:id`、导出 / 导入；手动 `POST /api/memories` 已移除。
 - `GET /api/memories/candidates`、`POST /api/memories/:id/confirm|reject`。
 - `POST /api/memory/reindex`、`POST /api/memory/embedding/test`。
-- 设置页包含 Provider、HTTP、自动沉淀、生命周期、Embedding、索引状态、候选确认 / 拒绝和条目管理。
+- 设置页包含个性化上下文、Provider、HTTP、自动沉淀、生命周期、Embedding、索引状态、候选确认 / 拒绝和条目管理。
+- 个性化上下文作为 `memory.personalization` 独立保存，默认启用；正文非空时每轮进入 system 注记，不参与记忆召回、候选或条目列表。
 - API Key 只回掩码；空值保留旧 Key，显式清除才删除。
 
 **备份与观测**：

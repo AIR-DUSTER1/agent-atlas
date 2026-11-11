@@ -794,6 +794,11 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
   background: linear-gradient(180deg, var(--surface-1), var(--surface-0));
 }
 .memory-provider-grid { display: grid; grid-template-columns: minmax(260px, .78fr) minmax(0, 1.42fr); gap: 14px; margin-bottom: 14px; }
+.memory-personalization-card { margin-bottom: 14px; }
+.memory-personalization-card .field { margin: 0; }
+.memory-personalization-card textarea { min-height: 112px; }
+.memory-personalization-actions { justify-content: flex-start; margin-top: 10px; }
+.memory-personalization-actions .settings-status { flex: 1; min-width: 220px; }
 .memory-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
 .memory-card-head h3 { margin: 0; color: var(--content-1); font-size: var(--font-lg); }
 .memory-card-head p { margin: 4px 0 0; color: var(--content-3); font-size: var(--font-xs); line-height: 1.45; }
@@ -827,11 +832,6 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
 .memory-filter-row { display: grid; grid-template-columns: 170px minmax(180px, 1fr) auto; align-items: end; gap: 10px; margin-bottom: 10px; }
 .memory-filter-row .field { margin: 0; }
 .memory-history-check { align-self: center; padding-top: 18px; }
-.memory-add-title { margin-top: 14px; }
-.memory-add-row { display: grid; grid-template-columns: minmax(150px, .42fr) minmax(220px, 1fr) auto; align-items: stretch; }
-.memory-add-row textarea { min-height: 58px; resize: vertical; padding: 9px 11px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-input); color: var(--content-1); font: inherit; font-size: var(--font-sm); }
-.memory-add-row textarea:focus { border-color: var(--border-focus); outline: none; }
-.memory-add-row > .ghost-btn { align-self: center; margin: 0; }
 .memory-item.superseded { opacity: .68; border-style: dashed; }
 .settings-status.warn { color: var(--warning); }
 @media (max-width: 980px) {
@@ -846,7 +846,7 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
   .skill-card-kind { display: none; }
   .settings-section-heading, .memory-manage-head { flex-direction: column; align-items: stretch; }
   .memory-manage-actions { justify-content: flex-start; }
-  .memory-form-grid, .memory-filter-row, .memory-add-row { grid-template-columns: 1fr; }
+  .memory-form-grid, .memory-filter-row { grid-template-columns: 1fr; }
   .memory-span-2 { grid-column: auto; }
   .memory-history-check { padding-top: 0; }
 }

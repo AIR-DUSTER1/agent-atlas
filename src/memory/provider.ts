@@ -51,7 +51,7 @@ export interface MemorySaveInput {
   content: string;
   tags?: string[];
   source: MemorySource;
-  /** 自动沉淀默认先写 candidate；工具/手动保存默认 active。 */
+  /** 自动沉淀默认先写 candidate；工具保存默认 active，manual 仅用于兼容旧数据。 */
   status?: MemoryStatus;
   category?: MemoryCategory;
   confidence?: number;

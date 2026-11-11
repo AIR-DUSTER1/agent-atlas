@@ -37,6 +37,26 @@ test("stream：连续模式放宽超步保险丝，普通模式不受影响", as
   assert.equal((seenOptions?.configurable as Record<string, unknown>)?.continuous, true);
 });
 
+test("stream：个性化上下文经 configurable 传入图", async () => {
+  let seenOptions: Record<string, unknown> | undefined;
+  const graph = {
+    stream: async (_input: unknown, options: Record<string, unknown>) => {
+      seenOptions = options;
+      return (async function* () {})();
+    },
+  };
+  for await (const _event of runGraphEvents(graph, {}, {
+    threadId: "personalization-context-test",
+    personalizationContext: "称呼我为老王；回答先给结论。",
+  })) {
+    // 空流只校验运行参数。
+  }
+  assert.equal(
+    (seenOptions?.configurable as Record<string, unknown>)?.personalization_context,
+    "称呼我为老王；回答先给结论。",
+  );
+});
+
 test("stream：过滤内部模型节点，保留可见回答与澄清 interrupt", async () => {
   const graph = {
     stream: async () =>

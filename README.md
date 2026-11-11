@@ -41,7 +41,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 | 多 Agent | 通用、房产、求职三类独立 Agent；主 Agent 可向子代理动态授予模型、提示词和工具子集 |
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
-| 会话与记忆 | SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆 |
+| 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆 |
 | 安全与运维 | 高风险审批、审计日志、登录认证、配置加密、用量统计、备份恢复与 Prometheus 指标 |
 
 ## 界面预览
@@ -50,7 +50,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
   <img src="docs/screenshots/main-empty.png" alt="agentatlas 主界面" width="100%">
 </p>
 
-界面将 Agent 选择、会话管理、模型切换、权限控制与设置中心整合在同一工作台中。左下角设置页集中管理模型与供应商、插件、子代理、路由、记忆、统计、命令、技能和 MCP。
+界面将 Agent 选择、会话管理、模型切换、权限控制与设置中心整合在同一工作台中。左下角设置页集中管理模型与供应商、插件、子代理、路由、记忆与个性化、统计、命令、技能和 MCP。
 
 ## 快速开始
 
@@ -104,7 +104,7 @@ npm run models
 2. 在输入框附加项目文件、本地文件或远程文件夹，或使用 `@` 搜索项目文件。
 3. 根据任务风险切换会话权限：**只读 / 审批 / 自主 / 自动**。
 4. 长任务使用 `/goal <任务描述>` 进入连续执行模式。
-5. 打开左下角设置，管理模型、插件、子代理、记忆、技能、MCP 与使用统计。
+5. 打开左下角设置，管理模型、插件、子代理、记忆与个性化、技能、MCP 与使用统计。
 6. 房产 Agent 首次使用时，在「设置 → 插件 → 找房数据源」手动打开一次官方登录页并保存 Key；不要连续扫码或快速重试。
 
 ## 系统架构
@@ -122,7 +122,7 @@ flowchart LR
     TOOLS --> DEV["文件 / 终端 / 浏览器 / 电脑控制"]
     TOOLS --> EXT["RAG / MCP / 技能 / 自定义命令"]
     WF --> MODEL["多供应商模型层"]
-    API --> DATA["会话 / 记忆 / 审计 / 统计"]
+    API --> DATA["会话 / 个性化 / 记忆 / 审计 / 统计"]
     DATA --> STORE[("本地文件或 Docker 数据卷")]
 ```
 
@@ -225,7 +225,7 @@ npm run build:client
 | [Agent Wiki](docs/agent-wiki.md) | 模块职责、调用链、架构约束与踩坑记录 |
 | [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
 | [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
-| [长期记忆](docs/memory-slot.md) | 本地 / HTTP Provider、作用域与故障排查 |
+| [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |
 | [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
 | [支持边界](docs/support.md) | 支持范围、安全报告与维护责任 |
 

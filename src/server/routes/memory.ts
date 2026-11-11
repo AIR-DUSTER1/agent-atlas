@@ -57,6 +57,8 @@ export async function handleUpdateMemoryConfig(
       preset: saved.http.preset,
       writeEnabled: saved.http.writeEnabled,
       allowPII: saved.local.allowPII,
+      personalizationEnabled: saved.personalization.enabled,
+      personalizationChars: saved.personalization.text.length,
       distillationMode: saved.distillation.mode,
       embeddingEnabled: saved.embedding.enabled,
       embeddingModel: saved.embedding.model,

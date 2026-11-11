@@ -27,6 +27,20 @@ test("上下文策略有安全默认值，并采用 profile 覆盖", () => {
   assert.ok(resolveContextPolicy(profile()).maxContextChars > 0);
 });
 
+test("个性化上下文进入系统注记，而不混入用户消息", () => {
+  const built = buildAgentContext({
+    profile: profile(),
+    messages: [new HumanMessage("当前问题")],
+    personalizationContext: "称呼我为老王；回答先给结论。",
+  });
+  const systemNotes = built.messages
+    .filter((message) => message.getType() === "system")
+    .map((message) => String(message.content));
+  assert.ok(systemNotes.some((note) => note.includes("个性化上下文")));
+  assert.ok(systemNotes.some((note) => note.includes("称呼我为老王")));
+  assert.equal(String(built.messages.at(-1)?.content), "当前问题");
+});
+
 test("token 预算生效：最近消息再长也不能无限膨胀", () => {
   const built = buildAgentContext({
     profile: profile({ maxRecentMessages: 8, maxToolResultChars: 8_000, maxContextChars: 1_000 }),

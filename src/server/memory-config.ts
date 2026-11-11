@@ -14,6 +14,9 @@ export type MemoryAuthMode = "none" | "bearer";
 export type MemoryDistillationMode = "off" | "confirm" | "smart";
 export type MemoryEmbeddingPreset = "openai-compatible";
 
+/** 个性化上下文长度上限；进入每轮 system 注记，必须有硬边界。 */
+const MAX_PERSONALIZATION_CHARS = 4_000;
+
 export interface MemoryHttpConfig {
   enabled: boolean;
   preset: MemoryPreset;
@@ -53,10 +56,16 @@ export interface MemoryRetentionConfig {
   identityDays: number;
 }
 
+export interface MemoryPersonalizationConfig {
+  enabled: boolean;
+  text: string;
+}
+
 export interface MemoryConfig {
   activeProvider: "local" | "http";
   local: { allowPII: boolean };
   http: MemoryHttpConfig;
+  personalization: MemoryPersonalizationConfig;
   distillation: MemoryDistillationConfig;
   embedding: MemoryEmbeddingConfig;
   retention: MemoryRetentionConfig;
@@ -76,6 +85,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     writeEnabled: true,
     banks: { general: "", estate: "", job: "" },
   },
+  personalization: { enabled: true, text: "" },
   distillation: {
     mode: "smart",
     maxPerTurn: 3,
@@ -142,6 +152,7 @@ export function normalizeMemoryConfig(value: unknown): MemoryConfig {
   const distillation = record(root.distillation);
   const embedding = record(root.embedding);
   const retention = record(root.retention);
+  const personalization = record(root.personalization);
   const enabled = http.enabled === true;
   const preset = http.preset === "hindsight" ? "hindsight" : "generic";
   const authMode = http.authMode === "none" ? "none" : "bearer";
@@ -154,6 +165,10 @@ export function normalizeMemoryConfig(value: unknown): MemoryConfig {
   return {
     activeProvider,
     local: { allowPII: local.allowPII === true },
+    personalization: {
+      enabled: personalization.enabled !== false,
+      text: typeof personalization.text === "string" ? personalization.text.trim().slice(0, MAX_PERSONALIZATION_CHARS) : "",
+    },
     http: {
       enabled,
       preset,
@@ -203,6 +218,7 @@ export async function readMemoryConfig(): Promise<MemoryConfig> {
 
 export interface MemoryConfigPatch {
   activeProvider?: unknown;
+  personalization?: { enabled?: unknown; text?: unknown };
   local?: { allowPII?: unknown };
   http?: {
     enabled?: unknown;
@@ -247,10 +263,15 @@ export function mergeMemoryConfigPatch(current: MemoryConfig, patch: MemoryConfi
   const distillationPatch = record(incoming.distillation);
   const embeddingPatch = record(incoming.embedding);
   const retentionPatch = record(incoming.retention);
+  const personalizationPatch = record(incoming.personalization);
   const merged = normalizeMemoryConfig({
     activeProvider: incoming.activeProvider ?? current.activeProvider,
     local: {
       allowPII: localPatch.allowPII ?? current.local.allowPII,
+    },
+    personalization: {
+      enabled: personalizationPatch.enabled ?? current.personalization.enabled,
+      text: personalizationPatch.text ?? current.personalization.text,
     },
     http: {
       enabled: httpPatch.enabled ?? current.http.enabled,
@@ -341,6 +362,7 @@ function maskSecret(value: string): string {
 /** 外部 API 的安全视图：真实 Key 永不回传。 */
 export function publicMemoryConfig(config: MemoryConfig) {
   return {
+    personalization: { ...config.personalization },
     activeProvider: config.activeProvider,
     local: { ...config.local },
     http: {
@@ -359,4 +381,10 @@ export function publicMemoryConfig(config: MemoryConfig) {
     },
     retention: { ...config.retention },
   };
+}
+
+/** 只有启用且正文非空时才进入模型上下文。 */
+export function personalizationContextText(config: MemoryConfig): string | undefined {
+  const text = config.personalization.text.trim();
+  return config.personalization.enabled && text ? text : undefined;
 }

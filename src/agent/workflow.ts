@@ -738,6 +738,7 @@ export function createWorkflowGraph(
         task_ledger?: string;
         task_budget_note?: string;
         context_window?: number;
+        personalization_context?: string;
       };
     }
   ) {
@@ -756,6 +757,7 @@ export function createWorkflowGraph(
       clarificationHistory: state.clarificationHistory,
       reviewFeedback: state.reviewFeedback,
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
+      personalizationContext: config?.configurable?.personalization_context,
       memoryNote: (await memorySlot.note({
         scope: memoryScope(profile.id),
         query: lastUserText,

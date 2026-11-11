@@ -23,8 +23,7 @@ const CONTROL_TARGET_SELECTOR = `:is(
   .reason-custom,
   .routing-field > input:not([type="range"]),
   .routing-field > select,
-  .routing-test-row > input,
-  .memory-add-row > textarea
+  .routing-test-row > input
 )`;
 
 export const CONFIG_CONTROL_SELECTOR = `${CONFIG_ROOT_SELECTOR} ${CONTROL_TARGET_SELECTOR}`;
