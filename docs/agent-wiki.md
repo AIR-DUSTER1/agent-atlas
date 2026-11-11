@@ -2454,7 +2454,7 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 ### 3.53 自主执行流程：从需求理解到可见步骤进度（`workflow-plan.ts` + `tools-plan.ts` + `client/views/workflow-plan.ts`）
 
 **定位**：让 Agent 在理解需求后先形成可验证的执行流程，再按步骤执行；执行过程中把
-进度同步到输入框上方，而不是把规划结果混进聊天正文或普通工具卡。
+进度同步到上下文条与模型 / 权限快捷栏上方，而不是把规划结果混进聊天正文或普通工具卡。
 
 **分层**：
 
@@ -2486,7 +2486,7 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 指令时会生成三段演示流程，便于不配置模型直接验收。
 
 **测试**：`workflow-plan.test.ts` 覆盖状态机与 LangGraph 推进；`stream.test.ts` 覆盖
-流程工具过滤；`app.spec.ts` 覆盖窗体默认折叠、无计划隐藏、完成后 3/3 步骤展示。
+流程工具过滤；`app.spec.ts` 覆盖窗体位于上下文条上方、默认折叠、无计划隐藏、完成后 3/3 步骤展示。
 ### 3.54 配置表单公共组件：`client/ui/config-control.ts`
 
 **定位**：把设置页与配置弹窗里的输入框、文本域和下拉框收敛为一个可复用组件层，

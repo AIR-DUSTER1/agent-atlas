@@ -37,7 +37,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 
 | 能力 | 说明 |
 |---|---|
-| Agent 编排 | 需求分析、自主流程、澄清、ReAct 工具循环与结果反思；复杂任务会生成可追踪的执行步骤 |
+| Agent 编排 | 需求分析、自主流程、澄清、ReAct 工具循环与结果反思；复杂任务会生成可追踪的执行步骤，并在上下文条上方以默认折叠窗体展示 |
 | 多 Agent | 通用、房产、求职三类独立 Agent；主 Agent 可向子代理动态授予模型、提示词和工具子集 |
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |

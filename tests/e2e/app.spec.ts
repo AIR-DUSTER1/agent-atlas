@@ -183,6 +183,12 @@ test("自主执行流程窗体默认折叠、无计划隐藏并实时同步步�
   await expect(page.locator("#workflow-panel")).toBeHidden();
   await sendMessage(page, "请自主规划并分步骤完成：先查北京天气，再写一句总结");
   await expect(page.locator("#workflow-panel")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
+  expect(await page.evaluate(() => {
+    const workflow = document.getElementById("workflow-panel")?.getBoundingClientRect();
+    const context = document.getElementById("context-bar")?.getBoundingClientRect();
+    return Boolean(workflow && context && workflow.top < context.top);
+  })).toBe(true);
   await expect(page.locator("#workflow-panel")).not.toHaveAttribute("open", "");
   await expect(page.locator("#workflow-steps")).toBeHidden({ timeout: 2_000 });
   await expect(page.locator("#workflow-status")).toHaveText("已完成", { timeout: 20_000 });
