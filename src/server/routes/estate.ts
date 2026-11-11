@@ -1,5 +1,5 @@
 /**
- * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 受控登录 / 保存 Key
+ * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 系统浏览器登录 / 保存 Key
  * ============================================================
  * getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await 再回 200；
  * installBeike 是几十秒级的下载解压，失败回 500。
@@ -57,7 +57,7 @@ export async function handleSaveBeikeKey(res: import("node:http").ServerResponse
   }
 }
 
-/** 启动受控可见浏览器完成贝壳扫码；回调在浏览器内接住并自动保存 Key。 */
+/** 在系统默认浏览器打开官方登录页；扫码和复制 Key 均由用户手动完成。 */
 export async function handleStartBeikeLogin(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage

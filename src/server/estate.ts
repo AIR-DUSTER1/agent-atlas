@@ -35,7 +35,7 @@ import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { log } from "./logging.js";
 import { isPluginEnabled } from "../plugin-state.js";
-import { loginBeikeInManagedBrowser } from "./estate-login-browser.js";
+import { openExternalUrl } from "./external-open.js";
 
 /** 贝壳 CLI 资源桶：需求上报与业务查询全走同一串行队列，避免并发触发风控。 */
 const BEIKE_CLI_CONCURRENCY = 1;
@@ -52,6 +52,7 @@ export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=beike_skill";
+const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
 const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
 
@@ -247,7 +248,7 @@ export interface BeikeLoginLaunch {
 }
 
 export interface BeikeLoginOptions {
-  /** 自动认证门禁只准备链接；手动按钮才启动受控浏览器，避免工具调用自动弹窗。 */
+  /** 自动认证门禁只准备链接；手动按钮才在系统浏览器打开一次，避免工具调用自动弹窗。 */
   open?: boolean;
 }
 
@@ -265,8 +266,8 @@ function currentBeikeLoginGate(): BeikeLoginGate | null {
 }
 
 /**
- * 手动登录使用 agentatlas 受控可见浏览器：在浏览器内接住官方 404 回调，
- * 让 building.ke.com 原页面用自身 Cookie 完成换票，再自动保存 Key。
+ * 手动登录只打开一次官方 HTTPS 页面，由用户在正常系统浏览器中扫码。
+ * 不使用自动化浏览器、不预点击、不代填，减少被贝壳风控误判的概率。
  */
 export function startBeikeLogin(options: BeikeLoginOptions = {}): Promise<BeikeLoginLaunch> {
   const url = BEIKE_KEY_URL;
@@ -274,18 +275,23 @@ export function startBeikeLogin(options: BeikeLoginOptions = {}): Promise<BeikeL
     writeAudit("beike.loginUrlPrepared", { opened: false, url });
     return Promise.resolve({ ok: true, url, opened: false });
   }
-  // 并发点击复用同一个登录窗口；准备链接的调用不进入这里，避免吞掉用户点击。
   if (beikeLoginLaunch) return beikeLoginLaunch;
-  beikeLoginLaunch = loginBeikeInManagedBrowser(saveBeikeKey).then((result) => {
-    writeAudit("beike.loginManaged", { ok: result.ok, opened: result.opened });
-    return {
-      ok: result.ok,
-      url,
-      opened: result.opened,
-      message: result.message,
-      ...(result.ok ? {} : { error: result.message }),
-    };
-  }).finally(() => { beikeLoginLaunch = null; });
+  beikeLoginLaunch = (async () => {
+    try {
+      await openExternalUrl(url, BEIKE_LOGIN_HOST_ALLOW);
+      writeAudit("beike.loginPageOpened", { opened: true, url });
+      return {
+        ok: true,
+        url,
+        opened: true,
+        message: "登录页已在系统浏览器打开，请扫码后复制页面显示的 Key",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      writeAudit("beike.loginPageOpened", { opened: false, url });
+      return { ok: false, url, opened: false, message, error: message };
+    }
+  })().finally(() => { beikeLoginLaunch = null; });
   return beikeLoginLaunch;
 }
 

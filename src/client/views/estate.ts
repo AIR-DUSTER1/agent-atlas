@@ -126,32 +126,26 @@ async function requestEstateLogin(): Promise<BeikeLoginLaunch> {
   });
 }
 
-/** 设置页手动启动受控登录窗口；官方回调由浏览器内中转页接住并自动保存 Key。 */
+/** 设置页只在系统默认浏览器打开一次官方登录页，后续扫码和复制 Key 都由用户手动完成。 */
 export async function openEstateLogin(): Promise<void> {
   const button = $("estate-login-open") as HTMLButtonElement | null;
   const status = $("estate-status2");
   if (button) button.disabled = true;
   if (status) {
-    status.textContent = "正在启动受控登录浏览器，请在新窗口扫码并确认授权（最多 3 分钟）…";
+    status.textContent = "正在打开贝壳官方登录页…";
     status.style.color = "var(--amber)";
   }
   try {
     const result = await requestEstateLogin();
     if (status) {
       status.textContent = result.ok
-        ? `✓ ${result.message || "登录完成，Key 已保存并通过校验"}`
-        : `✗ ${result.message || result.error || "登录未完成，请重新尝试"}`;
+        ? "✓ 登录页已在系统浏览器打开。请手动扫码，登录后复制页面显示的 Key 并粘贴保存"
+        : `✗ ${result.message || result.error || "浏览器未能自动打开"}${result.url ? `；可手动访问：${result.url}` : ""}`;
       status.style.color = result.ok ? "" : "var(--red)";
-    }
-    if (result.ok) {
-      state.estate = { ...(state.estate || { installed: true }), loginRequired: false };
-      const keyEl = $("estate-key") as HTMLInputElement | null;
-      if (keyEl) keyEl.value = "";
-      renderPluginCards();
     }
   } catch (err) {
     if (status) {
-      status.textContent = `✗ 启动登录失败：${(err as Error).message}`;
+      status.textContent = `✗ 打开登录页失败：${(err as Error).message}`;
       status.style.color = "var(--red)";
     }
   } finally {
@@ -224,7 +218,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   try { data = JSON.parse(part.result?.content || "") as EstatePayload; } catch { return; }
   if (!data || typeof data !== "object") return;
 
-  // 登录失效 → 受控登录窗口；扫码回调在浏览器内完成，Key 自动保存。
+  // 登录失效 → 系统浏览器手动登录；不自动点击或代填，降低风控误判。
   if (data.authRequired) {
     const extra = estateExtra(card);
     const box = document.createElement("div");
@@ -234,7 +228,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     title.textContent = "🔐 需要登录贝壳账号";
     const message = document.createElement("div");
     message.className = "err-line";
-    message.textContent = data.error || "点击下方按钮启动受控登录窗口，完成后 Key 会自动保存";
+    message.textContent = data.error || "点击下方按钮打开官方登录页，扫码后把页面显示的 Key 粘贴到设置中";
     copy.append(title, message);
 
     const actions = document.createElement("div");
@@ -242,19 +236,13 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const reopen = document.createElement("button");
     reopen.type = "button";
     reopen.className = "btn btn-approve";
-    reopen.textContent = "打开受控登录窗口";
+    reopen.textContent = "打开官方登录页";
     reopen.addEventListener("click", async () => {
       reopen.disabled = true;
-      reopen.textContent = "请在新窗口扫码，等待自动完成…";
+      reopen.textContent = "正在打开…";
       try {
         const result = await requestEstateLogin();
-        if (result.ok) {
-          title.textContent = "🔐 登录已完成";
-          message.textContent = result.message || "Bearer Key 已保存并通过校验";
-          reopen.textContent = "✓ 登录完成";
-        } else {
-          reopen.textContent = `✗ ${result.message || result.error || "登录未完成"}`;
-        }
+        reopen.textContent = result.ok ? "✓ 登录页已打开，请扫码后粘贴 Key" : `✗ ${result.message || result.error || "打开失败"}`;
       } catch (err) {
         reopen.textContent = `打开失败：${(err as Error).message}`;
       } finally {

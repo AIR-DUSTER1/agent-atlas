@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure } from "../../src/server/estate.js";
-import { beikeCallbackRelayHtml } from "../../src/server/estate-login-browser.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -41,35 +40,12 @@ test("贝壳 CLI 查询串行限速，认证失败后熔断冷却", async () => 
   assert.match(source, /beikeCredentialVerified = true/);
 });
 
-test("贝壳受控登录回调页只在同源 opener 间转发一次性票据", () => {
-  const html = beikeCallbackRelayHtml();
-  assert.match(html, /type: "alps-state"/);
-  assert.match(html, /type: "cas-ticket"/);
-  assert.match(html, /location\.origin/);
-  assert.match(html, /window\.close/);
-  assert.doesNotMatch(html, /bear_key|localStorage|sessionStorage/);
-});
-
-test("贝壳受控登录窗口已接入服务端、设置页和登录卡", async () => {
-  const [estate, browserLogin, client, html] = await Promise.all([
+test("贝壳登录只使用系统浏览器且一次点击只打开一次", async () => {
+  const [source, client, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/server/estate-login-browser.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/index.html", import.meta.url), "utf8"),
   ]);
-  assert.match(estate, /loginBeikeInManagedBrowser\(saveBeikeKey\)/);
-  assert.match(estate, /beike\.loginManaged/);
-  assert.doesNotMatch(estate, /openExternalUrl/);
-  assert.match(browserLogin, /context\.route\(BEIKE_CALLBACK_ROUTE/);
-  assert.match(browserLogin, /localStorage\.getItem\("bk_bearer_key"\)/);
-  assert.match(browserLogin, /headless: options\.headless === true/);
-  assert.match(client, /打开受控登录窗口/);
-  assert.match(html, /登录窗口由 agentatlas 托管/);
-  assert.doesNotMatch(html, /estate-login-recover/);
-});
-
-test("认证门禁只准备登录链接，手动入口启动受控登录", async () => {
-  const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
   const start = source.slice(
     source.indexOf("export function startBeikeLogin"),
     source.indexOf("async function activateBeikeLoginGate"),
@@ -77,9 +53,11 @@ test("认证门禁只准备登录链接，手动入口启动受控登录", async
   assert.match(source, /startBeikeLogin\(\{ open: false \}\)/);
   assert.match(source, /beike\.loginUrlPrepared/);
   assert.match(start, /const url = BEIKE_KEY_URL/);
-  assert.match(start, /loginBeikeInManagedBrowser\(saveBeikeKey\)/);
-  assert.doesNotMatch(start, /openExternalUrl|\["login"\]/);
-  assert.doesNotMatch(source, /已自动打开浏览器登录页/);
+  assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
+  assert.doesNotMatch(start, /\["login"\]|playwright-core|loginBeikeInManagedBrowser/);
+  assert.match(client, /系统浏览器/);
+  assert.match(html, /请手动扫码/);
+  assert.doesNotMatch(html, /登录窗口由 agentatlas 托管|estate-login-recover/);
 });
 
 test("Windows 安装器使用官方 manifest 的 windows 平台键", async () => {
