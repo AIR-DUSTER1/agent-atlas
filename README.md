@@ -1,348 +1,239 @@
-# agentatlas
+<h1 align="center">agentatlas</h1>
 
-> **当前状态：`0.9.0-beta.16` 开发预览版。**
-> 项目仍有很多功能在完善，接口、数据格式和交互可能继续调整；暂不提供正式版本、Git tag、生产 SLA 或稳定兼容承诺。
+<p align="center">
+  <strong>本地优先、可扩展的多 Agent 工作台</strong><br>
+  把模型、工具、审批、记忆与领域 Agent 放进同一个可审计的工作空间。
+</p>
 
-一个基于 **LangGraph.js + TypeScript** 的可扩展 Agent 工具集，包含 Web、CLI 和 Electron 桌面壳。当前以通用 Agent 与房产 Agent 为基础，支持由主 Agent 动态赋予提示词和工具的生产级子代理委派。
+<p align="center">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
+  <img alt="LangGraph.js" src="https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C">
+  <img alt="Status" src="https://img.shields.io/badge/status-beta-F59E0B">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
+</p>
 
-![agentatlas 主界面](docs/screenshots/main-empty.png)
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#核心能力">核心能力</a> ·
+  <a href="#界面预览">界面预览</a> ·
+  <a href="#系统架构">系统架构</a> ·
+  <a href="#开发与测试">开发与测试</a> ·
+  <a href="#文档">文档</a>
+</p>
+
+## 项目简介
+
+agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 Agent 工作台，提供 Web、CLI 和 Electron 三种入口。
+
+它面向需要长期使用、可审计、可扩展 Agent 能力的开发者与专业用户：既可以在不配置模型密钥的情况下体验完整交互，也可以接入 OpenAI、Anthropic、Gemini 兼容网关、外部 MCP Server、RAG 和 HTTP 记忆服务。
+
+- **Agent 隔离**：通用、房产、求职 Agent 使用独立工具集、审批边界与记忆作用域。
+- **人工可控**：只读、审批、自主、自动四种权限模式，高风险操作在执行前拦截。
+- **本地优先**：会话、检查点、记忆、审计与备份默认写入本地文件。
+- **按需扩展**：插件、技能、自定义命令、MCP 与子代理均可在设置页管理。
+
+## 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| Agent 编排 | 需求分析、自主流程、澄清、ReAct 工具循环与结果反思；复杂任务会生成可追踪的执行步骤 |
+| 多 Agent | 通用、房产、求职三类独立 Agent；主 Agent 可向子代理动态授予模型、提示词和工具子集 |
+| 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
+| 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
+| 会话与记忆 | SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆 |
+| 安全与运维 | 高风险审批、审计日志、登录认证、配置加密、用量统计、备份恢复与 Prometheus 指标 |
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/main-empty.png" alt="agentatlas 主界面" width="100%">
+</p>
+
+界面将 Agent 选择、会话管理、模型切换、权限控制与设置中心整合在同一工作台中。左下角设置页集中管理模型与供应商、插件、子代理、路由、记忆、统计、命令、技能和 MCP。
 
 ## 快速开始
 
-环境要求：
+### 环境要求
 
 - Node.js 24 推荐
 - npm 11+
 - 可选：Docker 24+、Chrome / Edge
 
+### 本地启动
+
 ```bash
 npm install
-cp .env.example .env      # Windows: Copy-Item .env.example .env
-npm run web               # http://127.0.0.1:3000
+npm run web
 ```
 
-不配置模型也能启动。此时使用本地 mock，工具调用、流式输出和审批流程仍可体验。
+打开 <http://127.0.0.1:3000>。
 
-配置真实模型：
+未配置模型时，应用会自动使用本地 mock。你仍然可以体验会话、流式输出、工具调用、执行流程和人工审批。
+
+### 接入真实模型
+
+推荐在页面左下角进入 **设置 → 模型与供应商**，添加供应商和模型后再回到会话。
+
+也可以复制环境变量模板并填写网关信息：
+
+```bash
+# macOS / Linux
+cp .env.example .env
+
+# Windows PowerShell
+Copy-Item .env.example .env
+```
 
 ```dotenv
 BASE_URL=https://your-gateway.example/v1
-API_KEY=your-key
+API_KEY=your-api-key
 MODEL=your-model
 AI_PROTOCOL=openai
 ```
 
-也可以在页面左下角 **设置 → 模型与供应商** 中配置。修改模型列表前可先运行：
+`AI_PROTOCOL` 支持 `openai`、`openai-responses`、`anthropic` 和 `gemini`。查看网关支持的模型：
 
 ```bash
 npm run models
 ```
 
-左下角 **设置** 会打开独立设置页，集中管理模型与供应商、插件、子代理、路由、长期记忆、自定义命令、技能、MCP 和使用统计；左上角返回会话，按 `Esc` 也可退出。
+## 使用方式
 
-其他入口：
+1. 点击 **新建对话**，选择通用、房产或求职 Agent。
+2. 在输入框附加项目文件、本地文件或远程文件夹，或使用 `@` 搜索项目文件。
+3. 根据任务风险切换会话权限：**只读 / 审批 / 自主 / 自动**。
+4. 长任务使用 `/goal <任务描述>` 进入连续执行模式。
+5. 打开左下角设置，管理模型、插件、子代理、记忆、技能、MCP 与使用统计。
 
-```bash
-npm run desktop    # Electron 桌面壳
-npm start          # CLI 菜单
-npm run demo:1     # 运行内置示例
-docker compose up -d --build   # 本机 Docker 验收，需设置 AUTH_TOKEN
+## 系统架构
+
+```mermaid
+flowchart LR
+    UI["Web / CLI / Desktop"] --> API["HTTP API + SSE"]
+    API --> WF["LangGraph Agent Workflow"]
+    WF --> PROFILE["Agent Profile 边界"]
+    PROFILE --> GENERAL["通用 Agent"]
+    PROFILE --> ESTATE["房产 Agent"]
+    PROFILE --> JOB["求职 Agent"]
+    WF --> SUBAGENT["动态子代理"]
+    WF --> TOOLS["工具层"]
+    TOOLS --> DEV["文件 / 终端 / 浏览器 / 电脑控制"]
+    TOOLS --> EXT["RAG / MCP / 技能 / 自定义命令"]
+    WF --> MODEL["多供应商模型层"]
+    API --> DATA["会话 / 记忆 / 审计 / 统计"]
+    DATA --> STORE[("本地文件或 Docker 数据卷")]
 ```
 
-## 当前能力
+设计原则：
 
-| 模块 | 当前状态 |
+- Agent Profile 决定可调用工具和审批项，通用 Agent 与业务 Agent 不共享越界能力。
+- 只读工具直接执行，会改变外部状态的工具必须经过权限策略或人工审批。
+- 模型、工具、审批结果和关键副作用进入会话回放、journal 或审计链路。
+- 服务端保持零 Web 框架，核心运行只依赖 Node.js、LangGraph 与文件型持久化。
+
+## 技术栈
+
+| 层级 | 技术选型 |
 |---|---|
-| 通用 Agent | 需求理解、自主执行流程、澄清、ReAct 工具循环、结果反思；复杂任务会先规划 2-8 个可见步骤，逐项同步进度并在完成/失败时收口；**需求澄清一次可问多道题**（最多 4 道，逐题作答后一次性提交，缺多项信息时不必来回追问好几轮）；逻辑任务跨审批/澄清/继续累计工作台账，不限制任务时长与工具/模型调用次数，图执行以 1000 超步兜底；**连续工作模式**：任务未完成就持续回炉执行，直到完成、请求异常或手动停止（见下文） |
-| 子代理委派 | 主 Agent 通过 `delegate_agent` 指定子代理、任务书、专项提示词与工具子集；子代理默认继承当前主对话模型，也可固定其他已配置模型；独立上下文、父请求取消透传、深度固定 1；可按领域继承提示词（如房产顾问工作流），并在结果里报告超出范围的部分供主 Agent 收尾 |
-| 路由决策（默认关闭） | 每条消息先按「规则关键词 → 向量比对（需配置 RAG）→ 决策模型」挑子代理，任一层没把握就转成选项卡询问；模型层默认复用当前「供应商 × 模型」，本机零额外占用；可切换 `systemone` 协议服务或纯规则；聊天里显示可展开的路由卡（目标、依据、来源层、候选打分） |
-| 浏览器操作（Browser Use 插件） | 使用本机 Chrome / Edge 的无头浏览器读取真实渲染页面；AI 可打开、点击、输入、按键、选择和滚动，画面实时显示在会话右侧。默认关闭；点击/输入等改页面动作需要审批，默认拒绝私网，空闲 10 分钟回收 |
-| 电脑操作（Computer Use 插件） | 截图、点击、双击、右键、文本输入、组合按键与滚轮；仅 Windows，默认关闭，开启后仍受会话权限与高风险审批约束 |
-| 模型韧性 | 408/429/5xx/超时/网络错误自动重试（默认 10 次），重试进度默认折叠并展示失败原因；思考型网关（DeepSeek 等）的多步续传自动回传 `reasoning_content`，网关不接受该字段时自动降级重试 |
-| 租房 / 房产 Agent | 与通用 Agent 独立工具集、权限和审批边界 |
-| 模型供应商 | 多供应商、多模型，支持 OpenAI / Responses / Anthropic / Gemini 协议；左侧供应商列表，选择后集中管理该供应商的模型；新增/编辑供应商使用独立弹窗，不打断当前页面状态；DeepSeek 仅展示原生 none / low / high / max，GLM-5.3 仅展示 low / high / max |
-| 会话 | 新建会话独立开始、SSE 流式输出、多会话并行生成与分别停止、刷新恢复、导出、搜索与清理 |
-| 审批与权限 | 人工审批、只读、自主风险评估、自动执行 |
-| 记忆 | LangGraph checkpoint、可插拔长期记忆（本地 / HTTP）、Agent scope 隔离、相关性注入、上下文压缩 |
-| 文件与项目 | 附件、本地项目系统目录选择、远程文件夹、文件搜索与读取；项目菜单支持「不选择项目」，只展示并创建未归属会话 |
-| 工具分类 | 写入、编辑、读取文件、读取图片、运行命令、文件检索、浏览器、知识库、记忆、子代理、电脑与 MCP 工具统一分类；显示原始工具名及路径/命令摘要，批量调用按类别分区展示 |
-| 扩展 | 设置 → 插件统一启停 RAG / 贝壳 / 求职 / Browser Use / Computer Use；设置 → 子代理支持搜索筛选，新增、编辑、启停、删除与模型覆盖；MCP（完整命令粘贴解析、Windows npx/npm 兼容、全局暂停、单服务器启停、JSON 导入、连接测试：点击即显示测试中，结果就地显示通过/失败与工具数）；技能库（触发词/名称/ID 命中，每轮最多 2 个）；可搜索并管理自定义命令；第三方 Agent |
-| 设置与 UI | 左下角设置入口打开独立设置页，左上角返回；记忆、统计、模型与供应商、插件、子代理、路由、命令、技能和 MCP 分区管理；配置输入框、文本域、下拉框统一由 `ui/config-control` 公共组件提供样式与交互 |
-| 数据 | 本地 journal（usage 归并、截断可审计）、备份恢复、数据检查、近 7 天 / 30 天使用统计与图表 |
-| 桌面端 | 本机便利壳，不是正式桌面发行版 |
+| Agent Runtime | LangGraph.js、TypeScript strict、NodeNext |
+| Service | `node:http`、SSE、零 Web 框架 |
+| Frontend | 原生 TypeScript、按职责拆分的 CSS、无 UI 框架 |
+| Desktop | Electron 桌面壳 |
+| Storage | JSONL journal / checkpoint、长期记忆目录、加密配置、备份 |
+| Test | Node Test、Playwright、故障注入、安全与负载测试 |
+| Deploy | Docker Compose、TLS 反向代理、Prometheus 指标 |
 
-这些能力仍有未完成项，尤其是真实供应商兼容、复杂会话恢复、房产 Agent 数据链路和桌面端发行流程。
-
-输入框上方会按需出现执行流程窗体：没有规划时完全隐藏，有计划时默认折叠，展开后可查看目标、步骤状态和完成比例；进度按会话保存，切换或刷新不会串台。上下文容量条保留当前会话最近一次主模型请求的 input 用量（不重复叠加 output），分母使用当前模型窗口扣除输出预留与安全余量后的输入预算。历史拼接按 token 预算从新到旧装入，不再受固定 32 条 / 48k 字符限制；切换模型不清空历史，下一轮请求返回 usage 后再校正；缓存命中率统一保留一位小数。若旧上下文超过目标模型可用输入，会先压缩当前上下文，完整聊天记录仍保留。
-
-## 能力路线
-
-agentatlas 后续按“先读后写、先基础设施后业务”的顺序扩展：
-
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| Hook 生命周期扩展 | 规划中 | 会话 / 回合 / 工具 / 审批事件的可配置 Hook，默认关闭并纳入审计 |
-| 电脑操作 Agent | 插件启停已落地 | 将电脑工具收敛为独立 profile，补齐停止、复核与窗口上下文 |
-| 获取岗位信息 Agent | 规划中 | 以只读工具聚合岗位来源，保留来源、时间和原始链接，不补造字段 |
-| 投递简历 Agent | 规划中 | 独立管理简历与投递记录；外发前强制确认，提交动作必须审批且幂等 |
-
-四类能力的边界、建议模块和落地顺序见 [agentatlas 能力路线](docs/agentatlas-roadmap.md)。路线中的功能在实现与验收前不会出现在“当前能力”表里。
-
-## Agent 隔离
-
-项目刻意保留三套独立的 Agent 能力边界：
-
-| Profile | 入口 | 工具与审批 |
-|---|---|---|
-| 通用 Agent | 新建对话 → 通用 Agent | 开发工具、文件、RAG、Browser Use（可在插件中启停）、MCP、`general` scope 记忆与协作 |
-| 房产 Agent | 新建对话 → 房产 Agent | 贝壳找房工具及对应审批，不加载开发工具；调研候选默认产出区位地图与推荐房源户型图；贝壳 CLI 串行限速调用，登录失效时展示官方登录卡并终止工具重试，登录页使用 agentatlas 受控可见浏览器，在浏览器内接住官方 `/auth/callback` 404 并自动取得、校验和保存 Key；安装器支持官方 manifest 的 windows/amd64 命名与 GitHub Release 安全重定向；保存 Key 时直接展示 CLI doctor 的完整校验结果，校验失败会恢复旧凭证；记忆使用独立 `estate` scope，默认不挂记忆工具 |
-| 求职 Agent | 新建对话 → 求职岗位 Agent | 内置四平台岗位采集、打分与交付流程及对应审批，不依赖外部 Skill / Python，不加载开发 / 找房工具；记忆使用独立 `job` scope |
-
-未添加任何项目时，打开应用或点击「新建对话」会直接进入 Agent 选择页，三类 Agent 固定排在示例前面；已有的未归属会话仍可从侧栏打开。
-
-隔离规则由 `src/agent/profile.ts`、各 profile 的工具 allowlist、审批登记和测试共同维护。通用 Agent 不能直接调用房产工具，房产 Agent 也不能调用终端、写文件等通用工具；插件停用后对应工具会从 allowlist 和审批表中同时移除。
-
-## 子代理
-
-设置 → **子代理** 管理可被主 Agent 委派的运行时子代理：
-
-- 内置三个：**通用子代理**（研究 / 代码阅读 / 多步信息收集，兜底用、不参与路由竞争）、
-  **房产找房子代理**（继承房产顾问工作流）、**求职岗位子代理**（继承求职顾问工作流）；
-- 配置项只包含名称、用途说明、启停和模型，不把提示词固定成角色模板；
-- 每次 `delegate_agent` 调用由主 Agent 提供完整任务书、专项提示词和工具子集；
-- 子代理可使用当前安全目录内的工具，但不能再次委派；长期记忆读写仍由主 Agent 收口；
-- 默认继承当前主对话的供应商与模型，也可固定到任意已配置的「供应商 × 模型」；
-- 设置页按全部 / 已启用 / 已停用筛选，并显示模型可用性与运行状态；
-- 聊天内委派卡在运行中展示目标子代理和授权工具，完成后展示模型、耗时、用量与工具轨迹；
-- 每次执行使用独立 threadId / MemorySaver，父请求取消会终止子图，结果以结构化委派卡回填。
-
-委派工具本身仍是审批项。默认审批模式下，用户在卡片里看到目标子代理、任务、工具列表和提示词摘要；批准后子代理在独立上下文中自动执行被授予的工具。
-
-审批是**执行前**的闸门：工具卡在等待人工审批时显示「⏸ 待审批」（琥珀色），批准后才转为「运行中」，不会出现「命令已经在跑、审批只是事后补签」的错觉。
-
-## 求职岗位 Agent
-
-求职能力已经内化到独立 Agent profile（新建对话 → 求职岗位 Agent），不再要求安装外部 skill、填写 `scripts/main.py` 路径或准备 Python/DrissionPage。Agent 内置驱动系统 Chrome / Edge，直接执行原 job-hunter 的四平台流程：搜索 → 打分 → 外包识别 → 增量合并 → Excel + HTML 交付。
-
-**能力**：
-
-| 工具 | 作用 | 是否审批 |
-|---|---|---|
-| `job_collect` | 四平台采集 + 五维规则打分 + 外包识别 + 导出 XLSX 和 HTML | ✅ 会访问招聘站点，约 3-5 分钟 |
-| `job_query` | 在已有清单里按关键词/城市/分数/状态筛选 | ❌ 纯本地 |
-| `job_enrich` | 打开已有岗位页补 JD 全文、地址、HR 活跃和公司详情 | ✅ 会逐条访问岗位页 |
-| `job_summary` | 清单概览（总数、外包数、方向/平台分布） | ❌ 纯本地 |
-| `job_diagnose` | 检查四平台 DOM 结构，区分风控/改版/真实空结果；可固化真实验证通过的候选选择器 | ✅ 会访问招聘站点，`apply=true` 还会写 `selectors.json` |
-
-**使用流程**：
-
-1. 「设置 → 插件 → 求职岗位」点「管理数据源」，确认浏览器可用；首次使用按需点击平台登录按钮扫码；
-2. 回到会话，Agent 会一次问清**岗位方向 + 城市 + 期望月薪 + 工作年限**四项，再调用 `job_collect`；
-3. 采集完成后 Agent 给出总数、外包条数、方向分布与 Top 5；
-4. 岗位清单保存为 JSON，并生成 `.xlsx` 与同名自包含 `.html` 报告；`job_enrich` 后会同步刷新两份交付物。
-
-**站点改版自愈**：选择器默认值集中在 `src/server/job-selectors.json` 的候选链中。采集发现卡片或关键字段异常时，会按“重复块 + 岗位文本 + 详情链接”临时推断并重试一次；临时结果会写入采集警告，但不会自动改长期配置。需要永久修复时：
-
-1. 在设置页点「结构诊断」，查看卡片数、字段命中率与候选证据；
-2. 确认候选在真实页面通过验证后点「诊断并修复」，应用只把 `verified=true` 的候选写入求职数据目录的 `selectors.json`；
-3. 原文件会保留为 `selectors.json.bak`，最近修复记录写入同一文件的 `learned` 数组。
-
-Excel 的「投递链接」列显示为「点击投递」超链接，不再把整串 URL 撑满表格；完整字段仍保留在岗位清单 JSON 中。
-
-求职会话和通用 / 房产会话一样，输入框上方有**权限切换**（只读 / 审批 / 自主 / 自动）。默认「审批」下采集与补详情都会先弹审批卡；切到「只读」时这两个工具会被直接拒绝执行。
-
-**支持的平台与城市**：BOSS直聘、智联招聘、前程无忧、猎聘；城市为青岛、济南、北京、上海、深圳、杭州、成都。内置执行器逐平台串行访问，导航之间带随机间隔与周期性冷却；采集和补详情仍应分开执行，避免短时间请求过量。
-
-**数据目录**：默认 `.setting/job-data/`，设置页可覆盖。浏览器登录态在 `.profile/`，岗位清单与交付物在 `out/`。清单按岗位链接增量合并，用户修改过的投递状态和备注会在下次采集中保留。
-
-**环境要求**：系统 Chrome / Edge / Chromium。可通过 `BROWSER_USE_EXECUTABLE_PATH` 指定浏览器路径；采集默认打开可见浏览器窗口，便于处理站点安全验证。设置 `JOB_BROWSER_HEADLESS=1` 可改为无头执行。不再依赖外部 skill、Python、DrissionPage 或 openpyxl。
-
-## 路由决策
-
-设置 → **路由决策** 开启后，每条消息在进入执行前会先判断「该交给哪个子代理」。**默认关闭**，不开启时行为与之前完全一致。
-
-分层管道（任一层都可以弃权，弃权不是错误而是降级）：
-
-| 层 | 做什么 | 代价 |
-|---|---|---|
-| L1 规则匹配 | 按子代理的「路由名片」关键词与负向词打分；分数足够高且明显领先就直接派发 | 纯本地，< 5 ms，零算力 |
-| L2 向量比对 | 仅在**已配置 RAG** 时启用：用专用 `agent-routing` 集合检索候选；未配置则整层跳过 | 一次向量检索 |
-| L3 决策模型 | 让模型在候选里选一个，并用置信度与分差守卫判断是否可靠 | 一次短请求 |
-
-守卫规则：目标不在候选白名单、置信度低于阈值、两个候选太接近、或请求同时涉及**两个以上不同子代理**，都会转成一张选项卡请你确认，而不是猜。确认后不再重新路由。
-
-**三种后端**（设置页可切换）：
-
-| 后端 | 说明 | 本机占用 |
-|---|---|---|
-| `openai-compat`（默认） | 复用已配置的「供应商 × 模型」发一次短请求；也可指向局域网里另一台机器上的 Ollama / vLLM | 0 |
-| `systemone` | 对接实现 `POST /v1/systemone` 概率协议的决策服务（Jev-Style / OpenJev 等），返回校准过的概率分布 | 取决于服务部署位置 |
-| `rules-only` | 只跑规则层，完全不调模型 | 0 |
-
-**给子代理配路由名片**：设置 → 子代理 → 配置，在「路由名片」里填关键词、类别、适用与不适用场景。关键词或类别**都为空**的子代理不参与自动路由（它是兜底型角色，不会被自动选中）。设置页的「试跑」可以用一段样例请求看它会派给谁，并列出各候选的规则分。
-
-**行为边界**：
-
-- 程序化路由派发只授予**只读工具**；需要写操作时子代理会把需求写进「超出范围」，由主 Agent 走原有审批流程完成，不会绕过审批；
-- 子代理报告「超出范围」后最多重新路由一次（设置页可调，上限 3），且不会回到已经试过的子代理；
-- 一次请求拆出超过 20 个意图时，会先归并大类再列子任务，生成计划卡片等你确认后才执行；
-- 路由失败（模型超时、网关报错、坏输出）一律降级为「当前 Agent 处理」，不会让对话中断。
-
-**隐私口径**：只用 API 后端时，发送给模型的内容仅限**用户本轮消息 + 子代理名称与适用场景**，不包含对话历史、附件内容或工具结果。若要求数据不出本机，请选 `systemone` 指向本机/内网服务，或改用 `rules-only`。
-
-## 连续工作模式
-
-输入 `/goal <任务描述>`（输入 `/` 可从命令菜单选中「🎯 连续任务」）。选中或手打 `/goal` 前缀后，输入框会出现 **◎ Goal 徽标**（与普通文本明确区分），正文只写任务描述，回车即以连续模式发送；点徽标或清空输入即退出。每轮结果反思从「回答是否够好」换成「任务是否真正完成」，任务没完成就带着下一步指令持续回炉执行，适合跑构建修复、批量改造这类需要几十步的长任务。
-
-什么时候会停：
-
-| 停止条件 | 说明 |
-|---|---|
-| 任务完成 | 反思判定目标已达成且有工具结果佐证（如构建/测试通过） |
-| 空转熔断 | 连续 3 轮反思不通过且期间**没有任何工具动作**——纯文本打转只会烧钱，结束回合交还控制权 |
-| 请求异常 | 模型请求自动重试（默认 10 次）耗尽仍失败，本轮报错结束 |
-| 手动停止 | 停止按钮随时可停；审批与澄清照常暂停等待你处理，批准后继续跑 |
-
-连续范围是**这一个回合**：`/goal` 派出的任务跑完即止，下一条普通消息回到正常节奏；连续回合被审批/澄清打断后，批准继续时仍保持连续。另有三条保险丝防止失控：连续回炉硬上限 1000 轮；图执行超步上限放宽到 2 万（普通模式仍为 1000）；工具执行、审批边界与普通模式完全一致（高风险操作仍需逐个批准，建议搭配「自主」权限模式使用）。API 调用同样可用：`POST /api/chat` 请求体加 `"continuous": true`。
-
-## 技术栈与结构
-
-- `node:http` + SSE，无 Express / Fastify
-- 原生 TypeScript 前端，无 React / Vue、无整体打包器
-- LangGraph.js 管理 Agent 图与持久检查点
-- Electron 仅作为桌面便利壳
-- 文件型持久化：配置、journal、checkpoint、记忆和审计
+## 项目结构
 
 ```text
 src/
-  agent/       LangGraph 图、profile、权限和审批边界
-  tools*.ts    基础、开发、RAG、Browser Use、房产、电脑控制和协作工具
-  server/      HTTP/SSE、配置、会话、持久化、观测与运维
-  client/      原生 TypeScript 前端
-  cli.ts       CLI 入口
-desktop/       Electron 主进程与 preload
-tests/         单元、集成、安全、E2E、故障和负载测试
-docs/          用户文档与运维参考
+  agent/          LangGraph 图、Agent Profile、权限与工具边界
+  client/         Web 前端源码
+  server/         HTTP / SSE、配置、会话、持久化与运维接口
+  tools-*.ts      各领域工具集
+  llm.ts          多协议模型工厂
+  config.ts       运行时配置
+  cli.ts          CLI 入口
+
+desktop/          Electron 主进程与 preload
+docs/             架构、部署、记忆、安全与运维文档
+tests/            单元、集成、安全、E2E、故障与负载测试
+scripts/          构建、检查、备份与发布辅助脚本
 ```
 
-详细模块说明见 [docs/agent-wiki.md](docs/agent-wiki.md)。
-
-### 配置控件公共组件
-
-设置页与配置弹窗的输入框、文本域、下拉框统一由 `src/client/ui/config-control.ts` 增强，样式集中在 `src/client/styles/ui.css`。
-
-- 动态表单使用 `configField({ control, label, hint, error })`；
-- 单个控件使用 `enhanceConfigControl(control)`；
-- 既有静态 HTML 由 `src/client/main.ts` 启动时调用 `enhanceConfigFields()` 渐进增强；
-- 稳定组件类为 `ui-config-control` / `ui-config-textarea`，并标记 `data-ui-component="config-control"`；
-- 搜索框、开关、滑杆和文件选择器不属于配置值控件，不进入这套组件；
-- 增强不改变原 `id`、`name`、事件绑定或 `aria-describedby`。
-
-新增设置表单时优先复用上述入口，不要在页面级 CSS 中复制输入框、焦点态和错误态规则。
-
-## 配置与数据
-
-配置来源优先级：
-
-```text
-.env  <  .web-config.json  <  运行中内存设置
-```
-
-本地默认数据目录：
-
-```text
-.setting/
-  sessions.ndjson       会话 journal
-  checkpoints.ndjson    LangGraph 检查点
-  memory-store/         长期记忆 v3（scope 事件日志 + 快照 + 向量索引）
-  skills/               技能文档
-  audit.ndjson          安全审计
-```
-
-旧版 `memories.json` 会在首次启动时自动迁移，并保留为 `memories.json.v2-backup`。长期记忆支持：
-- 自动沉淀：`关闭 / 每次确认 / 智能沉淀`，高置信低风险偏好可自动入库，身份信息与低置信候选等待确认；
-- 语义召回：可选 OpenAI 兼容 Embedding；不可用时自动降级词法召回；
-- 生命周期：到期转为 stale，宽限后归档，候选、历史与归档分别管理；
-- 大规模存储：按 Agent scope 分目录追加事件，达到阈值后生成快照并压缩；
-- 5 万条规模自测：`npm run memory:bench`。
-
-容器默认使用 `/data`。
+## 配置说明
 
 常用环境变量：
 
 | 变量 | 说明 |
 |---|---|
-| `BASE_URL` / `API_KEY` / `MODEL` | 模型网关配置 |
+| `BASE_URL` / `API_KEY` / `MODEL` | 模型网关地址、密钥与默认模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
-| `HOST` / `PORT` | 默认 `127.0.0.1:3000` |
-| `AUTH_TOKEN` | 开启登录认证 |
-| `PRODUCTION` | 设为 `1` 时启用更严格的生产环境门禁 |
-| `SESSION_SECRET` | 生产模式所需的会话签名密钥 |
-| `DATA_KEY` | 生产模式所需的配置加密主密钥 |
-| `METRICS_TOKEN` | 仅用于 `/metrics` 的只读抓取令牌 |
-| `MODEL_REQUEST_TIMEOUT_MS` | 单次模型 HTTP 请求超时，默认 90 秒；审批与工具等待不受此值影响 |
-| `MODEL_REQUEST_RETRIES` | 可重试模型错误（408/429/5xx/超时/网络）自动重试次数，默认 10 |
-| `MODEL_CONCURRENCY_PER_PROVIDER` | 每个供应商同时进行的模型轮数上限，默认 5（1–50）；超出后进入队列 |
-| `BROWSER_USE_EXECUTABLE_PATH` | Browser Use 使用的 Chrome / Edge / Chromium 可执行文件；未设置时自动探测系统安装 |
-| `MODEL_QUEUE_WAIT_MS` | 并发占满时的排队等待上限，默认 10000 毫秒；超过回 429 + `Retry-After` |
-| `MEMORY_STORE_DIR` | 长期记忆 v3 目录；默认 `.setting/memory-store`，测试/容器可覆盖 |
+| `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
+| `AUTH_TOKEN` | 开启登录认证；对外监听时必须设置 |
+| `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
+| `SESSION_SECRET` / `DATA_KEY` | 生产会话签名与配置加密密钥 |
+| `METRICS_TOKEN` | Prometheus 指标端点的只读令牌 |
+| `MODEL_REQUEST_TIMEOUT_MS` | 单次模型请求超时，默认 90 秒 |
+| `MODEL_REQUEST_RETRIES` | 可重试模型错误的自动重试次数，默认 10 |
+| `BROWSER_USE_EXECUTABLE_PATH` | 指定 Browser Use 使用的 Chrome / Edge |
 
-`.env`、`.web-config.json`、`.setting/` 和 `data/` 已加入 gitignore，不要提交。
+完整样例见 [.env.example](.env.example) 和 [production.env.example](production.env.example)。
 
-## 外部程序对接（/api/chat）
+## Docker 部署
 
-Web 界面之外，任何脚本或评测框架都可以直接用 SSE 驱动一轮对话。请求体除 `sessionId`、`message`、`files` 外还支持一个开关：
+本机构建验收：
 
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `headless` | boolean | `false` | 无头模式：需求澄清不再挂起等人，而是采用首个候选选项作为假设继续执行，并把假设写进事件流与工作台账 |
-
-```bash
-curl -N -X POST http://127.0.0.1:3000/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"sessionId":"<id>","message":"帮我算一下 17×23","headless":true}'
+```powershell
+$env:AUTH_TOKEN = "replace-with-a-long-random-token"
+docker compose up -d --build
 ```
 
-与 token 统计和落地判断相关的两类事件：
+正式部署、TLS、密钥生成、监控和回滚流程参见：
 
-| 事件 | 何时发送 | 语义 |
-|---|---|---|
-| `usage` | 每次模型调用（可能多条，流式分片会合并） | 单次调用的用量快照；同一次调用按 `callId` 归并 |
-| `task_usage` | 每轮结束前一条，位于最后一条 `usage` 之后、`done` 之前 | **任务累计用量**：`inputTokens` / `outputTokens` / `toolCalls` / `modelCalls` / `activeMs`；下游统计取这一条即可 |
-
-无头模式自动做假设时，事件流里会出现一条 `clarification_note`，携带原问题（`question`）与被采用的假设（`assumption`），便于调用方判断假设是否合理。
-
-复杂任务会额外输出 `workflow_plan` 快照：包含 `goal`、`steps`、每个步骤状态 `pending / in_progress / completed / failed / skipped`、当前步骤和单调递增的 `revision`。`workflow_plan:null` 表示本轮没有流程；客户端不要把它画成普通工具卡。
-
-并发方面：单会话同一时刻只允许一条流，超出发送间隔会被拒绝；供应商级并发占满时请求会排队，排队超时返回 **HTTP 429** 与 `Retry-After`（可重试），而不是把它当成请求错误。可以用 `MODEL_CONCURRENCY_PER_PROVIDER` 和 `MODEL_QUEUE_WAIT_MS` 调整。
+- [自托管指南](docs/self-hosting.md)
+- [生产检查单](docs/production-checklist.md)
+- [安全与 TLS](docs/security-and-tls.md)
+- [备份与恢复](docs/backup-restore.md)
 
 ## 开发与测试
 
 ```bash
-npm run typecheck       # 三套 TypeScript 配置
-npm test                # 单元 / 集成 / 安全 / 故障 / 负载
+npm run typecheck       # 后端、前端与桌面端三套 TypeScript 检查
+npm test                # 单元、集成、安全、故障与负载测试
 npm run e2e             # Playwright 浏览器主流程
-npm run build:client    # 前端 TS → 浏览器 ESM
-npm run build:desktop   # Electron 主进程与 preload
-npm run audit:prod      # 生产依赖 high / critical 阻断
-npm run data:check      # 配置、journal、checkpoint 与备份检查
+npm run build:client    # 构建前端浏览器产物
+npm run build:desktop   # 构建 Electron 主进程与 preload
+npm run audit:prod      # 检查生产依赖高危漏洞
+npm run data:check      # 校验配置、journal、checkpoint 与备份
 ```
 
-CI 还包含覆盖率门禁、SBOM、依赖审查和镜像 smoke。当前自动化通过不代表产品功能已经完整，也不构成正式发布承诺。
+提交前至少执行：
 
+```bash
+npm run typecheck
+npm test
+npm run build:client
+```
 
 ## 文档
 
-- [Agent Wiki](docs/agent-wiki.md) —— 架构、模块、调用链与踩坑
-- [能力路线](docs/agentatlas-roadmap.md) —— Hook、电脑操作、岗位获取与简历投递的规划边界
-- [长期记忆插槽](docs/memory-slot.md) —— 本地 / HTTP Provider、Generic 与 Hindsight 契约、导入导出和故障排查
-- [部署与运维总览](docs/deployment.md) —— 自托管、TLS、监控和运维入口
-- [开发预览验证快照](docs/readiness-snapshot.md) —— 当前自动化与基础设施验证记录
-- [备份与恢复](docs/backup-restore.md)
-- [升级与回滚](docs/upgrade-rollback.md)
-- [故障排查](docs/troubleshooting.md)
-- [支持边界](docs/support.md)
-- [请求编排](docs/agent-orchestration.md) / [与 ZCode 对比](docs/agent-orchestration-vs-zcode.md)
+| 文档 | 内容 |
+|---|---|
+| [Agent Wiki](docs/agent-wiki.md) | 模块职责、调用链、架构约束与踩坑记录 |
+| [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
+| [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
+| [长期记忆](docs/memory-slot.md) | 本地 / HTTP Provider、作用域与故障排查 |
+| [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
+| [支持边界](docs/support.md) | 支持范围、安全报告与维护责任 |
+
+## 贡献
+
+1. 修改前阅读 [AGENTS.md](AGENTS.md) 中的架构与提交约束。
+2. 一个提交只处理一个主题，提交信息保持单行中文格式。
+3. 新功能同步补充类型、审批边界、测试与用户文档。
+4. 不提交 `.env`、`.web-config.json`、`.setting/`、`data/` 或任何真实密钥。
 
 ## License
 
