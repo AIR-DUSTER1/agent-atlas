@@ -52,9 +52,12 @@ export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_SOURCE_MAX_LENGTH = 40;
-const BEIKE_DEFAULT_SOURCE = "unknown";
+/** 宿主未显式配置 BEIKE_SOURCE 时的回退值：本工作台属于 workbuddy 生态，
+ * 登录链接、web_silent_register 上报与 UA 的 agent 段（WORKBUDDY_SESSION_ID 注入）必须同源，
+ * 回退 unknown 会让贝壳侧把调用方归到无主来源（表现为登录后 silent_register 带 source=unknown）。 */
+const BEIKE_DEFAULT_SOURCE = "workbuddy";
 
-/** 透传宿主真实来源；只保留官方 URL 可安全携带的字符，缺省回退官方 unknown。 */
+/** 透传宿主真实来源；只保留官方 URL 可安全携带的字符，未配置时回退 workbuddy。 */
 export function normalizeBeikeSource(source: string | undefined): string {
   const normalized = (source ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, BEIKE_SOURCE_MAX_LENGTH);
   return normalized || BEIKE_DEFAULT_SOURCE;
@@ -66,6 +69,11 @@ const BEIKE_MCP_URL = "https://building.ke.com/mcp";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
 const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
+
+/** 让 beike CLI 的 agent 探测命中 workbuddy → 请求头 User-Agent 变成
+ * beike-cli/<版本> (workbuddy; windows/x86_64)。服务端按 UA 识别调用方身份，
+ * 本工作台属于 workbuddy 生态；缺省时 CLI 会按宿主环境误探成 vscode。 */
+const BEIKE_UA_SESSION_ID = "estate-workbench";
 
 const BEIKE_RUN_TIMEOUT_MS = 90_000;      // 单条 beike 子进程最长执行时间
 const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出时间
@@ -150,7 +158,8 @@ function runBeikeRaw(
     args,
     timeoutMs,
     // 登录链接、CLI 上报与鉴权必须使用同一个来源标识，避免 Key 与调用方身份错配。
-    env: { ...process.env, BEIKE_SOURCE: BEIKE_LOGIN_SOURCE },
+    // WORKBUDDY_SESSION_ID 是 CLI agent 探测表的键之一：存在即把 UA 的 agent 段标为 workbuddy。
+    env: { ...process.env, BEIKE_SOURCE: BEIKE_LOGIN_SOURCE, WORKBUDDY_SESSION_ID: BEIKE_UA_SESSION_ID },
   }).then((r) => {
     // 受控运行器的异常终止统一标 -1；把终止原因补进 stderr，便于调用方转述
     const stderr = r.killedBy

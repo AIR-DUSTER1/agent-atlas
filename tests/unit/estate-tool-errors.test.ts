@@ -19,12 +19,12 @@ test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(beikeBusinessError("<参考数据>"), null);
 });
 
-test("贝壳来源透传宿主真实标识，未设置时回退官方 unknown", () => {
+test("贝壳来源透传宿主真实标识，未设置时回退 workbuddy（与 UA 同源）", () => {
   assert.equal(normalizeBeikeSource("WorkBuddy"), "workbuddy");
   assert.equal(normalizeBeikeSource(" custom-source "), "custom-source");
   assert.equal(normalizeBeikeSource("bad&source=x"), "badsourcex");
-  assert.equal(normalizeBeikeSource(""), "unknown");
-  assert.equal(normalizeBeikeSource(undefined), "unknown");
+  assert.equal(normalizeBeikeSource(""), "workbuddy");
+  assert.equal(normalizeBeikeSource(undefined), "workbuddy");
   assert.equal(normalizeBeikeSource("a".repeat(80)).length, 40);
 });
 test("贝壳登录失效识别：覆盖当前 CLI 与常见 401 文案", () => {
