@@ -9,7 +9,7 @@
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="LangGraph.js" src="https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C">
-  <img alt="Status" src="https://img.shields.io/badge/status-beta-F59E0B">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.16-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -18,9 +18,12 @@
   <a href="#核心能力">核心能力</a> ·
   <a href="#界面预览">界面预览</a> ·
   <a href="#系统架构">系统架构</a> ·
+  <a href="#外部程序对接">外部程序对接</a> ·
   <a href="#开发与测试">开发与测试</a> ·
   <a href="#文档">文档</a>
 </p>
+
+> **当前是 `0.9.0-beta.16` 开发预览版。** 接口、数据格式与交互仍可能调整，暂不提供正式 tag、生产 SLA 或稳定兼容承诺。
 
 ## 项目简介
 
@@ -178,9 +181,13 @@ scripts/          构建、检查、备份与发布辅助脚本
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
 | `SESSION_SECRET` / `DATA_KEY` | 生产会话签名与配置加密密钥 |
 | `METRICS_TOKEN` | Prometheus 指标端点的只读令牌 |
-| `MODEL_REQUEST_TIMEOUT_MS` | 单次模型请求超时，默认 90 秒 |
+| `MODEL_REQUEST_TIMEOUT_MS` | 单次模型请求超时，默认 90 秒；审批与工具等待不受此值影响 |
 | `MODEL_REQUEST_RETRIES` | 可重试模型错误的自动重试次数，默认 10 |
-| `BROWSER_USE_EXECUTABLE_PATH` | 指定 Browser Use 使用的 Chrome / Edge |
+| `MODEL_CONCURRENCY_PER_PROVIDER` | 每个供应商同时进行的模型轮数上限，默认 5（1–50） |
+| `MODEL_QUEUE_WAIT_MS` | 并发占满时的排队等待上限，默认 10000 毫秒；超过回 429 + `Retry-After` |
+| `BROWSER_USE_EXECUTABLE_PATH` | 指定 Browser Use 使用的 Chrome / Edge；未设置时自动探测 |
+| `MEMORY_STORE_DIR` | 长期记忆 v3 目录；默认 `.setting/memory-store`，测试与容器可覆盖 |
+| `JOB_BROWSER_HEADLESS` | 求职采集默认打开可见窗口；设为 `1` 改为无头执行 |
 
 完整样例见 [.env.example](.env.example) 和 [production.env.example](production.env.example)。
 
@@ -199,6 +206,38 @@ docker compose up -d --build
 - [生产检查单](docs/production-checklist.md)
 - [安全与 TLS](docs/security-and-tls.md)
 - [备份与恢复](docs/backup-restore.md)
+
+## 外部程序对接
+
+Web 界面之外，脚本或评测框架可以直接用 SSE 驱动一轮对话。
+
+```bash
+# 1) 建会话（返回 session.id）
+curl -X POST http://127.0.0.1:3000/api/sessions \
+  -H 'Content-Type: application/json' -d '{"kind":"agent"}'
+
+# 2) 发消息并消费 SSE
+curl -N -X POST http://127.0.0.1:3000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"sessionId":"<id>","message":"帮我算一下 17×23","headless":true}'
+```
+
+请求体除 `sessionId`、`message`、`files` 外还支持：
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `headless` | boolean | `false` | 无头模式：需求澄清不挂起等人，采用首个候选选项作为假设继续，并把假设写进事件流 |
+| `continuous` | boolean | `false` | 连续工作模式：任务未完成就持续回炉，等价于界面里的 `/goal` |
+
+与统计和落地判断相关的事件：
+
+| 事件 | 何时发送 | 语义 |
+|---|---|---|
+| `usage` | 每次模型调用（可能多条，流式分片会合并） | 单次调用用量快照，同一次调用按 `callId` 归并 |
+| `task_usage` | 每轮结束前一条，位于最后一条 `usage` 之后、`done` 之前 | **任务累计用量**：`inputTokens` / `outputTokens` / `toolCalls` / `modelCalls` / `activeMs`；下游统计取这一条即可 |
+| `clarification_note` | 无头模式自动做假设时 | 携带原问题 `question` 与被采用的假设 `assumption`，便于调用方判断假设是否合理 |
+
+并发语义：单会话同一时刻只允许一条流；供应商级并发占满时请求进入队列，排队超时返回 **HTTP 429** 与 `Retry-After`（可重试，不要当成请求错误）。可用 `MODEL_CONCURRENCY_PER_PROVIDER` 与 `MODEL_QUEUE_WAIT_MS` 调整。
 
 ## 开发与测试
 
