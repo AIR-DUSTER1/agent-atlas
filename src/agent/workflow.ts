@@ -501,7 +501,7 @@ async function invokeModel(
 function stopNoticeText(stop: ToolStopResult): string {
   if (stop.authRequired) {
     const loginLine = stop.loginUrl ? `\n\n官方登录页：${stop.loginUrl}` : "";
-    return "贝壳登录已失效，本轮已暂停，避免继续触发风控。" +
+    return "贝壳鉴权未通过，本轮已暂停，避免继续触发风控。" +
       loginLine +
       "\n\n请按以下步骤恢复：\n" +
       "1. 点击上方工具卡里的「打开官方登录页」，用贝壳找房 App 扫码；\n" +
