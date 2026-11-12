@@ -150,6 +150,49 @@ test("会话发送、刷新恢复、人工审批折叠且只出现一个助手�
   expect(pageErrors).toEqual([]);
 });
 
+test("用户消息与 AI 总结可复制，按钮就地反馈成功", async ({ page, context }) => {
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: new URL(page.url()).origin,
+  });
+  await login(page);
+  await createChat(page);
+  await sendMessage(page, "你好");
+  await expect(page.locator(".msg-assistant").last()).toContainText("模拟模式", { timeout: 20_000 });
+
+  const user = page.locator(".msg-user").last();
+  const userCopy = user.getByRole("button", { name: "复制", exact: true });
+  await user.hover();
+  await expect(userCopy).toHaveCSS("opacity", "1");
+  expect(await userCopy.textContent()).toBe("");
+  await userCopy.click();
+  await expect(user.getByRole("button", { name: "已复制", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("你好");
+
+  const assistant = page.locator(".msg-assistant").last();
+  const summaryCopy = assistant.getByRole("button", { name: "复制总结", exact: true });
+  await assistant.hover();
+  await expect(summaryCopy).toHaveCSS("opacity", "1", { timeout: 20_000 });
+  expect(await summaryCopy.textContent()).toBe("");
+  await summaryCopy.click();
+  await expect(assistant.getByRole("button", { name: "总结已复制", exact: true })).toBeVisible();
+  const summary = await page.evaluate(() => navigator.clipboard.readText());
+  expect(summary).toContain("模拟模式");
+  expect(summary).not.toContain("思考过程");
+});
+test("不选择项目时默认会话仍显示在左侧会话树", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await sendMessage(page, "无项目会话回归");
+  await expect(page.locator(".msg-assistant").last()).toContainText("模拟模式", { timeout: 20_000 });
+
+  await page.locator("#project-btn").click();
+  await page.getByRole("menuitem", { name: /不选择项目/ }).click();
+  await expect(page.locator("#project-btn")).toContainText("不选择项目");
+  const item = page.locator("#session-list .session-item").filter({ hasText: "无项目会话回归" });
+  await expect(item).toBeVisible();
+  await expect(item).toHaveClass(/active/);
+});
 test("新建会话不继承上一会话的上下文用量显示", async ({ page }) => {
   await login(page);
   await createChat(page);

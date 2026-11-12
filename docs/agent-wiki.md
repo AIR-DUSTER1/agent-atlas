@@ -1961,6 +1961,7 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
   Enter/Space 同效）；折叠后子项不渲染，折叠状态只存 key 列表（`state.projCollapsed` →
   `lg-agent-proj-collapsed`），重渲染后由数据还原，未归属组用 `ORPHAN_GROUP_KEY` 独立键；
   搜索时强制展开（分组头加 `.static` 不可折叠），避免命中结果被收起后看似「搜不到」。
+- **项目筛选**：侧栏统一调用 `sessionMatchesProjectView(state.projectView, session.projectId)`；`__none__` 视图明确包含内部 `default` 会话，并归入「未归属」分组，不能再用直接字符串比较导致无项目会话消失。
 - **侧栏层级**：项目分组下再按“今天 / 昨天 / 更早”分组；时间显示为今天 HH:mm、昨天 HH:mm、
   N 天前或月/日，减少绝对时间阅读成本。
 - **阅读保护**：`ui/scroll-to-bottom.ts` 不再让新消息强行抢走滚动位置；离开底部时显示未读累计，
@@ -1991,6 +1992,8 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
   https 外链补 `target=_blank` 与 `rel="noopener noreferrer"`；
 - marked 或 DOMPurify 加载失败时继续使用内置转义 fallback，消息不消失；
 - 流式光标改为独立 DOM 节点，Markdown 受控 HTML 边界不再拼接 cursor HTML；
+- 用户消息、助手最终总结与压缩摘要都有消息级复制按钮；按钮只在悬停消息时显示纯图标，助手只复制最后一段已完成正文，不包含思考过程、工具参数或审批卡；
+- 消息、摘要与代码块共用 `modules/clipboard.ts`：优先 Clipboard API，权限受限时降级到临时 textarea；
 - 代码块在流式结束后动态加载 highlight.js，单块添加语言标签与复制按钮；高亮失败仍保留原始代码；
 - 长消息仍沿用流式节流，超长代码/内容不会被可选依赖拖垮。
 

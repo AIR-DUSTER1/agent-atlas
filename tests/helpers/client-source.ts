@@ -39,6 +39,8 @@ export const CLIENT_SOURCES = [
   "modules/tool-presentation.ts",
   "modules/chat-flow.ts",
   "modules/clarify.ts",
+  "modules/clipboard.ts",
+  "modules/message-copy.ts",
   "modules/agent-profile.ts",
   "modules/plugin-registry.ts",
   "modules/types.ts",

@@ -14,12 +14,11 @@ import { $, autoGrowImpl, chatScroll, inputEl, sendBtn, stopBtn } from "../core/
 import { authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
-import { mountBlock } from "../render/messages.js";
+import { mountBlock, refreshAssistantCopy, renderAll } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { renderAttachChips } from "../views/attachments.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { renderSessions } from "../views/sessions.js";
-import { renderAll } from "../render/messages.js";
 import { clearWorkflowPlan, renderWorkflowPlan } from "../views/workflow-plan.js";
 import { showChatState } from "../views/navigation.js";
 import { mountTyping } from "../render/parts.js";
@@ -226,6 +225,7 @@ export function finalize(
           void import("../render/parts.js").then((m) => m.updateThinkingPart(p));
         }
       }
+      refreshAssistantCopy(ablock);
     }
   }
   // interrupt 之后本轮的流已被主动解除，用户可能已经发起新一轮（复用了同一个

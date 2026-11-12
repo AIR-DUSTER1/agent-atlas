@@ -7,6 +7,7 @@
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import { toast } from "../ui/toast.js";
+import { writeClipboardText } from "../modules/clipboard.js";
 
 type HighlightModule = typeof import("../vendor/highlight.js");
 let highlightPromise: Promise<HighlightModule | null> | null = null;
@@ -27,12 +28,9 @@ function languageOf(code: HTMLElement): string {
 }
 
 async function copyCode(code: HTMLElement): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(code.textContent || "");
-    toast("代码已复制", "success", { durationMs: 2200 });
-  } catch {
-    toast("复制失败，请手动选择代码", "error");
-  }
+  const ok = await writeClipboardText(code.textContent || "");
+  if (ok) toast("代码已复制", "success", { durationMs: 2200 });
+  else toast("复制失败，请手动选择代码", "error");
 }
 
 /** 给 root 内的 pre>code 添加工具栏、语言标签和可选高亮；同一代码块只处理一次。 */

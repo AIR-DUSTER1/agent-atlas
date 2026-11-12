@@ -147,7 +147,7 @@ export function renderSessions(): void {
   const term = ($("session-search") as HTMLInputElement | null)?.value?.trim() ?? "";
 
   const filtered = state.sessions.filter(
-    (session) => (state.projectView === "all" || session.projectId === state.projectView) && sessionMatchesSearch(session, term),
+    (session) => sessionMatchesProjectView(state.projectView, session.projectId) && sessionMatchesSearch(session, term),
   );
   const groups: Array<{ key: string; project: ProjectEntry | null; sessions: Session[] }> = [];
   const byId = new Map<string, { key: string; project: ProjectEntry | null; sessions: Session[] }>();
