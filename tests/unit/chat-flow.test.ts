@@ -5,7 +5,8 @@
  * 审批卡里的长 URL / 命令必须能换行，不能撑破消息容器。
  */
 import assert from "node:assert/strict";
-import type { AssistantPart, ChatBlock } from "../../src/client/modules/types.js";
+import type { AssistantPart, ChatBlock, ToolPart } from "../../src/client/modules/types.js";
+import { collectEstateConclusionMedia } from "../../src/client/modules/conclusion-media.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
 import {
@@ -118,14 +119,20 @@ test("工具卡按类别展示并保留原始工具名，批量调用内部按�
   assert.match(css, /\.tool-card\[data-tool-category="command"\]/);
   assert.doesNotMatch(app, /TOOL_ICONS/);
 });
-test("房产地图与户型图作为富结果默认可见，不被 tools 分组藏掉", async () => {
-  const app = await readClientFiles(["views/estate.ts", "render/parts.ts"]);
-  assert.match(app, /card\.classList\.add\("open", "estate-rich"\)/);
-  assert.match(app, /classList\.contains\("estate-rich"\)/);
-  assert.match(app, /hasRichResult \? \{ open: true \}/);
-  assert.match(app, /data\.action === "detail" && data\.location/);
-  assert.match(app, /appendMapIframe\(extra, loc\.embedUrl/);
-  assert.match(app, /\.map\(\(src\) => safeImageSrc\(src\)\)/);
+test("房产地图与户型图进入最终结论附件，工具组保持折叠", async () => {
+  const app = await readClientFiles([
+    "modules/conclusion-media.ts", "render/conclusion-media.ts", "render/parts.ts",
+    "stream/events.ts", "render/messages.ts", "views/estate.ts",
+  ]);
+  const css = await readClientCss();
+  assert.match(app, /collectEstateConclusionMedia/);
+  assert.match(app, /refreshConclusionMedia/);
+  assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
+  assert.match(app, /h\("details", \{ class: "tool-group" \}/);
+  assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
+  assert.doesNotMatch(css, /\.estate-map-embed|\.estate-material-grid|\.estate-house-thumb/);
+  assert.match(css, /\.conclusion-media\s*\{/);
+  assert.match(css, /\.conclusion-images\s*\{/);
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
@@ -198,4 +205,56 @@ test("澄清卡支持多题：提交按钮在全答完前禁用", async () => {
   // 多题提交必须带题面否则模型分不清答案归属
   assert.match(clarify, /lines\.push\(`\$\{question\.question\}：\$\{text\}`\)/);
   assert.match(clarify, /MAX_SUBMISSION_CHARS/);
+});
+
+const DETAIL_MAP = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4&marker=36.1,120.1";
+const MAP_MULTI = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4&layer=mapnik";
+const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/a.jpg";
+const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/b.webp";
+
+function estateToolPart(id: string, name: string, payload: unknown): ToolPart {
+  return {
+    p: "tool", id, name, argsText: "{}",
+    result: { content: JSON.stringify(payload), isError: false },
+  };
+}
+
+test("结论附件聚合详情地图、点位与多张户型图", () => {
+  const parts: AssistantPart[] = [
+    estateToolPart("detail", "house_lookup", {
+      action: "detail", houseId: "10001", city: "青岛",
+      location: {
+        label: "测试花园", address: "测试路 1 号", lat: 36.1, lng: 120.1,
+        precision: "community", embedUrl: DETAIL_MAP,
+        links: { amap: "https://uri.amap.com/marker?position=120.1,36.1" },
+      },
+      images: [IMAGE_ONE],
+    }),
+    estateToolPart("map", "house_map", {
+      action: "map", embedUrl: MAP_MULTI,
+      points: [
+        { name: "测试花园", address: "测试路 1 号", lat: 36.1, lng: 120.1, links: {} },
+        { name: "第二花园", address: "测试路 2 号", lat: 36.2, lng: 120.2, source: "nominatim", links: {} },
+      ],
+    }),
+    estateToolPart("material", "house_lookup", {
+      action: "material", houseId: "10001", images: [IMAGE_ONE, IMAGE_TWO],
+    }),
+  ];
+  const media = collectEstateConclusionMedia(parts);
+  assert.equal(media.mapEmbedUrl, DETAIL_MAP);
+  assert.equal(media.mapTitle, "房源所在小区");
+  assert.equal(media.points.length, 2);
+  assert.equal(media.points[0]?.name, "测试花园");
+  assert.equal(media.points[1]?.name, "第二花园");
+  assert.deepEqual(media.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
+});
+
+test("无房产媒体时不生成结论附件", () => {
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search", "house_search", { action: "search", listings: [{ title: "房源" }] }),
+  ]);
+  assert.equal(media.mapEmbedUrl, "");
+  assert.deepEqual(media.points, []);
+  assert.deepEqual(media.images, []);
 });

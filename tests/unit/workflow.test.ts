@@ -218,7 +218,7 @@ test("通用与房产 profile 注入不同的分析 / 反思领域规则", () =>
   assert.match(estateProfile.systemPrompt, /户型图同样是默认交付/);
   assert.match(estateProfile.systemPrompt, /house_lookup\(action=material\)/);
   assert.match(estateProfile.systemPrompt, /location\.lat\/lng/);
-  assert.match(estateProfile.systemPrompt, /Markdown 图片语法/);
+  assert.match(estateProfile.systemPrompt, /最终结论下方/);
 });
 
 test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反思", async () => {

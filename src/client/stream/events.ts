@@ -15,6 +15,7 @@ import { scrollBottom } from "../core/dom.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { setWorkflowPlan } from "../views/workflow-plan.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
+import { refreshConclusionMedia } from "../render/conclusion-media.js";
 import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
   updateThinkingPart, updateToolCard, upsertModelRetry,
@@ -268,6 +269,7 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
         ablock.parts.push(part);
         mountPart(ablock, part);
       }
+      refreshConclusionMedia(ablock);
       break;
     }
     case "interrupt": addInterrupt(ablock, ev.payload, sid, visible); break;
@@ -323,12 +325,20 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
       break;
     }
     case "error": addErrorBlock(ev.message, sid); break;
-    case "done": break;
+    case "done":
+      sealStreamingParts(ablock);
+      refreshConclusionMedia(ablock);
+      break;
     default: {
       // 穷尽性校验：新增事件类型时这里编译失败（而不是运行时静默失联）
       const exhaustive: never = ev;
       console.warn("[stream] 未知事件", exhaustive);
     }
+  }
+  if (ev.type === "reasoning" || ev.type === "tool_call" || ev.type === "tool_result"
+    || ev.type === "node" || ev.type === "interrupt" || ev.type === "route_decision") {
+    // 后续仍有思考/工具时，上一版文本不是最终结论，先撤掉旧媒体。
+    refreshConclusionMedia(ablock);
   }
 }
 

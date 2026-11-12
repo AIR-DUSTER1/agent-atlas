@@ -26,6 +26,7 @@ import { renderToolEnhancers } from "./tool-enhancers.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
+import { refreshConclusionMedia } from "./conclusion-media.js";
 import { enhanceCodeBlocks } from "./code-enhance.js";
 import type {
   AgentEvent, AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
@@ -208,11 +209,7 @@ function refreshToolGroup(group: HTMLElement | null): void {
   });
   for (const section of sections) items.appendChild(section);
 
-  // 富结果可能在分组创建后才返回；第一次识别到地图/户型图时自动展开，之后尊重用户手动折叠。
-  if (!group.dataset.richOpened && cards.some((card) => card.classList.contains("estate-rich"))) {
-    if (group instanceof HTMLDetailsElement) group.open = true;
-    group.dataset.richOpened = "1";
-  }
+  // 工具组只展示执行轨迹，默认折叠；房产地图与户型图在最终结论附件区展示。
   const categoryCounts = new Map<ToolCategoryId, number>();
   const nameCounts = new Map<string, number>();
   for (const card of cards) {
@@ -265,9 +262,8 @@ export function groupToolCallsIfNeeded(
   const firstCard = partEls.get(tools[0])?.el;
   if (!firstCard || firstCard.parentElement !== body) return null;
 
-  // 地图/户型图这类富结果属于交付物，不是调试轨迹；包含它们时分组默认展开。
-  const hasRichResult = tools.some((tool) => partEls.get(tool)?.el.classList.contains("estate-rich"));
-  const details = h("details", { class: "tool-group", ...(hasRichResult ? { open: true } : {}) },
+  // 工具组只展示执行轨迹，默认折叠；结论中的地图和图片由 conclusion-media 渲染。
+  const details = h("details", { class: "tool-group" },
     h("summary", { class: "tool-group-summary" },
       h("span", { class: "tool-group-caret" }, "▶"),
       h("span", { class: "tool-group-icon" }, icon("Wrench", { size: 13 })),
@@ -474,6 +470,8 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     body.appendChild(el);
     partEls.set(part, { el });
     renderTextPart(part);
+    // 历史回放时没有 done 事件；最终文本挂载完成即可补齐结论附件。
+    if (!part.streaming) refreshConclusionMedia(block);
     return;
   }
 

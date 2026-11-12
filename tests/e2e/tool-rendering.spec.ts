@@ -36,16 +36,11 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
         count: section.querySelectorAll(".tool-card").length,
       }));
     const names = [...(group?.querySelectorAll(".tool-name") ?? [])].map((el) => el.textContent);
-    const richPart = block.parts[1];
-    const richCard = clientState.partEls.get(richPart)?.el;
-    if (richCard) {
-      richCard.classList.add("estate-rich");
-      updateToolCard(richPart);
-    }
-    const richOpened = group instanceof HTMLDetailsElement && group.open;    const summary = group?.querySelector(".tool-group-names")?.textContent ?? "";
+    const groupOpened = group instanceof HTMLDetailsElement && group.open;
+    const summary = group?.querySelector(".tool-group-names")?.textContent ?? "";
     host.remove();
     clientState.blockBodies.delete(block);
-    return { exists: Boolean(group), sections, names, summary, richOpened };
+    return { exists: Boolean(group), sections, names, summary, groupOpened };
   });
 
   expect(result.exists).toBe(true);
@@ -61,16 +56,17 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
   expect(result.summary).toContain("read_file");
   expect(result.summary).toContain("read_image");
   expect(result.summary).toContain("terminal");
-  expect(result.richOpened).toBe(true);
+  expect(result.groupOpened).toBe(false);
 });
 
-test("房源详情经纬度与 material 图片直接渲染为地图和图片网格", async ({ page }) => {
+test("房源结论直接展示地图与户型图，工具卡不再承载媒体", async ({ page }) => {
   await login(page);
   const result = await page.evaluate(async () => {
     const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, updateToolCard }, clientState] = await Promise.all([
+    const [{ mountPart, updateToolCard }, clientState, events] = await Promise.all([
       load("/render/parts.js"),
       load("/core/state.js"),
+      load("/stream/events.js"),
     ]);
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -109,24 +105,36 @@ test("房源详情经纬度与 material 图片直接渲染为地图和图片网�
       mountPart(block, part);
       updateToolCard(part);
     }
-    const detailCard = clientState.partEls.get(parts[0])?.el;
-    const materialCard = clientState.partEls.get(parts[1])?.el;
-    const iframe = detailCard?.querySelector(".estate-map-embed iframe");
-    const img = materialCard?.querySelector(".estate-material-grid img");
+    events.handleEvent({ type: "token", text: "结论：测试花园位置与户型图如下。", node: "agent" }, block, null);
+    const beforeDone = host.querySelectorAll(".conclusion-media").length;
+    events.handleEvent({ type: "done" }, block, null);
+    const conclusion = host.querySelector(".conclusion-media");
+    const md = host.querySelector(".md");
+    const iframe = conclusion?.querySelector(".conclusion-map iframe");
+    const img = conclusion?.querySelector(".conclusion-images img");
+    const node = conclusion && md ? md.compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
+    const toolMedia = host.querySelectorAll(".tool-card iframe, .tool-card img, .tool-card .conclusion-images").length;
+    const openToolCards = [...host.querySelectorAll(".tool-card")].filter((card) => card.classList.contains("open")).length;
     const answer = {
+      hasConclusion: Boolean(conclusion),
+      beforeDone,
+      isAfterText: Boolean(node),
       iframeSrc: iframe?.getAttribute("src") || "",
       imageSrc: img?.getAttribute("src") || "",
-      detailRich: detailCard?.classList.contains("estate-rich") || false,
-      materialRich: materialCard?.classList.contains("estate-rich") || false,
+      toolMedia,
+      openToolCards,
     };
     host.remove();
     clientState.blockBodies.delete(block);
     return answer;
   });
 
-  expect(result.detailRich).toBe(true);
-  expect(result.materialRich).toBe(true);
+  expect(result.beforeDone).toBe(0);
+  expect(result.hasConclusion).toBe(true);
+  expect(result.isAfterText).toBe(true);
   expect(result.iframeSrc).toContain("openstreetmap.org/export/embed.html");
   expect(result.iframeSrc).toContain("marker=36.123456,120.123456");
   expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
+  expect(result.toolMedia).toBe(0);
+  expect(result.openToolCards).toBe(0);
 });
