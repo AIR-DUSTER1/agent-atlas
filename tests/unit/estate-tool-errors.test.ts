@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure, probeBeikeMcpKey } from "../../src/server/estate.js";
+import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -19,6 +19,14 @@ test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(beikeBusinessError("<参考数据>"), null);
 });
 
+test("贝壳来源透传宿主真实标识，未设置时回退官方 unknown", () => {
+  assert.equal(normalizeBeikeSource("WorkBuddy"), "workbuddy");
+  assert.equal(normalizeBeikeSource(" custom-source "), "custom-source");
+  assert.equal(normalizeBeikeSource("bad&source=x"), "badsourcex");
+  assert.equal(normalizeBeikeSource(""), "unknown");
+  assert.equal(normalizeBeikeSource(undefined), "unknown");
+  assert.equal(normalizeBeikeSource("a".repeat(80)).length, 40);
+});
 test("贝壳登录失效识别：覆盖当前 CLI 与常见 401 文案", () => {
   assert.equal(isBeikeAuthFailure(JSON.stringify({ error: "invalid cli request", ok: false })), true);
   assert.equal(isBeikeAuthFailure("Invalid or missing Authorization header"), true);
@@ -92,15 +100,16 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.match(start, /const url = BEIKE_KEY_URL/);
   assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
   assert.doesNotMatch(start, /\["login"\]|playwright-core|loginBeikeInManagedBrowser/);
-  assert.match(source, /BEIKE_LOGIN_SOURCE = "agentatlas"/);
+  assert.match(source, /BEIKE_LOGIN_SOURCE = normalizeBeikeSource\(process\.env\.BEIKE_SOURCE\)/);
   assert.match(source, /BEIKE_SOURCE: BEIKE_LOGIN_SOURCE/);
   assert.doesNotMatch(source, /beike_skill/);
-  assert.match(client, /source=agentatlas/);
+  assert.match(client, /source=unknown/);
+  assert.match(client, /safeHref\(st\.keyUrl/);
   assert.match(client, /status\.textContent = "🔐 需要登录"/);
   assert.match(client, /navigator\.clipboard.*readText/);
   assert.match(client, /pasteEstateKeyFromClipboard/);
   assert.match(client, /从剪贴板读取/);
-  assert.match(html, /source=agentatlas/);
+  assert.match(html, /id="estate-key-link"[^>]+source=unknown/);
   assert.match(html, /estate-key-paste/);
   assert.match(html, /页面显示的是掩码/);
   assert.match(source, /检测到的是页面掩码/);
