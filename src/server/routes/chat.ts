@@ -27,10 +27,20 @@ import { incCounter, incGauge } from "../observability/metrics.js";
 import { runWithModelSlot, acquireModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
 import { scheduleMemoryDistillation } from "../memory-distillation.js";
+import { personalizationContextText, readMemoryConfig } from "../memory-config.js";
 import {
   beginTaskSegment, endTaskSegment, observeTaskEvent, renderTaskBudgetNote,
   renderTaskLedger, taskSnapshot,
 } from "../task-budget.js";
+
+/** 个性化上下文读取失败不能阻断对话；本轮按无个性化上下文继续。 */
+async function personalizationContextForTurn(): Promise<string | undefined> {
+  try {
+    return personalizationContextText(await readMemoryConfig());
+  } catch {
+    return undefined;
+  }
+}
 
 function friendlyModelError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
@@ -390,6 +400,7 @@ async function handleChatInner(
   }
 
   const contextWindow = getContextWindowForActive();
+  const personalizationContext = await personalizationContextForTurn();
   // 无头模式：请求级开关（默认 false，交互行为完全不变）。澄清不挂起、
   // 自动采用默认假设继续，适用于外部评测 / 批量脚本这类没有人应答的场景。
   const headless = body.headless === true;
@@ -417,6 +428,7 @@ async function handleChatInner(
       taskLedger: renderTaskLedger(session.activeTask),
       budgetNote: renderTaskBudgetNote(session),
       contextWindow,
+      personalizationContext,
       headless,
       continuous,
     })
@@ -548,6 +560,7 @@ async function handleResumeInner(
 
   // 真实图：用 Command({ resume }) 把决定送回被暂停的图（见 agent/hitl.ts / workflow.ts）
   const { buildResumeCommand } = await import("../../agent/hitl.js");
+  const personalizationContext = await personalizationContextForTurn();
   await streamToClient(
     res,
     req,
@@ -564,6 +577,7 @@ async function handleResumeInner(
         taskLedger: renderTaskLedger(session.activeTask),
         budgetNote: renderTaskBudgetNote(session),
         contextWindow: getContextWindowForActive(),
+        personalizationContext,
         // 连续回合被审批/澄清打断后恢复：重传标记以延续放宽后的超步保险丝，
         // 回炉循环本身由图状态里的 continuousMode 驱动，不依赖这里
         continuous,

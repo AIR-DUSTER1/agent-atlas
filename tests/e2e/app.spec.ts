@@ -183,6 +183,12 @@ test("自主执行流程窗体默认折叠、无计划隐藏并实时同步步�
   await expect(page.locator("#workflow-panel")).toBeHidden();
   await sendMessage(page, "请自主规划并分步骤完成：先查北京天气，再写一句总结");
   await expect(page.locator("#workflow-panel")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
+  expect(await page.evaluate(() => {
+    const workflow = document.getElementById("workflow-panel")?.getBoundingClientRect();
+    const context = document.getElementById("context-bar")?.getBoundingClientRect();
+    return Boolean(workflow && context && workflow.top < context.top);
+  })).toBe(true);
   await expect(page.locator("#workflow-panel")).not.toHaveAttribute("open", "");
   await expect(page.locator("#workflow-steps")).toBeHidden({ timeout: 2_000 });
   await expect(page.locator("#workflow-status")).toHaveText("已完成", { timeout: 20_000 });
@@ -272,7 +278,7 @@ test("100KB Markdown 用户消息换行正常且不撑破容器", async ({ page 
   expect(metrics.width).toBeLessThanOrEqual(metrics.viewport);
   expect(metrics.scrollWidth).toBeLessThanOrEqual(Math.ceil(metrics.width) + 2);
 });
-test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP 失败提示", async ({ page }) => {
+test("记忆与个性化：默认上下文、scope 隔离、导出导入与 HTTP 失败提示", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await login(page);
@@ -284,26 +290,45 @@ test("记忆插槽设置：local 状态、scope 隔离、导出导入与 HTTP �
   await expect(page.locator("#mem-distill-mode")).toHaveValue("smart");
   await expect(page.locator("#mem-retention-active")).toHaveValue("2000");
   await expect(page.locator("#mem-semantic-status")).toContainText("语义召回未启用");
+  await expect(page.locator("#mem-add-btn")).toHaveCount(0);
+  await expect(page.locator("#mem-key")).toHaveCount(0);
 
-  await page.locator("#mem-key").fill("E2E 记忆偏好");
-  await page.locator("#mem-content").fill("回答先给结论，再给依据");
-  await page.locator("#mem-add-btn").click();
+  await expect(page.locator("#mem-personalization-enabled")).toBeChecked();
+  await expect(page.locator("#mem-personalization-text")).toHaveValue("");
+  await expect(page.locator("#mem-personalization-text")).toHaveClass(/ui-config-textarea/);
+  await page.locator("#mem-personalization-text").fill("称呼我为老王；回答先给结论，默认使用中文。");
+  await page.locator("#mem-personalization-save-btn").click();
+  await expect(page.locator("#mem-personalization-status")).toContainText("已保存", { timeout: 10_000 });
+  const savedConfig = await page.evaluate(async () => {
+    const res = await fetch("/api/memory/config", { credentials: "include" });
+    return res.json() as Promise<{ config: { personalization: { enabled: boolean; text: string } } }>;
+  });
+  expect(savedConfig.config.personalization).toEqual({
+    enabled: true,
+    text: "称呼我为老王；回答先给结论，默认使用中文。",
+  });
+
+  await page.locator("#mem-import-mode").selectOption("replace");
+  await page.locator("#mem-import-file").setInputFiles({
+    name: "e2e-memories.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({
+      schemaVersion: 3,
+      memories: [{ key: "E2E 记忆偏好", content: "回答先给结论，再给依据", status: "active" }],
+    })),
+  });
+  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
+  await page.locator("#ui-dialog-ok").click();
   await expect(page.locator("#memories-list")).toContainText("E2E 记忆偏好", { timeout: 10_000 });
 
   const downloadPromise = page.waitForEvent("download");
   await page.locator("#mem-export-btn").click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^memories-general-\d{4}-\d{2}-\d{2}\.json$/);
-  const downloadPath = await download.path();
-  expect(downloadPath).toBeTruthy();
+  expect(await download.path()).toBeTruthy();
 
   await page.locator("#mem-profile-filter").selectOption("estate");
-  await expect(page.locator("#memories-list")).not.toContainText("E2E 记忆偏好");
-  await page.locator("#mem-import-mode").selectOption("replace");
-  await page.locator("#mem-import-file").setInputFiles(downloadPath!);
-  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
-  await page.locator("#ui-dialog-ok").click();
-  await expect(page.locator("#memories-list")).toContainText("E2E 记忆偏好", { timeout: 10_000 });
+  await expect(page.locator("#memories-list")).not.toContainText("E2E 记忆偏好", { timeout: 10_000 });
 
   await page.locator("#mem-http-enabled").check();
   await page.locator("#mem-http-base-url").fill("http://127.0.0.1:1");

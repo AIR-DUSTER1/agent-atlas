@@ -64,7 +64,7 @@ async function main(): Promise<void> {
 
   // 产物自检：缺任何一个都会让桌面端白屏或 preload 失效
   const files = await readdir(join(ROOT, "desktop", "build"));
-  for (const required of ["main.js", "preload.cjs"]) {
+  for (const required of ["main.js", "startup.js", "preload.cjs"]) {
     if (!files.includes(required)) {
       console.error(`✗ 桌面端构建产物缺少 ${required}`);
       process.exit(1);

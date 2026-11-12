@@ -1,7 +1,7 @@
 /**
  * routes/memories.ts — Memory Slot 管理路由（按 Agent scope 隔离）
  * ============================================================
- * 列表 / 手动保存 / 候选确认与拒绝 / 导出导入都只依赖统一 Slot；
+ * 列表 / 自动候选确认与拒绝 / 导出导入都只依赖统一 Slot；
  * profileId 在三类 Agent 之间强隔离，任何路由都不能跨 scope 查找或删除。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
@@ -51,45 +51,6 @@ export async function handleListMemoryCandidates(
   if (!profileId) return respondInvalidScope(res);
   const memories = await memorySlot.list(memoryScope(profileId), { statuses: ["candidate"] });
   sendJson(res, 200, { memories, profileId });
-}
-
-export async function handleSaveMemory(
-  res: import("node:http").ServerResponse,
-  req: import("node:http").IncomingMessage
-): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as {
-    profileId?: unknown;
-    key?: unknown;
-    content?: unknown;
-    tags?: unknown;
-  };
-  const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
-  if (!profileId) return respondInvalidScope(res);
-  const key = typeof body.key === "string" ? body.key : "";
-  const content = typeof body.content === "string" ? body.content : "";
-  const tags = Array.isArray(body.tags)
-    ? body.tags.filter((item): item is string => typeof item === "string")
-    : undefined;
-  if (!key.trim() || !content.trim()) {
-    sendJson(res, 400, { error: "主题（key）与内容（content）都不能为空" });
-    return;
-  }
-  try {
-    const config = await readMemoryConfig();
-    const entry = await memorySlot.save({
-      scope: memoryScope(profileId),
-      key,
-      content,
-      source: "user",
-      status: "active",
-      origin: { mode: "manual" },
-      ...(tags ? { tags } : {}),
-      ...(config.local.allowPII ? { allowPII: true } : {}),
-    });
-    sendJson(res, 200, { ok: true, entry, profileId });
-  } catch (err) {
-    respondBadRequest(res, req, err);
-  }
 }
 
 export async function handleConfirmMemory(

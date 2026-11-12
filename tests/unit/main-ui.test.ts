@@ -37,6 +37,16 @@ test("新建会话会刷新上下文容量条，不残留上一会话用量", as
   assert.doesNotMatch(turn, /showChatState\(state\.sessions\[0\]\)/);
 });
 
+test("执行流程窗体位于上下文条和输入控制上方", async () => {
+  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  const workflow = html.indexOf('id="workflow-panel"');
+  const context = html.indexOf('id="context-bar"');
+  const composer = html.indexOf('id="composer-bar"');
+  const input = html.indexOf('id="input-box"');
+  assert.ok(workflow >= 0 && context >= 0 && composer >= 0 && input >= 0);
+  assert.ok(workflow < context && context < composer && composer < input);
+});
+
 test("侧栏按项目与今天/昨天/更早分组，并显示相对时间", async () => {
   const source = await readClientFiles(["views/sessions.ts"]);
   assert.match(source, /function sessionDayGroup/);

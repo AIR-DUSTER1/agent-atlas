@@ -82,6 +82,8 @@ interface NormalizeOptions {
   budgetNote?: string;
   /** 当前模型总窗口；由路由在请求开始时冻结，避免流中途切换配置。 */
   contextWindow?: number;
+  /** 用户设置的个性化上下文；每轮注入主 Agent system 注记。 */
+  personalizationContext?: string;
   /** 无头模式：澄清不挂起，自动采用默认假设继续（外部评测/批量调用）。 */
   headless?: boolean;
   /** 连续工作模式：反思不通过就持续回炉，直到任务完成/空转熔断/请求异常/用户中止。 */
@@ -394,6 +396,7 @@ export async function* runGraphEvents(
       ...(options.taskLedger ? { task_ledger: options.taskLedger } : {}),
       ...(options.budgetNote ? { task_budget_note: options.budgetNote } : {}),
       ...(options.contextWindow ? { context_window: options.contextWindow } : {}),
+      ...(options.personalizationContext ? { personalization_context: options.personalizationContext } : {}),
       ...(options.headless ? { headless: true } : {}),
       ...(options.continuous ? { continuous: true } : {}),
     },

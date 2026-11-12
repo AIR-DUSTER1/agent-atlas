@@ -55,8 +55,15 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.match(start, /const url = BEIKE_KEY_URL/);
   assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
   assert.doesNotMatch(start, /\["login"\]|playwright-core|loginBeikeInManagedBrowser/);
-  assert.match(client, /系统浏览器/);
-  assert.match(html, /请手动扫码/);
+  assert.match(source, /source=unknown/);
+  assert.match(client, /source=unknown/);
+  assert.match(client, /navigator\.clipboard.*readText/);
+  assert.match(client, /pasteEstateKeyFromClipboard/);
+  assert.match(client, /从剪贴板读取/);
+  assert.match(html, /source=unknown/);
+  assert.match(html, /estate-key-paste/);
+  assert.match(html, /页面显示的是掩码/);
+  assert.match(source, /检测到的是页面掩码/);
   assert.doesNotMatch(html, /登录窗口由 agentatlas 托管|estate-login-recover/);
 });
 

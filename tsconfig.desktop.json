@@ -15,5 +15,5 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["desktop/main.ts", "desktop/preload.ts", "desktop/electron-ambient.d.ts"]
+  "include": ["desktop/main.ts", "desktop/startup.ts", "desktop/preload.ts", "desktop/electron-ambient.d.ts"]
 }

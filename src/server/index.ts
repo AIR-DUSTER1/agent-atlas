@@ -63,6 +63,7 @@ import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
 import { handleHealthz, handleReadyz } from "./health.js";
 import { lifecycle } from "./lifecycle.js";
+import { startParentWatchdog } from "./parent-watchdog.js";
 import { auditFilePath, flushAudit, writeAudit } from "./audit.js";
 import { flushJournal, journalPath } from "./session-store.js";
 import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
@@ -90,7 +91,7 @@ import { handleListProjects, handleAddProject, handleSetActiveProject, handleDel
 import { handleFsList, handleFsSearch, handleFsRead, handleFsOpenRemote, handleUpload } from "./routes/files.js";
 import { handleGetRag, handleSaveRagConfig, handleTestRag, handleIngest, handleRagSearch, handleDeleteRagDoc, handleClearRag } from "./routes/rag.js";
 import {
-  handleListMemories, handleSaveMemory, handleDeleteMemory, handleExportMemories, handleImportMemories,
+  handleListMemories, handleDeleteMemory, handleExportMemories, handleImportMemories,
   handleListMemoryCandidates, handleConfirmMemory, handleRejectMemory,
 } from "./routes/memories.js";
 import {
@@ -440,7 +441,6 @@ const server = createServer(async (req, res) => {
 
     // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
     if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
-    if (pathname === "/api/memories" && req.method === "POST") { await handleSaveMemory(res, req); return; }
     if (pathname === "/api/memories/candidates" && req.method === "GET") {
       await handleListMemoryCandidates(res, url.searchParams.get("profileId"));
       return;
@@ -607,7 +607,12 @@ const server = createServer(async (req, res) => {
 // 优雅退出（Phase 4）：停新请求 → 通知 SSE → 等在途 → flush → 退出
 // ---------------------------------------------------------------------------
 let signalHandled = false;
+let stopParentWatchdog: (() => void) | null = null;
 function handleSignal(signal: string): void {
+  if (stopParentWatchdog) {
+    stopParentWatchdog();
+    stopParentWatchdog = null;
+  }
   // 第二次 Ctrl+C / kill：编排器已等不及，立即退出，不再拖住 drain
   if (signalHandled) {
     log("warn", "shutdown_forced_by_signal", { signal });
@@ -627,7 +632,7 @@ function handleSignal(signal: string): void {
       await flushMemoryUsage();
       stopMemoryMaintenance();
       await closeAllBrowserSessions();
-  await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
+      await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，
     // 并留一个 1s 的兜底定时器（不 hold 事件循环）
@@ -644,6 +649,16 @@ process.on("SIGINT", () => handleSignal("SIGINT"));
 process.on("SIGTERM", () => handleSignal("SIGTERM"));
 // Windows 控制台 Ctrl+Break 对应 SIGBREAK（POSIX 无此信号）
 if (process.platform === "win32") process.on("SIGBREAK", () => handleSignal("SIGBREAK"));
+
+// 仅桌面端注入：主进程被系统直接结束时，服务自行走同一条优雅退出链路。
+const electronParentPid = Number(process.env.ELECTRON_PARENT_PID ?? "");
+if (Number.isInteger(electronParentPid) && electronParentPid > 0) {
+  stopParentWatchdog = startParentWatchdog({
+    parentPid: electronParentPid,
+    onParentGone: () => handleSignal("electron_parent_gone"),
+  });
+  log("info", "parent_watchdog_started", { parentPid: electronParentPid });
+}
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   log("error", "server_listen_failed", { code: err.code, message: err.message, host: HOST, port: PORT });

@@ -35,7 +35,7 @@ import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
 } from "./views/attachments.js";
 import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
-import { closeEstate, installBeikeCli, openEstate, openEstateLogin, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
+import { closeEstate, installBeikeCli, openEstate, openEstateLogin, pasteEstateKeyFromClipboard, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 import { bindJob } from "./views/job.js";
 import { closeProviderForm, openProviderForm, saveModel } from "./views/model-form.js";
 import {
@@ -49,7 +49,6 @@ import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-sub
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
-import { saveMemoryFromForm } from "./views/settings-memories.js";
 import { bindCommandSettings, refreshCommands } from "./views/settings-commands.js";
 import {
   filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
@@ -220,7 +219,6 @@ async function init(): Promise<void> {
   bindSubagentSettings();
   bindCommandSettings();
   on("stats-refresh", "click", refreshStats);
-  on("mem-add-btn", "click", () => { void saveMemoryFromForm(); });
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   });
@@ -440,6 +438,7 @@ async function init(): Promise<void> {
   });
   on("estate-install", "click", () => { void installBeikeCli(); });
   on("estate-login-open", "click", () => { void openEstateLogin(); });
+  on("estate-key-paste", "click", () => { void pasteEstateKeyFromClipboard(); });
   on("estate-key-save", "click", () => { void saveEstateKey(); });
   on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
 
@@ -508,10 +507,6 @@ async function init(): Promise<void> {
     if (e.key === "Enter" && ["pf-name", "pf-base-url", "pf-api-key"].includes(target.id)) {
       e.preventDefault();
       void saveProvider();
-    }
-    if (e.key === "Enter" && (target.id === "mem-key" || (target.id === "mem-content" && (e.ctrlKey || e.metaKey)))) {
-      e.preventDefault();
-      void saveMemoryFromForm();
     }
     if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(target.id)) {
       e.preventDefault();

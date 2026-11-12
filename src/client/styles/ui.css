@@ -87,7 +87,6 @@
 
 .ui-config-control { min-height: 38px; }
 .ui-config-textarea { line-height: 1.6; resize: vertical; }
-.memory-add-row > .ui-config-textarea { min-height: 88px; }
 
 .ui-config-control[spellcheck="false"],
 .ui-config-control[type="url"],

@@ -51,7 +51,7 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
-const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=beike_skill";
+const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=unknown";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
 const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
@@ -497,6 +497,12 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   await ensureLoaded();
   const key = apiKey.trim();
   if (!key) throw new Error("Key 不能为空：登录贝壳获取后完整复制粘贴");
+  if (/\*{2,}|…/.test(key)) {
+    return {
+      ok: false,
+      message: "检测到的是页面掩码，不是完整 Key。请点击官方页面 Key 右侧的「复制」按钮，再点「从剪贴板读取」或手动粘贴",
+    };
+  }
   let bin: string;
   try {
     bin = (await ensureBeike()).path;

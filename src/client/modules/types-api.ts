@@ -578,9 +578,15 @@ export interface MemoryRetentionSettings {
   identityDays: number;
 }
 
+export interface MemoryPersonalizationSettings {
+  enabled: boolean;
+  text: string;
+}
+
 export interface MemorySlotConfig {
   activeProvider: "local" | "http";
   local: { allowPII: boolean };
+  personalization: MemoryPersonalizationSettings;
   http: MemoryHttpSettings;
   distillation: MemoryDistillationSettings;
   embedding: MemoryEmbeddingSettings;

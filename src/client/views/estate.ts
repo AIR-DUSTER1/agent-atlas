@@ -85,6 +85,39 @@ export async function installBeikeCli(): Promise<void> {
   }
 }
 
+export async function pasteEstateKeyFromClipboard(): Promise<void> {
+  const button = $("estate-key-paste") as HTMLButtonElement | null;
+  const status = $("estate-status2");
+  if (!navigator.clipboard?.readText) {
+    if (status) {
+      status.textContent = "✗ 当前环境不允许读取剪贴板，请手动粘贴完整 Key";
+      status.style.color = "var(--red)";
+    }
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const text = (await navigator.clipboard.readText()).trim();
+    if (!text) {
+      if (status) {
+        status.textContent = "✗ 剪贴板为空：请先在官方页面点击 Key 右侧的「复制」";
+        status.style.color = "var(--red)";
+      }
+      return;
+    }
+    const input = $("estate-key") as HTMLInputElement | null;
+    if (input) input.value = text;
+    await saveEstateKey();
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ 无法读取剪贴板：${(err as Error).message}；请手动粘贴完整 Key`;
+      status.style.color = "var(--red)";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 export async function saveEstateKey(): Promise<void> {
   const value = (($("estate-key") as HTMLInputElement | null)?.value || "").trim();
   const s2 = $("estate-status2");
@@ -139,7 +172,7 @@ export async function openEstateLogin(): Promise<void> {
     const result = await requestEstateLogin();
     if (status) {
       status.textContent = result.ok
-        ? "✓ 登录页已在系统浏览器打开。请手动扫码，登录后复制页面显示的 Key 并粘贴保存"
+        ? "✓ 登录页已在系统浏览器打开。请扫码，成功后点页面 Key 右侧的「复制」，再回到这里点「从剪贴板读取」"
         : `✗ ${result.message || result.error || "浏览器未能自动打开"}${result.url ? `；可手动访问：${result.url}` : ""}`;
       status.style.color = result.ok ? "" : "var(--red)";
     }
@@ -242,7 +275,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
       reopen.textContent = "正在打开…";
       try {
         const result = await requestEstateLogin();
-        reopen.textContent = result.ok ? "✓ 登录页已打开，请扫码后粘贴 Key" : `✗ ${result.message || result.error || "打开失败"}`;
+        reopen.textContent = result.ok ? "✓ 登录页已打开，请扫码后点「复制」，再回设置页读取剪贴板" : `✗ ${result.message || result.error || "打开失败"}`;
       } catch (err) {
         reopen.textContent = `打开失败：${(err as Error).message}`;
       } finally {
@@ -266,7 +299,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const keyA = box.querySelector<HTMLAnchorElement>(".key-link");
     if (keyA) {
       keyA.textContent = "获取贝壳 Key（building.ke.com）";
-      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=beike_skill";
+      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=unknown";
     }
     const fix = document.createElement("button");
     fix.className = "btn btn-approve";
