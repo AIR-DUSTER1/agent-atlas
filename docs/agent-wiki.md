@@ -63,6 +63,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 ├── Dockerfile / docker-compose*.yml # 单实例容器部署（/data 数据卷，§3.19）
 ├── desktop/
 │   ├── main.ts           # Electron 主进程：子进程托管 Web 服务 + 窗口加载（§3.14）
+│   ├── startup.ts        # 端口选择、就绪探测与页面加载重试（可独立单测）
 │   ├── preload.ts        # 渲染进程最小桥，构建时编成 preload.cjs
 │   └── build/            # 构建产物（npm run build:desktop 生成，gitignore）
 └── src/
@@ -87,6 +88,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── job-cards.ts / job-health.ts / job-diagnose.ts           # 卡片解析、健康分级与站点诊断（§3.47）
         ├── health.ts     # /healthz 存活 + /readyz 就绪探针（§3.19）
         ├── lifecycle.ts  # 在途请求统计 + 优雅退出（§3.19）
+        ├── parent-watchdog.ts # 桌面端父进程消失后自动退出（§3.14）
         ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
         ├── stream.ts     # LangGraph 原始流事件 → 前端友好事件（token/工具卡/审批）的翻译层
         ├── mock.ts       # 未配置 API_KEY 时的模拟模型（事件协议与真实图一致）
@@ -653,24 +655,25 @@ Header: Authorization: Bearer <key>（可留空）
 - *实战坑*：`getRagPublic` 改成 async 后，路由内所有调用点都要 `await`，
   否则 `JSON.stringify(Promise)` 得到 `{}`（注册表一度「凭空消失/翻倍」）。
 
-### 3.14 `desktop/main.ts` — Electron 桌面端
+### 3.14 `desktop/main.ts` + `desktop/startup.ts` — Electron 桌面端
 
 **策略**：桌面端 = 原生窗口 + 托管已有 Web 服务，前后端逻辑零改动。
 
-**源码与产物**：源码是 TypeScript（`main.ts` + `preload.ts`），`npm run build:desktop`
+**源码与产物**：源码是 TypeScript（`main.ts` + `startup.ts` + `preload.ts`），`npm run build:desktop`
 编译到 `desktop/build/`（gitignore）。主进程编成 ESM 的 `main.js`（`package.json` 是
 `"type":"module"`）；preload 因 sandbox 只支持 CommonJS，单独用 `module: CommonJS`
-再编一轮并改名 `preload.cjs`。构建末尾自检两个产物都在，缺一个就失败退出 ——
+再编一轮并改名 `preload.cjs`。构建末尾自检 `main.js`、`startup.js`、`preload.cjs` 都在，缺一个就失败退出 ——
 缺 `preload.cjs` 时桌面端白屏且 `window.desktop` 失效，而进程本身不报错。
 
-- 启动：以子进程拉起 `npx tsx src/server/index.ts`（独立端口 3123，
-  与 `npm run web` 的 3000 互不打架；Windows 上 `.cmd` 必须 `shell:true`）；
-- 就绪探测：轮询 `GET /api/config` 直到可连接（≤90s）才 `new BrowserWindow()`；
-- 窗口：`ready-to-show` 再显示避免白屏；`backgroundColor` 预置深色；外部链接
+- 启动：首选 3123（与 `npm run web` 的 3000 互不打架）；若被孤儿进程占用，
+  先用真实 bind 探测顺延到下一可用端口；再直接用 Electron 自带 Node 执行本地 tsx CLI，
+  去掉 npx→cmd 中间层；子进程同时收到 `ELECTRON_PARENT_PID`，用于父进程消失自检；
+- 就绪探测：轮询 `GET /api/config`，仅 2xx 算就绪（≤90s）；探测期间子进程退出会立即失败；
+- 窗口：服务就绪后创建 BrowserWindow，`loadURL` 对瞬时断连做有限退避重试，成功后才显示；外部链接
   `setWindowOpenHandler` 交给系统浏览器；
 - 退出：`window-all-closed` → **同步等待** `taskkill /pid <pid> /T /F` 完成，
-  杀干净 npx→node→tsx 子进程树（孤儿 tsx 会继续占用端口，这就是必须 /T 的原因）；
-  若用异步 `spawn` 发完 taskkill 就退出 Electron，子进程树会残留（桌面实测踩坑）；
+  杀干净 Electron-as-Node→tsx 子进程树；Web 服务另带父进程看门狗，主进程被系统直接
+  终止时也会在 1.5 秒内优雅退出，不依赖 Electron 是否来得及执行 `before-quit`；
 - 单实例锁：二次启动 `requestSingleInstanceLock` 失败即退出并聚焦已有窗口；
 - **无白标题栏**：Windows 以 `titleBarStyle:"hidden" + titleBarOverlay` 隐藏系统标题栏，
   右上角三枚窗口控制键由原生绘制、颜色跟随应用深浅主题 —— 链路是
@@ -1646,7 +1649,7 @@ console.log(result.messages.at(-1).content);
 | 子代理固定模型显示「不可用」 | 原供应商或模型已删除/改名；编辑子代理重新选择，或改回「继承当前主对话模型」 |
 | 子代理继承了错误模型 | 继承绑定的是创建父图时冻结的当前模型；切换模型后需等该会话下一条消息重建图，再发起委派 |
 | 子代理取消后仍有残留任务 | 父请求 `AbortSignal` 会传入子图；若使用自定义工具绕过 `invoke(..., { signal })`，工具实现必须自己消费取消信号 |
-| 桌面端起不来 / 端口被占用             | 孤儿 tsx 进程占着 3123：退出时必须**同步等待** `taskkill /pid X /T /F` 完成；用 `spawn` 异步发完就 `app.quit()` 会留下 npx→tsx→node 树（桌面实测踩到，改 `execFileSync` 后复测无孤儿）。手动排查 `tasklist \| findstr tsx` 后结束进程，或换 `DESKTOP_PORT` |
+| 桌面端起不来 / 端口被占用             | 现启动链路会先探测端口并自动顺延；服务由 Electron 自带 Node 直接运行 tsx，主进程消失后 Web 服务看门狗会在 1.5 秒内退出。正常退出仍用 `taskkill /pid X /T /F` 同步清理；页面加载失败会退避重试，不再停在 `ERR_CONNECTION_REFUSED` 错误页。极端残留可 `tasklist \| findstr electron` 清理或设置 `DESKTOP_PORT` |
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 | 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展示登录卡并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存，界面会显示 doctor 返回的完整失败原因；新 Key 通过 doctor 后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL）。贝壳官方 `/auth/callback` 现在已恢复为正常页面；应使用系统默认浏览器手动扫码并复制 Key。若再次出现 `Not Found`，先停止重试并等待贝壳修复，不要用自动化浏览器、脚本点击或后台换票绕过风控 |
 | 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒。登录阶段只用系统浏览器打开一次，不预点击、不代扫；出现验证页时停止 10-30 分钟，不使用换 IP、伪装 UA 或脚本重试规避 |

@@ -205,7 +205,8 @@ npm run typecheck       # 后端、前端与桌面端三套 TypeScript 检查
 npm test                # 单元、集成、安全、故障与负载测试
 npm run e2e             # Playwright 浏览器主流程
 npm run build:client    # 构建前端浏览器产物
-npm run build:desktop   # 构建 Electron 主进程与 preload
+npm run build:desktop   # 构建 Electron 主进程、启动原语与 preload
+npm run desktop         # 启动桌面端；自动处理端口冲突与退出清理
 npm run audit:prod      # 检查生产依赖高危漏洞
 npm run data:check      # 校验配置、journal、checkpoint 与备份
 ```
