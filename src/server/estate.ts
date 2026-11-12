@@ -52,6 +52,7 @@ export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=unknown";
+const BEIKE_MCP_URL = "https://building.ke.com/mcp";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
 const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
@@ -493,6 +494,39 @@ function redactSecret(sample: string, secret: string): string {
   return sample.split(s).join(`${s.slice(0, REDACT_KEEP)}****${s.slice(-REDACT_KEEP)}`);
 }
 
+/** 用官方 MCP initialize 直接验证 Bearer Key，绕过 CLI doctor 的已知误报。 */
+export async function probeBeikeMcpKey(apiKey: string): Promise<boolean> {
+  const key = apiKey.trim();
+  if (!key) return false;
+  try {
+    const res = await fetch(BEIKE_MCP_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "agentatlas/1.0",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "agentatlas", version: "1.0" },
+        },
+      }),
+      signal: AbortSignal.timeout(KEY_AUTH_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const text = await res.text();
+    return /"result"\s*:/.test(text) && /"serverInfo"|"protocolVersion"/.test(text) && !/"error"\s*:/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
   await ensureLoaded();
   const key = apiKey.trim();
@@ -523,10 +557,18 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   await fsp.writeFile(BEIKE_CRED_FILE, key, { mode: 0o600 });
   const doctor = await runBeikeRaw(bin, ["doctor"], KEY_AUTH_TIMEOUT_MS);
   const out = `${doctor.stdout}\n${doctor.stderr}`;
-  if (/Key 有效/.test(out)) {
+  const doctorValid = /Key 有效/.test(out);
+  const mcpValid = !doctorValid && await probeBeikeMcpKey(key);
+  if (doctorValid || mcpValid) {
     beikeLoginGate = null;
     beikeCredentialVerified = true;
-    return { ok: true, message: "Key 已保存并通过 CLI 校验，可以开始找房了" };
+    writeAudit("beike.keyValidated", { via: doctorValid ? "doctor" : "mcp" });
+    return {
+      ok: true,
+      message: doctorValid
+        ? "Key 已保存并通过 CLI 校验，可以开始找房了"
+        : "Key 已保存并通过官方 MCP 校验（已忽略 CLI doctor 的误报）",
+    };
   }
   let restoreError = "";
   try {
