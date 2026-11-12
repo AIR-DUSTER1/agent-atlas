@@ -625,7 +625,7 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   const detail = tail
     ? `凭证校验未通过：${redactSecret(tail, key)}`
     : "凭证校验未通过，请确认复制的是页面上的完整字符";
-  const sourceHint = "若该 Key 来自 WorkBuddy 等其他客户端，来源或会话可能不匹配；请在本应用的登录页重新获取后保存。";
+  const sourceHint = "若该 Key 来自 WorkBuddy，贝壳 MCP 会校验调用方 User-Agent；请改在 WorkBuddy 内使用，或向贝壳申请当前客户端可用的 Key，不要跨客户端复用。";
   return {
     ok: false,
     message: restoreError
@@ -691,7 +691,7 @@ async function beikeAuthOutcome(action: string): Promise<BeikeOutcome> {
     loginUrl: gate.loginUrl,
     loginOpened: gate.opened,
     stopAgent: true,
-    error: "贝壳登录已失效。请在登录卡中打开官方登录页，使用贝壳找房 App 扫码；拿到 Key 后到「设置 → 插件 → 找房数据源」保存再重试。",
+    error: "贝壳鉴权未通过：Key 可能已失效，或与当前客户端调用方不匹配。若 Key 来自 WorkBuddy，请改在 WorkBuddy 内使用，或向贝壳申请当前客户端可用的 Key；否则请在登录卡中重新扫码获取并保存。",
   };
 }
 

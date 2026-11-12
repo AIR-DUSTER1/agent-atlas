@@ -136,7 +136,8 @@ test("保存 Key 的失败原因完整展示，不回退成未知错误", async 
   assert.match(estate, /fsp\.writeFile\(BEIKE_CRED_FILE, previousKey/);
   assert.match(estate, /probeBeikeMcpKey\(key, found\.version\)/);
   assert.match(estate, /method: "tools\/list"/);
-  assert.match(estate, /来源或会话可能不匹配/);
+  assert.match(estate, /调用方 User-Agent/);
+  assert.match(estate, /不要跨客户端复用/);
   assert.match(estate, /beike\.keyValidated/);
 });
 
