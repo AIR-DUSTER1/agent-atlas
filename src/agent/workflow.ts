@@ -57,6 +57,7 @@ import {
   createWorkflowPlanFromDraft,
   finalizeWorkflowPlan,
   normalizeWorkflowPlanDraft,
+  settleReviewPassedPlan,
   workflowPlanPrompt,
   workflowPlanSummary,
   WORKFLOW_PLAN_TOOL_NAME,
@@ -857,7 +858,7 @@ export function createWorkflowGraph(
     ) ?? [];
     // 回炉上限：普通模式 3 次防死循环；连续模式放宽到保险丝级，靠空转熔断与异常兜底
     const cap = continuous ? MAX_CONTINUOUS_REVISIONS : MAX_REVIEW_REVISIONS;
-    const finishPlan = (status: "completed" | "failed") => finalizeWorkflowPlan(plan, status);
+    const finishPlan = (status: "completed" | "failed", target = plan) => finalizeWorkflowPlan(target, status);
     try {
       const response = await invokeModel(reviewerModel, [
         { role: "system", content: continuous ? continuousReviewPrompt : reviewPrompt },
@@ -873,9 +874,15 @@ export function createWorkflowGraph(
       ], nodeConfig?.signal, options?.sessionId);
       observeModel("review", response);
       const review = parseReviewResult(contentText(response.content));
-      // 计划是可见承诺：有未完成/失败步骤时，即使模型说 passes 也不能提前收尾。
-      if (review.passes && unfinishedPlanSteps.length && attempts < cap) {
-        const names = unfinishedPlanSteps.slice(0, 6).map((step) => step.title).join("、");
+      // 模型常忘记把最后一个 in_progress 步骤标 completed。反思已确认结果满足需求时，
+      // 若只差这一个 active 步骤封口，由编排层补 bookkeeping，避免同一答案被反复回炉。
+      const settledPlan = review.passes ? settleReviewPassedPlan(plan) : plan;
+      const unsettledPlanSteps = settledPlan?.steps.filter(
+        (step) => step.status !== "completed" && step.status !== "skipped",
+      ) ?? [];
+      // 计划是可见承诺：仍有 pending / failed 步骤时，即使模型说 passes 也不能提前收尾。
+      if (review.passes && unsettledPlanSteps.length && attempts < cap) {
+        const names = unsettledPlanSteps.slice(0, 6).map((step) => step.title).join("、");
         return {
           reviewFeedback: `执行流程仍有未完成或失败的步骤：${names}。请继续执行，并用 update_workflow_plan 同步证据；无法完成的步骤标记 failed 或 skipped 并说明原因。`,
           reviewAttempts: attempts + 1,
@@ -887,7 +894,7 @@ export function createWorkflowGraph(
           reviewFeedback: "",
           reviewAttempts: attempts + 1,
           ...bookkeeping,
-          ...(plan ? { workflowPlan: finishPlan(unfinishedPlanSteps.length ? "failed" : "completed") } : {}),
+          ...(settledPlan ? { workflowPlan: finishPlan(unsettledPlanSteps.length ? "failed" : "completed", settledPlan) } : {}),
         };
       }
       // 连续模式空转熔断：反思连续多轮不通过且期间没有任何工具动作，

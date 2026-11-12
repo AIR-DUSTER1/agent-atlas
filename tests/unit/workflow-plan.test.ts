@@ -18,6 +18,7 @@ import {
   createWorkflowPlanFromDraft,
   finalizeWorkflowPlan,
   normalizeWorkflowPlanDraft,
+  settleReviewPassedPlan,
   WORKFLOW_PLAN_TOOL_NAME,
 } from "../../src/workflow-plan.js";
 import { createWorkflowGraph, parseRequirementAnalysis, type WorkflowChatModel } from "../../src/agent/workflow.js";
@@ -94,6 +95,30 @@ test("流程收口：所有步骤完成或跳过后状态为 completed", () => {
   assert.equal(finalized, done, "已收口流程不应重复制造 revision");
 });
 
+test("反思通过：仅剩唯一 in_progress 步骤时自动封口，pending/failed 仍阻止通过", () => {
+  const draft = normalizeWorkflowPlanDraft({
+    goal: "完成结果交付",
+    steps: [{ title: "收集数据" }, { title: "输出结果" }],
+  });
+  assert.ok(draft);
+  const initial = createWorkflowPlanFromDraft(draft, 1_000, "plan-review-settle");
+  assert.ok(initial);
+  const progressed = applyWorkflowPlanToolInput(initial, {
+    updates: [
+      { stepId: "step-1", status: "completed", note: "数据已收集" },
+      { stepId: "step-2", status: "in_progress" },
+    ],
+  }, 2_000);
+  assert.ok(progressed);
+  const settled = settleReviewPassedPlan(progressed, 3_000);
+  assert.ok(settled);
+  assert.equal(settled.status, "completed");
+  assert.equal(settled.activeStepId, null);
+  assert.equal(settled.steps[1]?.status, "completed");
+  assert.match(settled.steps[1]?.note || "", /反思确认/);
+  assert.equal(settleReviewPassedPlan(initial, 3_000), initial, "仍有 pending 步骤时不得自动收口");
+});
+
 test("需求分析：plan JSON 被规范化，简单任务保持 null", () => {
   const withPlan = parseRequirementAnalysis(JSON.stringify({
     understood: true,
@@ -143,6 +168,65 @@ class PlanThenAnswerModel extends BaseChatModel {
     return { generations: [{ text: "", message }] };
   }
 }
+
+/** 模拟真实故障：模型做完最后一步却没有再调用 update_workflow_plan 封口。 */
+class PlanLeavesActiveStepModel extends BaseChatModel {
+  private step = 0;
+
+  constructor() { super({}); }
+
+  _llmType(): string { return "plan-leaves-active-fake"; }
+
+  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
+    this.step += 1;
+    const message = this.step === 1
+      ? new AIMessage({
+          content: "",
+          tool_calls: [{
+            name: WORKFLOW_PLAN_TOOL_NAME,
+            args: { updates: [
+              { stepId: "step-1", status: "completed", note: "已读取代码" },
+              { stepId: "step-2", status: "in_progress" },
+            ] },
+            id: "plan-update-stale",
+            type: "tool_call",
+          }],
+        })
+      : new AIMessage("修复已经完成，测试也已通过。");
+    return { generations: [{ text: "", message }] };
+  }
+}
+
+test("LangGraph：反思已通过时自动收口遗留的 in_progress 步骤", async () => {
+  const analyst = new FakeListChatModel({
+    responses: [JSON.stringify({
+      understood: true,
+      brief: "修复并验证代码",
+      questions: [],
+      plan: { goal: "修复并验证代码", steps: [{ title: "读取代码" }, { title: "运行测试" }] },
+    })],
+  });
+  const reviewer = new FakeListChatModel({
+    responses: [JSON.stringify({ passes: true, reason: "测试证据已满足", feedback: "" })],
+  });
+  const graph = createWorkflowGraph(testProfile, {
+    agent: new PlanLeavesActiveStepModel() as unknown as WorkflowChatModel,
+    analyst: analyst as unknown as WorkflowChatModel,
+    reviewer: reviewer as unknown as WorkflowChatModel,
+  }, { checkpointer: new MemorySaver() });
+  const result = await graph.invoke(
+    { messages: [new HumanMessage("修复代码并运行测试")] },
+    { configurable: { thread_id: `plan-settle-${randomUUID()}` } },
+  ) as unknown as {
+    workflowPlan?: { status: string; activeStepId: string | null; steps: Array<{ status: string; note?: string }> };
+    reviewAttempts?: number;
+  };
+  assert.equal(result.workflowPlan?.status, "completed");
+  assert.equal(result.workflowPlan?.activeStepId, null);
+  assert.deepEqual(result.workflowPlan?.steps.map((step) => step.status), ["completed", "completed"]);
+  assert.match(result.workflowPlan?.steps[1]?.note || "", /反思确认/);
+  assert.equal(result.reviewAttempts, 1);
+});
 
 test("LangGraph：analyze 计划可由受控工具推进并在反思后收口", async () => {
   const analyst = new FakeListChatModel({

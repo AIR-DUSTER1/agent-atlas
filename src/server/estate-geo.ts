@@ -21,6 +21,10 @@ const GEOCODE_MAX_ITEMS = 6;              // 单次地图对比最多同时定�
 /** Nominatim 要求带可识别的 UA，否则可能被拒 */
 const NOMINATIM_UA = `${PRODUCT_USER_AGENT} (local agentatlas)`;
 
+function b64(input: string): string {
+  return encodeURIComponent(input);
+}
+
 // ---------------------------------------------------------------------------
 // 区位 geocode：Nominatim（无 key）+ 串行限速 + 内存缓存
 // 出口形状（tools-estate.ts 组装给前端专属渲染）：
@@ -38,8 +42,10 @@ export interface GeocodePoint {
 const geocodeCache = new Map<string, { lat: number; lng: number; address: string } | null>();
 let geocodeQueue: Promise<void> = Promise.resolve();
 
-function b64(input: string): string {
-  return encodeURIComponent(input);
+export function buildPointMapEmbed(lat: number, lng: number): string {
+  const pad = 0.012;
+  const bbox = `${lng - pad},${lat - pad},${lng + pad},${lat + pad}`;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
 }
 
 /** 三家国内地图 + OSM 的直达链接（无 key；uri 协议链接浏览器直接打开） */
@@ -107,8 +113,16 @@ export function geocodeAddress(name: string, city: string): Promise<{ lat: numbe
 export const GEOCODE_LIMITS = { maxItems: GEOCODE_MAX_ITEMS };
 
 /** 多点对比结果组装（tools-estate.ts 的 house_map 调用） */
+export interface CompareMapItem {
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  source?: string;
+}
+
 export async function buildCompareMap(
-  items: Array<{ name: string; address?: string }>,
+  items: CompareMapItem[],
   city: string
 ): Promise<{
   points: GeocodePoint[];
@@ -120,6 +134,21 @@ export async function buildCompareMap(
   const located: GeocodePoint[] = [];
   const missing: Array<{ name: string; links: GeocodePoint["links"] }> = [];
   for (const item of capped) {
+    const exact = Number.isFinite(item.lat) && Number.isFinite(item.lng)
+      && Math.abs(item.lat as number) <= 90 && Math.abs(item.lng as number) <= 180;
+    if (exact) {
+      const lat = item.lat as number;
+      const lng = item.lng as number;
+      located.push({
+        name: item.name,
+        address: item.address,
+        lat,
+        lng,
+        source: item.source || "provided",
+        links: buildMapLinks(item.name, lat, lng, city),
+      });
+      continue;
+    }
     const target = item.address?.trim() || item.name;
     const hit = await geocodeAddress(target, city);
     if (hit) {
@@ -135,20 +164,23 @@ export async function buildCompareMap(
       missing.push({ name: item.name, links: searchLinks(target, city) });
     }
   }
-  // OSM embed iframe：bbox 覆盖全部已定位点（留 ~0.02° 边距）；单点附加 marker
+  // 单点用贝壳精确坐标直接放置 marker；多点用 bbox 展示整体分布。
+  // OSM export/embed 只支持一个 marker，因此多点时标记首个点，逐点核对仍由下方链接保证。
   let embedUrl = "";
   if (located.length) {
-    const lats = located.map((p) => p.lat);
-    const lngs = located.map((p) => p.lng);
-    const pad = 0.02;
-    const minLat = Math.min(...lats) - pad;
-    const maxLat = Math.max(...lats) + pad;
-    const minLng = Math.min(...lngs) - pad;
-    const maxLng = Math.max(...lngs) + pad;
     const one = located[0];
-    embedUrl =
-      `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik` +
-      (located.length === 1 ? `&marker=${one.lat},${one.lng}` : "");
+    if (located.length === 1) {
+      embedUrl = buildPointMapEmbed(one.lat, one.lng);
+    } else {
+      const lats = located.map((p) => p.lat);
+      const lngs = located.map((p) => p.lng);
+      const pad = 0.02;
+      const minLat = Math.min(...lats) - pad;
+      const maxLat = Math.max(...lats) + pad;
+      const minLng = Math.min(...lngs) - pad;
+      const maxLng = Math.max(...lngs) + pad;
+      embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik&marker=${one.lat},${one.lng}`;
+    }
   }
   return { points: located, geoMissing: missing, embedUrl, city };
 }

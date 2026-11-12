@@ -204,7 +204,22 @@ interface EstateListing {
 
 interface EstatePoint {
   name?: string;
+  label?: string;
   address?: string;
+  lat?: number;
+  lng?: number;
+  source?: string;
+  links?: Record<string, string>;
+}
+
+interface EstateLocation {
+  label?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  source?: string;
+  precision?: "building" | "community";
+  embedUrl?: string;
   links?: Record<string, string>;
 }
 
@@ -219,8 +234,10 @@ interface EstatePayload {
   action?: string;
   city?: string;
   mode?: string;
+  houseId?: string;
   listings?: EstateListing[];
   points?: EstatePoint[];
+  location?: EstateLocation;
   embedUrl?: string;
   note?: string;
   images?: string[];
@@ -247,6 +264,47 @@ function linkButton(label: string, href: string): HTMLAnchorElement {
   a.target = "_blank";
   a.rel = "noopener";
   return a;
+}
+
+const MAP_LINK_LABELS: Record<string, string> = {
+  amap: "高德地图", qq: "腾讯地图", baidu: "百度地图", osm: "OSM",
+};
+
+/** 地图 iframe 只接受 OSM 官方 embed；其余链接仍作为手动核对入口。 */
+function appendMapIframe(extra: HTMLElement, embedUrl: string | undefined, title: string): boolean {
+  const embed = String(embedUrl || "");
+  if (!/^https:\/\/www\.openstreetmap\.org\//i.test(embed)) return false;
+  const mapBox = document.createElement("div");
+  mapBox.className = "estate-map-embed";
+  const iframe = document.createElement("iframe");
+  iframe.src = embed;
+  iframe.loading = "lazy";
+  iframe.title = title;
+  mapBox.appendChild(iframe);
+  extra.appendChild(mapBox);
+  return true;
+}
+
+function appendPointRow(extra: HTMLElement, point: EstatePoint): void {
+  const row = document.createElement("div");
+  row.className = "estate-point";
+  row.innerHTML = `<div class="estate-point-main"><div class="estate-point-name"></div><div class="estate-point-addr"></div></div><div class="estate-point-links"></div>`;
+  const nameEl = row.querySelector(".estate-point-name");
+  if (nameEl) nameEl.textContent = point.name || point.label || "未知点位";
+  const addrEl = row.querySelector(".estate-point-addr");
+  if (addrEl) {
+    const coords = Number.isFinite(point.lat) && Number.isFinite(point.lng)
+      ? `${point.lat?.toFixed(6)}, ${point.lng?.toFixed(6)}`
+      : "";
+    addrEl.textContent = [point.address, coords].filter(Boolean).join(" · ");
+  }
+  const links = row.querySelector(".estate-point-links");
+  for (const [label, value] of Object.entries(point.links || {})) {
+    const href = safeHref(value);
+    if (!href || !links) continue;
+    links.appendChild(linkButton(MAP_LINK_LABELS[label] || label, href));
+  }
+  extra.appendChild(row);
 }
 
 export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void {
@@ -340,6 +398,26 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     return;
   }
 
+  // 单套房源详情 → 贝壳小区坐标直接渲染地图；这是用户核对通勤与周边位置的
+  // 主交付，不能因为 house_map 的地址 geocode 失败而退化成一句“地图未定位”。
+  if (data.action === "detail" && data.location) {
+    const loc = data.location;
+    const extra = estateExtra(card);
+    appendMapIframe(extra, loc.embedUrl, "房源所在小区地图");
+    const precisionLabel = loc.precision === "building" ? "楼栋精确位置"
+      : loc.precision === "community" ? "小区位置" : "";
+    appendPointRow(extra, {
+      name: loc.label || `房源 ${data.houseId || ""}`,
+      address: [precisionLabel, loc.address || data.city].filter(Boolean).join(" · "),
+      lat: loc.lat,
+      lng: loc.lng,
+      source: loc.source,
+      links: loc.links,
+    });
+    card.classList.add("open", "estate-rich");
+    return;
+  }
+
   // 房源搜索 → 列表卡
   const listings = Array.isArray(data.listings) ? data.listings : [];
   if (data.action === "search" || listings.length) {
@@ -400,33 +478,8 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   if (data.action === "map") {
     const extra = estateExtra(card);
     const points = Array.isArray(data.points) ? data.points : [];
-    const embed = String(data.embedUrl || "");
-    if (points.length && /^https:\/\/www\.openstreetmap\.org\//i.test(embed)) {
-      const mapBox = document.createElement("div");
-      mapBox.className = "estate-map-embed";
-      const iframe = document.createElement("iframe");
-      iframe.src = embed;
-      iframe.loading = "lazy";
-      iframe.title = "候选房源分布地图";
-      mapBox.appendChild(iframe);
-      extra.appendChild(mapBox);
-    }
-    for (const p of points) {
-      const row = document.createElement("div");
-      row.className = "estate-point";
-      row.innerHTML = `<div class="estate-point-main"><div class="estate-point-name"></div><div class="estate-point-addr"></div></div><div class="estate-point-links"></div>`;
-      const nameEl = row.querySelector(".estate-point-name");
-      if (nameEl) nameEl.textContent = p.name || "未知点位";
-      const addrEl = row.querySelector(".estate-point-addr");
-      if (addrEl) addrEl.textContent = p.address || "";
-      const links = row.querySelector(".estate-point-links");
-      for (const [label, value] of Object.entries(p.links || {})) {
-        const href = safeHref(value);
-        if (!href || !links) continue;
-        links.appendChild(linkButton(label, href));
-      }
-      extra.appendChild(row);
-    }
+    if (points.length) appendMapIframe(extra, data.embedUrl, "候选房源分布地图");
+    for (const p of points) appendPointRow(extra, p);
     if (points.length) card.classList.add("open", "estate-rich");
     if (data.note) {
       const note = document.createElement("div");
@@ -439,19 +492,19 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
 
   // 户型图 → 图片网格。与地图同理，图片必须直接可见，不能埋在两层折叠里。
   if (data.action === "material") {
-    const images = Array.isArray(data.images) ? data.images : [];
+    const images = (Array.isArray(data.images) ? data.images : [])
+      .map((src) => safeImageSrc(src))
+      .filter(Boolean);
     const extra = estateExtra(card);
     if (images.length) {
       card.classList.add("open", "estate-rich");
       const grid = document.createElement("div");
       grid.className = "estate-material-grid";
-      for (const src of images) {
-        const s = safeImageSrc(src);
-        if (!s) continue;
+      images.forEach((src, index) => {
         const img = document.createElement("img");
-        img.src = s; img.alt = "户型图"; img.loading = "lazy";
+        img.src = src; img.alt = `房源 ${data.houseId || ""} 户型图 ${index + 1}`; img.loading = "lazy";
         grid.appendChild(img);
-      }
+      });
       extra.appendChild(grid);
     }
     const href = safeHref(data.vr || data.detailUrl || data.url);

@@ -263,6 +263,33 @@ export function finalizeWorkflowPlan(
   };
 }
 
+/**
+ * 反思已判定实际结果满足需求，但模型忘了把最后一个 in_progress 步骤封口时，
+ * 由编排层补一次确定性的 bookkeeping。只在没有 pending / failed 步骤时生效；
+ * 任何尚未真正执行的步骤仍会留给反思节点继续追。
+ */
+export function settleReviewPassedPlan(
+  plan: WorkflowPlanSnapshot | null,
+  now = Date.now(),
+): WorkflowPlanSnapshot | null {
+  if (!plan || plan.status !== "running") return plan;
+  if (plan.steps.some((step) => step.status === "pending" || step.status === "failed")) return plan;
+  const active = plan.steps.filter((step) => step.status === "in_progress");
+  if (active.length !== 1) return plan;
+  const activeId = active[0]?.id;
+  const steps = plan.steps.map((step) => step.id === activeId
+    ? { ...step, status: "completed" as const, note: step.note || "结果反思确认已完成" }
+    : { ...step });
+  return {
+    ...plan,
+    steps,
+    status: "completed",
+    activeStepId: null,
+    revision: plan.revision + 1,
+    updatedAt: now,
+  };
+}
+
 export function workflowPlanSummary(plan: WorkflowPlanSnapshot | null): string {
   if (!plan) return "（本轮没有执行流程）";
   const lines = plan.steps.map((step) => {
@@ -285,6 +312,7 @@ export function workflowPlanPrompt(plan: WorkflowPlanSnapshot | null): string {
     "3. 每个步骤开始/结束时调用 update_workflow_plan：{\"updates\":[{\"stepId\":\"step-1\",\"status\":\"completed\",\"note\":\"证据或结果\"},{\"stepId\":\"step-2\",\"status\":\"in_progress\"}]}；只有一个步骤进行中。",
     "4. completed 必须有真实工具结果或明确产出支撑；失败标 failed，跳过标 skipped 并写明原因。全部步骤结束后才能收尾。",
     "5. 规划调用必须单独发起，不要和 terminal、write_file、browser 等业务工具放在同一批。",
+    "6. 收尾前必须单独调用 update_workflow_plan 封口：完成项标 completed；数据缺失或确实无法完成的步骤标 skipped / failed 并写原因，禁止把 in_progress 留给反思节点。",
   ];
   if (plan) rules.push("", "当前流程：", workflowPlanSummary(plan));
   return rules.join("\n");

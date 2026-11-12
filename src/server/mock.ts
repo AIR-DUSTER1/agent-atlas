@@ -344,6 +344,12 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       const city = /上海/.test(message) ? "上海" : /广州/.test(message) ? "广州" : /深圳/.test(message) ? "深圳" : "北京";
       const cond = /两居|两房/.test(message) ? "两居" : rent ? "一居" : "两居";
       // 内联 SVG 户型图：base64 data URL，零外链依赖且能通过前端图片白名单
+      const mapLinks = (name: string, lat: number, lng: number) => ({
+        amap: `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}&callnative=0`,
+        qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:${encodeURIComponent(name)}&referer=${PRODUCT_NAME}`,
+        baidu: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${encodeURIComponent(name)}&output=html&src=${PRODUCT_NAME}`,
+        osm: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`,
+      });
       const floorplanSvg = (label: string) =>
         "data:image/svg+xml;base64," + Buffer.from(
           `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='260'>` +
@@ -409,7 +415,30 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
         }),
       };
 
-      // ③ 户型图卡
+      // ③ 单房源详情位置：验证 location 归一化后不依赖 house_map geocode 也能出图。
+      yield { type: "node", name: "agent" };
+      yield* streamText("再看一下最推荐房源所在小区的精确位置：", signal);
+      yield { type: "node", name: "tools" };
+      const detailId = MOCK_ID();
+      const detailLat = 39.9892;
+      const detailLng = 116.4633;
+      yield* streamToolCall(detailId, "house_lookup", { action: "detail", mode: rent ? "rent" : "buy", city, houseId: "mock-listing-1" }, signal);
+      yield {
+        type: "tool_result", id: detailId,
+        content: JSON.stringify({
+          action: "detail", houseId: "mock-listing-1", city,
+          location: {
+            label: "望京花园南里", address: "望京核心区", lat: detailLat, lng: detailLng,
+            source: "mock", precision: "community",
+            embedUrl: `https://www.openstreetmap.org/export/embed.html?bbox=${detailLng - 0.012},${detailLat - 0.012},${detailLng + 0.012},${detailLat + 0.012}&layer=mapnik&marker=${detailLat},${detailLng}`,
+            links: mapLinks("望京花园南里", detailLat, detailLng),
+          },
+          presentation: { map: true, images: 0 },
+          note: "演示模式：位置为内置演示坐标。",
+        }),
+      };
+
+      // ④ 户型图卡
       yield { type: "node", name: "agent" };
       yield* streamText("顺手看一下候选一的户型图：", signal);
       yield { type: "node", name: "tools" };
@@ -425,7 +454,7 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
         }),
       };
 
-      // ④ 收尾总结
+      // ⑤ 收尾总结
       yield { type: "node", name: "agent" };
       yield* streamText(
         `### 演示小结\n\n` +

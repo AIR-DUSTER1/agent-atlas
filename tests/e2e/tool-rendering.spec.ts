@@ -63,3 +63,70 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
   expect(result.summary).toContain("terminal");
   expect(result.richOpened).toBe(true);
 });
+
+test("房源详情经纬度与 material 图片直接渲染为地图和图片网格", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart, updateToolCard }, clientState] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const detail = {
+      action: "detail",
+      houseId: "10001",
+      city: "青岛",
+      location: {
+        label: "测试花园",
+        address: "测试路 1 号",
+        lat: 36.123456,
+        lng: 120.123456,
+        source: "beike",
+        precision: "community",
+        embedUrl: "https://www.openstreetmap.org/export/embed.html?bbox=120.111456,36.111456,120.135456,36.135456&layer=mapnik&marker=36.123456,120.123456",
+        links: { amap: "https://uri.amap.com/marker?position=120.123456,36.123456&name=test" },
+      },
+      presentation: { map: true, images: 0 },
+    };
+    const image = "data:image/svg+xml;base64," + btoa("<svg xmlns='http://www.w3.org/2000/svg' width='320' height='220'><rect width='320' height='220' fill='#eee'/><text x='20' y='40'>Floor plan</text></svg>");
+    const material = {
+      action: "material",
+      houseId: "10001",
+      images: [image],
+      count: 1,
+      presentation: { images: 1 },
+    };
+    const parts = [detail, material].map((payload, index) => ({
+      p: "tool", id: `estate-render-${index}`, name: "house_lookup", argsText: "{}",
+      result: { content: JSON.stringify(payload), isError: false },
+    }));
+    for (const part of parts) {
+      block.parts.push(part);
+      mountPart(block, part);
+      updateToolCard(part);
+    }
+    const detailCard = clientState.partEls.get(parts[0])?.el;
+    const materialCard = clientState.partEls.get(parts[1])?.el;
+    const iframe = detailCard?.querySelector(".estate-map-embed iframe");
+    const img = materialCard?.querySelector(".estate-material-grid img");
+    const answer = {
+      iframeSrc: iframe?.getAttribute("src") || "",
+      imageSrc: img?.getAttribute("src") || "",
+      detailRich: detailCard?.classList.contains("estate-rich") || false,
+      materialRich: materialCard?.classList.contains("estate-rich") || false,
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    return answer;
+  });
+
+  expect(result.detailRich).toBe(true);
+  expect(result.materialRich).toBe(true);
+  expect(result.iframeSrc).toContain("openstreetmap.org/export/embed.html");
+  expect(result.iframeSrc).toContain("marker=36.123456,120.123456");
+  expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
+});

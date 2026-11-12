@@ -123,6 +123,9 @@ test("房产地图与户型图作为富结果默认可见，不被 tools 分组�
   assert.match(app, /card\.classList\.add\("open", "estate-rich"\)/);
   assert.match(app, /classList\.contains\("estate-rich"\)/);
   assert.match(app, /hasRichResult \? \{ open: true \}/);
+  assert.match(app, /data\.action === "detail" && data\.location/);
+  assert.match(app, /appendMapIframe\(extra, loc\.embedUrl/);
+  assert.match(app, /\.map\(\(src\) => safeImageSrc\(src\)\)/);
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {

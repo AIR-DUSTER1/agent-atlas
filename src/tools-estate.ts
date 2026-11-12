@@ -18,6 +18,7 @@ import {
   houseSearch, houseInfo, houseArea, houseResolve, houseMarket, houseAgents,
   houseContact, houseAppoint, buildCompareMap, GEOCODE_LIMITS,
 } from "./server/estate.js";
+import { normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
 import { isPluginEnabled } from "./plugin-state.js";
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
@@ -135,7 +136,8 @@ export const houseLookupTool = tool(
         return badArgs("房源详情需要 city 与 house_id（必须来自 house_search 的真实返回，禁止编造 ID）");
       }
       const r = await houseInfo(mode === "rent" ? "rent" : "buy", "detail", city, houseId);
-      return finalize(r);
+      if (!r.ok) return finalize(r);
+      return JSON.stringify(normalizeEstateDetail(r.data, houseId.trim(), city.trim()));
     }
     if (action === "resolve") {
       if (!query?.trim()) return badArgs("resolve 需要 query（待消歧文本）");
@@ -146,7 +148,8 @@ export const houseLookupTool = tool(
     if (action === "material") {
       if (!houseId?.trim()) return badArgs("户型图/图片需要 house_id（来自 house_search 真实返回）");
       const r = await houseInfo(mode === "rent" ? "rent" : "buy", "material", city, houseId);
-      return finalize(r);
+      if (!r.ok) return finalize(r);
+      return JSON.stringify(normalizeEstateMaterial(r.data, houseId.trim()));
     }
     if (!query?.trim()) return badArgs("resblock / plate 需要 query（小区名或板块名）");
     const r = await houseArea(mode === "rent" ? "rent" : "buy", action === "resblock" ? "resblock" : "plate", city, query.trim());
@@ -210,11 +213,18 @@ export const houseMapTool = tool(
     const list = (items ?? []).filter((i) => i?.name?.trim());
     if (!list.length) return badArgs("items 不能为空：每项给 name（小区/楼盘/板块名），可选 address（更精确的地址）");
     const map = await buildCompareMap(
-      list.map((i) => ({ name: i.name.trim(), address: i.address?.trim() || undefined })),
+      list.map((i) => ({
+        name: i.name.trim(),
+        address: i.address?.trim() || undefined,
+        lat: i.lat,
+        lng: i.lng,
+        source: i.source?.trim() || undefined,
+      })),
       city.trim()
     );
-    const rows = map.points.map((p) => `- ${p.name}：(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}) ${p.address}`);
+    const rows = map.points.map((p) => `- ${p.name}：(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}) ${p.address || ""}`.trim());
     const missed = map.geoMissing.map((m) => m.name).join("、");
+    const exactCount = map.points.filter((p) => p.source !== "nominatim").length;
     return JSON.stringify({
       action: "map",
       city: map.city,
@@ -225,7 +235,9 @@ export const houseMapTool = tool(
       embedUrl: map.embedUrl,
       note: `已定位 ${map.points.length}/${list.length} 个地点（最多 ${GEOCODE_LIMITS.maxItems}）。` +
         (missed ? `未能自动定位的可点直达链接手动搜索：${missed}。` : "") +
-        `坐标来源：Nominatim（OSM），国内小地名可能偏移，回答时请提醒用户核对。`,
+        (exactCount
+          ? `坐标来源：贝壳精确坐标 ${exactCount} 个，前端会直接放 marker。`
+          : "坐标来源：Nominatim（OSM），国内小地名可能偏移，回答时请提醒用户核对。"),
       rows: rows.join("\n"),
     });
   },
@@ -234,12 +246,16 @@ export const houseMapTool = tool(
     description:
       "把若干房源/小区的地址定位到地图（前端会渲染内嵌地图 + 每个点的直达链接）。" +
       "何时用：用户想对比几套房源的区位分布，或明确说「在地图上看」时必调；" +
-      "何时不用：评估单个小房的板块区位请用 house_lookup(action=plate/resblock)。",
+      "若 house_lookup(detail/material) 已返回 location.lat/lng，必须原样填入 items，禁止重新按地址猜测；" +
+      "何时不用：单个房源的详情已含 location 时，详情卡会直接渲染地图，不必重复调用；评估板块区位请用 house_lookup(action=plate/resblock)。",
     schema: z.object({
       city: z.string().describe("坐标所属城市，如 北京"),
       items: z.array(z.object({
         name: z.string().describe("小区/楼盘名，如 望京 SOHO"),
         address: z.string().optional().describe("可选：更精确的地址（街道 + 门牌）"),
+        lat: z.number().min(-90).max(90).optional().describe("可选：工具结果 location.lat，提供后不再按地址猜测"),
+        lng: z.number().min(-180).max(180).optional().describe("可选：工具结果 location.lng，必须与 lat 同时提供"),
+        source: z.string().optional().describe("可选：坐标来源，如 beike"),
       })).max(8).describe("要对比的地点列表，其中最多 6 个会被定位"),
     }),
   }

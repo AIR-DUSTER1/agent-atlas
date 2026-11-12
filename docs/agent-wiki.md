@@ -684,19 +684,20 @@ Header: Authorization: Bearer <key>（可留空）
 
 ---
 
-### 3.15 `src/server/estate.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI，插件入口：设置 → 插件 → CLI，可启停）
+### 3.15 `src/server/estate*.ts` + `src/tools-estate.ts` + `src/agent/estate.ts` — 房产 Agent（贝壳官方 AI，插件入口：设置 → 插件 → CLI，可启停）
 
 **设计立场**：贝壳能力由官方 `beike` CLI（LianjiaTech/beike-ai-platform）提供，
 工作台只做「子进程包装 + JSON 解析 + 错误兜底 + 工具 schema」；(indexPath) 不引入贝壳私有
 协议 / npm SDK —— CLI 是官方唯一承诺稳定的接口。
 
-**三段结构**：
+**四段结构**：
 
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
+| `server/estate-result.ts` | 富结果归一化 | 从贝壳 detail / material 的文本块中提取 `楼栋经纬度` / `小区经纬度`、`小区名称`、别名与 https 图片 URL（楼栋可用时优先，隐私隐藏时退回小区中心点），输出稳定 `location{lat,lng,embedUrl,links}` / `images[]` 契约；坐标按国内常见的「经度,纬度」解析并校验范围，原始 `data` 仍保留给模型，归一字段只用于可靠渲染 |
 | `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 透传宿主真实来源（缺省 unknown））→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com/?action=get-key&source=${BEIKE_LOGIN_SOURCE}` 登录链接；手动入口只在系统默认浏览器打开一次，不执行会自行开页签的 `beike login`，不自动点击、不代扫、不后台换票；回调页由贝壳官方自身处理，用户点击页面 Key 右侧“复制”后回填剪贴板，服务端拒绝 `****` 掩码；`saveBeikeKey` 先跑 doctor，若 doctor 误报则按 CLI 同款请求头调用官方 `/mcp` 的 `tools/list` 做业务复验（`initialize` 不校验业务权限，不能作为放行依据）；凭证文件指纹变化或新 Key 通过校验后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
-| `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后不再回模型重试，而是进入 `stopNotice` 节点生成确定的登录/处理指引；工具卡自动展开并显示「需要登录」 |
-| `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程 7 条规则（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
+| `tools-estate.ts` | 工具 schema | 7 个 zod 工具（`house_search/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；`house_lookup(detail/material)` 直接返回归一化后的 `location/images`；`house_map` 接受可选的 `lat/lng`，优先复用贝壳精确坐标而不是重新 geocode；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后不再回模型重试，而是进入 `stopNotice` 节点生成确定的登录/处理指引；工具卡自动展开并显示「需要登录」 |
+| `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程（搜索门槛 / resolve 消歧 / 地图与材料作为默认交付 / 精确坐标复用 / 分间面积缺失时标待核实 / 禁编造 ID / 高风险复述 / 口径声明）；前端把地图与户型图视为富结果，自动展开所在工具卡与 tools 分组，避免多工具调研完成后只剩文字摘要 |
 
 **关键常量**（city 名尽量存表）：`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_MCP_URL=https://building.ke.com/mcp`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录只访问 HTTPS + `building.ke.com` 精确 host；一次点击只打开一次系统浏览器，不做自动点击、轮询或代填登录票据。
 
@@ -710,7 +711,8 @@ Header: Authorization: Bearer <key>（可留空）
 
 **契约外发现**：贝壳返回字段名不固定（`priceTitle/price/bodyPrice…`），所以工具侧一律
 松散解析再归一；CLI 输出虽是单行 JSON，中文在某些版本带 BOM/转义差异，解析失败时会把
-原始 stdout 尾部 500 字符放进 `error` 便于排查。
+原始 stdout 尾部 500 字符放进 `error` 便于排查。详情中的楼栋经纬度可能因隐私被隐藏，但
+小区经纬度通常仍可用；这时必须使用小区坐标出图并明确粒度，不能退化成“地图未定位”。
 
 ---
 
@@ -1662,8 +1664,9 @@ console.log(result.messages.at(-1).content);
 | Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
 | Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
 | 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
-| 房产会话地图空白 / 点位缺              | Nominatim 限流 1 req/s：候选 ≤6 且串行；地址太口语（如「望京那种小区」）解析失败属预期，列为「未定位」；换官方小区名重试 |
-| 房产调研完成后看不到地图 / 户型图      | 先确认对应 `house_map` / `house_lookup(action=material)` 卡片是否真的出现：提示词已把两者列为默认交付，且富结果会自动展开工具卡与 tools 分组；若工具返回「拿不到图片/未定位」，则如实展示失败而不是伪装成图文 |
+| 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，详情卡立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。只有地址确实无坐标时才列「未定位」 |
+| 房产调研完成后看不到地图 / 户型图      | 户型图 URL 在 material 的嵌套 JSON 字符串中，旧版本未归一为 `images[]`，前端只能看到裸文本。现在工具卡直接渲染图片网格；地图与图片都标记 `estate-rich` 自动展开，若原始数据确实没有图片/坐标才如实说明 |
+| 房产任务反思反复不通过 / 流程最终 failed | 常见原因是模型做完最后一步却忘了 `update_workflow_plan`，留下唯一 `in_progress`；反思节点因此反复回炉。现在反思已判定结果满足需求时，会在没有 pending / failed 的前提下自动封口唯一 active 步骤，并保留「结果反思确认已完成」证据；真正未执行的步骤仍不会被放行 |
 | e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 | 413 客户端只见 ECONNRESET         | 超限响应后直接 destroy socket 会带 RST，把已发出的 413 一起冲掉（客户端拿不到状态码）。对策「丢弃式排水」：继续读完剩余 body 再关 + 攻击流总量上限兜底。**另两个坑（5.6 测试实锤）**：① 响应头别带 `Connection: close` —— node:http 会在「响应结束 + 请求体没读完」时自行 destroy，同样发 RST；② 排水完用 `socket.end()` 发 FIN，不要 `destroy()`（Windows 上带未读数据 destroy 会 RST）。**验收方式**：node:http 客户端在 Windows loopback 上偶发 ECONNRESET（还没读到响应头），curl/浏览器正常；自动化测试用**裸 TCP 先读响应再断开**才稳定 |
 | 测试后端口被神秘进程占用                 | 测试脚本里 `child.kill()` 只杀 cmd 壳（npx 包装），tsx 孙进程变孤儿长期占端口（0.0.0.0 和 127.0.0.1 会**同端口并存**，`netstat` 看着两个都怪）。对策：拿到 child.pid 就直接 `taskkill /pid X /T /F`，并按 port+LISTENING 过滤 netstat 只看绑定向 |
