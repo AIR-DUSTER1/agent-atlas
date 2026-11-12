@@ -23,8 +23,6 @@
   <a href="#文档">文档</a>
 </p>
 
-> **当前是 `0.9.0-beta.16` 开发预览版。** 接口、数据格式与交互仍可能调整，暂不提供正式 tag、生产 SLA 或稳定兼容承诺。
-
 ## 项目简介
 
 agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 Agent 工作台，提供 Web、CLI 和 Electron 三种入口。
