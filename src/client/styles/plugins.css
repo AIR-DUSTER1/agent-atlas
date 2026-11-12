@@ -452,6 +452,24 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 }
 .estate-status.ok { border-color: rgba(63,185,111,.4); color: var(--green); }
 .estate-status.err { border-color: rgba(229,96,79,.4); color: var(--red); }
+/* 操作行混用 .ghost-btn 与 .btn 时统一盒模型；状态单独占下一行，避免挤歪按钮。 */
+#estate-modal .kb-actions { align-items: stretch; flex-wrap: wrap; }
+#estate-modal .kb-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-top: 0;
+  box-sizing: border-box;
+}
+#estate-modal .kb-actions > .settings-status {
+  flex: 1 1 100%;
+  min-height: 0;
+  margin: 0;
+  line-height: 1.5;
+}
+#estate-modal .kb-actions > .settings-status:empty { display: none; }
 
 /* 工具卡内的房产专属渲染容器 */
 .estate-extra { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }

@@ -26,8 +26,8 @@ import {
   interrupt,
 } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
-import type { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { HumanMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm.js";
 import { config } from "../config.js";
 import { invokeWithModelRetry } from "../model-retry.js";
@@ -51,7 +51,7 @@ import { buildDelegationCatalog } from "../delegation-catalog.js";
 import { dispatchToAgent } from "../tools-team.js";
 import { renderBriefing, parseOutOfScope, OUT_OF_SCOPE_MARKER } from "../routing/briefing.js";
 import type { RouteDecision } from "../routing/types.js";
-import { toolResultsStopTurn } from "./turn-stop.js";
+import { latestToolStopResult, toolResultsStopTurn, type ToolStopResult } from "./turn-stop.js";
 import {
   applyWorkflowPlanToolInput,
   createWorkflowPlanFromDraft,
@@ -497,7 +497,21 @@ async function invokeModel(
   return model.invoke(input, { signal: requestSignal(parentSignal) });
 }
 
-
+/** 把工具的停止原因收口成用户可执行的一段话，避免停止分支静默结束。 */
+function stopNoticeText(stop: ToolStopResult): string {
+  if (stop.authRequired) {
+    const loginLine = stop.loginUrl ? `\n\n官方登录页：${stop.loginUrl}` : "";
+    return "贝壳鉴权未通过，本轮已暂停，避免继续触发风控。" +
+      loginLine +
+      "\n\n请按以下步骤恢复：\n" +
+      "1. 点击上方工具卡里的「打开官方登录页」，用贝壳找房 App 扫码；\n" +
+      "2. 扫码成功后，点击页面 Key 右侧的「复制」；\n" +
+      "3. 打开「设置 → 插件 → 找房数据源」，点「从剪贴板读取」并保存。\n\n" +
+      "保存成功后回复「继续」，我会接着原任务执行。";
+  }
+  const reason = stop.error || "工具返回了需要人工处理的状态";
+  return `本轮已暂停：${reason}。\n\n请按工具卡里的提示处理；完成后回复「继续」，我会接着执行。`;
+}
 /**
  * 构建带需求理解与反思的 ReAct 图。
  * general / estate 只提供 profile（提示词 + 工具 allowlist + 审批策略），
@@ -782,6 +796,16 @@ export function createWorkflowGraph(
   }
 
   /**
+   * 工具要求终止时也要给用户一条可操作的收尾说明。
+   * 认证失效属于“需要人处理”而不是“任务做完了”，静默 END 会让界面只剩红色失败卡。
+   */
+  async function stopNoticeNode(state: WorkflowStateType) {
+    const stop = latestToolStopResult(state.messages);
+    if (!stop) return {};
+    return { messages: [new AIMessage(stopNoticeText(stop))] };
+  }
+
+  /**
    * 流程状态迁移节点：只读上一批工具调用，把 update_workflow_plan 的参数写回图状态。
    * 独立成节点而不是在 agentNode 里扫描历史，保证审批 resume 重放时仍按当前批次幂等应用。
    */
@@ -998,8 +1022,8 @@ export function createWorkflowGraph(
     return last?.tool_calls?.length ? "tools" : "review";
   }
 
-  function afterPlanProgress(state: WorkflowStateType): "agent" | typeof END {
-    return toolResultsStopTurn(state.messages) ? END : "agent";
+  function afterPlanProgress(state: WorkflowStateType): "stopNotice" | "agent" {
+    return toolResultsStopTurn(state.messages) ? "stopNotice" : "agent";
   }
 
   function afterReview(state: WorkflowStateType): "agent" | typeof END {
@@ -1015,6 +1039,7 @@ export function createWorkflowGraph(
     .addNode("agent", agentNode)
     .addNode("tools", toolsNode)
     .addNode("planProgress", planProgressNode)
+    .addNode("stopNotice", stopNoticeNode)
     .addNode("review", reviewNode)
     .addEdge(START, "analyze")
     .addConditionalEdges("analyze", afterAnalyze)
@@ -1024,7 +1049,8 @@ export function createWorkflowGraph(
     .addConditionalEdges("dispatch", afterDispatch)
     .addConditionalEdges("agent", afterAgent)
     .addEdge("tools", "planProgress")
-    .addConditionalEdges("planProgress", afterPlanProgress);
+    .addConditionalEdges("planProgress", afterPlanProgress)
+    .addEdge("stopNotice", END);
 
   return graph
     .addConditionalEdges("review", afterReview)

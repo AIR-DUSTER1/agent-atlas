@@ -239,13 +239,15 @@ function refreshToolGroup(group: HTMLElement | null): void {
   if (statusEl) {
     const awaiting = cards.filter((card) => card.classList.contains("awaiting")).length;
     const running = cards.filter((card) => card.classList.contains("running")).length;
+    const needsAction = cards.filter((card) => card.classList.contains("needs-action")).length;
     const errors = cards.filter((card) => card.classList.contains("err")).length;
     statusEl.textContent = awaiting
       ? `${awaiting} 个待审批${running ? ` · ${running} 个运行中` : ""}`
       : running ? `${running} 个运行中`
-        : errors ? `${errors} 个失败`
-          : "全部完成";
-    statusEl.className = `tool-group-status${errors && !running && !awaiting ? " err" : ""}`;
+        : needsAction ? `${needsAction} 个需要处理`
+          : errors ? `${errors} 个失败`
+            : "全部完成";
+    statusEl.className = `tool-group-status${needsAction ? " warn" : errors && !running && !awaiting ? " err" : ""}`;
   }
   group.title = `${cards.length} 次工具调用：${summaryText}`;
 }
