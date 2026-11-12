@@ -56,6 +56,13 @@ test("配置表单公共组件共享高度、焦点环与占位样式", async ()
   assert.match(css, /\.ui-config-control:focus[\s\S]*?border-color:\s*var\(--border-focus\)[^}]*box-shadow:\s*0 0 0 3px var\(--info-bg\)/s);
   assert.match(css, /\.ui-config-control::placeholder[\s\S]*?color:\s*var\(--text-3\)/s);
 });
+test("房产弹窗操作按钮统一高度并对齐，状态独占下一行", async () => {
+  const css = await readFile(join(CLIENT, "styles", "plugins.css"), "utf8");
+  assert.match(css, /#estate-modal \.kb-actions[^}]*align-items:\s*stretch[^}]*flex-wrap:\s*wrap/s);
+  assert.match(css, /#estate-modal \.kb-actions > button[^}]*min-height:\s*36px[^}]*margin-top:\s*0/s);
+  assert.match(css, /#estate-modal \.kb-actions > \.settings-status[^}]*flex:\s*1 1 100%/s);
+});
+
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const html = await readFile(join(CLIENT, "index.html"), "utf8");
   const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");
