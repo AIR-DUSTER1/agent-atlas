@@ -51,7 +51,16 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
-const BEIKE_LOGIN_SOURCE = "agentatlas";
+const BEIKE_SOURCE_MAX_LENGTH = 40;
+const BEIKE_DEFAULT_SOURCE = "unknown";
+
+/** 透传宿主真实来源；只保留官方 URL 可安全携带的字符，缺省回退官方 unknown。 */
+export function normalizeBeikeSource(source: string | undefined): string {
+  const normalized = (source ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, BEIKE_SOURCE_MAX_LENGTH);
+  return normalized || BEIKE_DEFAULT_SOURCE;
+}
+
+const BEIKE_LOGIN_SOURCE = normalizeBeikeSource(process.env.BEIKE_SOURCE);
 const BEIKE_KEY_URL = `https://building.ke.com/?action=get-key&source=${BEIKE_LOGIN_SOURCE}`;
 const BEIKE_MCP_URL = "https://building.ke.com/mcp";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);

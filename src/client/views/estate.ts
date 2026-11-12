@@ -53,6 +53,9 @@ function renderEstatePanel(): void {
   }
   const keyEl = $("estate-key") as HTMLInputElement | null;
   if (keyEl) keyEl.value = "";
+  const keyLink = $("estate-key-link") as HTMLAnchorElement | null;
+  const keyHref = safeHref(st.keyUrl || "");
+  if (keyLink && keyHref) keyLink.href = keyHref;
   const s2 = $("estate-status2");
   if (s2) {
     s2.textContent = st.loginRequired
@@ -312,7 +315,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const keyA = box.querySelector<HTMLAnchorElement>(".key-link");
     if (keyA) {
       keyA.textContent = "获取贝壳 Key（building.ke.com）";
-      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=agentatlas";
+      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=unknown";
     }
     const fix = document.createElement("button");
     fix.className = "btn btn-approve";
