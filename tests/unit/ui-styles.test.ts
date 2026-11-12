@@ -63,6 +63,17 @@ test("房产弹窗操作按钮统一高度并对齐，状态独占下一行", as
   assert.match(css, /#estate-modal \.kb-actions > \.settings-status[^}]*flex:\s*1 1 100%/s);
 });
 
+test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
+  const [css, estate] = await Promise.all([
+    readFile(join(CLIENT, "styles", "chat.css"), "utf8"),
+    readFile(join(CLIENT, "views", "estate.ts"), "utf8"),
+  ]);
+  assert.match(css, /\.tool-card\.needs-approval,[\s\S]*?\.tool-card\.needs-action\s*\{[^}]*border-left-color:\s*var\(--amber\)/s);
+  assert.match(css, /\.tool-group-status\.warn\s*\{[^}]*color:\s*var\(--amber\)/s);
+  assert.match(estate, /card\.classList\.add\("needs-action", "open", "estate-auth-required"\)/);
+  assert.match(estate, /status\.textContent = "🔐 需要登录"/);
+  assert.match(estate, /settingsButton\.textContent = "打开找房数据源设置"/);
+});
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const html = await readFile(join(CLIENT, "index.html"), "utf8");
   const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");

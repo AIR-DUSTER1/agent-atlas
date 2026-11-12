@@ -253,6 +253,14 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
 
   // 登录失效 → 系统浏览器手动登录；不自动点击或代填，降低风控误判。
   if (data.authRequired) {
+    // 失败态要明确表达“需要登录”，并把登录 CTA 直接展开，避免用户只看到红色停止。
+    card.classList.remove("err", "running", "awaiting");
+    card.classList.add("needs-action", "open", "estate-auth-required");
+    const status = card.querySelector<HTMLElement>(".tool-status");
+    if (status) {
+      status.className = "tool-status awaiting";
+      status.textContent = "🔐 需要登录";
+    }
     const extra = estateExtra(card);
     const box = document.createElement("div");
     box.className = "estate-setup";
@@ -282,7 +290,12 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
         reopen.disabled = false;
       }
     });
-    actions.appendChild(reopen);
+    const settingsButton = document.createElement("button");
+    settingsButton.type = "button";
+    settingsButton.className = "btn btn-approve";
+    settingsButton.textContent = "打开找房数据源设置";
+    settingsButton.addEventListener("click", () => { void openEstate(); });
+    actions.append(reopen, settingsButton);
     box.append(copy, actions);
     extra.appendChild(box);
     return;
@@ -299,7 +312,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const keyA = box.querySelector<HTMLAnchorElement>(".key-link");
     if (keyA) {
       keyA.textContent = "获取贝壳 Key（building.ke.com）";
-      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=unknown";
+      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=agentatlas";
     }
     const fix = document.createElement("button");
     fix.className = "btn btn-approve";

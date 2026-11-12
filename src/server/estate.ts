@@ -23,7 +23,7 @@
  */
 import { runControlled } from "./subprocess.js";
 import { promises as fsp, createReadStream, statSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -51,7 +51,8 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
-const BEIKE_KEY_URL = "https://building.ke.com/?action=get-key&source=unknown";
+const BEIKE_LOGIN_SOURCE = "agentatlas";
+const BEIKE_KEY_URL = `https://building.ke.com/?action=get-key&source=${BEIKE_LOGIN_SOURCE}`;
 const BEIKE_MCP_URL = "https://building.ke.com/mcp";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
@@ -139,8 +140,8 @@ function runBeikeRaw(
   return runControlled(bin, {
     args,
     timeoutMs,
-    // 贝壳官方技能要求固定来源标识；沿用用户环境变量其余部分
-    env: { ...process.env, BEIKE_SOURCE: "beike_skill" },
+    // 登录链接、CLI 上报与鉴权必须使用同一个来源标识，避免 Key 与调用方身份错配。
+    env: { ...process.env, BEIKE_SOURCE: BEIKE_LOGIN_SOURCE },
   }).then((r) => {
     // 受控运行器的异常终止统一标 -1；把终止原因补进 stderr，便于调用方转述
     const stderr = r.killedBy
@@ -494,10 +495,46 @@ function redactSecret(sample: string, secret: string): string {
   return sample.split(s).join(`${s.slice(0, REDACT_KEEP)}****${s.slice(-REDACT_KEEP)}`);
 }
 
-/** 用官方 MCP initialize 直接验证 Bearer Key，绕过 CLI doctor 的已知误报。 */
-export async function probeBeikeMcpKey(apiKey: string): Promise<boolean> {
+/** 解析 MCP 的 JSON 或 SSE 响应；只取合法 JSON-RPC 载荷。 */
+function parseMcpPayloads(text: string): Array<Record<string, unknown>> {
+  const candidates = [
+    text.trim(),
+    ...text.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim()),
+  ].filter(Boolean);
+  const payloads: Array<Record<string, unknown>> = [];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        payloads.push(parsed as Record<string, unknown>);
+      }
+    } catch { /* 混合日志或空 SSE 行直接跳过 */ }
+  }
+  return payloads;
+}
+
+/** 只有 tools/list 真正返回工具清单，才能证明这个 Key 能调用业务接口。 */
+function mcpToolListVisible(text: string): boolean {
+  return parseMcpPayloads(text).some((payload) => {
+    if (payload.error) return false;
+    const result = payload.result;
+    if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+    return Array.isArray((result as Record<string, unknown>).tools);
+  });
+}
+
+/**
+ * 用官方 MCP tools/list 验证 Bearer Key。
+ * `initialize` 不校验业务权限，不能拿它给 Key 放行；这里按 CLI 的实际请求头校验，
+ * 失败时保留 doctor 的结论，避免把 WorkBuddy 等其他来源的 Key 误报为可用。
+ */
+export async function probeBeikeMcpKey(apiKey: string, cliVersion = "0.2.28"): Promise<boolean> {
   const key = apiKey.trim();
   if (!key) return false;
+  const version = cliVersion.trim().replace(/^v/i, "").replace(/[^0-9A-Za-z._-]/g, "") || "0.2.28";
   try {
     const res = await fetch(BEIKE_MCP_URL, {
       method: "POST",
@@ -505,23 +542,20 @@ export async function probeBeikeMcpKey(apiKey: string): Promise<boolean> {
         "Authorization": `Bearer ${key}`,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "User-Agent": "agentatlas/1.0",
+        "User-Agent": `beike-cli/${version}`,
+        "X-Beike-Cli-Version": version,
+        "X-Beike-Session-Id": randomUUID(),
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "agentatlas", version: "1.0" },
-        },
+        method: "tools/list",
+        params: {},
       }),
       signal: AbortSignal.timeout(KEY_AUTH_TIMEOUT_MS),
     });
     if (!res.ok) return false;
-    const text = await res.text();
-    return /"result"\s*:/.test(text) && /"serverInfo"|"protocolVersion"/.test(text) && !/"error"\s*:/.test(text);
+    return mcpToolListVisible(await res.text());
   } catch {
     return false;
   }
@@ -537,12 +571,13 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
       message: "检测到的是页面掩码，不是完整 Key。请点击官方页面 Key 右侧的「复制」按钮，再点「从剪贴板读取」或手动粘贴",
     };
   }
-  let bin: string;
+  let found: { path: string; version: string };
   try {
-    bin = (await ensureBeike()).path;
+    found = await ensureBeike();
   } catch {
     return { ok: false, message: "贝壳 CLI 尚未安装，请先点「安装 CLI」再保存 Key" };
   }
+  const bin = found.path;
   // T1-3：官方 CLI 的 auth 只收位置参数 KEY（无 stdin/env 支持），argv 直接进
   // 进程命令行会被任意本机进程读取（Get-CimInstance Win32_Process 实测可见）。
   // 但 `auth --save` 的实际动作就是「把 Key 落盘到 ~/.beike/BEIKE_MCP_API_KEY」，
@@ -558,7 +593,7 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   const doctor = await runBeikeRaw(bin, ["doctor"], KEY_AUTH_TIMEOUT_MS);
   const out = `${doctor.stdout}\n${doctor.stderr}`;
   const doctorValid = /Key 有效/.test(out);
-  const mcpValid = !doctorValid && await probeBeikeMcpKey(key);
+  const mcpValid = !doctorValid && await probeBeikeMcpKey(key, found.version);
   if (doctorValid || mcpValid) {
     beikeLoginGate = null;
     beikeCredentialVerified = true;
@@ -581,9 +616,12 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   const detail = tail
     ? `凭证校验未通过：${redactSecret(tail, key)}`
     : "凭证校验未通过，请确认复制的是页面上的完整字符";
+  const sourceHint = "若该 Key 来自 WorkBuddy 等其他客户端，来源或会话可能不匹配；请在本应用的登录页重新获取后保存。";
   return {
     ok: false,
-    message: restoreError ? `${detail}；旧凭证恢复失败：${restoreError}` : detail,
+    message: restoreError
+      ? `${detail}；旧凭证恢复失败：${restoreError}。${sourceHint}`
+      : `${detail}。${sourceHint}`,
   };
 }
 

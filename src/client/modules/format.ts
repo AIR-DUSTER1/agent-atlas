@@ -11,10 +11,10 @@ import type { ToolPart } from "./types.js";
 import { safeHref as safeUrlHref, safeImageSrc as safeUrlImage } from "../ui/safe-url.js";
 
 export const NODE_ICONS: Record<string, string> = {
-  analyze: "🧭", clarify: "❓", review: "🔎",
+  analyze: "🧭", clarify: "❓", review: "🔎", stopNotice: "⏸️",
   agent: "🧠", tools: "🔧", supervisor: "👔", researcher: "🔍", writer: "✍️",
 };
-export const NODE_LABELS: Record<string, string> = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思" };
+export const NODE_LABELS: Record<string, string> = { analyze: "需求理解", clarify: "需求澄清", review: "结果反思", stopNotice: "需要处理" };
 export function nodeIcon(name: string): string {
   return NODE_ICONS[name.split("/")[0]] || "⚙️";
 }

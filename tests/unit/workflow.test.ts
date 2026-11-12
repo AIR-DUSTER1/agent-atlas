@@ -35,9 +35,9 @@ const toolProfile: AgentProfile = {
   tools: [calculator],
 };
 
-/** 模拟“登录失效”一类不可继续状态：工具返回 stopAgent，图必须直接结束。 */
+/** 模拟“登录失效”一类不可继续状态：工具返回 stopAgent，图必须给出收尾后结束。 */
 const stoppingTool = tool(
-  async () => JSON.stringify({ error: "需要登录", stopAgent: true }),
+  async () => JSON.stringify({ error: "需要登录", authRequired: true, loginUrl: "https://building.ke.com/?action=get-key&source=agentatlas", stopAgent: true }),
   {
     name: "calculator",
     description: "测试用停止工具",
@@ -418,7 +418,7 @@ test("连续模式：反思连续失败且期间无任何工具动作时，三�
   assert.equal(result.reviewAttempts, 3);
 });
 
-test("工具返回 stopAgent 时直接结束本轮，不再调用模型重试", async () => {
+test("工具返回 stopAgent 时生成登录收尾并结束本轮，不再调用模型重试", async () => {
   const agentFake = new ScriptedToolCallModel(["TOOL", "不应出现的第二次回答"]);
   const analystFake = new FakeListChatModel({
     responses: [JSON.stringify({ understood: true, brief: "查询房源", question: "", options: [] })],
@@ -434,9 +434,13 @@ test("工具返回 stopAgent 时直接结束本轮，不再调用模型重试", 
   const result = await graph.invoke(
     { messages: [new HumanMessage("帮我找青岛两室")] },
     { configurable: { thread_id: `stop-tool-${randomUUID()}` } },
-  ) as unknown as { messages: Array<{ content: unknown }> };
+  ) as unknown as { messages: BaseMessage[] };
 
   const texts = result.messages.map((message) => String(message.content));
   assert.ok(texts.some((text) => text.includes("需要登录")));
   assert.equal(texts.includes("不应出现的第二次回答"), false);
+  const last = result.messages.at(-1);
+  assert.equal(last?.getType(), "ai");
+  assert.match(String(last?.content), /请按以下步骤恢复/);
+  assert.match(String(last?.content), /保存成功后回复「继续」/);
 });
