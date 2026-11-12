@@ -40,27 +40,43 @@ test("贝壳 CLI 查询串行限速，认证失败后熔断冷却", async () => 
   assert.match(source, /beikeCredentialVerified = true/);
 });
 
-test("贝壳 Key 在 CLI doctor 误报时可由 MCP initialize 复验", async () => {
+test("贝壳 Key 在 CLI doctor 误报时由 MCP tools/list 复验", async () => {
   const originalFetch = globalThis.fetch;
-  let authorization = "";
+  const headers = new Headers();
   let method = "";
   try {
     globalThis.fetch = (async (_input, init) => {
-      authorization = new Headers(init?.headers).get("authorization") || "";
+      const sent = new Headers(init?.headers);
+      sent.forEach((value, key) => headers.set(key, value));
       method = String((JSON.parse(String(init?.body || "{}")) as { method?: string }).method || "");
-      return new Response('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"布丁MCP服务"}}}\n\n', {
+      return new Response('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"house_search"}]}}\n\n', {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
       });
     }) as typeof fetch;
-    assert.equal(await probeBeikeMcpKey("test-key"), true);
-    assert.equal(authorization, "Bearer test-key");
-    assert.equal(method, "initialize");
+    assert.equal(await probeBeikeMcpKey("test-key", "v0.2.28"), true);
+    assert.equal(headers.get("authorization"), "Bearer test-key");
+    assert.equal(headers.get("x-beike-cli-version"), "0.2.28");
+    assert.equal(headers.get("user-agent"), "beike-cli/0.2.28");
+    assert.match(headers.get("x-beike-session-id") || "", /^[0-9a-f-]{36}$/);
+    assert.equal(method, "tools/list");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
+test("MCP initialize 成功不再被误判为业务 Key 有效", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => new Response(
+      'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"布丁MCP服务"}}}\n\n',
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    )) as typeof fetch;
+    assert.equal(await probeBeikeMcpKey("source-mismatched-key"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("贝壳登录只使用系统浏览器且一次点击只打开一次", async () => {
   const [source, client, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
@@ -76,12 +92,15 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.match(start, /const url = BEIKE_KEY_URL/);
   assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
   assert.doesNotMatch(start, /\["login"\]|playwright-core|loginBeikeInManagedBrowser/);
-  assert.match(source, /source=unknown/);
-  assert.match(client, /source=unknown/);
+  assert.match(source, /BEIKE_LOGIN_SOURCE = "agentatlas"/);
+  assert.match(source, /BEIKE_SOURCE: BEIKE_LOGIN_SOURCE/);
+  assert.doesNotMatch(source, /beike_skill/);
+  assert.match(client, /source=agentatlas/);
+  assert.match(client, /status\.textContent = "🔐 需要登录"/);
   assert.match(client, /navigator\.clipboard.*readText/);
   assert.match(client, /pasteEstateKeyFromClipboard/);
   assert.match(client, /从剪贴板读取/);
-  assert.match(html, /source=unknown/);
+  assert.match(html, /source=agentatlas/);
   assert.match(html, /estate-key-paste/);
   assert.match(html, /页面显示的是掩码/);
   assert.match(source, /检测到的是页面掩码/);
@@ -106,7 +125,9 @@ test("保存 Key 的失败原因完整展示，不回退成未知错误", async 
   const estate = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
   assert.match(estate, /previousKey = await fsp\.readFile/);
   assert.match(estate, /fsp\.writeFile\(BEIKE_CRED_FILE, previousKey/);
-  assert.match(estate, /probeBeikeMcpKey\(key\)/);
+  assert.match(estate, /probeBeikeMcpKey\(key, found\.version\)/);
+  assert.match(estate, /method: "tools\/list"/);
+  assert.match(estate, /来源或会话可能不匹配/);
   assert.match(estate, /beike\.keyValidated/);
 });
 

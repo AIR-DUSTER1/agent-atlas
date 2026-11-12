@@ -229,7 +229,8 @@
 .tool-card.running { border-left-color: var(--amber); }
 .tool-card.ok { border-left-color: var(--green); }
 .tool-card.err { border-left-color: var(--red); }
-.tool-card.needs-approval { border-left-color: var(--amber); }
+.tool-card.needs-approval,
+.tool-card.needs-action { border-left-color: var(--amber); }
 /* 工具类别色只用于图标、类别胶囊和分类分区标题；运行/完成/失败仍由左侧状态色表达。 */
 .tool-card[data-tool-category="file-read"],
 .tool-card[data-tool-category="file-search"],
@@ -312,6 +313,7 @@
 .tool-status.err { color: var(--red); }
 /* 等审批 ≠ 运行中：琥珀色 + 不转的圈，与「真的在执行」明确区分 */
 .tool-status.awaiting { color: var(--amber); }
+.tool-group-status.warn { color: var(--amber); }
 .tool-card.awaiting { border-color: rgba(226,161,60,.42); }
 .spinner {
   width: 12px; height: 12px;
