@@ -8,6 +8,7 @@
  * 路由：
  *   GET  /                  前端页面（public/ 下的静态文件）
  *   GET  /api/config        模型/模式元信息（是否 mock、模型名、供应商×模型清单、思考等级、Demo 清单）
+ *   GET  /api/map/static    高德/腾讯/百度官方静态图同源代理（Key 只在服务端使用）
  *   GET  /api/sessions      会话列表
  *   POST /api/sessions      新建会话 { demo }
  *   DELETE /api/sessions/:id 删除会话
@@ -85,7 +86,7 @@ import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
   handleSetReasoning, handleUpdateProvider, handleDeleteProvider, handleActivate, handleModels,
 } from "./routes/config.js";
-import { handleAmapStaticMap } from "./map-static.js";
+import { handleStaticMap } from "./map-static.js";
 import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission, handleExportSession, handleCleanupSessions } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject, handlePickProjectDirectory } from "./routes/projects.js";
@@ -349,8 +350,8 @@ const server = createServer(async (req, res) => {
     const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
     const subagentMatch = pathname.match(/^\/api\/subagents\/([\w-]+)$/);
 
-    // 结论地图：高德 Web 服务 Key 仅在服务端代理中使用
-    if (pathname === "/api/map/static" && req.method === "GET") { await handleAmapStaticMap(res, url); return; }
+    // 结论地图：高德/腾讯/百度 Web 服务 Key 仅在服务端代理中使用
+    if (pathname === "/api/map/static" && req.method === "GET") { await handleStaticMap(res, url); return; }
 
     // 供应商 / 模型 / 思考等级 / 网关探测
     if (pathname === "/api/config" && req.method === "GET") { await handleGetApiConfig(res); return; }

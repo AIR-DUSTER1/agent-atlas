@@ -87,6 +87,28 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(activeModel?.contextWindowSource, "default");
 });
 
+test("地图静态代理按 provider 明确报缺失 Key，服务端字段不下发前端", async () => {
+  const cfg = await json("/api/config");
+  assert.equal(cfg.body.map.staticMapAvailable, false);
+  assert.equal("amapWebServiceKey" in cfg.body.map, false);
+  assert.equal("tencentWebServiceKey" in cfg.body.map, false);
+  assert.equal("baiduWebServiceKey" in cfg.body.map, false);
+  const expected: Record<string, string> = {
+    amap: "AMAP_WEB_SERVICE_KEY",
+    tencent: "TENCENT_MAP_KEY",
+    baidu: "BAIDU_MAP_AK",
+  };
+  for (const [provider, envName] of Object.entries(expected)) {
+    const res = await json(`/api/map/static?provider=${provider}&lat=36.123971&lng=120.421197&zoom=14&variant=compact`);
+    assert.equal(res.status, 503);
+    assert.match(res.body.error, new RegExp(envName));
+    assert.match(res.body.error, /原生瓦片降级/);
+  }
+  const invalid = await json("/api/map/static?provider=osm&lat=36.123971&lng=120.421197");
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.body.error, /provider 无效/);
+});
+
 test("同供应商切换模型会重建配置且保留会话历史", async () => {
   const created = await json("/api/config/providers", {
     method: "POST",

@@ -17,7 +17,7 @@ import {
   type EstateConclusionMedia,
 } from "../modules/conclusion-media.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
-import { amapStaticMapUrl, mapLinkKey, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
+import { mapLinkKey, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
 import type { MapRuntimeConfig } from "../modules/types-api.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
@@ -140,7 +140,7 @@ function renderMapFrame(lat: number | undefined, lng: number | undefined, title:
   const marker = h("span", { class: "conclusion-map-marker", "aria-hidden": "true" });
   const source = h("span", { class: "conclusion-map-attribution" }, `定位 · ${config.label}`);
   let officialMap: HTMLImageElement | null = null;
-  const staticUrl = amapStaticMapUrl(point.lat, point.lng, config, compact);
+  const staticUrl = mapStaticImageUrl(point.lat, point.lng, config, compact);
   if (staticUrl) {
     officialMap = document.createElement("img");
     officialMap.className = "conclusion-map-static";
@@ -149,7 +149,7 @@ function renderMapFrame(lat: number | undefined, lng: number | undefined, title:
     officialMap.referrerPolicy = "same-origin";
     officialMap.draggable = false;
     map.dataset.mapStatus = "loading";
-    map.dataset.mapRenderer = "amap-static";
+    map.dataset.mapRenderer = `${config.provider}-static`;
     officialMap.addEventListener("load", () => {
       officialMap?.classList.add("is-ready");
       layer.hidden = true;

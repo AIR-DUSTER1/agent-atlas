@@ -712,7 +712,7 @@ Header: Authorization: Bearer <key>（可留空）
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
 
-**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。地图渲染由 `/api/config.map` 提供提供方、瓦片模板、坐标系、投影与 y 轴，`client/modules/map-provider.ts` 统一完成 WGS84→GCJ02→BD09、Web Mercator/百度投影与 TMS 翻转。高德配置 `AMAP_WEB_SERVICE_KEY` 时，浏览器请求同源 `/api/map/static`，由 `server/map-static.ts` 携带服务端 Key 调用官方静态地图并返回 PNG；Key 不进入 DOM 或浏览器网络，也不需要加载高德 JS SDK、`unsafe-eval` 或内部 iframe。静态图失败时自动回退原生 `<img>` 瓦片。腾讯、百度、OSM 及自定义瓦片继续直接创建图片瓦片层，全程不使用 iframe。底图失败时仍保留坐标与四家地图入口。
+**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。地图渲染由 `/api/config.map` 提供提供方、瓦片模板、坐标系、投影与 y 轴，`client/modules/map-provider.ts` 统一完成 WGS84→GCJ02→BD09、Web Mercator/百度投影与 TMS 翻转。高德、腾讯、百度分别配置 `AMAP_WEB_SERVICE_KEY`、`TENCENT_MAP_KEY`、`BAIDU_MAP_AK` 时，浏览器请求同源 `/api/map/static`；`server/map-static.ts` 按 provider 携带对应服务端 Key 调用官方静态图接口并返回图片。Key 不进入 DOM 或浏览器网络，也不需要加载地图 JS SDK、`unsafe-eval` 或内部 iframe。静态图失败时自动回退当前提供方的原生 `<img>` 瓦片；OSM 与自定义瓦片继续直接创建图片层，全程不使用 iframe。底图失败时仍保留坐标与四家地图入口。
 
 **失败恢复**：`agent/profile.ts` 的 `toolRetryPolicy` 只允许显式登记的只读房产工具自动重试；认证、权限、参数与未找到等确定性错误不重试。可恢复的服务临时不可用、超时、限流和网络故障最多执行 3 次（含首次）；耗尽后 ToolMessage 会带 `retry.analysis / retry.nextAction`，同一参数再次调用由 hitl 直接熔断，避免模型静默忽略或无限重放。
 

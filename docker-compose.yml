@@ -24,6 +24,8 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       MAP_PROVIDER: ${MAP_PROVIDER:-amap}
       AMAP_WEB_SERVICE_KEY: ${AMAP_WEB_SERVICE_KEY:-}
+      TENCENT_MAP_KEY: ${TENCENT_MAP_KEY:-}
+      BAIDU_MAP_AK: ${BAIDU_MAP_AK:-}
       TZ: ${TZ:-Asia/Shanghai}
       WEB_CONFIG_FILE: /data/web-config.json
       SESSIONS_FILE: /data/sessions.ndjson

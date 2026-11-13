@@ -47,7 +47,7 @@ export interface MapRuntimeConfig {
   yAxis: MapTileYAxis;
   zoom: number;
   tileSize: number;
-  amapStaticMapAvailable: boolean;
+  staticMapAvailable: boolean;
 }
 
 const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
@@ -61,7 +61,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
-    amapStaticMapAvailable: false,
+    staticMapAvailable: false,
   },
   tencent: {
     provider: "tencent",
@@ -73,7 +73,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "tms",
     zoom: 14,
     tileSize: 256,
-    amapStaticMapAvailable: false,
+    staticMapAvailable: false,
   },
   baidu: {
     provider: "baidu",
@@ -85,7 +85,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
-    amapStaticMapAvailable: false,
+    staticMapAvailable: false,
   },
   osm: {
     provider: "osm",
@@ -97,7 +97,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
-    amapStaticMapAvailable: false,
+    staticMapAvailable: false,
   },
   custom: {
     provider: "custom",
@@ -109,7 +109,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
-    amapStaticMapAvailable: false,
+    staticMapAvailable: false,
   },
 };
 
@@ -143,6 +143,14 @@ function mapSubdomains(raw: string | undefined, fallback: string[]): string[] {
   return values.length ? values : fallback;
 }
 
+/** 三家国内地图都通过服务端 Web 服务 Key 调用官方静态图；OSM/自定义不读 Key。 */
+function staticMapKey(provider: MapProviderId, env: Record<string, string | undefined>): string {
+  if (provider === "amap") return (env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || "").trim();
+  if (provider === "tencent") return (env.TENCENT_MAP_KEY || env.TENCENT_WEB_SERVICE_KEY || "").trim();
+  if (provider === "baidu") return (env.BAIDU_MAP_AK || env.BAIDU_MAP_KEY || "").trim();
+  return "";
+}
+
 /** 只读取环境变量，不触碰网络；测试可传入任意 env 快照。 */
 export function resolveMapRuntimeConfig(env: Record<string, string | undefined>): MapRuntimeConfig {
   const requested = mapProviderId(env.MAP_PROVIDER);
@@ -162,18 +170,22 @@ export function resolveMapRuntimeConfig(env: Record<string, string | undefined>)
     yAxis: mapYAxis(env.MAP_Y_AXIS, effectiveDefaults.yAxis),
     zoom: resolvePositiveInt(env.MAP_ZOOM, effectiveDefaults.zoom, 3, 18),
     tileSize: resolvePositiveInt(env.MAP_TILE_SIZE, effectiveDefaults.tileSize, 128, 512),
-    amapStaticMapAvailable: Boolean((env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || "").trim()),
+    staticMapAvailable: Boolean(staticMapKey(effectiveProvider, env)),
   };
 }
 
 export interface MapStaticServiceConfig {
   amapWebServiceKey: string;
+  tencentWebServiceKey: string;
+  baiduWebServiceKey: string;
 }
 
-/** 静态地图代理的服务端凭据；AMAP_KEY 保留为旧配置别名。 */
+/** 静态地图代理的服务端凭据；保留旧别名，公开配置只暴露当前 provider 是否可用。 */
 export function resolveMapStaticServiceConfig(env: Record<string, string | undefined>): MapStaticServiceConfig {
   return {
-    amapWebServiceKey: (env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || "").trim(),
+    amapWebServiceKey: staticMapKey("amap", env),
+    tencentWebServiceKey: staticMapKey("tencent", env),
+    baiduWebServiceKey: staticMapKey("baidu", env),
   };
 }
 

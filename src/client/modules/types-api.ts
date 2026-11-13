@@ -256,7 +256,7 @@ export interface MapRuntimeConfig {
   yAxis: MapTileYAxis;
   zoom: number;
   tileSize: number;
-  amapStaticMapAvailable?: boolean;
+  staticMapAvailable?: boolean;
 }
 
 export interface AppConfig {

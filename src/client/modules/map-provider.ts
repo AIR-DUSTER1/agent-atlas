@@ -26,7 +26,7 @@ export const DEFAULT_MAP_CONFIG: MapRuntimeConfig = {
   yAxis: "xyz",
   zoom: 14,
   tileSize: 256,
-  amapStaticMapAvailable: false,
+  staticMapAvailable: false,
 };
 
 export interface MapCoordinate {
@@ -70,7 +70,7 @@ export function resolveMapConfig(raw?: MapRuntimeConfig | null): MapRuntimeConfi
     yAxis: raw.yAxis === "tms" ? "tms" : "xyz",
     zoom: finite(raw.zoom) ? Math.max(3, Math.min(18, Math.round(raw.zoom))) : DEFAULT_MAP_CONFIG.zoom,
     tileSize: finite(raw.tileSize) ? Math.max(128, Math.min(512, Math.round(raw.tileSize))) : DEFAULT_MAP_CONFIG.tileSize,
-    amapStaticMapAvailable: raw.amapStaticMapAvailable === true,
+    staticMapAvailable: raw.staticMapAvailable === true,
   };
 }
 
@@ -176,10 +176,12 @@ export function projectMapPoint(lat: number, lng: number, rawConfig?: MapRuntime
   return { ...coordinate, worldX: pixel.x, worldY: pixel.y };
 }
 
-/** 高德使用服务端代理的官方静态地图；其它提供方继续走原生瓦片。 */
-export function amapStaticMapUrl(lat: number, lng: number, config: MapRuntimeConfig, compact: boolean): string | null {
-  if (config.provider !== "amap" || !config.amapStaticMapAvailable) return null;
+/** 高德/腾讯/百度共用一个同源静态图代理；服务端按 provider 选择官方接口和 Key。 */
+export function mapStaticImageUrl(lat: number, lng: number, config: MapRuntimeConfig, compact: boolean): string | null {
+  if (!config.staticMapAvailable) return null;
+  if (config.provider !== "amap" && config.provider !== "tencent" && config.provider !== "baidu") return null;
   const params = new URLSearchParams({
+    provider: config.provider,
     lat: String(lat),
     lng: String(lng),
     zoom: String(config.zoom),

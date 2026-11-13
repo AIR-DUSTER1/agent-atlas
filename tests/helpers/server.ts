@@ -76,6 +76,10 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
       ...process.env,
       PORT: String(port),
       API_KEY: "",              // mock 模式：不碰真实模型
+      AMAP_WEB_SERVICE_KEY: "", // 不继承用户地图 Key，避免测试触网或泄露
+      AMAP_KEY: "",
+      TENCENT_MAP_KEY: "",
+      BAIDU_MAP_AK: "",
       AUTH_TOKEN: "",
       BEIKE_DISABLE_AUTO_INSTALL: "1",
       SESSIONS_FILE: journalPath,
