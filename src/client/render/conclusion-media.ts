@@ -2,7 +2,7 @@
  * ============================================================
  * render/conclusion-media.ts — 房产最终结论中的结构化对比表
  * ============================================================
- * 职责：把同一轮 house_* 结果按 houseId 合并成“房源 / 户型图 / 地理位置”
+ * 职责：把同一轮 house_* 结果按 houseId 合并成“房源 / 户型图 / VR / 地理位置”
  * 表格，挂到最终回答下方。内部 ID 只参与匹配，不展示给用户；流式或重写
  * 阶段自动撤下旧表，避免结论与过程不一致。
  */
@@ -255,6 +255,16 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
     }
     if (tags.childElementCount) facts.appendChild(tags);
     if (property.address) facts.appendChild(h("span", { class: "conclusion-property-address" }, property.address));
+    const vrHref = safeHref(property.vrUrl);
+    if (vrHref) {
+      facts.appendChild(h("a", {
+        class: "conclusion-vr-link",
+        href: vrHref,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        "aria-label": `${property.title || property.community || "房源"} VR 看房`,
+      }, icon("Eye", { size: 14 }), h("span", null, "VR 看房")));
+    }
     row.appendChild(facts);
     row.appendChild(renderImageCell(property));
     row.appendChild(renderLocationCell(property, media, renderedLocations));
@@ -301,6 +311,7 @@ function renderImages(images: ConclusionImage[]): HTMLElement | null {
 
 function renderConclusion(media: EstateConclusionMedia): HTMLElement {
   const hasTable = media.properties.length > 0;
+  const hasVr = media.properties.some((property) => Boolean(property.vrUrl));
   const section = h("section", {
     class: "conclusion-media",
     "aria-label": "本轮结论中的房源对比表",
@@ -310,7 +321,7 @@ function renderConclusion(media: EstateConclusionMedia): HTMLElement {
       h("div", { class: "conclusion-media-copy" },
         h("strong", null, hasTable ? "推荐房源对比" : "结论附图：位置与户型"),
         h("span", null, hasTable
-          ? "按月租从低到高；户型图与位置按房源自动匹配；内部编号已隐藏"
+          ? `按月租从低到高；${hasVr ? "户型图、VR 与位置" : "户型图与位置"}按房源自动匹配；内部编号已隐藏`
           : "地图与图片直接来自本轮工具结果"),
       ),
     ),

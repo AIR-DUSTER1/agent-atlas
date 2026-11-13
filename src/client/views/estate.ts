@@ -360,17 +360,30 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   // 房产交付物统一放到最终结论附件区；工具卡只保留可折叠的执行轨迹。
   if (data.action === "detail" || data.action === "map" || data.action === "material") {
     const hasMedia = data.action === "material"
-      ? Array.isArray(data.images) && data.images.length > 0
+      ? (Array.isArray(data.images) && data.images.length > 0) || Boolean(data.vr)
       : data.action === "map"
         ? Array.isArray(data.points) && data.points.length > 0
-        : Boolean(data.location);
+        : Boolean(data.location) || Boolean(data.vr);
     if (hasMedia) {
       const extra = estateExtra(card);
       const hint = document.createElement("div");
       hint.className = "estate-conclusion-hint";
-      hint.textContent = data.action === "material"
-        ? "户型图已放入本轮结论下方。"
-        : "房源位置与地图已放入本轮结论下方。";
+      if (data.action === "material") {
+        const delivered = [
+          Array.isArray(data.images) && data.images.length > 0 ? "户型图" : "",
+          data.vr ? "VR" : "",
+        ].filter(Boolean);
+        hint.textContent = `${delivered.join("与")}已放入本轮结论下方。`;
+      } else if (data.action === "map") {
+        hint.textContent = "房源位置与地图已放入本轮结论下方。";
+      } else {
+        const delivered = [
+          data.location ? "房源位置" : "",
+          data.location ? "地图" : "",
+          data.vr ? "VR" : "",
+        ].filter(Boolean);
+        hint.textContent = `${delivered.join("、").replace("、VR", "与 VR")}已放入本轮结论下方。`;
+      }
       extra.appendChild(hint);
     }
     return;

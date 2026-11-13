@@ -109,6 +109,8 @@ test("同批工具超过两个才折叠到 tools，摘要保留工具名且 1–
   assert.doesNotMatch(app, /tool-drawer|ensureToolDrawer|refreshToolDrawer/);
   assert.match(css, /\.tool-group-summary/);
   assert.match(css, /\.tool-group\[open\]/);
+  assert.match(css, /\.tool-group\.single-category \.tool-category-heading/);
+  assert.match(app, /setAttribute\("aria-expanded", String\(open\)\)/);
   assert.doesNotMatch(css, /\.tool-drawer|\.drawer-head|\.drawer-items/);
 });
 
@@ -221,6 +223,7 @@ const DETAIL_MAP = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4
 const MAP_MULTI = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4&layer=mapnik";
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/a.jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/b.webp";
+const VR_URL = "https://vr.ke.com/#/vr?houseid=10001";
 
 function estateToolPart(id: string, name: string, payload: unknown): ToolPart {
   return {
@@ -252,7 +255,7 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
       ],
     }),
     estateToolPart("material", "house_lookup", {
-      action: "material", houseId: "10001", images: [IMAGE_ONE, IMAGE_TWO],
+      action: "material", houseId: "10001", images: [IMAGE_ONE, IMAGE_TWO], vr: VR_URL,
     }),
   ];
   const media = collectEstateConclusionMedia(parts);
@@ -266,6 +269,7 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
   assert.equal(media.properties[0]?.title, "测试花园 · 2室1厅 · 90㎡");
   assert.equal(media.properties[0]?.rent, "2400元/月");
   assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
+  assert.equal(media.properties[0]?.vrUrl, VR_URL);
   assert.equal(media.properties[0]?.location?.name, "测试花园");
 });
 
@@ -350,7 +354,7 @@ test("历史原始 detail/material 结果也能按房源匹配表格、户型图
     '{"小区信息":{"小区名称":"左岸风度","小区别名":"劲松七路237号,左岸丰渡","小区经纬度":"120.421197,36.123971"}}',
     "</103155273255>",
   ].join("\n");
-  const materialRaw = '{"103155273255":{"房源图片":{"户型图片":"' + IMAGE_ONE + '"}}}';
+  const materialRaw = '{"103155273255":{"房源图片":{"户型图片":"' + IMAGE_ONE + '","vr":"https://vr.ke.com/#/vr?houseid=103155273255"}}}';
   const media = collectEstateConclusionMedia([
     estateToolPart("raw-detail", "house_lookup", { action: "detail", data: detailRaw }),
     estateToolPart("raw-material", "house_lookup", { action: "material", data: materialRaw }),
@@ -359,6 +363,7 @@ test("历史原始 detail/material 结果也能按房源匹配表格、户型图
   assert.equal(media.properties[0]?.houseId, "103155273255");
   assert.equal(media.properties[0]?.title, "左岸风度 · 2室2厅 · 90㎡");
   assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE]);
+  assert.equal(media.properties[0]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155273255");
   assert.equal(media.properties[0]?.location?.lat, 36.123971);
   assert.equal(media.properties[0]?.location?.lng, 120.421197);
 });

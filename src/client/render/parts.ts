@@ -229,7 +229,11 @@ function refreshToolGroup(group: HTMLElement | null): void {
   const nameSummary = [...nameCounts.entries()]
     .map(([name, count]) => count > 1 ? `${name} ×${count}` : name)
     .join(" · ");
-  const summaryText = [categorySummary, nameSummary].filter(Boolean).join("｜");
+  const singleCategory = categoryCounts.size <= 1;
+  group.classList.toggle("single-category", singleCategory);
+  const titleEl = group.querySelector(".tool-group-title");
+  if (titleEl) titleEl.textContent = singleCategory ? "连续工具调用" : "工具调用";
+  const summaryText = [singleCategory ? "" : categorySummary, nameSummary].filter(Boolean).join("｜");
 
   const countEl = group.querySelector(".tool-group-count");
   if (countEl) countEl.textContent = `${cards.length} 次调用`;
@@ -262,9 +266,6 @@ export function groupToolCallsIfNeeded(
   while (start >= 0 && block.parts[start].p === "tool") start -= 1;
   const tools = block.parts.slice(start + 1, nodeIndex).filter((p): p is ToolPart => p.p === "tool");
   if (tools.length < TOOL_GROUP_MIN) return null;
-  // 房产业务卡本身已带房源语义；再套一层「房产查询」分组会形成同名嵌套。
-  // 每次 house_* 调用都保留为独立工具卡，失败/重试状态才不会混在一起。
-  if (tools.some((tool) => describeTool(tool).category.id === "estate")) return null;
   const firstCard = partEls.get(tools[0])?.el;
   if (!firstCard || firstCard.parentElement !== body) return null;
 
@@ -346,6 +347,10 @@ export function updateToolCard(part: ToolPart): void {
   }
   // 委派卡在参数阶段就显示目标与授权边界，结果到达后原地替换为执行摘要。
   if (part.name === "delegate_agent") renderDelegateInToolCard(part, card);
+  card.querySelector<HTMLElement>(".tool-head")?.setAttribute(
+    "aria-expanded",
+    String(card.classList.contains("open")),
+  );
   refreshToolGroup(card.closest<HTMLElement>(".tool-group"));
 }
 /* ---------------------------------------------------------------------------
@@ -563,7 +568,22 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
         h("div", { class: "tool-section" }, h("div", { class: "tool-label" }, "结果"), h("pre", { class: "result-pre" }, "…")),
       ),
     );
-    card.querySelector(".tool-head")?.addEventListener("click", () => card.classList.toggle("open"));
+    const head = card.querySelector<HTMLElement>(".tool-head");
+    const toggleOpen = (): void => {
+      const open = card.classList.toggle("open");
+      head?.setAttribute("aria-expanded", String(open));
+    };
+    if (head) {
+      head.setAttribute("role", "button");
+      head.setAttribute("tabindex", "0");
+      head.setAttribute("aria-expanded", "false");
+      head.addEventListener("click", toggleOpen);
+      head.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleOpen();
+      });
+    }
     mountToolCard(block, card);
     partEls.set(part, { el: card });
     updateToolCard(part);

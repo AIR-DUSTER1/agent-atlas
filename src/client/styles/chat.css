@@ -486,6 +486,14 @@
   background: var(--bg-input);
 }
 .tool-group-items .tool-card { margin: 0; }
+.tool-group.single-category .tool-category-heading { display: none; }
+.tool-group.single-category .tool-category-section {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.tool-group.single-category .tool-category-items { gap: 7px; padding: 0; }
 /* 批量工具按类别分区；原始工具名仍保留在每张卡的 tool-name 中。 */
 .tool-category-section {
   overflow: hidden;

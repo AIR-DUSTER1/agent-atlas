@@ -10,6 +10,7 @@ import { test } from "node:test";
 import {
   extractEstateImageUrls,
   extractEstateLocation,
+  extractEstateVrUrl,
   normalizeEstateDetail,
   normalizeEstateMaterial,
   parseEstateCoordinate,
@@ -18,6 +19,7 @@ import { buildCompareMap } from "../../src/server/estate-geo.js";
 
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/floorplan.jpg!m_fit,h_843,w_1125,l_fbk_v1,lo_0.22,f_jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/living-room.webp?x=1";
+const VR_URL = "https://vr.ke.com/#/vr?houseid=10001";
 
 function detailPayload(): string {
   return [
@@ -72,16 +74,27 @@ test("坐标解析兼容经纬度反序与非法值", () => {
   assert.equal(parseEstateCoordinate("200,36"), null);
 });
 
-test("material 归一化：https 图片 URL 去重后直接进入 images", () => {
-  const raw = JSON.stringify({ 10001: { 房源图片: { 户型图片: IMAGE_ONE, 客厅图片: IMAGE_TWO } } }) +
+test("material 归一化：图片与官方 VR 链接都进入稳定字段", () => {
+  const raw = JSON.stringify({ 10001: { 房源图片: { 户型图片: IMAGE_ONE, 客厅图片: IMAGE_TWO }, vr: VR_URL } }) +
     `\n重复：${IMAGE_ONE}\n不安全：http://example.test/a.jpg`;
   assert.deepEqual(extractEstateImageUrls(raw), [IMAGE_ONE, IMAGE_TWO]);
+  assert.equal(extractEstateVrUrl(raw), VR_URL);
   const normalized = normalizeEstateMaterial(raw, "10001") as Record<string, any>;
   assert.equal(normalized.action, "material");
   assert.equal(normalized.count, 2);
   assert.deepEqual(normalized.images, [IMAGE_ONE, IMAGE_TWO]);
+  assert.equal(normalized.vr, VR_URL);
   assert.equal(normalized.presentation.images, 2);
+  assert.equal(normalized.presentation.vr, true);
   assert.match(normalized.note, /直接展示/);
+});
+
+test("VR 提取只接受 HTTPS 贝壳官方域名，并支持嵌套对象与 VR链接字段", () => {
+  const nested = JSON.stringify({ 房源资料: { VR链接: { pcUrl: "//vr.ke.com/#/vr?houseid=10002" } } });
+  assert.equal(extractEstateVrUrl(nested), "https://vr.ke.com/#/vr?houseid=10002");
+  assert.equal(extractEstateVrUrl({ vr_url: "http://vr.ke.com/#/vr?houseid=10003" }), "");
+  assert.equal(extractEstateVrUrl({ vr: "https://evil.example/vr?houseid=10004" }), "");
+  assert.equal(extractEstateVrUrl({ vr: "https://ke-image.ljcdn.com/frame/vr-cover.jpg" }), "");
 });
 
 test("精确坐标不会触发二次 geocode，单点地图保留 marker", async () => {

@@ -13,6 +13,11 @@ import { buildMapLinks, buildPointMapEmbed, type GeocodePoint } from "./estate-g
 const MAX_ESTATE_IMAGES = 12;
 const MAX_STRING_DEPTH = 12;
 const IMAGE_URL_RE = /https:\/\/[^\s"'<>\\]+?\.(?:jpe?g|png|webp|gif|avif)(?:[!?][^\s"'<>\\]*)?/gi;
+const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
+const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
+const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
+const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
+const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com"] as const;
 
 export interface EstateLocation {
   lat: number;
@@ -62,6 +67,56 @@ export function extractEstateImageUrls(value: unknown): string[] {
     }
   }
   return images;
+}
+
+function normalizeEstateVrUrl(raw: string): string {
+  let value = raw.trim()
+    .replace(/\\u002f/gi, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/gi, "&")
+    .replace(/[),.;，。；]+$/, "");
+  if (value.startsWith("//")) value = `https:${value}`;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return "";
+    const host = url.hostname.toLowerCase();
+    if (!VR_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) return "";
+    if (VR_IMAGE_RE.test(url.pathname)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+/** 从 material/detail 任意嵌套字段提取贝壳官方 VR 链接；只接受官方域名和 HTTPS。 */
+export function extractEstateVrUrl(value: unknown): string {
+  const scan = (current: unknown, hinted: boolean, depth: number): string => {
+    if (depth > MAX_STRING_DEPTH || current == null) return "";
+    if (typeof current === "string") {
+      const text = current.replace(/\\u002f/gi, "/").replace(/\\\//g, "/");
+      if (!hinted && !VR_HINT_RE.test(text)) return "";
+      for (const match of text.matchAll(VR_URL_RE)) {
+        const url = normalizeEstateVrUrl(match[0]);
+        if (url) return url;
+      }
+      return "";
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        const hit = scan(item, hinted, depth + 1);
+        if (hit) return hit;
+      }
+      return "";
+    }
+    const record = asRecord(current);
+    if (!record) return "";
+    for (const [key, item] of Object.entries(record)) {
+      const hit = scan(item, hinted || VR_KEY_RE.test(key), depth + 1);
+      if (hit) return hit;
+    }
+    return "";
+  };
+  return scan(value, false, 0);
 }
 
 /** 解析国内常见的“经度,纬度”字符串；兼容少量“纬度,经度”返回值。 */
@@ -124,13 +179,15 @@ export function extractEstateLocation(data: unknown, city: string): EstateLocati
 export function normalizeEstateDetail(data: unknown, houseId: string, city: string): Record<string, unknown> {
   const location = extractEstateLocation(data, city);
   const images = extractEstateImageUrls(data);
+  const vr = extractEstateVrUrl(data);
   return {
     action: "detail",
     houseId,
     city,
     ...(location ? { location } : {}),
     ...(images.length ? { images } : {}),
-    presentation: { map: Boolean(location), images: images.length },
+    ...(vr ? { vr } : {}),
+    presentation: { map: Boolean(location), images: images.length, vr: Boolean(vr) },
     data,
     note: location
       ? `位置来自贝壳详情的${location.precision === "building" ? "楼栋" : "小区"}经纬度；前端会直接渲染地图卡，地图失败时仍可用 location.links 核对。`
@@ -140,15 +197,17 @@ export function normalizeEstateDetail(data: unknown, houseId: string, city: stri
 
 export function normalizeEstateMaterial(data: unknown, houseId: string): Record<string, unknown> {
   const images = extractEstateImageUrls(data);
+  const vr = extractEstateVrUrl(data);
   return {
     action: "material",
     houseId,
     images,
     count: images.length,
-    presentation: { images: images.length },
+    ...(vr ? { vr } : {}),
+    presentation: { images: images.length, vr: Boolean(vr) },
     data,
-    note: images.length
-      ? "图片已归一为 images，前端会直接展示；最终回答不要只贴裸 URL。"
-      : "贝壳 material 未返回可展示的图片 URL，请如实说明，不要编造图片。",
+    note: images.length || vr
+      ? `${images.length ? "图片已归一为 images" : "VR 已归一为 vr"}，前端会直接展示；最终回答不要只贴裸 URL。`
+      : "贝壳 material 未返回可展示的图片或 VR URL，请如实说明，不要编造图片或 VR 地址。",
   };
 }

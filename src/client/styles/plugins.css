@@ -558,6 +558,8 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 .conclusion-property-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .conclusion-property-tags span { padding: 2px 7px; border-radius: 999px; background: var(--tag-bg); color: var(--text-2); font-size: 11px; }
 .conclusion-property-address { display: block; margin-top: 7px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.conclusion-vr-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 4px 9px; border: 1px solid var(--green); border-radius: 999px; color: var(--green-soft); font-size: 11.5px; font-weight: 650; text-decoration: none; background: color-mix(in srgb, var(--green) 9%, transparent); }
+.conclusion-vr-link:hover { color: var(--text); background: color-mix(in srgb, var(--green) 18%, transparent); }
 .conclusion-table-image { width: 25%; }
 .conclusion-image-card.compact { max-width: 220px; }
 .conclusion-image-card.compact img { max-height: 180px; }

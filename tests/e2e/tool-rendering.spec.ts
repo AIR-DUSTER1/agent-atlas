@@ -59,7 +59,7 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
   expect(result.groupOpened).toBe(false);
 });
 
-test("房产工具每次调用保持独立卡片，不再嵌套同名房产查询分组", async ({ page }) => {
+test("连续房产工具调用折叠为单层，组内每次调用仍可独立展开", async ({ page }) => {
   await login(page);
   const result = await page.evaluate(async () => {
     const load = (specifier: string): Promise<any> => import(specifier);
@@ -71,9 +71,9 @@ test("房产工具每次调用保持独立卡片，不再嵌套同名房产查�
     document.body.appendChild(host);
     const block = { t: "assistant", parts: [] } as any;
     clientState.blockBodies.set(block, host);
-    for (const [index, action] of ["detail", "detail", "material"].entries()) {
+    for (const [index, action] of ["detail", "detail", "material", "detail"].entries()) {
       const part = {
-        p: "tool", id: `estate-independent-${index}`, name: "house_lookup",
+        p: "tool", id: `estate-consecutive-${index}`, name: "house_lookup",
         argsText: JSON.stringify({ action, city: "青岛", houseId: String(100000000000 + index) }),
         result: { content: "{}", isError: false },
       };
@@ -83,21 +83,60 @@ test("房产工具每次调用保持独立卡片，不再嵌套同名房产查�
     const node = { p: "node", name: "tools" };
     block.parts.push(node);
     const group = groupToolCallsIfNeeded(block, host, node);
-    const answer = {
+    const summary = group?.querySelector(".tool-group-summary") as HTMLElement | null;
+    const heading = group?.querySelector(".tool-category-heading") as HTMLElement | null;
+    const firstHead = group?.querySelector(".tool-card .tool-head") as HTMLElement | null;
+    const firstCard = firstHead?.closest(".tool-card") as HTMLElement | null;
+    const initial = {
       grouped: Boolean(group),
+      groupOpen: Boolean(group?.open),
       groups: host.querySelectorAll(".tool-group").length,
-      cards: host.querySelectorAll(".tool-card").length,
-      categories: [...host.querySelectorAll(".tool-card")].map((card) => (card as HTMLElement).dataset.toolCategory),
+      cards: group?.querySelectorAll(".tool-card").length || 0,
+      categories: [...(group?.querySelectorAll(".tool-card") ?? [])].map((card) => (card as HTMLElement).dataset.toolCategory),
+      title: group?.querySelector(".tool-group-title")?.textContent || "",
+      names: group?.querySelector(".tool-group-names")?.textContent || "",
+      headingDisplay: heading ? getComputedStyle(heading).display : "",
+      caret: group?.querySelector(".tool-group-caret")?.textContent || "",
+      cardExpanded: firstHead?.getAttribute("aria-expanded") || "",
     };
+    summary?.click();
+    const openAfterClick = Boolean(group?.open);
+    summary?.click();
+    const closedAfterClick = Boolean(group?.open);
+    firstHead?.click();
+    const cardOpenAfterClick = Boolean(firstCard?.classList.contains("open"));
+    const cardExpandedAfterClick = firstHead?.getAttribute("aria-expanded") || "";
+    firstHead?.click();
+    firstHead?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const cardOpenAfterKeyboard = Boolean(firstCard?.classList.contains("open"));
     host.remove();
     clientState.blockBodies.delete(block);
-    return answer;
+    return {
+      ...initial,
+      openAfterClick,
+      closedAfterClick,
+      cardOpenAfterClick,
+      cardExpandedAfterClick,
+      cardOpenAfterKeyboard,
+    };
   });
 
-  expect(result.grouped).toBe(false);
-  expect(result.groups).toBe(0);
-  expect(result.cards).toBe(3);
-  expect(result.categories).toEqual(["estate", "estate", "estate"]);
+  expect(result.grouped).toBe(true);
+  expect(result.groupOpen).toBe(false);
+  expect(result.groups).toBe(1);
+  expect(result.cards).toBe(4);
+  expect(result.categories).toEqual(["estate", "estate", "estate", "estate"]);
+  expect(result.title).toBe("连续工具调用");
+  expect(result.names).toContain("house_lookup ×4");
+  expect(result.names).not.toContain("房产查询 ×4");
+  expect(result.headingDisplay).toBe("none");
+  expect(result.caret).toBe("▶");
+  expect(result.cardExpanded).toBe("false");
+  expect(result.openAfterClick).toBe(true);
+  expect(result.closedAfterClick).toBe(false);
+  expect(result.cardOpenAfterClick).toBe(true);
+  expect(result.cardExpandedAfterClick).toBe("true");
+  expect(result.cardOpenAfterKeyboard).toBe(true);
 });
 
 test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
@@ -216,7 +255,8 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       houseId: "103155273255",
       images: [image],
       count: 1,
-      presentation: { images: 1 },
+      vr: "https://vr.ke.com/#/vr?houseid=103155273255",
+      presentation: { images: 1, vr: true },
     };
     const parts = [detail, material].map((payload, index) => ({
       p: "tool", id: `estate-render-${index}`, name: "house_lookup", argsText: "{}",
@@ -237,6 +277,7 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     const map = conclusion?.querySelector<HTMLElement>(".conclusion-property-map");
     const mapTile = conclusion?.querySelector(".conclusion-map-tile");
     const img = conclusion?.querySelector(".conclusion-table-image img");
+    const vrLink = conclusion?.querySelector<HTMLAnchorElement>(".conclusion-vr-link");
     const table = conclusion?.querySelector(".conclusion-table");
     const rows = table?.querySelectorAll("tbody tr").length || 0;
     const node = conclusion && md ? md.compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
@@ -253,6 +294,8 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       mapMarker: Boolean(conclusion?.querySelector(".conclusion-map-marker")),
       mapTileSrc: mapTile?.getAttribute("src") || "",
       imageSrc: img?.getAttribute("src") || "",
+      vrHref: vrLink?.href || "",
+      vrText: vrLink?.textContent || "",
       tableText: table?.textContent || "",
       rows,
       visibleText: md?.textContent || "",
@@ -274,6 +317,8 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.mapMarker).toBe(true);
   expect(result.mapTileSrc).toContain("is.autonavi.com/appmaptile?style=8");
   expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
+  expect(result.vrHref).toBe("https://vr.ke.com/#/vr?houseid=103155273255");
+  expect(result.vrText).toContain("VR 看房");
   expect(result.rows).toBe(1);
   expect(result.tableText).toContain("测试花园 · 2室1厅 · 90㎡");
   expect(result.tableText).toContain("2400元/月");

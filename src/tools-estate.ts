@@ -18,7 +18,7 @@ import {
   houseSearch, houseInfo, houseArea, houseResolve, houseMarket, houseAgents,
   houseContact, houseAppoint, buildCompareMap, GEOCODE_LIMITS,
 } from "./server/estate.js";
-import { normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
+import { extractEstateVrUrl, normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
 import { isPluginEnabled } from "./plugin-state.js";
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
@@ -62,7 +62,7 @@ function badArgs(message: string): string {
 /** 把 CLI 返回里的候选数组抽出来，映射成前端友好字段（宽松键名匹配）：
  *  贝壳 CLI 输出形状未公开文档化，按 list/houses 等常见键名取数组；取不到
  *  就整体原样返回（模型仍可总结，前端降级只显示原始 JSON）。 */
-function extractListings(data: unknown): Array<{ id?: string; title?: string; price?: string; area?: string; url?: string; cover?: string; addressText?: string }> {
+function extractListings(data: unknown): Array<{ id?: string; title?: string; price?: string; area?: string; url?: string; cover?: string; addressText?: string; vr?: string }> {
   if (!data || typeof data !== "object") return [];
   const root = data as Record<string, unknown>;
   const buckets: Array<Record<string, unknown>> = [];
@@ -83,15 +83,19 @@ function extractListings(data: unknown): Array<{ id?: string; title?: string; pr
     }
     return undefined;
   };
-  return buckets.slice(0, 8).map((o) => ({
-    id: pick(o, ["id", "houseId", "house_id", "houseid", "hsId"]),
-    title: pick(o, ["title", "name", "houseName"]),
-    price: pick(o, ["price", "totalPrice", "total_price", "zongjia", "priceDesc", "rent"]),
-    area: pick(o, ["area", "surface", "square", "mianji", "areaDesc"]),
-    url: pick(o, ["url", "link", "detailUrl", "detail_url", "pageUrl"]),
-    cover: pick(o, ["cover", "img", "image", "pic", "coverPic", "thumb"]),
-    addressText: pick(o, ["addressText", "address", "position", "communityName", "xiaoqu"]),
-  }));
+  return buckets.slice(0, 8).map((o) => {
+    const vr = extractEstateVrUrl(o);
+    return {
+      id: pick(o, ["id", "houseId", "house_id", "houseid", "hsId"]),
+      title: pick(o, ["title", "name", "houseName"]),
+      price: pick(o, ["price", "totalPrice", "total_price", "zongjia", "priceDesc", "rent"]),
+      area: pick(o, ["area", "surface", "square", "mianji", "areaDesc"]),
+      url: pick(o, ["url", "link", "detailUrl", "detail_url", "pageUrl"]),
+      cover: pick(o, ["cover", "img", "image", "pic", "coverPic", "thumb"]),
+      addressText: pick(o, ["addressText", "address", "position", "communityName", "xiaoqu"]),
+      ...(vr ? { vr } : {}),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
