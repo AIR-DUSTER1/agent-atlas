@@ -208,6 +208,14 @@ export function fmtTokens(n: number | null | undefined): string {
   return n.toLocaleString("zh-CN");
 }
 
+/** 任务平均输出速度：累计输出 token / 活动秒数；数据不足时返回占位符。 */
+export function fmtTokenRate(outputTokens: number | null | undefined, activeMs: number | null | undefined): string {
+  if (!Number.isFinite(outputTokens) || !Number.isFinite(activeMs) || !outputTokens || !activeMs || outputTokens <= 0 || activeMs <= 0) {
+    return "–";
+  }
+  return `${(outputTokens / (activeMs / 1000)).toFixed(1)} tok/s`;
+}
+
 export function fmtSize(n: number): string {
   if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
   if (n >= 1024) return (n / 1024).toFixed(1) + " KB";

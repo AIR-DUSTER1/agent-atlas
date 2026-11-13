@@ -490,7 +490,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
 生成内联卡片，标题直接显示工具名、参数首行和运行状态。某个 `tools` 节点前紧邻的工具卡
 达到 3 个才折叠进该批次的「🔧 tools」分组；1–2 个保持平铺。分组摘要必须列出工具名与重复
 次数（如 `list_dir ×3 · read_file`），不能只显示“N 个工具调用”而隐藏具体内容；展开后卡片
-仍按原顺序可见。流式与 journal 历史回放共用同一条 `mountPart` 挂载路径。
+仍按原顺序可见。房产业务工具是例外：每次 `house_*` 调用保留独立卡片，避免外层“房产查询”
+再套同名分类，失败与重试状态可逐条核对。流式与 journal 历史回放共用同一条 `mountPart` 挂载路径。
 
 ```
 浏览器 (public/)                       服务端 (index.ts)
@@ -550,7 +551,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
 - **用量与容量条 `stream.ts` / `settings.ts`**：网关返回的 `usage`
   （`usage_metadata`，兼容旧 `tokenUsage` 形状）被翻译成 `usage` 事件 ——
   `input_tokens` ≈ 当时整段对话的上下文大小，`input_token_details.cache_read`
-  是提示词缓存命中；前端汇总为输入框上方的「当前会话上下文容量条 + 缓存命中」，命中率统一保留一位小数。
+  是提示词缓存命中；前端汇总为输入框上方的精简容量条，只显示上下文、占比、最近请求输入 / 输出、缓存与输出均速，
+  模型窗口 / 输出预留 / 安全余量收进标题提示；命中率与输出均速统一保留一位小数。
   服务端在每个 `usage` 事件里携带目标模型窗口容量。前端参考 ZCode 的 context meter：
   历史主请求的 `input` used 按会话保留（output 只作明细，不重复计入上下文）；
   分母是窗口扣除输出预留与安全余量后的输入预算；历史投影按 token 预算从新到旧装入，
@@ -558,7 +560,8 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   不清空历史，下一轮 usage 到达后再用真实 token 校正。目标窗口不足时会参考 ZCode
   的切换守门：先压缩当前上下文并保留完整聊天记录，再切换模型。窗口长度优先级：手动设置 →
   网关 `/models` 的 `context_length` → 默认 200k。每个助手回合末尾还展示
-  `↑ 输入 · ↓ 输出 · 缓存 N%` 小字。模拟模式下由 `mock.ts`
+  `↑ 输入 · ↓ 输出 · 缓存 N%` 小字；容量条中的「输出均速」按逻辑任务累计输出 token / 活动时长计算，
+  等待人工审批的时间不计入，定位为任务整体吞吐，不冒充纯模型首 token 延迟。模拟模式下由 `mock.ts`
   合成同协议的假用量（轮次越多上下文越大、命中率递增）；
 - **图片与多模态 `files.ts`**：上传/拖拽/粘贴的图片以 dataURL 暂存，
   供应商模型的 `modality: "vision"`（设置里勾选「多模态」）时，
@@ -709,7 +712,9 @@ Header: Authorization: Bearer <key>（可留空）
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
 
-**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 在最终文本落盘后挂载响应式表格，并对回答中出现的真实 houseId 做确定性脱敏。流式途中、后续工具调用或回答被重写时自动撤下旧表。工具组不再因为 `estate-rich` 自动展开。
+**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。
+
+**失败恢复**：`agent/profile.ts` 的 `toolRetryPolicy` 只允许显式登记的只读房产工具自动重试；认证、权限、参数与未找到等确定性错误不重试。可恢复的服务临时不可用、超时、限流和网络故障最多执行 3 次（含首次）；耗尽后 ToolMessage 会带 `retry.analysis / retry.nextAction`，同一参数再次调用由 hitl 直接熔断，避免模型静默忽略或无限重放。
 
 **契约外发现**：贝壳返回字段名不固定（`priceTitle/price/bodyPrice…`），所以工具侧一律
 松散解析再归一；CLI 输出虽是单行 JSON，中文在某些版本带 BOM/转义差异，解析失败时会把
@@ -1668,7 +1673,8 @@ console.log(result.messages.at(-1).content);
 | Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
 | 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
 | 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，最终结论表立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。只有地址确实无坐标时才列「未定位」 |
-| 房产调研完成后看不到地图 / 户型图      | 户型图 URL 在 material 的嵌套 JSON 字符串中，旧版本未归一为 `images[]`，前端只能看到裸文本。现在最终回答落盘后由 `refreshConclusionMedia` 按 houseId 挂载“房源 / 户型图 / 地理位置”表格；工具卡默认折叠且不再承载媒体，内部 ID 不进入可见文字。若原始数据确实没有图片/坐标才如实说明 |
+| 房产调研完成后看不到地图 / 户型图      | 两类原因都要排查：① 户型图 URL 在 material 的嵌套 JSON 中，旧版本未归一为 `images[]`；② 回答后 review 又追加思考时，旧逻辑因“最后一个 part 必须是正文”误删表格。现在 `refreshConclusionMedia` 查找最后一段已完成正文并固定插表，后续思考不撤表；工具卡默认折叠且不承载媒体，内部 ID 不进入可见文字。若原始数据确实没有图片/坐标才如实说明 |
+| 房产详情偶发 `service temporarily unavailable` | 可恢复故障不能直接放弃：只读 `house_*` 工具按 `toolRetryPolicy` 自动尝试，最多 3 次（含首次），并在 ToolMessage 的 `retry` 字段返回错误分类与下一步建议；认证/参数/未找到不重试。三次仍失败后同参数调用会被 hitl 熔断，Agent 必须改用其它工具/参数或向用户说明缺口，不能静默省略 |
 | 房产任务反思反复不通过 / 流程最终 failed | 常见原因是模型做完最后一步却忘了 `update_workflow_plan`，留下唯一 `in_progress`；反思节点因此反复回炉。现在反思已判定结果满足需求时，会在没有 pending / failed 的前提下自动封口唯一 active 步骤，并保留「结果反思确认已完成」证据；真正未执行的步骤仍不会被放行 |
 | e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 | 413 客户端只见 ECONNRESET         | 超限响应后直接 destroy socket 会带 RST，把已发出的 413 一起冲掉（客户端拿不到状态码）。对策「丢弃式排水」：继续读完剩余 body 再关 + 攻击流总量上限兜底。**另两个坑（5.6 测试实锤）**：① 响应头别带 `Connection: close` —— node:http 会在「响应结束 + 请求体没读完」时自行 destroy，同样发 RST；② 排水完用 `socket.end()` 发 FIN，不要 `destroy()`（Windows 上带未读数据 destroy 会 RST）。**验收方式**：node:http 客户端在 Windows loopback 上偶发 ECONNRESET（还没读到响应头），curl/浏览器正常；自动化测试用**裸 TCP 先读响应再断开**才稳定 |

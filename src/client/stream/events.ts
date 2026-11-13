@@ -289,8 +289,21 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
       mountPart(ablock, part);
       break;
     }
-    // 任务累计用量已随 usage 事件下发（服务端快照），这里不再重复计数。
-    case "task_usage": break;
+    case "task_usage": {
+      // 结束时以服务端权威快照封口，补上最后一个 usage 之后的活动时长；
+      // 平均输出速度因此不会停在半路，也不会把同一条 usage 重复累加。
+      const u = state.usage[sid || state.currentId || ""];
+      if (u) {
+        u.taskInput = ev.inputTokens;
+        u.taskOutput = ev.outputTokens;
+        u.taskTools = ev.toolCalls;
+        u.taskModels = ev.modelCalls;
+        u.taskActiveMs = ev.activeMs;
+        if (sid === state.currentId) updateContextBar();
+        saveLocal();
+      }
+      break;
+    }
     case "route_decision": {
       // 路由卡：同一轮可能有多张（首次派发 + 一次转回），按序追加即可。
       sealStreamingParts(ablock);

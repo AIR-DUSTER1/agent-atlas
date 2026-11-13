@@ -15,7 +15,7 @@ import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
-import { fmtPercent, fmtTokens } from "../modules/format.js";
+import { fmtPercent, fmtTokenRate, fmtTokens } from "../modules/format.js";
 import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../modules/reasoning-display.js";
 import { activateModel } from "./model-actions.js";
 import { prepareModelSwitch } from "../actions/model-switch.js";
@@ -236,7 +236,7 @@ export function updateContextBar(): void {
   const fill = $("ctx-fill");
   const text = $("ctx-text");
   if (!fill || !text) return;
-  const requestText = `${u.contextPending ? "上一请求" : "请求"} ↑ ${fmtTokens(u.lastInput)} · ↓ ${fmtTokens(u.lastOutput)}`;
+  const requestText = `↑ ${fmtTokens(u.lastInput)} ↓ ${fmtTokens(u.lastOutput)}`;
   const inputBudget = u.contextInputBudget
     ?? state.config?.contextBudget?.inputBudgetTokens
     ?? null;
@@ -247,23 +247,34 @@ export function updateContextBar(): void {
     const pct = Math.min(100, (u.contextTokens / scale) * 100);
     fill.style.width = Math.max(1.5, pct) + "%";
     fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    const warning = u.contextTokens > scale ? " · 已超出输入预算，请压缩上下文" : "";
+    const warning = u.contextTokens > scale ? " · 超出预算" : "";
     const budgetText = inputBudget
-      ? `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(inputBudget)} tokens（${pct.toFixed(1)}% · 模型窗口 ${fmtTokens(win)}，输出预留 ${fmtTokens(u.outputReserveTokens)}，安全余量 ${fmtTokens(u.safetyMarginTokens)}）`
-      : `当前会话上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} tokens（${pct.toFixed(1)}% · 当前模型窗口）`;
+      ? `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(inputBudget)} · ${pct.toFixed(1)}%`
+      : `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} · ${pct.toFixed(1)}%`;
     text.textContent = `${budgetText} · ${requestText}${warning}`;
+    bar.title = `模型窗口 ${fmtTokens(win)} · 输出预留 ${fmtTokens(u.outputReserveTokens)} · 安全余量 ${fmtTokens(u.safetyMarginTokens)} · 输出均速按本轮活动时长估算`;
   } else {
     fill.style.width = "0%";
     fill.className = "ctx-fill";
-    text.textContent = `当前会话上下文 ${fmtTokens(u.contextTokens)} tokens · ${requestText} · 容量未知（设置里「获取列表」后显示占比）`;
+    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} · ${requestText} · 容量未知`;
+    bar.title = "模型窗口未知；在设置中获取模型列表后显示容量与占比";
   }
 
+  const speedEl = $("ctx-speed");
+  if (speedEl) {
+    const output = u.taskOutput && u.taskOutput > 0 ? u.taskOutput : u.lastOutput;
+    const speed = !u.contextPending ? fmtTokenRate(output, u.taskActiveMs) : "–";
+    speedEl.textContent = speed === "–" ? "" : `输出均速 ${speed}`;
+    speedEl.classList.toggle("hidden", speed === "–");
+  }
   const cacheEl = $("ctx-cache");
   if (!cacheEl) return;
   if (u.lastInput > 0 && u.lastCache > 0) {
-    cacheEl.textContent = `缓存命中 ${fmtPercent((u.lastCache / u.lastInput) * 100)}`;
+    cacheEl.textContent = `缓存 ${fmtPercent((u.lastCache / u.lastInput) * 100)}`;
     cacheEl.classList.remove("hidden");
   } else {
+    cacheEl.textContent = "";
     cacheEl.classList.add("hidden");
   }
+  bar.setAttribute("aria-label", [text.textContent, speedEl?.textContent, cacheEl.textContent].filter(Boolean).join(" · "));
 }

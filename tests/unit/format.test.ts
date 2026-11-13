@@ -10,6 +10,7 @@ import {
   escapeHtml,
   fmtPercent,
   fmtSize,
+  fmtTokenRate,
   fmtTokens,
   nodeIcon,
   renderInline,
@@ -95,4 +96,12 @@ test("fmtTokens / fmtSize / nodeIcon 边界", () => {
   assert.equal(fmtSize(2 * 1048576), "2.0 MB");
   assert.equal(nodeIcon("tools/toolnode"), "🔧");
   assert.equal(nodeIcon("unknown"), "⚙️");
+});
+
+test("fmtTokenRate：按活动时长计算平均输出速度并处理无效数据", () => {
+  assert.equal(fmtTokenRate(287, 15_000), "19.1 tok/s");
+  assert.equal(fmtTokenRate(1, 2_000), "0.5 tok/s");
+  assert.equal(fmtTokenRate(0, 15_000), "–");
+  assert.equal(fmtTokenRate(287, 0), "–");
+  assert.equal(fmtTokenRate(Number.NaN, 15_000), "–");
 });

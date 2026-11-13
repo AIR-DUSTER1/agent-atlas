@@ -206,11 +206,14 @@ test("新建会话不继承上一会话的上下文用量显示", async ({ page 
   await createChat(page);
   await sendMessage(page, "你好");
   await expect(page.locator("#context-bar")).toBeVisible({ timeout: 20_000 });
-  // 容量条显示该会话落盘的当前上下文与最近一次请求量，不能混用任务累计消耗。
-  await expect(page.locator("#ctx-text")).toContainText("当前会话上下文");
-  await expect(page.locator("#ctx-text")).toContainText("请求 ↑");
-  await expect(page.locator("#ctx-text")).toContainText("模型窗口");
-  await expect(page.locator("#ctx-text")).toContainText("输出预留");
+  // 容量条只保留上下文、占比、最近请求量与平均输出速度；预算细节收进标题。
+  await expect(page.locator("#ctx-text")).toContainText("上下文");
+  await expect(page.locator("#ctx-text")).toContainText("↑");
+  await expect(page.locator("#ctx-text")).toContainText("↓");
+  await expect(page.locator("#ctx-text")).not.toContainText("输出预留");
+  await expect(page.locator("#context-bar")).toHaveAttribute("title", /模型窗口/);
+  await expect(page.locator("#ctx-speed")).toContainText("输出均速", { timeout: 20_000 });
+  await expect(page.locator("#ctx-speed")).toContainText("tok/s");
 
   await createChat(page);
   await expect(page.locator("#context-bar")).toBeHidden();
