@@ -282,3 +282,74 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.toolMedia).toBe(0);
   expect(result.openToolCards).toBe(0);
 });
+
+test("切换地图配置后使用各提供方原生瓦片而不是 iframe", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart }, clientState, events, mapProvider] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+      load("/stream/events.js"),
+      load("/modules/map-provider.js"),
+    ]);
+    const appState = clientState.state;
+    const previousConfig = appState.config;
+    const baseConfig = previousConfig || { mock: true, model: "mock", contextWindow: null, providers: [], demos: [] };
+    const detail = {
+      action: "detail",
+      houseId: "103155273255",
+      city: "青岛",
+      data: JSON.stringify({ 基础信息: { 小区名: "测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月" } }),
+      location: { label: "测试花园", address: "测试路 1 号", lat: 36.123456, lng: 120.123456, source: "beike", precision: "community" },
+    };
+    const renderWith = (map: any): { url: string; provider: string; configuredProvider: string; iframe: number } => {
+      appState.config = { ...baseConfig, map };
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const block = { t: "assistant", parts: [] } as any;
+      clientState.blockBodies.set(block, host);
+      const part = {
+        p: "tool", id: "map-provider-switch-" + map.provider, name: "house_lookup", argsText: "{}",
+        result: { content: JSON.stringify(detail), isError: false },
+      };
+      block.parts.push(part);
+      mountPart(block, part);
+      events.handleEvent({ type: "token", text: "结论：地图提供方切换验证。", node: "agent" }, block, null);
+      events.handleEvent({ type: "done" }, block, null);
+      const mapEl = host.querySelector<HTMLElement>(".conclusion-property-map");
+      const tile = host.querySelector<HTMLImageElement>(".conclusion-map-tile");
+      const answer = {
+        url: tile?.src || "",
+        provider: mapEl?.dataset.mapProvider || "",
+        configuredProvider: appState.config?.map?.provider || "",
+        iframe: host.querySelectorAll("iframe").length,
+      };
+      host.remove();
+      clientState.blockBodies.delete(block);
+      return answer;
+    };
+    const tencent = renderWith({
+      ...mapProvider.DEFAULT_MAP_CONFIG,
+      provider: "tencent", label: "腾讯地图",
+      tileUrl: "https://rt{s}.map.gtimg.com/tile?z={z}&x={x}&y={y}&styleid=3&version=1",
+      subdomains: ["0", "1", "2", "3"], coordinateSystem: "gcj02", yAxis: "tms",
+    });
+    const baidu = renderWith({
+      ...mapProvider.DEFAULT_MAP_CONFIG,
+      provider: "baidu", label: "百度地图",
+      tileUrl: "https://maponline{s}.bdimg.com/tile/?qt=vtile&x={x}&y={y}&z={z}&styles=pl&scaler=1",
+      subdomains: ["0", "1", "2", "3"], coordinateSystem: "bd09", projection: "baidu",
+    });
+    appState.config = previousConfig;
+    return { tencent, baidu };
+  });
+
+  expect(result.tencent.configuredProvider).toBe("tencent");
+  expect(result.tencent.provider).toBe("tencent");
+  expect(result.tencent.url).toContain("map.gtimg.com/tile");
+  expect(result.tencent.iframe).toBe(0);
+  expect(result.baidu.provider).toBe("baidu");
+  expect(result.baidu.url).toContain("bdimg.com/tile");
+  expect(result.baidu.iframe).toBe(0);
+});

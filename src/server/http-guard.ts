@@ -11,7 +11,7 @@
  *  - 不引入 CSRF token：同源校验 + Bearer 已覆盖该面（计划规则 4 的
  *    「same-origin 或 bearer」满足其或分支），避免给零依赖前端再加一套令牌流转；
  *  - 安全响应头一次性 setHeader（writeHead 会合并继承），对 HTML 也有 CSP；
- *  - OSM 地图 iframe 是唯一外部 frame 源，frame-src 白名单放行官方域名；
+ *  - 地图由原生瓦片图片渲染，不再放行外部 frame；img-src 仍只允许 https/data；
  *  - index.html 的首屏主题脚本与 import map 是静态内联脚本，使用精确 SHA-256 hash
  *    script-src 不再放行任意 inline script，敏感操作仍有认证/同源防线。
  */
@@ -67,7 +67,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
     `default-src 'self'; script-src 'self' ${CSP_SCRIPT_HASHES.map((hash) => `'${hash}'`).join(" ")}; ` +
     `style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; ` +
-    `frame-src https://www.openstreetmap.org; base-uri 'self'; form-action 'none'`,
+    `base-uri 'self'; form-action 'none'`,
 };
 
 /** 一次性把安全头挂到响应上（后续 writeHead 字段会与之合并，不冲突即继承） */

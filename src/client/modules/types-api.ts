@@ -241,12 +241,31 @@ export interface ContextBudget {
   inputBudgetTokens: number;
 }
 
+export type MapProviderId = "amap" | "tencent" | "baidu" | "osm" | "custom";
+export type MapCoordinateSystem = "wgs84" | "gcj02" | "bd09";
+export type MapProjection = "web-mercator" | "baidu";
+export type MapTileYAxis = "xyz" | "tms";
+
+export interface MapRuntimeConfig {
+  provider: MapProviderId;
+  label: string;
+  tileUrl: string;
+  subdomains: string[];
+  coordinateSystem: MapCoordinateSystem;
+  projection: MapProjection;
+  yAxis: MapTileYAxis;
+  zoom: number;
+  tileSize: number;
+}
+
 export interface AppConfig {
   mock: boolean;
   model: string;
   baseURL?: string;
   contextWindow: number | null;
   contextBudget?: ContextBudget;
+  /** 地图提供方与原生瓦片参数；旧服务进程可能没有该字段，前端会回退高德。 */
+  map?: MapRuntimeConfig;
   providers: ProviderEntry[];
   dialects?: DialectInfo[];
   reasoning?: ReasoningState;

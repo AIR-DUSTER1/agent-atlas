@@ -6,7 +6,7 @@
  * 表格，挂到最终回答下方。内部 ID 只参与匹配，不展示给用户；流式或重写
  * 阶段自动撤下旧表，避免结论与过程不一致。
  */
-import { blockBodies, partEls } from "../core/state.js";
+import { blockBodies, partEls, state } from "../core/state.js";
 import {
   collectEstateConclusionMedia,
   collectEstateHouseIds,
@@ -17,6 +17,8 @@ import {
   type EstateConclusionMedia,
 } from "../modules/conclusion-media.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
+import { mapLinkKey, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
+import type { MapRuntimeConfig } from "../modules/types-api.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import type { AssistantBlock } from "../modules/types.js";
@@ -53,10 +55,15 @@ function coordinateText(point: ConclusionPoint): string {
     : "";
 }
 
-function renderLinks(links: Record<string, string> | undefined): HTMLElement | null {
+function renderLinks(links: Record<string, string> | undefined, preferredKey?: string): HTMLElement | null {
   if (!links) return null;
   const row = h("div", { class: "conclusion-links" });
-  for (const [label, raw] of Object.entries(links)) {
+  const entries = Object.entries(links).sort(([left], [right]) => {
+    if (left === preferredKey) return -1;
+    if (right === preferredKey) return 1;
+    return 0;
+  });
+  for (const [label, raw] of entries) {
     const href = safeHref(raw);
     if (!href) continue;
     row.appendChild(h("a", {
@@ -67,20 +74,6 @@ function renderLinks(links: Record<string, string> | undefined): HTMLElement | n
     }, MAP_LINK_LABELS[label] || label));
   }
   return row.childElementCount ? row : null;
-}
-
-const MAP_TILE_SIZE = 256;
-const MAP_ZOOM = 14;
-const MAP_SOURCE_LABEL = "高德地图";
-const MAP_TILE_HOSTS = ["webst01", "webst02", "webst03", "webst04"] as const;
-
-function longitudeWorldPixel(lng: number, zoom: number): number {
-  return ((lng + 180) / 360) * MAP_TILE_SIZE * (2 ** zoom);
-}
-
-function latitudeWorldPixel(lat: number, zoom: number): number {
-  const radians = (lat * Math.PI) / 180;
-  return ((1 - Math.asinh(Math.tan(radians)) / Math.PI) / 2) * MAP_TILE_SIZE * (2 ** zoom);
 }
 
 function coordinatesFromEmbed(raw: string): { lat: number; lng: number } | null {
@@ -97,34 +90,32 @@ function coordinatesFromEmbed(raw: string): { lat: number; lng: number } | null 
   }
 }
 
-function amapTileUrl(x: number, y: number, zoom: number, attempt = 0): string {
-  const host = MAP_TILE_HOSTS[(Math.abs(x + y) + attempt) % MAP_TILE_HOSTS.length];
-  return `https://${host}.is.autonavi.com/appmaptile?style=8&x=${x}&y=${y}&z=${zoom}`;
-}
-
 /**
- * 外部 OSM iframe 在国内网络经常被重置，造成“有坐标但地图是灰色断图”。
- * 这里改为纯图片瓦片 + 本地定位点，不依赖 iframe/脚本；底图失败仍保留坐标与地图链接。
+ * 只创建由配置决定的原生图片瓦片层；高德、腾讯、百度、OSM 的坐标/投影/y 轴差异
+ * 全部在 map-provider 中处理。这里绝不创建 iframe，底图失败时仍显示地址、坐标和链接。
  */
-function renderMapFrame(lat: number | undefined, lng: number | undefined, title: string, compact = false): HTMLElement | null {
+function renderMapFrame(lat: number | undefined, lng: number | undefined, title: string, compact = false, rawConfig?: MapRuntimeConfig): HTMLElement | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (Math.abs(lat as number) > 90 || Math.abs(lng as number) > 180) return null;
   const latitude = lat as number;
   const longitude = lng as number;
+  const config = resolveMapConfig(rawConfig ?? state.config?.map);
+  const point = projectMapPoint(latitude, longitude, config);
+  const tileSize = config.tileSize;
+  const centerX = Math.floor(point.worldX / tileSize);
+  const centerY = Math.floor(point.worldY / tileSize);
   const map = h("div", {
     class: compact ? "conclusion-property-map" : "conclusion-map",
     role: "img",
-    "aria-label": `${title} 地图，坐标 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}，底图来源 ${MAP_SOURCE_LABEL}`,
-    title: `${title} · ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+    "aria-label": `${title} 地图，坐标 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}，底图来源 ${config.label}`,
+    title: `${title} · ${latitude.toFixed(6)}, ${longitude.toFixed(6)} · ${config.label}`,
   });
   map.dataset.mapLat = latitude.toFixed(6);
   map.dataset.mapLng = longitude.toFixed(6);
-  map.dataset.mapZoom = String(MAP_ZOOM);
+  map.dataset.mapProvider = config.provider;
+  map.dataset.mapProjection = config.projection;
+  map.dataset.mapCoordinateSystem = config.coordinateSystem;
 
-  const worldX = longitudeWorldPixel(longitude, MAP_ZOOM);
-  const worldY = latitudeWorldPixel(latitude, MAP_ZOOM);
-  const centerX = Math.floor(worldX / MAP_TILE_SIZE);
-  const centerY = Math.floor(worldY / MAP_TILE_SIZE);
   const layer = h("div", { class: "conclusion-map-tiles", "aria-hidden": "true" });
   for (let tileY = centerY - 1; tileY <= centerY + 1; tileY += 1) {
     for (let tileX = centerX - 1; tileX <= centerX + 1; tileX += 1) {
@@ -135,20 +126,15 @@ function renderMapFrame(lat: number | undefined, lng: number | undefined, title:
       img.decoding = "async";
       img.referrerPolicy = "no-referrer";
       img.draggable = false;
-      img.style.left = `${tileX * MAP_TILE_SIZE - worldX}px`;
-      img.style.top = `${tileY * MAP_TILE_SIZE - worldY}px`;
-      const initial = amapTileUrl(tileX, tileY, MAP_ZOOM);
-      img.src = initial;
-      img.addEventListener("error", () => {
-        const fallback = amapTileUrl(tileX, tileY, MAP_ZOOM, 1);
-        if (img.src !== fallback) img.src = fallback;
-      }, { once: true });
+      img.style.left = `${tileX * tileSize - point.worldX}px`;
+      img.style.top = `${tileY * tileSize - point.worldY}px`;
+      img.src = mapTileUrl(tileX, tileY, config);
       layer.appendChild(img);
     }
   }
 
   const marker = h("span", { class: "conclusion-map-marker", "aria-hidden": "true" });
-  const source = h("span", { class: "conclusion-map-attribution" }, `定位 · ${MAP_SOURCE_LABEL}`);
+  const source = h("span", { class: "conclusion-map-attribution" }, `定位 · ${config.label}`);
   map.append(layer, marker, source);
   return map;
 }
@@ -194,9 +180,10 @@ function renderLocationCell(property: ConclusionProperty, media: EstateConclusio
     return cell;
   }
 
+  const mapConfig = resolveMapConfig(state.config?.map);
   const key = [location.name, location.lat ?? "", location.lng ?? ""].join("|");
   if (Number.isFinite(location.lat) && Number.isFinite(location.lng) && !rendered.has(key)) {
-    const map = renderMapFrame(location.lat, location.lng, `${property.title || location.name} 位置`, true);
+    const map = renderMapFrame(location.lat, location.lng, `${property.title || location.name} 位置`, true, mapConfig);
     if (map) {
       cell.appendChild(map);
       rendered.add(key);
@@ -209,7 +196,7 @@ function renderLocationCell(property: ConclusionProperty, media: EstateConclusio
   const meta = [precisionLabel(location.precision), location.address || property.address, coordinateText(location)]
     .filter(Boolean).join(" · ");
   if (meta) cell.appendChild(h("span", { class: "conclusion-location-meta" }, meta));
-  const links = renderLinks(location.links);
+  const links = renderLinks(location.links, mapLinkKey(mapConfig.provider));
   if (links) cell.appendChild(links);
   return cell;
 }
@@ -255,9 +242,10 @@ function renderMap(media: EstateConclusionMedia): HTMLElement | null {
 function renderPoints(media: EstateConclusionMedia): HTMLElement | null {
   if (!media.points.length) return null;
   const list = h("div", { class: "conclusion-points" });
+  const mapConfig = resolveMapConfig(state.config?.map);
   for (const point of media.points) {
     const meta = [precisionLabel(point.precision), point.address, coordinateText(point)].filter(Boolean).join(" · ");
-    const links = renderLinks(point.links);
+    const links = renderLinks(point.links, mapLinkKey(mapConfig.provider));
     list.appendChild(h("div", { class: "conclusion-point" },
       h("div", { class: "conclusion-point-main" },
         h("strong", { class: "conclusion-point-name" }, point.name),

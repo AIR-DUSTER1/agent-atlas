@@ -121,6 +121,7 @@ test("CSP hash 与 index 内联脚本严格同步且不放行任意 inline scrip
   assert.deepEqual(computeInlineScriptHashes(html), [...CSP_SCRIPT_HASHES]);
   const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
+  assert.doesNotMatch(csp, /frame-src/);
   for (const hash of CSP_SCRIPT_HASHES) assert.ok(csp.includes(`'${hash}'`));
 });
 

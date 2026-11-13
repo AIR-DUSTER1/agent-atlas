@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { assertTrustedInstallUrl, beikeBusinessError, buildBeikeChildEnv, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
+import { resolveMapRuntimeConfig } from "../../src/config.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(
@@ -168,4 +169,33 @@ test("外链打开器拒绝非白名单协议与域名", () => {
   assert.equal(assertTrustedInstallUrl("https://release-assets.githubusercontent.com/asset?signature=x", "二进制下载地址"), undefined);
   assert.throws(() => assertAllowedExternalUrl("http://building.ke.com/login", allow), /HTTPS/);
   assert.throws(() => assertAllowedExternalUrl("https://evil.example/login", allow), /白名单/);
+});
+test("地图配置可从 env 切换高德/腾讯/百度/OSM/自定义瓦片", () => {
+  const amap = resolveMapRuntimeConfig({});
+  assert.equal(amap.provider, "amap");
+  assert.equal(amap.coordinateSystem, "gcj02");
+  assert.match(amap.tileUrl, /autonavi\.com/);
+
+  const tencent = resolveMapRuntimeConfig({ MAP_PROVIDER: "tencent", MAP_ZOOM: "15" });
+  assert.equal(tencent.provider, "tencent");
+  assert.equal(tencent.yAxis, "tms");
+  assert.equal(tencent.zoom, 15);
+  assert.match(tencent.tileUrl, /map\.gtimg\.com/);
+
+  const baidu = resolveMapRuntimeConfig({ MAP_PROVIDER: "baidu" });
+  assert.equal(baidu.provider, "baidu");
+  assert.equal(baidu.projection, "baidu");
+  assert.equal(baidu.coordinateSystem, "bd09");
+
+  const osm = resolveMapRuntimeConfig({ MAP_PROVIDER: "osm" });
+  assert.equal(osm.coordinateSystem, "wgs84");
+  assert.match(osm.tileUrl, /openstreetmap/);
+
+  const custom = resolveMapRuntimeConfig({ MAP_PROVIDER: "custom", MAP_TILE_URL: "https://tiles.example.test/{z}/{x}/{y}.png", MAP_LABEL: "内部地图" });
+  assert.equal(custom.provider, "custom");
+  assert.equal(custom.label, "内部地图");
+  assert.equal(custom.tileUrl, "https://tiles.example.test/{z}/{x}/{y}.png");
+
+  const fallback = resolveMapRuntimeConfig({ MAP_PROVIDER: "custom" });
+  assert.equal(fallback.provider, "amap", "自定义未给瓦片模板时回退默认高德");
 });

@@ -78,6 +78,9 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(cfg.body.contextBudget.outputReserveTokens, 8_192);
   assert.equal(cfg.body.contextBudget.safetyMarginTokens, 10_000);
   assert.equal(cfg.body.contextBudget.inputBudgetTokens, 181_808);
+  assert.equal(cfg.body.map.provider, "amap");
+  assert.match(cfg.body.map.tileUrl, /autonavi\.com/);
+  assert.equal(cfg.body.map.projection, "web-mercator");
   const activeProvider = cfg.body.providers.find((provider: { active: boolean }) => provider.active);
   const activeModel = activeProvider?.models.find((model: { active: boolean }) => model.active);
   assert.equal(activeModel?.contextWindow, 200_000);

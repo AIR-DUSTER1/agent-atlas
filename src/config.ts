@@ -31,6 +31,134 @@ function resolveNonNegativeInt(raw: string | undefined, fallback: number, max: n
   return Number.isSafeInteger(value) && value >= 0 && value <= max ? value : fallback;
 }
 
+export type MapProviderId = "amap" | "tencent" | "baidu" | "osm" | "custom";
+export type MapCoordinateSystem = "wgs84" | "gcj02" | "bd09";
+export type MapProjection = "web-mercator" | "baidu";
+export type MapTileYAxis = "xyz" | "tms";
+
+/** 前端原生瓦片渲染所需的公开地图配置；key 只放在可公开的 tile URL 查询串里。 */
+export interface MapRuntimeConfig {
+  provider: MapProviderId;
+  label: string;
+  tileUrl: string;
+  subdomains: string[];
+  coordinateSystem: MapCoordinateSystem;
+  projection: MapProjection;
+  yAxis: MapTileYAxis;
+  zoom: number;
+  tileSize: number;
+}
+
+const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
+  amap: {
+    provider: "amap",
+    label: "高德地图",
+    tileUrl: "https://{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}",
+    subdomains: ["webst01", "webst02", "webst03", "webst04"],
+    coordinateSystem: "gcj02",
+    projection: "web-mercator",
+    yAxis: "xyz",
+    zoom: 14,
+    tileSize: 256,
+  },
+  tencent: {
+    provider: "tencent",
+    label: "腾讯地图",
+    tileUrl: "https://rt{s}.map.gtimg.com/tile?z={z}&x={x}&y={y}&styleid=3&version=1",
+    subdomains: ["0", "1", "2", "3"],
+    coordinateSystem: "gcj02",
+    projection: "web-mercator",
+    yAxis: "tms",
+    zoom: 14,
+    tileSize: 256,
+  },
+  baidu: {
+    provider: "baidu",
+    label: "百度地图",
+    tileUrl: "https://maponline{s}.bdimg.com/tile/?qt=vtile&x={x}&y={y}&z={z}&styles=pl&scaler=1&udt=20240101",
+    subdomains: ["0", "1", "2", "3"],
+    coordinateSystem: "bd09",
+    projection: "baidu",
+    yAxis: "xyz",
+    zoom: 14,
+    tileSize: 256,
+  },
+  osm: {
+    provider: "osm",
+    label: "OpenStreetMap",
+    tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    subdomains: [],
+    coordinateSystem: "wgs84",
+    projection: "web-mercator",
+    yAxis: "xyz",
+    zoom: 14,
+    tileSize: 256,
+  },
+  custom: {
+    provider: "custom",
+    label: "自定义地图",
+    tileUrl: "",
+    subdomains: [],
+    coordinateSystem: "wgs84",
+    projection: "web-mercator",
+    yAxis: "xyz",
+    zoom: 14,
+    tileSize: 256,
+  },
+};
+
+function mapProviderId(raw: string | undefined): MapProviderId {
+  const value = (raw || "").trim().toLowerCase();
+  return value === "tencent" || value === "qq" ? "tencent"
+    : value === "baidu" || value === "bd" ? "baidu"
+      : value === "osm" || value === "openstreetmap" ? "osm"
+        : value === "custom" ? "custom" : "amap";
+}
+
+function mapCoordinateSystem(raw: string | undefined, fallback: MapCoordinateSystem): MapCoordinateSystem {
+  const value = (raw || "").trim().toLowerCase();
+  return value === "wgs84" || value === "gcj02" || value === "bd09" ? value : fallback;
+}
+
+function mapProjection(raw: string | undefined, fallback: MapProjection): MapProjection {
+  const value = (raw || "").trim().toLowerCase();
+  return value === "web-mercator" || value === "webmercator" || value === "mercator" || value === "baidu"
+    ? value === "baidu" ? "baidu" : "web-mercator"
+    : fallback;
+}
+
+function mapYAxis(raw: string | undefined, fallback: MapTileYAxis): MapTileYAxis {
+  const value = (raw || "").trim().toLowerCase();
+  return value === "tms" ? "tms" : value === "xyz" ? "xyz" : fallback;
+}
+
+function mapSubdomains(raw: string | undefined, fallback: string[]): string[] {
+  const values = (raw || "").split(",").map((item) => item.trim()).filter((item) => /^[a-z0-9.-]+$/i.test(item));
+  return values.length ? values : fallback;
+}
+
+/** 只读取环境变量，不触碰网络；测试可传入任意 env 快照。 */
+export function resolveMapRuntimeConfig(env: Record<string, string | undefined>): MapRuntimeConfig {
+  const requested = mapProviderId(env.MAP_PROVIDER);
+  const tileUrlOverride = (env.MAP_TILE_URL || "").trim();
+  const effectiveProvider = requested === "custom" && !tileUrlOverride ? "amap" : requested;
+  const effectiveDefaults = MAP_PROVIDER_DEFAULTS[effectiveProvider];
+  const tileUrl = tileUrlOverride && /^https:\/\//i.test(tileUrlOverride)
+    ? tileUrlOverride
+    : effectiveDefaults.tileUrl;
+  return {
+    provider: effectiveProvider,
+    label: (env.MAP_LABEL || "").trim() || effectiveDefaults.label,
+    tileUrl,
+    subdomains: mapSubdomains(env.MAP_SUBDOMAINS, effectiveDefaults.subdomains),
+    coordinateSystem: mapCoordinateSystem(env.MAP_COORDINATE_SYSTEM, effectiveDefaults.coordinateSystem),
+    projection: mapProjection(env.MAP_PROJECTION, effectiveDefaults.projection),
+    yAxis: mapYAxis(env.MAP_Y_AXIS, effectiveDefaults.yAxis),
+    zoom: resolvePositiveInt(env.MAP_ZOOM, effectiveDefaults.zoom, 3, 18),
+    tileSize: resolvePositiveInt(env.MAP_TILE_SIZE, effectiveDefaults.tileSize, 128, 512),
+  };
+}
+
 export const config = {
   /** 兼容 OpenAI 格式的 API 地址（例如 https://tokenrhythm.studio/v1） */
   baseURL: process.env.BASE_URL ?? "https://tokenrhythm.studio/v1",
@@ -65,6 +193,8 @@ export const config = {
   modelRequestTimeoutMs: resolvePositiveInt(process.env.MODEL_REQUEST_TIMEOUT_MS, DEFAULT_MODEL_REQUEST_TIMEOUT_MS, 10_000, 10 * 60_000),
   /** 单次模型调用失败后的自动重试次数；0 表示不重试。 */
   modelRequestRetries: resolveNonNegativeInt(process.env.MODEL_REQUEST_RETRIES, DEFAULT_MODEL_REQUEST_RETRIES, 20),
+  /** 结论地图的原生瓦片配置；MAP_PROVIDER 决定高德/腾讯/百度/OSM/自定义。 */
+  map: resolveMapRuntimeConfig(process.env),
 } as {
   baseURL: string;
   apiKey: string;
@@ -73,6 +203,7 @@ export const config = {
   reasoning: ReasoningSetting;
   modelRequestTimeoutMs: number;
   modelRequestRetries: number;
+  map: MapRuntimeConfig;
 };
 
 export type Protocol = "openai" | "openai-responses" | "anthropic" | "gemini";

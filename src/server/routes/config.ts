@@ -39,6 +39,7 @@ export async function handleGetApiConfig(res: import("node:http").ServerResponse
     dialects: listDialects(),
     contextWindow: getContextWindowForActive() ?? null,
     contextBudget: createContextWindowBudget(getContextWindowForActive()),
+    map: config.map,
     demos: DEMOS,
   }));
 }

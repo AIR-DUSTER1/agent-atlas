@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import type { AssistantPart, ChatBlock, ToolPart } from "../../src/client/modules/types.js";
 import { collectEstateConclusionMedia, collectEstateHouseIds, stripEstateHouseIds } from "../../src/client/modules/conclusion-media.js";
+import { DEFAULT_MAP_CONFIG, mapTileUrl, projectMapPoint, resolveMapConfig } from "../../src/client/modules/map-provider.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
 import {
@@ -286,6 +287,41 @@ test("最终文字按真实 houseId 脱敏，表格匹配仍保留内部关系",
   const visible = stripEstateHouseIds("首推左岸风度 103155273255 ——2室2厅，ID：103155273255。", ids);
   assert.doesNotMatch(visible, /103155273255/);
   assert.match(visible, /首推左岸风度/);
+});
+
+test("地图配置按提供方生成原生瓦片，不依赖 iframe", () => {
+  const tencent = resolveMapConfig({
+    ...DEFAULT_MAP_CONFIG,
+    provider: "tencent",
+    label: "腾讯地图",
+    tileUrl: "https://rt{s}.map.gtimg.com/tile?z={z}&x={x}&y={y}&styleid=3&version=1",
+    subdomains: ["0", "1", "2", "3"],
+    coordinateSystem: "gcj02",
+    yAxis: "tms",
+  });
+  const point = projectMapPoint(36.117778, 120.414538, tencent);
+  const tileX = Math.floor(point.worldX / tencent.tileSize);
+  const tileY = Math.floor(point.worldY / tencent.tileSize);
+  const tencentUrl = mapTileUrl(tileX, tileY, tencent);
+  assert.match(tencentUrl, /rt[0-3]\.map\.gtimg\.com\/tile/);
+  assert.match(tencentUrl, new RegExp(`y=${2 ** tencent.zoom - 1 - tileY}(?:&|$)`));
+
+  const baidu = resolveMapConfig({
+    ...DEFAULT_MAP_CONFIG,
+    provider: "baidu",
+    label: "百度地图",
+    tileUrl: "https://maponline{s}.bdimg.com/tile/?qt=vtile&x={x}&y={y}&z={z}&styles=pl&scaler=1",
+    subdomains: ["0", "1", "2", "3"],
+    coordinateSystem: "bd09",
+    projection: "baidu",
+    yAxis: "xyz",
+  });
+  const baiduUrl = mapTileUrl(3272, 1047, baidu);
+  assert.match(baiduUrl, /maponline[0-3]\.bdimg\.com\/tile/);
+  assert.match(baiduUrl, /x=3272&y=1047/);
+
+  const osm = resolveMapConfig({ ...DEFAULT_MAP_CONFIG, provider: "osm", tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", subdomains: [], coordinateSystem: "wgs84" });
+  assert.equal(mapTileUrl(1, 2, osm), "https://tile.openstreetmap.org/14/1/2.png");
 });
 
 test("历史原始 detail/material 结果也能按房源匹配表格、户型图和位置", () => {
