@@ -36,7 +36,7 @@ export type MapCoordinateSystem = "wgs84" | "gcj02" | "bd09";
 export type MapProjection = "web-mercator" | "baidu";
 export type MapTileYAxis = "xyz" | "tms";
 
-/** 前端原生瓦片渲染所需的公开地图配置；key 只放在可公开的 tile URL 查询串里。 */
+/** 前端地图渲染公开配置；Web 服务 Key 只留在服务端，不下发浏览器。 */
 export interface MapRuntimeConfig {
   provider: MapProviderId;
   label: string;
@@ -47,6 +47,7 @@ export interface MapRuntimeConfig {
   yAxis: MapTileYAxis;
   zoom: number;
   tileSize: number;
+  amapStaticMapAvailable: boolean;
 }
 
 const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
@@ -60,6 +61,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
+    amapStaticMapAvailable: false,
   },
   tencent: {
     provider: "tencent",
@@ -71,6 +73,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "tms",
     zoom: 14,
     tileSize: 256,
+    amapStaticMapAvailable: false,
   },
   baidu: {
     provider: "baidu",
@@ -82,6 +85,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
+    amapStaticMapAvailable: false,
   },
   osm: {
     provider: "osm",
@@ -93,6 +97,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
+    amapStaticMapAvailable: false,
   },
   custom: {
     provider: "custom",
@@ -104,6 +109,7 @@ const MAP_PROVIDER_DEFAULTS: Record<MapProviderId, MapRuntimeConfig> = {
     yAxis: "xyz",
     zoom: 14,
     tileSize: 256,
+    amapStaticMapAvailable: false,
   },
 };
 
@@ -156,6 +162,18 @@ export function resolveMapRuntimeConfig(env: Record<string, string | undefined>)
     yAxis: mapYAxis(env.MAP_Y_AXIS, effectiveDefaults.yAxis),
     zoom: resolvePositiveInt(env.MAP_ZOOM, effectiveDefaults.zoom, 3, 18),
     tileSize: resolvePositiveInt(env.MAP_TILE_SIZE, effectiveDefaults.tileSize, 128, 512),
+    amapStaticMapAvailable: Boolean((env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || "").trim()),
+  };
+}
+
+export interface MapStaticServiceConfig {
+  amapWebServiceKey: string;
+}
+
+/** 静态地图代理的服务端凭据；AMAP_KEY 保留为旧配置别名。 */
+export function resolveMapStaticServiceConfig(env: Record<string, string | undefined>): MapStaticServiceConfig {
+  return {
+    amapWebServiceKey: (env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || "").trim(),
   };
 }
 
@@ -195,6 +213,8 @@ export const config = {
   modelRequestRetries: resolveNonNegativeInt(process.env.MODEL_REQUEST_RETRIES, DEFAULT_MODEL_REQUEST_RETRIES, 20),
   /** 结论地图的原生瓦片配置；MAP_PROVIDER 决定高德/腾讯/百度/OSM/自定义。 */
   map: resolveMapRuntimeConfig(process.env),
+  /** 高德静态地图代理的服务端 Key；不属于公开前端配置。 */
+  mapStatic: resolveMapStaticServiceConfig(process.env),
 } as {
   baseURL: string;
   apiKey: string;
@@ -204,6 +224,7 @@ export const config = {
   modelRequestTimeoutMs: number;
   modelRequestRetries: number;
   map: MapRuntimeConfig;
+  mapStatic: MapStaticServiceConfig;
 };
 
 export type Protocol = "openai" | "openai-responses" | "anthropic" | "gemini";

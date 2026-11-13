@@ -85,6 +85,7 @@ import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
   handleSetReasoning, handleUpdateProvider, handleDeleteProvider, handleActivate, handleModels,
 } from "./routes/config.js";
+import { handleAmapStaticMap } from "./map-static.js";
 import { handleSessions, handleDeleteSession, handleTranscript, handleCompactSession, handleSessionPermission, handleExportSession, handleCleanupSessions } from "./routes/sessions.js";
 import { handleListExternalAgents, handleAddExternalAgent, handleUpdateExternalAgent, handleDeleteExternalAgent } from "./routes/external.js";
 import { handleListProjects, handleAddProject, handleSetActiveProject, handleDeleteProject, handleRefreshProject, handlePickProjectDirectory } from "./routes/projects.js";
@@ -347,6 +348,9 @@ const server = createServer(async (req, res) => {
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
     const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
     const subagentMatch = pathname.match(/^\/api\/subagents\/([\w-]+)$/);
+
+    // 结论地图：高德 Web 服务 Key 仅在服务端代理中使用
+    if (pathname === "/api/map/static" && req.method === "GET") { await handleAmapStaticMap(res, url); return; }
 
     // 供应商 / 模型 / 思考等级 / 网关探测
     if (pathname === "/api/config" && req.method === "GET") { await handleGetApiConfig(res); return; }

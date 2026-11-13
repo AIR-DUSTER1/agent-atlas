@@ -353,3 +353,80 @@ test("切换地图配置后使用各提供方原生瓦片而不是 iframe", asyn
   expect(result.baidu.url).toContain("bdimg.com/tile");
   expect(result.baidu.iframe).toBe(0);
 });
+
+test("高德使用同源官方静态图并保留无 iframe 瓦片降级层", async ({ page }) => {
+  await login(page);
+  let staticMapRequest = "";
+  await page.route(/\/api\/map\/static\?/, async (route) => {
+    staticMapRequest = route.request().url();
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360"><rect width="100%" height="100%" fill="#dbe7da"/></svg>',
+    });
+  });
+
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart }, clientState, events, mapProvider] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+      load("/stream/events.js"),
+      load("/modules/map-provider.js"),
+    ]);
+    const appState = clientState.state;
+    const previousConfig = appState.config;
+    const baseConfig = previousConfig || { mock: true, model: "mock", contextWindow: null, providers: [], demos: [] };
+    const mapConfig = { ...mapProvider.DEFAULT_MAP_CONFIG, provider: "amap", label: "高德地图", amapStaticMapAvailable: true };
+    appState.config = { ...baseConfig, map: mapConfig };
+    const detail = {
+      action: "detail",
+      houseId: "103155273299",
+      city: "青岛",
+      data: JSON.stringify({ 基础信息: { 小区名: "高德测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月" } }),
+      location: { label: "高德测试花园", address: "测试路 1 号", lat: 36.123456, lng: 120.123456, source: "beike", precision: "community" },
+    };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const part = {
+      p: "tool", id: "amap-static-native", name: "house_lookup", argsText: "{}",
+      result: { content: JSON.stringify(detail), isError: false },
+    };
+    block.parts.push(part);
+    mountPart(block, part);
+    events.handleEvent({ type: "token", text: "结论：高德官方静态地图验证。", node: "agent" }, block, null);
+    events.handleEvent({ type: "done" }, block, null);
+
+    const mapEl = host.querySelector<HTMLElement>(".conclusion-property-map");
+    const started = Date.now();
+    while (mapEl?.dataset.mapStatus !== "ready" && Date.now() - started < 3_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const staticImage = mapEl?.querySelector<HTMLImageElement>(".conclusion-map-static");
+    const answer = {
+      status: mapEl?.dataset.mapStatus || "",
+      renderer: mapEl?.dataset.mapRenderer || "",
+      src: staticImage?.src || "",
+      staticReady: staticImage?.classList.contains("is-ready") || false,
+      layerHidden: Boolean(mapEl?.querySelector<HTMLElement>(".conclusion-map-tiles")?.hidden),
+      markerHidden: Boolean(mapEl?.querySelector<HTMLElement>(".conclusion-map-marker")?.hidden),
+      iframe: host.querySelectorAll("iframe").length,
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    appState.config = previousConfig;
+    return answer;
+  });
+
+  expect(result.status).toBe("ready");
+  expect(result.renderer).toBe("amap-static");
+  expect(result.src).toContain("/api/map/static?");
+  expect(result.staticReady).toBe(true);
+  expect(result.layerHidden).toBe(true);
+  expect(result.markerHidden).toBe(true);
+  expect(result.iframe).toBe(0);
+  expect(staticMapRequest).toContain("/api/map/static?");
+  expect(staticMapRequest).toContain("variant=compact");
+});

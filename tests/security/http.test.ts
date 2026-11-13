@@ -70,6 +70,9 @@ test("页面响应头不再放行任意 inline script", async () => {
   const csp = res.headers.get("content-security-policy") ?? "";
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
   assert.match(csp, /script-src[^;]*'sha256-/);
+  assert.doesNotMatch(csp, /script-src[^;]*amap\.com/);
+  assert.match(csp, /connect-src 'self'/);
+  assert.doesNotMatch(csp, /frame-src/);
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
   assert.equal(res.headers.get("x-frame-options"), "DENY");
 });

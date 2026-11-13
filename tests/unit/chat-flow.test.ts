@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import type { AssistantPart, ChatBlock, ToolPart } from "../../src/client/modules/types.js";
 import { collectEstateConclusionMedia, collectEstateHouseIds, stripEstateHouseIds } from "../../src/client/modules/conclusion-media.js";
-import { DEFAULT_MAP_CONFIG, mapTileUrl, projectMapPoint, resolveMapConfig } from "../../src/client/modules/map-provider.js";
+import { DEFAULT_MAP_CONFIG, amapStaticMapUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../../src/client/modules/map-provider.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
 import {
@@ -322,6 +322,11 @@ test("地图配置按提供方生成原生瓦片，不依赖 iframe", () => {
 
   const osm = resolveMapConfig({ ...DEFAULT_MAP_CONFIG, provider: "osm", tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", subdomains: [], coordinateSystem: "wgs84" });
   assert.equal(mapTileUrl(1, 2, osm), "https://tile.openstreetmap.org/14/1/2.png");
+
+  const amapUrl = amapStaticMapUrl(36.123456, 120.123456, { ...DEFAULT_MAP_CONFIG, amapStaticMapAvailable: true }, true);
+  assert.match(amapUrl || "", /^\/api\/map\/static\?/);
+  assert.match(amapUrl || "", /variant=compact/);
+  assert.equal(amapStaticMapUrl(36.123456, 120.123456, osm, false), null);
 });
 
 test("历史原始 detail/material 结果也能按房源匹配表格、户型图和位置", () => {

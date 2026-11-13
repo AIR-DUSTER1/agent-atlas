@@ -530,6 +530,12 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
   padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,.58);
   color: #fff; font-size: 10px; line-height: 1.2; pointer-events: none;
 }
+.conclusion-map-static {
+  position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%;
+  max-width: none; object-fit: cover; opacity: 0; pointer-events: none;
+  transition: opacity .18s ease;
+}
+.conclusion-map-static.is-ready { opacity: 1; }
 .conclusion-points { display: flex; flex-direction: column; gap: 7px; }
 .conclusion-point { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--bg-elev); }
 .conclusion-point-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

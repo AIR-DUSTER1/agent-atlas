@@ -11,7 +11,7 @@
  *  - 不引入 CSRF token：同源校验 + Bearer 已覆盖该面（计划规则 4 的
  *    「same-origin 或 bearer」满足其或分支），避免给零依赖前端再加一套令牌流转；
  *  - 安全响应头一次性 setHeader（writeHead 会合并继承），对 HTML 也有 CSP；
- *  - 地图由原生瓦片图片渲染，不再放行外部 frame；img-src 仍只允许 https/data；
+ *  - 地图由同源静态图或原生瓦片渲染，不创建 iframe，也不需要放行外部脚本；
  *  - index.html 的首屏主题脚本与 import map 是静态内联脚本，使用精确 SHA-256 hash
  *    script-src 不再放行任意 inline script，敏感操作仍有认证/同源防线。
  */
@@ -63,7 +63,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
   // 禁止被嵌入他人页面的 iframe（点击劫持）
   "X-Frame-Options": "DENY",
-  // 内容来源白名单：脚本仅同源 + 两个静态内联脚本的精确 hash；地图只放 OSM 官方域
+  // 内容来源白名单：脚本仅同源 + 两个静态内联脚本的精确 hash；地图不开放 frame-src
   "Content-Security-Policy":
     `default-src 'self'; script-src 'self' ${CSP_SCRIPT_HASHES.map((hash) => `'${hash}'`).join(" ")}; ` +
     `style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; ` +

@@ -712,7 +712,7 @@ Header: Authorization: Bearer <key>（可留空）
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
 
-**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。地图渲染由 `/api/config.map` 提供提供方、瓦片模板、坐标系、投影和 y 轴，`client/modules/map-provider.ts` 统一完成 WGS84→GCJ02→BD09、Web Mercator/百度投影与 TMS 翻转；高德、腾讯、百度、OSM 及自定义瓦片都直接创建 `<img>` 瓦片层，不再使用 iframe。底图加载失败时仍保留坐标与四家地图入口。
+**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。地图渲染由 `/api/config.map` 提供提供方、瓦片模板、坐标系、投影与 y 轴，`client/modules/map-provider.ts` 统一完成 WGS84→GCJ02→BD09、Web Mercator/百度投影与 TMS 翻转。高德配置 `AMAP_WEB_SERVICE_KEY` 时，浏览器请求同源 `/api/map/static`，由 `server/map-static.ts` 携带服务端 Key 调用官方静态地图并返回 PNG；Key 不进入 DOM 或浏览器网络，也不需要加载高德 JS SDK、`unsafe-eval` 或内部 iframe。静态图失败时自动回退原生 `<img>` 瓦片。腾讯、百度、OSM 及自定义瓦片继续直接创建图片瓦片层，全程不使用 iframe。底图失败时仍保留坐标与四家地图入口。
 
 **失败恢复**：`agent/profile.ts` 的 `toolRetryPolicy` 只允许显式登记的只读房产工具自动重试；认证、权限、参数与未找到等确定性错误不重试。可恢复的服务临时不可用、超时、限流和网络故障最多执行 3 次（含首次）；耗尽后 ToolMessage 会带 `retry.analysis / retry.nextAction`，同一参数再次调用由 hitl 直接熔断，避免模型静默忽略或无限重放。
 
@@ -728,7 +728,7 @@ Header: Authorization: Bearer <key>（可留空）
 | 文件 | 职责 | 关键设计（踩过的坑在 §7.3） |
 |---|---|---|
 | `auth.ts` | Bearer 认证 | 惰性读 env（防 ESM 早求值）；token 比 sha256 摘要 + `timingSafeEqual`（防时序侧信道）；401 统一文案 + `Connection: close` |
-| `http-guard.ts` | 请求层防线 | `checkSameOrigin`（`Sec-Fetch-Site: cross-site` / `Origin` 不符 → 403，即使带令牌也拒——防恶意页面借浏览器自动携带凭证）；`SECURITY_HEADERS`（nosniff / no-referrer / X-Frame-Options / CSP）；`shedRequestBodyAfterResponse` 拒绝路径排水（**空 body 的 GET 不能 destroy**，会在响应 flush 前带 RST） |
+| `http-guard.ts` | 请求层防线 | `checkSameOrigin`（`Sec-Fetch-Site: cross-site` / `Origin` 不符 → 403，即使带令牌也拒——防恶意页面借浏览器自动携带凭证）；`SECURITY_HEADERS`（nosniff / no-referrer / X-Frame-Options / CSP；地图静态图走同源代理，不放外部脚本或 frame-src）；`shedRequestBodyAfterResponse` 拒绝路径排水（**空 body 的 GET 不能 destroy**，会在响应 flush 前带 RST） |
 | `subprocess.ts` | 受控运行器 | `runControlled` 统一 stdin/超时/abort/输出上限（stdout 头部 4MB、stderr 尾部 64KB、超限树杀），`killProcessTree`（win32 `taskkill /T /F`、unix detached 组杀）；`realRunner` 可替换 → 测试不碰真进程 |
 | `audit.ts` | 审计日志 | `writeAudit(ev, detail)` fire-and-forget 自吞异常；append-only NDJSON 到 `.setting/audit.ndjson`；`AUDIT_MAX_BYTES=1MB` 超限尾部截断重写；事件族：`external.*`、`beike.*`、`browser.opened/closed/idleClosed/requestBlocked` |
 

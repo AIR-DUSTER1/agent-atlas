@@ -8,7 +8,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { assertTrustedInstallUrl, beikeBusinessError, buildBeikeChildEnv, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
-import { resolveMapRuntimeConfig } from "../../src/config.js";
+import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../src/config.js";
+import { buildAmapStaticMapUrl, parseAmapStaticMapQuery } from "../../src/server/map-static.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(
@@ -175,6 +176,20 @@ test("地图配置可从 env 切换高德/腾讯/百度/OSM/自定义瓦片", ()
   assert.equal(amap.provider, "amap");
   assert.equal(amap.coordinateSystem, "gcj02");
   assert.match(amap.tileUrl, /autonavi\.com/);
+  assert.equal("amapWebServiceKey" in amap, false, "服务端 Key 不能进入前端地图配置");
+  assert.equal(resolveMapRuntimeConfig({ AMAP_WEB_SERVICE_KEY: "service-key" }).amapStaticMapAvailable, true);
+  assert.equal(resolveMapStaticServiceConfig({ AMAP_WEB_SERVICE_KEY: " service-key " }).amapWebServiceKey, "service-key");
+  assert.equal(resolveMapStaticServiceConfig({ AMAP_KEY: " legacy-key " }).amapWebServiceKey, "legacy-key");
+
+  const compact = parseAmapStaticMapQuery(new URL("http://localhost/api/map/static?lat=36.123&lng=120.421&zoom=99&variant=compact"));
+  assert.deepEqual(compact, { lat: 36.123, lng: 120.421, zoom: 17, variant: "compact" });
+  const staticUrl = new URL(buildAmapStaticMapUrl(compact, "dummy-key"));
+  assert.equal(staticUrl.hostname, "restapi.amap.com");
+  assert.equal(staticUrl.searchParams.get("size"), "600*360");
+  assert.equal(staticUrl.searchParams.get("key"), "dummy-key");
+  assert.match(staticUrl.searchParams.get("markers") || "", /120\.421000,36\.123000/);
+  assert.throws(() => parseAmapStaticMapQuery(new URL("http://localhost/api/map/static?lat=200&lng=120")), /lat 无效/);
+  assert.throws(() => parseAmapStaticMapQuery(new URL("http://localhost/api/map/static?lat=36&lng=120&variant=huge")), /variant 无效/);
 
   const tencent = resolveMapRuntimeConfig({ MAP_PROVIDER: "tencent", MAP_ZOOM: "15" });
   assert.equal(tencent.provider, "tencent");

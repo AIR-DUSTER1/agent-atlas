@@ -17,7 +17,7 @@ import {
   type EstateConclusionMedia,
 } from "../modules/conclusion-media.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
-import { mapLinkKey, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
+import { amapStaticMapUrl, mapLinkKey, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
 import type { MapRuntimeConfig } from "../modules/types-api.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
@@ -91,8 +91,9 @@ function coordinatesFromEmbed(raw: string): { lat: number; lng: number } | null 
 }
 
 /**
- * 只创建由配置决定的原生图片瓦片层；高德、腾讯、百度、OSM 的坐标/投影/y 轴差异
- * 全部在 map-provider 中处理。这里绝不创建 iframe，底图失败时仍显示地址、坐标和链接。
+ * 高德优先加载服务端代理的官方静态图；其它提供方直接创建原生图片瓦片层。
+ * 坐标/投影/y 轴差异全部在 map-provider 中处理，这里绝不创建 iframe，
+ * 静态图失败时才补瓦片，底图失败时仍显示地址、坐标和链接。
  */
 function renderMapFrame(lat: number | undefined, lng: number | undefined, title: string, compact = false, rawConfig?: MapRuntimeConfig): HTMLElement | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -117,25 +118,56 @@ function renderMapFrame(lat: number | undefined, lng: number | undefined, title:
   map.dataset.mapCoordinateSystem = config.coordinateSystem;
 
   const layer = h("div", { class: "conclusion-map-tiles", "aria-hidden": "true" });
-  for (let tileY = centerY - 1; tileY <= centerY + 1; tileY += 1) {
-    for (let tileX = centerX - 1; tileX <= centerX + 1; tileX += 1) {
-      const img = document.createElement("img");
-      img.className = "conclusion-map-tile";
-      img.alt = "";
-      img.loading = "lazy";
-      img.decoding = "async";
-      img.referrerPolicy = "no-referrer";
-      img.draggable = false;
-      img.style.left = `${tileX * tileSize - point.worldX}px`;
-      img.style.top = `${tileY * tileSize - point.worldY}px`;
-      img.src = mapTileUrl(tileX, tileY, config);
-      layer.appendChild(img);
+  const populateTiles = (): void => {
+    if (layer.childElementCount) return;
+    for (let tileY = centerY - 1; tileY <= centerY + 1; tileY += 1) {
+      for (let tileX = centerX - 1; tileX <= centerX + 1; tileX += 1) {
+        const img = document.createElement("img");
+        img.className = "conclusion-map-tile";
+        img.alt = "";
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.referrerPolicy = "no-referrer";
+        img.draggable = false;
+        img.style.left = `${tileX * tileSize - point.worldX}px`;
+        img.style.top = `${tileY * tileSize - point.worldY}px`;
+        img.src = mapTileUrl(tileX, tileY, config);
+        layer.appendChild(img);
+      }
     }
-  }
+  };
 
   const marker = h("span", { class: "conclusion-map-marker", "aria-hidden": "true" });
   const source = h("span", { class: "conclusion-map-attribution" }, `定位 · ${config.label}`);
-  map.append(layer, marker, source);
+  let officialMap: HTMLImageElement | null = null;
+  const staticUrl = amapStaticMapUrl(point.lat, point.lng, config, compact);
+  if (staticUrl) {
+    officialMap = document.createElement("img");
+    officialMap.className = "conclusion-map-static";
+    officialMap.alt = "";
+    officialMap.decoding = "async";
+    officialMap.referrerPolicy = "same-origin";
+    officialMap.draggable = false;
+    map.dataset.mapStatus = "loading";
+    map.dataset.mapRenderer = "amap-static";
+    officialMap.addEventListener("load", () => {
+      officialMap?.classList.add("is-ready");
+      layer.hidden = true;
+      marker.hidden = true;
+      source.textContent = `定位 · ${config.label} · 官方底图`;
+      map.dataset.mapStatus = "ready";
+    }, { once: true });
+    officialMap.addEventListener("error", () => {
+      officialMap?.remove();
+      populateTiles();
+      map.dataset.mapStatus = "fallback";
+      map.dataset.mapRenderer = "tiles";
+    }, { once: true });
+    officialMap.src = staticUrl;
+  } else {
+    populateTiles();
+  }
+  map.append(layer, ...(officialMap ? [officialMap] : []), marker, source);
   return map;
 }
 

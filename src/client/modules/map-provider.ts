@@ -26,6 +26,7 @@ export const DEFAULT_MAP_CONFIG: MapRuntimeConfig = {
   yAxis: "xyz",
   zoom: 14,
   tileSize: 256,
+  amapStaticMapAvailable: false,
 };
 
 export interface MapCoordinate {
@@ -69,6 +70,7 @@ export function resolveMapConfig(raw?: MapRuntimeConfig | null): MapRuntimeConfi
     yAxis: raw.yAxis === "tms" ? "tms" : "xyz",
     zoom: finite(raw.zoom) ? Math.max(3, Math.min(18, Math.round(raw.zoom))) : DEFAULT_MAP_CONFIG.zoom,
     tileSize: finite(raw.tileSize) ? Math.max(128, Math.min(512, Math.round(raw.tileSize))) : DEFAULT_MAP_CONFIG.tileSize,
+    amapStaticMapAvailable: raw.amapStaticMapAvailable === true,
   };
 }
 
@@ -172,6 +174,18 @@ export function projectMapPoint(lat: number, lng: number, rawConfig?: MapRuntime
   }
   const pixel = webMercatorWorldPixel(coordinate, config);
   return { ...coordinate, worldX: pixel.x, worldY: pixel.y };
+}
+
+/** 高德使用服务端代理的官方静态地图；其它提供方继续走原生瓦片。 */
+export function amapStaticMapUrl(lat: number, lng: number, config: MapRuntimeConfig, compact: boolean): string | null {
+  if (config.provider !== "amap" || !config.amapStaticMapAvailable) return null;
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+    zoom: String(config.zoom),
+    variant: compact ? "compact" : "full",
+  });
+  return `/api/map/static?${params.toString()}`;
 }
 
 export function mapTileUrl(tileX: number, tileY: number, config: MapRuntimeConfig): string {
