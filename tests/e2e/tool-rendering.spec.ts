@@ -59,6 +59,83 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
   expect(result.groupOpened).toBe(false);
 });
 
+test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart, updateToolCard }, clientState, events] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+      load("/stream/events.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const tool = {
+      p: "tool", id: "named-tool", name: "house_lookup",
+      argsText: JSON.stringify({ community: "左岸风度" }), result: null,
+    };
+    block.parts.push(tool);
+    mountPart(block, tool);
+    updateToolCard(tool);
+    events.addNodeChip(block, "agent", false);
+    events.addNodeChip(block, "tools", false);
+    const answer = {
+      nodeChips: [...host.querySelectorAll(".node-chip")].map((el) => el.textContent),
+      toolName: host.querySelector(".tool-name")?.textContent || "",
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    return answer;
+  });
+
+  expect(result.nodeChips).toEqual([]);
+  expect(result.toolName).toBe("house_lookup");
+});
+
+test("思考过程流式阶段显示思考中状态，完成后隐藏并解除 busy", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart, updateThinkingPart }, clientState] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const part = { p: "thinking", node: "agent", text: "正在核对房源。", streaming: true };
+    block.parts.push(part);
+    mountPart(block, part);
+    const details = host.querySelector(".thinking-block")!;
+    const meta = host.querySelector(".thinking-meta")!;
+    const during = {
+      text: meta.textContent || "",
+      hidden: meta.classList.contains("hidden"),
+      busy: details.getAttribute("aria-busy"),
+      stateClass: details.classList.contains("is-thinking"),
+      role: meta.getAttribute("role"),
+    };
+    part.streaming = false;
+    updateThinkingPart(part);
+    const after = {
+      hidden: meta.classList.contains("hidden"),
+      busy: details.getAttribute("aria-busy"),
+      stateClass: details.classList.contains("is-thinking"),
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    return { during, after };
+  });
+
+  expect(result.during).toEqual({
+    text: "思考中", hidden: false, busy: "true", stateClass: true, role: "status",
+  });
+  expect(result.after).toEqual({ hidden: true, busy: "false", stateClass: false });
+});
+
 test("房源结论直接展示地图与户型图，工具卡不再承载媒体", async ({ page }) => {
   await login(page);
   const result = await page.evaluate(async () => {

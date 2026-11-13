@@ -45,10 +45,13 @@ export function updateThinkingPart(part: ThinkingPart): void {
   const refs = partEls.get(part);
   if (!refs) return;
   if (refs.textEl) refs.textEl.textContent = part.text;
+  const streaming = Boolean(part.streaming);
+  refs.el.classList.toggle("is-thinking", streaming);
+  refs.el.setAttribute("aria-busy", String(streaming));
   // 摘要只保留“思考中”这一临时状态；完成后不再显示字数或展开/收起文案。
   if (refs.metaEl) {
-    refs.metaEl.textContent = part.streaming ? "思考中" : "";
-    refs.metaEl.classList.toggle("hidden", !part.streaming);
+    refs.metaEl.textContent = streaming ? "思考中" : "";
+    refs.metaEl.classList.toggle("hidden", !streaming);
   }
 }
 
@@ -480,16 +483,12 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     details.className = "thinking-block";
     details.append(
       h("summary", { class: "thinking-summary" },
-        h("span", { class: "thinking-spark" }, icon("Brain", { size: 13 })),
-        h("span", { class: "thinking-title" }, "思考过程"),
-        h("span", { class: "thinking-node" }),
-        h("span", { class: "thinking-meta" }),
         h("span", { class: "thinking-chevron" }, icon("ChevronRight", { size: 12 })),
+        h("span", { class: "thinking-title" }, "思考过程"),
+        h("span", { class: "thinking-meta", role: "status", "aria-live": "polite" }),
       ),
       h("div", { class: "thinking-body" }, h("pre", { class: "thinking-text" })),
     );
-    const nodeEl = details.querySelector(".thinking-node");
-    if (nodeEl) nodeEl.textContent = `${nodeIcon(part.node)} ${nodeLabel(part.node)}`;
     body.appendChild(details);
     partEls.set(part, {
       el: details,
@@ -522,12 +521,15 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
   }
 
   if (part.p === "node") {
+    // agent / tools 是执行内部节点，不携带用户可操作的信息；
+    // 具体工具名由工具卡和工具组摘要展示，避免成排出现无意义的同名徽章。
+    if (part.name === "agent") return;
     if (part.name === "tools") {
       const grouped = groupToolCallsIfNeeded(block, body, part);
       if (grouped) {
         partEls.set(part, { el: grouped });
-        return;
       }
+      return;
     }
     const chip = document.createElement("span");
     chip.className = "node-chip";

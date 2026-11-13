@@ -66,7 +66,7 @@ test("用户消息、助手总结与压缩摘要均接入复制按钮和降级�
   assert.match(css, /opacity:\s*0/);
   assert.match(css, /\.assistant-footer\s*\{[^}]*min-height:\s*30px/s);
   assert.match(css, /\.message-action\s*\{[^}]*width:\s*30px/s);
-  assert.match(css, /\.thinking-summary\s*\{[^}]*min-height:\s*34px/s);
+  assert.match(css, /\.thinking-summary\s*\{[^}]*min-height:\s*24px/s);
   assert.doesNotMatch(messages, /message-action-label/);
   assert.match(css, /\.message-actions\.hidden\s*\{\s*display:\s*none/s);
 });
