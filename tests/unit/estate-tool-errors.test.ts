@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { assertTrustedInstallUrl, beikeBusinessError, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
+import { assertTrustedInstallUrl, beikeBusinessError, buildBeikeChildEnv, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
@@ -26,6 +26,25 @@ test("贝壳来源透传宿主真实标识，未设置时回退 workbuddy（与 
   assert.equal(normalizeBeikeSource(""), "workbuddy");
   assert.equal(normalizeBeikeSource(undefined), "workbuddy");
   assert.equal(normalizeBeikeSource("a".repeat(80)).length, 40);
+});
+
+test("beike 子进程环境锁定 workbuddy 调用方身份：宿主的更高优先级探测键被删除", () => {
+  process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE = "codex";
+  process.env.CODEX_THREAD_ID = "t1";
+  process.env.CLAUDECODE = "1";
+  try {
+    const env = buildBeikeChildEnv();
+    // 探测表按「claude-code → codex → workbuddy」顺序命中，这些键存在会把 UA 抢走
+    for (const key of ["CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "CODEX_THREAD_ID", "CLAUDECODE"]) {
+      assert.equal(key in env, false, `${key} 必须从子进程环境删除`);
+    }
+    assert.equal(env.WORKBUDDY_SESSION_ID, "estate-workbench");
+    assert.equal(env.BEIKE_SOURCE, "workbuddy");
+  } finally {
+    delete process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE;
+    delete process.env.CODEX_THREAD_ID;
+    delete process.env.CLAUDECODE;
+  }
 });
 test("贝壳登录失效识别：覆盖当前 CLI 与常见 401 文案", () => {
   assert.equal(isBeikeAuthFailure(JSON.stringify({ error: "invalid cli request", ok: false })), true);
@@ -101,9 +120,10 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.equal((start.match(/openExternalUrl\(/g) || []).length, 1);
   assert.doesNotMatch(start, /\["login"\]|playwright-core|loginBeikeInManagedBrowser/);
   assert.match(source, /BEIKE_LOGIN_SOURCE = normalizeBeikeSource\(process\.env\.BEIKE_SOURCE\)/);
-  assert.match(source, /BEIKE_SOURCE: BEIKE_LOGIN_SOURCE/);
+  assert.match(source, /env: buildBeikeChildEnv\(\)/);
   assert.doesNotMatch(source, /beike_skill/);
-  assert.match(client, /source=unknown/);
+  // 登录链接的 source 由后端 keyUrl 统一提供（回退 workbuddy），前端不再写死 source=unknown
+  assert.doesNotMatch(client, /source=unknown/);
   assert.match(client, /safeHref\(st\.keyUrl/);
   assert.match(client, /status\.textContent = "🔐 需要登录"/);
   assert.match(client, /navigator\.clipboard.*readText/);
@@ -136,8 +156,9 @@ test("保存 Key 的失败原因完整展示，不回退成未知错误", async 
   assert.match(estate, /fsp\.writeFile\(BEIKE_CRED_FILE, previousKey/);
   assert.match(estate, /probeBeikeMcpKey\(key, found\.version\)/);
   assert.match(estate, /method: "tools\/list"/);
-  assert.match(estate, /调用方 User-Agent/);
-  assert.match(estate, /不要跨客户端复用/);
+  // 跨客户端复用的提示文案已按需求移除：错误只说「重新扫码」，不引导换客户端
+  assert.doesNotMatch(estate, /调用方 User-Agent/);
+  assert.doesNotMatch(estate, /不要跨客户端复用/);
   assert.match(estate, /beike\.keyValidated/);
 });
 

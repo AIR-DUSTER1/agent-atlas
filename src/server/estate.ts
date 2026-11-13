@@ -75,6 +75,15 @@ const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
  * 本工作台属于 workbuddy 生态；缺省时 CLI 会按宿主环境误探成 vscode。 */
 const BEIKE_UA_SESSION_ID = "estate-workbench";
 
+/** beike CLI 的 agent 探测表按「claude-code → codex → workbuddy → …」顺序命中首个键。
+ * 宿主若是 Codex / Claude 终端（Trae、Codex Desktop 等注入 CODEX_* 与 CLAUDE_* 变量），
+ * 探测会先命中更高优先级的键，把 UA 抢成别的客户端 → 贝壳 MCP 按 UA 校验 Key 来源
+ * 判「调用方不匹配」。注入 workbuddy 键之前必须先删掉这些更高优先级的探测键。 */
+const BEIKE_AGENT_DETECT_HIGHER_KEYS = [
+  "CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE",
+  "CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "CODEX_THREAD_ID", "CODEX_SESSION_ID",
+];
+
 const BEIKE_RUN_TIMEOUT_MS = 90_000;      // 单条 beike 子进程最长执行时间
 const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出时间
 const BEIKE_INSTALL_TIMEOUT_MS = 600_000; // 整个安装流程（下载 ~32MB + 解压）
@@ -147,6 +156,18 @@ export interface BeikeStatus {
   loginRequired: boolean;
 }
 
+/** 组装 beike 子进程环境：来源标识 + UA 身份锁定（导出供测试）。
+ * 探测表按优先级命中，宿主的 CODEX_* 与 CLAUDE_* 键必须先删，workbuddy 才能生效。 */
+export function buildBeikeChildEnv(): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  for (const probe of BEIKE_AGENT_DETECT_HIGHER_KEYS) delete childEnv[probe];
+  // 登录链接、CLI 上报与鉴权必须使用同一个来源标识，避免 Key 与调用方身份错配。
+  childEnv.BEIKE_SOURCE = BEIKE_LOGIN_SOURCE;
+  // WORKBUDDY_SESSION_ID 是 CLI agent 探测表的 workbuddy 键：存在且无更高优先级键时，UA 标为 workbuddy。
+  childEnv.WORKBUDDY_SESSION_ID = BEIKE_UA_SESSION_ID;
+  return childEnv;
+}
+
 /** spawn 一次 beike：返回退出码 + stdout/stderr（不解析 JSON）。
  * T1-4 迁移到 subprocess.ts 受控运行器：输出上限 + 超时 + Windows整树强杀 */
 function runBeikeRaw(
@@ -157,9 +178,7 @@ function runBeikeRaw(
   return runControlled(bin, {
     args,
     timeoutMs,
-    // 登录链接、CLI 上报与鉴权必须使用同一个来源标识，避免 Key 与调用方身份错配。
-    // WORKBUDDY_SESSION_ID 是 CLI agent 探测表的键之一：存在即把 UA 的 agent 段标为 workbuddy。
-    env: { ...process.env, BEIKE_SOURCE: BEIKE_LOGIN_SOURCE, WORKBUDDY_SESSION_ID: BEIKE_UA_SESSION_ID },
+    env: buildBeikeChildEnv(),
   }).then((r) => {
     // 受控运行器的异常终止统一标 -1；把终止原因补进 stderr，便于调用方转述
     const stderr = r.killedBy
@@ -634,12 +653,11 @@ export async function saveBeikeKey(apiKey: string): Promise<{ ok: boolean; messa
   const detail = tail
     ? `凭证校验未通过：${redactSecret(tail, key)}`
     : "凭证校验未通过，请确认复制的是页面上的完整字符";
-  const sourceHint = "若该 Key 来自 WorkBuddy，贝壳 MCP 会校验调用方 User-Agent；请改在 WorkBuddy 内使用，或向贝壳申请当前客户端可用的 Key，不要跨客户端复用。";
   return {
     ok: false,
     message: restoreError
-      ? `${detail}；旧凭证恢复失败：${restoreError}。${sourceHint}`
-      : `${detail}。${sourceHint}`,
+      ? `${detail}；旧凭证恢复失败：${restoreError}`
+      : detail,
   };
 }
 
@@ -700,7 +718,7 @@ async function beikeAuthOutcome(action: string): Promise<BeikeOutcome> {
     loginUrl: gate.loginUrl,
     loginOpened: gate.opened,
     stopAgent: true,
-    error: "贝壳鉴权未通过：Key 可能已失效，或与当前客户端调用方不匹配。若 Key 来自 WorkBuddy，请改在 WorkBuddy 内使用，或向贝壳申请当前客户端可用的 Key；否则请在登录卡中重新扫码获取并保存。",
+    error: "贝壳鉴权未通过：Key 可能已失效或已过期，请在登录卡中重新扫码获取并保存。",
   };
 }
 

@@ -332,7 +332,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     const keyA = box.querySelector<HTMLAnchorElement>(".key-link");
     if (keyA) {
       keyA.textContent = "获取贝壳 Key（building.ke.com）";
-      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key&source=unknown";
+      keyA.href = data.keyUrl || "https://building.ke.com/?action=get-key";
     }
     const fix = document.createElement("button");
     fix.className = "btn btn-approve";
