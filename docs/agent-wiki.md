@@ -709,7 +709,7 @@ Header: Authorization: Bearer <key>（可留空）
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
 
-**结论附件**：`client/modules/conclusion-media.ts` 只做纯数据聚合（详情地图优先、点位与图片去重），`client/render/conclusion-media.ts` 在最终文本落盘后挂载地图和图片；流式途中、后续工具调用或回答被重写时自动撤下旧附件。工具组不再因为 `estate-rich` 自动展开。
+**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 在最终文本落盘后挂载响应式表格，并对回答中出现的真实 houseId 做确定性脱敏。流式途中、后续工具调用或回答被重写时自动撤下旧表。工具组不再因为 `estate-rich` 自动展开。
 
 **契约外发现**：贝壳返回字段名不固定（`priceTitle/price/bodyPrice…`），所以工具侧一律
 松散解析再归一；CLI 输出虽是单行 JSON，中文在某些版本带 BOM/转义差异，解析失败时会把
@@ -1657,7 +1657,8 @@ console.log(result.messages.at(-1).content);
 | 检索报「路径未授权」                | RAG 入库沿用 files.ts 授权模型：只能扫描项目根 / 已添加的文件夹（云端 Git 项目先 ⟳ pull）    |
 | `beike login` 输出链接后报 `'source' 不是内部或外部命令` | Windows CLI 通过 `cmd /c start` 打开含 `&source=` 的 URL，未转义时 `source` 被当成第二条命令；这是 CLI 启动链接的 Windows 引号 bug。agentatlas 不依赖它打开页面，而是用参数数组启动同一官方 URL |
 | `beike doctor` 报 Key 无效但业务实际可用 | 不能再用 MCP `initialize` 兜底：官方初始化阶段可能不校验业务权限，会制造假阳性。agentatlas 现在按 CLI 同款 `X-Beike-Cli-Version` / `X-Beike-Session-Id` 请求头调用 `tools/list`，只有返回工具清单才接受 Key；否则保留 doctor 失败原因并提示重新登录 |
-| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展开登录卡、在本轮插入确定的登录步骤说明并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存。登录链接与 CLI 环境变量必须使用同一个宿主来源；未设置时回退官方 `unknown`。不要伪造调用方：实测贝壳 MCP 会按 User-Agent 中调用方标识限制 Key，同一枚 WorkBuddy Key 在 `workbuddy/WorkBuddy` UA 下 `tools/list` 成功，在 `codex/Codex Desktop` 或 generic `beike-cli` 下均返回 `invalid cli request`。因此 WorkBuddy Key 应留在 WorkBuddy 内使用，或向贝壳申请当前客户端可用 Key。新 Key 通过业务校验后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL）。贝壳官方 `/auth/callback` 现在已恢复为正常页面；应使用系统默认浏览器手动扫码并点击页面 Key 右侧的「复制」。页面只显示 `r33s...****...` 掩码，手动选中掩码会得到无效 Key；app 提供「从剪贴板读取」并由服务端拒绝掩码。若再次出现 `Not Found`，先停止重试并等待贝壳修复，不要用自动化浏览器、脚本点击或后台换票绕过风控 |
+| 贝壳返回 `invalid cli request` / 401 或登录卡 | 这是 Key 失效，不是参数错误。服务会展开登录卡、在本轮插入确定的登录步骤说明并熔断后续 CLI 调用；用户手动打开官方登录页，扫码后复制页面 Key，到「设置 → 插件 → 找房数据源」保存。登录链接与 CLI 环境变量必须使用同一个宿主来源；未设置时回退 `workbuddy`（本工作台即 workbuddy 生态，与 UA 同源）。实测贝壳 MCP 会按 User-Agent 中调用方标识限制 Key：WorkBuddy Key 只在 `workbuddy` UA 下通过，`codex/Codex Desktop` 或 generic `beike-cli` 均返回 `invalid cli request`——因此服务端主动把子进程调用方锁定为 workbuddy（见下一行），不再提示用户「换客户端」。新 Key 通过业务校验后门禁自动解除。登录页直接使用官方 `building.ke.com` 地址，一次点击应只出现一个页签；若出现两个，需确认是否仍在运行旧服务进程（旧实现会先跑 `beike login` 再打开同一 URL）。贝壳官方 `/auth/callback` 现在已恢复为正常页面；应使用系统默认浏览器手动扫码并点击页面 Key 右侧的「复制」。页面只显示 `r33s...****...` 掩码，手动选中掩码会得到无效 Key；app 提供「从剪贴板读取」并由服务端拒绝掩码。若再次出现 `Not Found`，先停止重试并等待贝壳修复，不要用自动化浏览器、脚本点击或后台换票绕过风控 |
+| UA 被探测成 codex / vscode 导致 Key 校验失败 | beike CLI 内置 agent 探测表，按「claude-code → codex → workbuddy → doubao → cursor → zcode → zed」顺序命中**首个存在的环境变量**；宿主是 Trae / Codex Desktop / Claude Code 终端时带着 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE` 等更高优先级键进来，只注入 `WORKBUDDY_SESSION_ID` 会被抢。`buildBeikeChildEnv` 组装子进程环境时先删除 claude/codex 的 5 个探测键再注入 workbuddy 键，把调用方恒定锁为 `workbuddy`；同理登录链接 source 缺省回退 `workbuddy`，不再回退 `unknown`（实测 silent_register 的 source 跟随登录页 URL 参数） |
 | 怀疑调用过快触发贝壳风控 | 历史实现允许 2 个贝壳 CLI 并发，且每轮还会附加 `analyze` 上报，认证异常时可能形成重复请求。现在 analyze / 业务查询共用并发 1 队列、相邻启动间隔 1.5 秒；未验证 Key 前不发 analyze，连续 2 次失败熔断 60 秒。登录阶段只用系统浏览器打开一次，不预点击、不代扫；出现验证页时停止 10-30 分钟，不使用换 IP、伪装 UA 或脚本重试规避 |
 | 安装贝壳 CLI 报「暂无 win32/x64」或 `unexpected redirect` | 官方 manifest 使用 `windows/amd64`，不是 Node 的 `win32/x64`；GitHub Release 下载会 302 到 `release-assets.githubusercontent.com`。安装器现做平台名映射，并逐跳重新校验重定向 host |
 | `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
@@ -1666,8 +1667,8 @@ console.log(result.messages.at(-1).content);
 | Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
 | Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
 | 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
-| 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，详情卡立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。只有地址确实无坐标时才列「未定位」 |
-| 房产调研完成后看不到地图 / 户型图      | 户型图 URL 在 material 的嵌套 JSON 字符串中，旧版本未归一为 `images[]`，前端只能看到裸文本。现在最终回答落盘后由 `refreshConclusionMedia` 统一挂载地图与图片；工具卡默认折叠且不再承载媒体。若原始数据确实没有图片/坐标才如实说明 |
+| 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，最终结论表立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。只有地址确实无坐标时才列「未定位」 |
+| 房产调研完成后看不到地图 / 户型图      | 户型图 URL 在 material 的嵌套 JSON 字符串中，旧版本未归一为 `images[]`，前端只能看到裸文本。现在最终回答落盘后由 `refreshConclusionMedia` 按 houseId 挂载“房源 / 户型图 / 地理位置”表格；工具卡默认折叠且不再承载媒体，内部 ID 不进入可见文字。若原始数据确实没有图片/坐标才如实说明 |
 | 房产任务反思反复不通过 / 流程最终 failed | 常见原因是模型做完最后一步却忘了 `update_workflow_plan`，留下唯一 `in_progress`；反思节点因此反复回炉。现在反思已判定结果满足需求时，会在没有 pending / failed 的前提下自动封口唯一 active 步骤，并保留「结果反思确认已完成」证据；真正未执行的步骤仍不会被放行 |
 | e2e 测试后真实配置丢失               | 测试前把 `.web-config.json` 移开时**必须先建好备份目录再 unlink**（本仓库实测翻车：备份写盘失败但原文件已删，只能靠 `.env` 重新播种） |
 | 413 客户端只见 ECONNRESET         | 超限响应后直接 destroy socket 会带 RST，把已发出的 413 一起冲掉（客户端拿不到状态码）。对策「丢弃式排水」：继续读完剩余 body 再关 + 攻击流总量上限兜底。**另两个坑（5.6 测试实锤）**：① 响应头别带 `Connection: close` —— node:http 会在「响应结束 + 请求体没读完」时自行 destroy，同样发 RST；② 排水完用 `socket.end()` 发 FIN，不要 `destroy()`（Windows 上带未读数据 destroy 会 RST）。**验收方式**：node:http 客户端在 Windows loopback 上偶发 ECONNRESET（还没读到响应头），curl/浏览器正常；自动化测试用**裸 TCP 先读响应再断开**才稳定 |

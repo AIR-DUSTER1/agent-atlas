@@ -1,16 +1,19 @@
 /**
  * ============================================================
- * render/conclusion-media.ts — 房产最终结论中的地图与图片附件
+ * render/conclusion-media.ts — 房产最终结论中的结构化对比表
  * ============================================================
- * 职责：把同一轮 house_* 工具结果中的位置和户型图挂到最终回答下方。
- * 设计立场：这是结论的一部分，不放进可折叠工具卡；只有最后一条文本已经
- * 落盘且非流式时才出现，工具仍在执行或回答还在重写时自动移除。
+ * 职责：把同一轮 house_* 结果按 houseId 合并成“房源 / 户型图 / 地理位置”
+ * 表格，挂到最终回答下方。内部 ID 只参与匹配，不展示给用户；流式或重写
+ * 阶段自动撤下旧表，避免结论与过程不一致。
  */
 import { blockBodies } from "../core/state.js";
 import {
   collectEstateConclusionMedia,
+  collectEstateHouseIds,
+  stripEstateHouseIds,
   type ConclusionImage,
   type ConclusionPoint,
+  type ConclusionProperty,
   type EstateConclusionMedia,
 } from "../modules/conclusion-media.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
@@ -57,33 +60,126 @@ function renderLinks(links: Record<string, string> | undefined): HTMLElement | n
   return row.childElementCount ? row : null;
 }
 
-function renderMap(media: EstateConclusionMedia): HTMLElement | null {
-  if (!media.mapEmbedUrl) return null;
+function renderMapFrame(embedUrl: string, title: string, compact = false): HTMLElement | null {
+  const src = safeHref(embedUrl);
+  if (!src || !/^https:\/\/www\.openstreetmap\.org\//i.test(src)) return null;
   const iframe = document.createElement("iframe");
-  iframe.src = media.mapEmbedUrl;
+  iframe.src = src;
   iframe.loading = "lazy";
-  iframe.title = media.mapTitle || "房源位置地图";
-  return h("div", { class: "conclusion-map" }, iframe);
+  iframe.title = title;
+  return h("div", { class: compact ? "conclusion-property-map" : "conclusion-map" }, iframe);
+}
+
+function renderImageFigure(image: ConclusionImage, compact = false): HTMLElement | null {
+  const src = safeImageSrc(image.src);
+  if (!src) return null;
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = image.alt;
+  img.loading = compact ? "lazy" : "eager";
+  img.decoding = "async";
+  const href = safeHref(src);
+  const visual = href
+    ? h("a", { class: "conclusion-image-open", href, target: "_blank", rel: "noopener noreferrer" }, img)
+    : img;
+  return h("figure", { class: compact ? "conclusion-image-card compact" : "conclusion-image-card" }, visual);
+}
+
+function renderImageCell(property: ConclusionProperty): HTMLElement {
+  const cell = document.createElement("td");
+  cell.className = "conclusion-table-image";
+  const first = property.images[0];
+  const figure = first ? renderImageFigure(first, true) : null;
+  if (figure) {
+    cell.appendChild(figure);
+    if (property.images.length > 1) {
+      cell.appendChild(h("span", { class: "conclusion-image-more" }, `另有 ${property.images.length - 1} 张`));
+    }
+  } else {
+    cell.appendChild(h("span", { class: "conclusion-empty" }, "未获取户型图"));
+  }
+  return cell;
+}
+
+function renderLocationCell(property: ConclusionProperty, media: EstateConclusionMedia, rendered: Set<string>): HTMLElement {
+  const cell = document.createElement("td");
+  cell.className = "conclusion-table-location";
+  const location = property.location;
+  if (!location) {
+    cell.appendChild(h("strong", { class: "conclusion-location-name" }, property.community || "位置待补"));
+    cell.appendChild(h("span", { class: "conclusion-empty" }, property.address || "未获取坐标"));
+    return cell;
+  }
+
+  const key = [location.name, location.lat ?? "", location.lng ?? ""].join("|");
+  const embed = location.embedUrl || (media.properties.length === 1 ? media.mapEmbedUrl : "");
+  if (embed && !rendered.has(key)) {
+    const map = renderMapFrame(embed, `${property.title || location.name} 位置`, true);
+    if (map) {
+      cell.appendChild(map);
+      rendered.add(key);
+    }
+  } else if (rendered.has(key)) {
+    cell.appendChild(h("span", { class: "conclusion-same-location" }, "同一小区位置，见上方地图"));
+  }
+
+  cell.appendChild(h("strong", { class: "conclusion-location-name" }, location.name || property.community || "房源位置"));
+  const meta = [precisionLabel(location.precision), location.address || property.address, coordinateText(location)]
+    .filter(Boolean).join(" · ");
+  if (meta) cell.appendChild(h("span", { class: "conclusion-location-meta" }, meta));
+  const links = renderLinks(location.links);
+  if (links) cell.appendChild(links);
+  return cell;
+}
+
+function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement; mappedLocations: number } {
+  const table = document.createElement("table");
+  table.className = "conclusion-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const label of ["房源", "户型图", "地理位置"]) {
+    headRow.appendChild(h("th", null, label));
+  }
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  const renderedLocations = new Set<string>();
+  for (const property of media.properties) {
+    const row = document.createElement("tr");
+    const facts = document.createElement("td");
+    facts.className = "conclusion-table-property";
+    facts.appendChild(h("strong", { class: "conclusion-property-title" }, property.title || property.community || "房源详情"));
+    const tags = h("div", { class: "conclusion-property-tags" });
+    for (const value of [property.rent, property.layout, property.area, property.floor, property.orientation, property.decoration]) {
+      if (value) tags.appendChild(h("span", null, value));
+    }
+    if (tags.childElementCount) facts.appendChild(tags);
+    if (property.address) facts.appendChild(h("span", { class: "conclusion-property-address" }, property.address));
+    row.appendChild(facts);
+    row.appendChild(renderImageCell(property));
+    row.appendChild(renderLocationCell(property, media, renderedLocations));
+    tbody.appendChild(row);
+  }
+  table.append(thead, tbody);
+  return { table, mappedLocations: renderedLocations.size };
+}
+
+function renderMap(media: EstateConclusionMedia): HTMLElement | null {
+  return media.mapEmbedUrl ? renderMapFrame(media.mapEmbedUrl, media.mapTitle || "房源位置地图") : null;
 }
 
 function renderPoints(media: EstateConclusionMedia): HTMLElement | null {
   if (!media.points.length) return null;
   const list = h("div", { class: "conclusion-points" });
   for (const point of media.points) {
-    const meta = [
-      precisionLabel(point.precision),
-      point.address,
-      coordinateText(point),
-    ].filter(Boolean).join(" · ");
+    const meta = [precisionLabel(point.precision), point.address, coordinateText(point)].filter(Boolean).join(" · ");
     const links = renderLinks(point.links);
-    const row = h("div", { class: "conclusion-point" },
+    list.appendChild(h("div", { class: "conclusion-point" },
       h("div", { class: "conclusion-point-main" },
         h("strong", { class: "conclusion-point-name" }, point.name),
         meta ? h("span", { class: "conclusion-point-meta" }, meta) : null,
       ),
       links,
-    );
-    list.appendChild(row);
+    ));
   }
   return list.childElementCount ? list : null;
 }
@@ -91,45 +187,51 @@ function renderPoints(media: EstateConclusionMedia): HTMLElement | null {
 function renderImages(images: ConclusionImage[]): HTMLElement | null {
   if (!images.length) return null;
   const grid = h("div", { class: "conclusion-images" });
-  images.forEach((image, index) => {
-    const src = safeImageSrc(image.src);
-    if (!src) return;
-    const img = document.createElement("img");
-    img.src = src;
-    img.alt = image.alt;
-    img.loading = index === 0 ? "eager" : "lazy";
-    img.decoding = "async";
-    const href = safeHref(src);
-    const visual = href
-      ? h("a", { class: "conclusion-image-open", href, target: "_blank", rel: "noopener noreferrer" }, img)
-      : img;
-    grid.appendChild(h("figure", { class: "conclusion-image-card" },
-      visual,
-      h("figcaption", null, index === 0 ? "主户型图" : `户型图 ${index + 1}`),
-    ));
+  images.forEach((image) => {
+    const figure = renderImageFigure(image);
+    if (figure) grid.appendChild(figure);
   });
   return grid.childElementCount ? grid : null;
 }
 
 function renderConclusion(media: EstateConclusionMedia): HTMLElement {
+  const hasTable = media.properties.length > 0;
   const section = h("section", {
     class: "conclusion-media",
-    "aria-label": "本轮结论中的房源位置与户型图",
+    "aria-label": "本轮结论中的房源对比表",
   },
     h("div", { class: "conclusion-media-head" },
-      h("span", { class: "conclusion-media-icon" }, icon("Sparkles", { size: 14 })),
+      h("span", { class: "conclusion-media-icon" }, icon(hasTable ? "House" : "MapPin", { size: 14 })),
       h("div", { class: "conclusion-media-copy" },
-        h("strong", null, "结论附图：位置与户型"),
-        h("span", null, media.mapEmbedUrl ? "地图直接定位；点击图片可查看原图" : "户型图直接展示；地图链接可手动核对"),
+        h("strong", null, hasTable ? "推荐房源对比" : "结论附图：位置与户型"),
+        h("span", null, hasTable
+          ? "按月租从低到高；户型图与位置按房源自动匹配；内部编号已隐藏"
+          : "地图与图片直接来自本轮工具结果"),
       ),
     ),
   );
-  const map = renderMap(media);
-  if (map) section.appendChild(map);
-  const points = renderPoints(media);
-  if (points) section.appendChild(points);
-  const images = renderImages(media.images);
-  if (images) section.appendChild(images);
+  if (hasTable) {
+    const { table, mappedLocations } = renderPropertyTable(media);
+    section.appendChild(table);
+    if (!mappedLocations) {
+      const map = renderMap(media);
+      if (map) section.appendChild(map);
+    }
+    const used = new Set(media.properties.flatMap((property) => property.images.map((image) => image.src)));
+    const orphans = media.images.filter((image) => !used.has(image.src));
+    const gallery = renderImages(orphans);
+    if (gallery) {
+      section.appendChild(h("div", { class: "conclusion-subtitle" }, "其他户型图"));
+      section.appendChild(gallery);
+    }
+  } else {
+    const map = renderMap(media);
+    if (map) section.appendChild(map);
+    const points = renderPoints(media);
+    if (points) section.appendChild(points);
+    const images = renderImages(media.images);
+    if (images) section.appendChild(images);
+  }
   return section;
 }
 
@@ -140,7 +242,7 @@ function removeConclusion(block: AssistantBlock, body: HTMLElement): void {
   body.classList.remove("has-conclusion-media");
 }
 
-/** 最终文本落盘后刷新；流式文本、后续工具调用和重写阶段都会移除旧附件。 */
+/** 最终文本落盘后刷新；流式文本、后续工具调用和重写阶段都会移除旧表。 */
 export function refreshConclusionMedia(block: AssistantBlock): void {
   const body = blockBodies.get(block);
   if (!body) return;
@@ -150,7 +252,7 @@ export function refreshConclusionMedia(block: AssistantBlock): void {
     return;
   }
   const media = collectEstateConclusionMedia(block.parts);
-  if (!media.mapEmbedUrl && !media.points.length && !media.images.length) {
+  if (!media.mapEmbedUrl && !media.points.length && !media.images.length && !media.properties.length) {
     removeConclusion(block, body);
     return;
   }
@@ -165,4 +267,9 @@ export function refreshConclusionMedia(block: AssistantBlock): void {
   }
   conclusionEls.set(block, section);
   body.classList.add("has-conclusion-media");
+}
+
+/** 模型文字可能复述工具参数；展示前按本轮真实 houseId 做确定性脱敏。 */
+export function sanitizeEstateConclusionText(block: AssistantBlock, value: string): string {
+  return stripEstateHouseIds(value, collectEstateHouseIds(block.parts));
 }

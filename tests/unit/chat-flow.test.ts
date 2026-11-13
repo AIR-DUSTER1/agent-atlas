@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import type { AssistantPart, ChatBlock, ToolPart } from "../../src/client/modules/types.js";
-import { collectEstateConclusionMedia } from "../../src/client/modules/conclusion-media.js";
+import { collectEstateConclusionMedia, collectEstateHouseIds, stripEstateHouseIds } from "../../src/client/modules/conclusion-media.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
 import {
@@ -126,7 +126,7 @@ test("工具卡按类别展示并保留原始工具名，批量调用内部按�
   assert.match(css, /\.tool-card\[data-tool-category="command"\]/);
   assert.doesNotMatch(app, /TOOL_ICONS/);
 });
-test("房产地图与户型图进入最终结论附件，工具组保持折叠", async () => {
+test("房产地图与户型图进入最终结论表格，工具组保持折叠", async () => {
   const app = await readClientFiles([
     "modules/conclusion-media.ts", "render/conclusion-media.ts", "render/parts.ts",
     "stream/events.ts", "render/messages.ts", "views/estate.ts",
@@ -134,12 +134,14 @@ test("房产地图与户型图进入最终结论附件，工具组保持折叠",
   const css = await readClientCss();
   assert.match(app, /collectEstateConclusionMedia/);
   assert.match(app, /refreshConclusionMedia/);
+  assert.match(app, /sanitizeEstateConclusionText/);
+  assert.match(app, /conclusion-table/);
   assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
   assert.match(app, /h\("details", \{ class: "tool-group" \}/);
   assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
   assert.doesNotMatch(css, /\.estate-map-embed|\.estate-material-grid|\.estate-house-thumb/);
   assert.match(css, /\.conclusion-media\s*\{/);
-  assert.match(css, /\.conclusion-images\s*\{/);
+  assert.match(css, /\.conclusion-table\s*\{/);
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
@@ -160,7 +162,7 @@ test("工具/节点边界立即封口流式内容，ai_message 兜底不再留�
   assert.match(app, /export function upsertToolCall\([\s\S]*?sealStreamingParts\(ablock\)/);
   assert.match(app, /export function addNodeChip\([\s\S]*?sealStreamingParts\(ablock\)/);
   assert.match(app, /export function addInterrupt\([\s\S]*?sealStreamingParts\(ablock\)/);
-  assert.match(app, /p: "text", text: ev\.content, streaming: false/);
+  assert.match(app, /p: "text", text: content, streaming: false/);
 });
 
 test("上下文用量忽略 review 等内部调用，并按每轮峰值恢复容量与缓存", async () => {
@@ -230,6 +232,10 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
   const parts: AssistantPart[] = [
     estateToolPart("detail", "house_lookup", {
       action: "detail", houseId: "10001", city: "青岛",
+      data: JSON.stringify({ 基础信息: {
+        小区名: "测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月",
+        房源所属楼层: "中楼层", 出租朝向: "南", 装修: "精装",
+      } }),
       location: {
         label: "测试花园", address: "测试路 1 号", lat: 36.1, lng: 120.1,
         precision: "community", embedUrl: DETAIL_MAP,
@@ -255,6 +261,11 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
   assert.equal(media.points[0]?.name, "测试花园");
   assert.equal(media.points[1]?.name, "第二花园");
   assert.deepEqual(media.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
+  assert.equal(media.properties.length, 1);
+  assert.equal(media.properties[0]?.title, "测试花园 · 2室1厅 · 90㎡");
+  assert.equal(media.properties[0]?.rent, "2400元/月");
+  assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
+  assert.equal(media.properties[0]?.location?.name, "测试花园");
 });
 
 test("无房产媒体时不生成结论附件", () => {
@@ -264,4 +275,36 @@ test("无房产媒体时不生成结论附件", () => {
   assert.equal(media.mapEmbedUrl, "");
   assert.deepEqual(media.points, []);
   assert.deepEqual(media.images, []);
+});
+
+test("最终文字按真实 houseId 脱敏，表格匹配仍保留内部关系", () => {
+  const parts: AssistantPart[] = [
+    estateToolPart("detail", "house_lookup", { action: "detail", houseId: "103155273255", data: "{}" }),
+  ];
+  const ids = collectEstateHouseIds(parts);
+  assert.deepEqual(ids, ["103155273255"]);
+  const visible = stripEstateHouseIds("首推左岸风度 103155273255 ——2室2厅，ID：103155273255。", ids);
+  assert.doesNotMatch(visible, /103155273255/);
+  assert.match(visible, /首推左岸风度/);
+});
+
+test("历史原始 detail/material 结果也能按房源匹配表格、户型图和位置", () => {
+  const detailRaw = [
+    "<参考数据>",
+    "<103155273255>",
+    '{"基础信息":{"小区名":"左岸风度","房型":"2室2厅","出租面积":"90㎡","租赁价格":"2400元/月","楼栋经纬度":"出于业主隐私保护，不方便透露具体的楼栋经纬度"}}',
+    '{"小区信息":{"小区名称":"左岸风度","小区别名":"劲松七路237号,左岸丰渡","小区经纬度":"120.421197,36.123971"}}',
+    "</103155273255>",
+  ].join("\n");
+  const materialRaw = '{"103155273255":{"房源图片":{"户型图片":"' + IMAGE_ONE + '"}}}';
+  const media = collectEstateConclusionMedia([
+    estateToolPart("raw-detail", "house_lookup", { action: "detail", data: detailRaw }),
+    estateToolPart("raw-material", "house_lookup", { action: "material", data: materialRaw }),
+  ]);
+  assert.equal(media.properties.length, 1);
+  assert.equal(media.properties[0]?.houseId, "103155273255");
+  assert.equal(media.properties[0]?.title, "左岸风度 · 2室2厅 · 90㎡");
+  assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE]);
+  assert.equal(media.properties[0]?.location?.lat, 36.123971);
+  assert.equal(media.properties[0]?.location?.lng, 120.421197);
 });

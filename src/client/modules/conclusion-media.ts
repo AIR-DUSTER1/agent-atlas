@@ -1,14 +1,15 @@
 /**
  * ============================================================
- * modules/conclusion-media.ts — 从同一轮工具结果提取结论附件
+ * modules/conclusion-media.ts — 房产结论表格的数据归一
  * ============================================================
- * 房产工具结果属于交付数据，但“在哪展示”由前端决定。这里只做纯数据归一：
- * 从 house_lookup(detail/material) 与 house_map 中收集地图、点位和图片，
- * 由 render/conclusion-media.ts 挂到最终回答下方；不依赖 DOM，便于单测。
+ * 同一轮会同时出现 search / detail / material / map。这里按 houseId 把
+ * 房源事实、户型图与位置合并成一张表；houseId 仅用于内部匹配，绝不进入
+ * 用户可见标题。模型文字里的原始 ID 也由本模块提供确定性脱敏。
  */
 import type { AssistantPart } from "./types.js";
 
 const MAX_CONCLUSION_IMAGES = 6;
+const MAX_CONCLUSION_PROPERTIES = 5;
 const MAX_CONCLUSION_POINTS = 8;
 
 export interface ConclusionPoint {
@@ -18,6 +19,7 @@ export interface ConclusionPoint {
   lng?: number;
   precision?: string;
   houseId?: string;
+  embedUrl?: string;
   links?: Record<string, string>;
 }
 
@@ -27,11 +29,27 @@ export interface ConclusionImage {
   houseId?: string;
 }
 
+export interface ConclusionProperty {
+  houseId: string;
+  title: string;
+  community?: string;
+  layout?: string;
+  area?: string;
+  rent?: string;
+  floor?: string;
+  orientation?: string;
+  decoration?: string;
+  address?: string;
+  images: ConclusionImage[];
+  location?: ConclusionPoint;
+}
+
 export interface EstateConclusionMedia {
   mapEmbedUrl: string;
   mapTitle: string;
   points: ConclusionPoint[];
   images: ConclusionImage[];
+  properties: ConclusionProperty[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -48,17 +66,6 @@ function number(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function stringLinks(value: unknown): Record<string, string> | undefined {
-  const record = asRecord(value);
-  if (!record) return undefined;
-  const links: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(record)) {
-    const href = text(raw);
-    if (href) links[key] = href;
-  }
-  return Object.keys(links).length ? links : undefined;
-}
-
 function safeMapEmbed(raw: unknown): string {
   const value = text(raw);
   return /^https:\/\/www\.openstreetmap\.org\//i.test(value) ? value : "";
@@ -71,13 +78,222 @@ function safeImage(raw: unknown): string {
     : "";
 }
 
+function inferHouseId(raw: string): string {
+  return firstMatch(raw, /<(\d{6,})>/)
+    || firstMatch(raw, /"?(\d{9,})"?\s*:/)
+    || firstMatch(raw, /"房源ID"\s*:\s*"(\d{6,})"/);
+}
+
+function rawImages(raw: string): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const match of raw.matchAll(/https:\/\/[^\s"'<>\\]+?\.(?:jpe?g|png|webp|gif|avif)(?:[!?][^\s"'<>\\]*)?/gi)) {
+    const src = safeImage(match[0].replace(/[),.;]+$/, ""));
+    if (src && !seen.has(src)) { seen.add(src); urls.push(src); }
+  }
+  return urls;
+}
+
+function parseCoordinate(raw: string): { lat: number; lng: number } | null {
+  const parts = raw.trim().split(/\s*[,，]\s*/);
+  if (parts.length !== 2) return null;
+  const first = Number(parts[0]);
+  const second = Number(parts[1]);
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+  let lat = second;
+  let lng = first;
+  if (Math.abs(first) <= 90 && Math.abs(second) > 90) { lat = first; lng = second; }
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function locationFromRaw(data: unknown, houseId?: string): ConclusionPoint | null {
+  const raw = rawText(data);
+  const building = parseCoordinate(field(raw, ["楼栋经纬度"]));
+  const community = parseCoordinate(field(raw, ["小区经纬度"]));
+  const coordinate = building || community;
+  if (!coordinate) return null;
+  const name = field(raw, ["小区名称", "小区名"]) || "房源位置";
+  const alias = field(raw, ["小区别名"]).split(/[,，]/)[0]?.trim();
+  const encoded = encodeURIComponent(name);
+  return {
+    name,
+    ...(alias ? { address: alias } : {}),
+    ...coordinate,
+    precision: building ? "building" : "community",
+    ...(houseId ? { houseId } : {}),
+    embedUrl: `https://www.openstreetmap.org/export/embed.html?bbox=${coordinate.lng - 0.012},${coordinate.lat - 0.012},${coordinate.lng + 0.012},${coordinate.lat + 0.012}&layer=mapnik&marker=${coordinate.lat},${coordinate.lng}`,
+    links: {
+      amap: `https://uri.amap.com/marker?position=${coordinate.lng},${coordinate.lat}&name=${encoded}&src=agentatlas&callnative=0`,
+      qq: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${coordinate.lat},${coordinate.lng};title:${encoded}&referer=agentatlas`,
+      baidu: `https://api.map.baidu.com/marker?location=${coordinate.lat},${coordinate.lng}&title=${encoded}&output=html&src=agentatlas`,
+      osm: `https://www.openstreetmap.org/?mlat=${coordinate.lat}&mlon=${coordinate.lng}#map=16/${coordinate.lat}/${coordinate.lng}`,
+    },
+  };
+}
+
+function stringLinks(value: unknown): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const links: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const href = text(raw);
+    if (href) links[key] = href;
+  }
+  return Object.keys(links).length ? links : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rawText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try { return JSON.stringify(value); } catch { return ""; }
+}
+
+function field(raw: string, names: string[]): string {
+  for (const name of names) {
+    const re = new RegExp(`"${escapeRegExp(name)}"\\s*:\\s*"([^"]+)"`);
+    const hit = raw.match(re)?.[1]?.trim();
+    if (hit) return hit;
+  }
+  return "";
+}
+
+function firstMatch(raw: string, pattern: RegExp): string {
+  return raw.match(pattern)?.[1]?.trim() || "";
+}
+
+function propertyTitle(community: string, layout: string, area: string): string {
+  return [community, layout, area].filter(Boolean).join(" · ") || "房源详情";
+}
+
+function addUniqueImage(target: ConclusionImage[], seen: Set<string>, raw: unknown, houseId?: string): void {
+  if (target.length >= MAX_CONCLUSION_IMAGES) return;
+  const src = safeImage(raw);
+  if (!src || seen.has(src)) return;
+  seen.add(src);
+  target.push({
+    src,
+    alt: `房源${houseId ? "户型图" : "图片"} ${target.length + 1}`,
+    ...(houseId ? { houseId } : {}),
+  });
+}
+
+function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { houseId: string }> {
+  const raw = rawText(data);
+  const rows: Array<Partial<ConclusionProperty> & { houseId: string }> = [];
+  if (!raw) return rows;
+  // 贝壳 search 的 data 是字符串，房源块形如 <103155273255>...</103155273255>。
+  const blockRe = /<(\d{6,})>\s*([\s\S]*?)<\/\1>/g;
+  for (const match of raw.matchAll(blockRe)) {
+    const houseId = match[1] || "";
+    const body = match[2] || "";
+    const detail = field(body, ["户型信息"]);
+    const layout = firstMatch(detail, /(\d+室\d+厅)/);
+    const area = firstMatch(detail, /出租面积\s*([\d.]+\s*㎡)/).replace(/\s+/g, "");
+    const orientation = firstMatch(detail, /朝向\s*([^，,]+)/);
+    const rent = field(body, ["租赁价格"]);
+    const traffic = field(body, ["区位交通"]);
+    const community = firstMatch(traffic, /板块\s*([^，,。]+?)小区/)
+      || firstMatch(traffic, /小区\s*([^，,。]+)/);
+    rows.push({
+      houseId,
+      ...(community ? { community } : {}),
+      ...(layout ? { layout } : {}),
+      ...(area ? { area } : {}),
+      ...(rent ? { rent } : {}),
+      ...(orientation ? { orientation } : {}),
+      ...(traffic ? { address: traffic } : {}),
+      title: propertyTitle(community, layout, area),
+    });
+  }
+  return rows;
+}
+
+function parseListingObjects(listings: unknown): Array<Partial<ConclusionProperty> & { houseId: string }> {
+  if (!Array.isArray(listings)) return [];
+  const rows: Array<Partial<ConclusionProperty> & { houseId: string }> = [];
+  for (const item of listings) {
+    const record = asRecord(item);
+    const houseId = text(record?.id) || text(record?.houseId);
+    if (!houseId) continue;
+    const title = text(record?.title) || text(record?.name);
+    const rent = text(record?.price);
+    const area = text(record?.area);
+    const address = text(record?.addressText) || text(record?.address);
+    rows.push({
+      houseId,
+      ...(title ? { title } : {}),
+      ...(rent ? { rent } : {}),
+      ...(area ? { area } : {}),
+      ...(address ? { address } : {}),
+    });
+  }
+  return rows;
+}
+
+function factsFromDetail(data: unknown): Partial<ConclusionProperty> {
+  const raw = rawText(data);
+  const community = field(raw, ["小区名", "小区名称"]);
+  const layout = field(raw, ["房型"]);
+  const area = field(raw, ["出租面积"]);
+  const rent = field(raw, ["租赁价格"]);
+  const floor = field(raw, ["房源所属楼层"]);
+  const orientation = field(raw, ["出租朝向"]);
+  const decoration = field(raw, ["装修"]);
+  return {
+    ...(community ? { community } : {}),
+    ...(layout ? { layout } : {}),
+    ...(area ? { area } : {}),
+    ...(rent ? { rent } : {}),
+    ...(floor ? { floor } : {}),
+    ...(orientation ? { orientation } : {}),
+    ...(decoration ? { decoration } : {}),
+    ...(community || layout || area ? { title: propertyTitle(community, layout, area) } : {}),
+  };
+}
+
+function locationFromPayload(location: Record<string, unknown>, houseId?: string): ConclusionPoint | null {
+  const name = text(location.label) || text(location.name);
+  const links = stringLinks(location.links);
+  if (!name && number(location.lat) === undefined && number(location.lng) === undefined) return null;
+  return {
+    name: name || "房源位置",
+    ...(text(location.address) ? { address: text(location.address) } : {}),
+    ...(number(location.lat) !== undefined ? { lat: number(location.lat) } : {}),
+    ...(number(location.lng) !== undefined ? { lng: number(location.lng) } : {}),
+    ...(text(location.precision) ? { precision: text(location.precision) } : {}),
+    ...(houseId ? { houseId } : {}),
+    ...(safeMapEmbed(location.embedUrl) ? { embedUrl: safeMapEmbed(location.embedUrl) } : {}),
+    ...(links ? { links } : {}),
+  };
+}
+
 function pointKey(point: ConclusionPoint): string {
-  // houseId 只用于图片说明；同一小区在 detail / map 中出现时按名称与坐标去重。
   return [point.name, point.address || "", point.lat ?? "", point.lng ?? ""].join("|");
 }
 
-function imageKey(image: ConclusionImage): string {
-  return image.src;
+function mergeProperty(
+  rows: Map<string, ConclusionProperty>,
+  order: string[],
+  houseId: string,
+  patch: Partial<ConclusionProperty>,
+): void {
+  if (!houseId) return;
+  let row = rows.get(houseId);
+  if (!row) {
+    row = { houseId, title: "", images: [] };
+    rows.set(houseId, row);
+    order.push(houseId);
+  }
+  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address"] as const) {
+    const value = text(patch[key]);
+    if (value) row[key] = value;
+  }
+  if (patch.location) row.location = patch.location;
 }
 
 /** 解析并去重；详情地图优先，其次 house_map 的多点分布图。 */
@@ -86,9 +302,14 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
   let comparisonMap = "";
   let mapTitle = "";
   const points: ConclusionPoint[] = [];
-  const images: ConclusionImage[] = [];
   const pointSeen = new Set<string>();
+  const images: ConclusionImage[] = [];
   const imageSeen = new Set<string>();
+  const imagesByHouse = new Map<string, ConclusionImage[]>();
+  const imageSeenByHouse = new Map<string, Set<string>>();
+  const locationsByHouse = new Map<string, ConclusionPoint>();
+  const propertyRows = new Map<string, ConclusionProperty>();
+  const propertyOrder: string[] = [];
 
   const addPoint = (point: ConclusionPoint): void => {
     if (!point.name || points.length >= MAX_CONCLUSION_POINTS) return;
@@ -98,16 +319,14 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
     points.push(point);
   };
 
-  const addImage = (src: string, houseId?: string): void => {
-    if (!src || images.length >= MAX_CONCLUSION_IMAGES) return;
-    const image: ConclusionImage = {
-      src,
-      alt: `房源${houseId ? ` ${houseId}` : ""}户型图 ${images.length + 1}`,
-      ...(houseId ? { houseId } : {}),
-    };
-    if (imageSeen.has(imageKey(image))) return;
-    imageSeen.add(imageKey(image));
-    images.push(image);
+  const addPropertyImage = (raw: unknown, houseId?: string): void => {
+    addUniqueImage(images, imageSeen, raw, houseId);
+    if (!houseId) return;
+    const list = imagesByHouse.get(houseId) ?? [];
+    const seen = imageSeenByHouse.get(houseId) ?? new Set<string>();
+    addUniqueImage(list, seen, raw, houseId);
+    imagesByHouse.set(houseId, list);
+    imageSeenByHouse.set(houseId, seen);
   };
 
   for (const part of parts) {
@@ -120,34 +339,49 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
     }
     if (!payload) continue;
     const action = text(payload.action);
-    const houseId = text(payload.houseId) || undefined;
+    const raw = rawText(payload.data);
+    const houseId = text(payload.houseId) || inferHouseId(raw) || undefined;
 
-    if (action === "material") {
-      const rawImages = Array.isArray(payload.images) ? payload.images : [];
-      for (const raw of rawImages) addImage(safeImage(raw), houseId);
+    if (action === "search") {
+      const listings = parseListingObjects(payload.listings);
+      const parsed = listings.length ? listings : parseSearchRaw(payload.data);
+      for (const item of parsed) {
+        mergeProperty(propertyRows, propertyOrder, item.houseId, {
+          ...item,
+          title: text(item.title) || propertyTitle(text(item.community), text(item.layout), text(item.area)),
+        });
+      }
       continue;
     }
 
     if (action === "detail") {
       const location = asRecord(payload.location);
-      if (location) {
-        const embed = safeMapEmbed(location.embedUrl);
-        if (embed) {
-          detailMap = embed;
-          mapTitle = "房源所在小区";
+      const point = location ? locationFromPayload(location, houseId) : locationFromRaw(payload.data, houseId);
+      if (point) {
+        locationsByHouse.set(houseId || point.name, point);
+        addPoint(point);
+        if (point.name) {
+          const embed = safeMapEmbed(point.embedUrl || location?.embedUrl);
+          if (embed) {
+            detailMap = embed;
+            mapTitle = "房源所在小区";
+          }
         }
-        addPoint({
-          name: text(location.label) || `房源 ${houseId || ""}`.trim(),
-          ...(text(location.address) ? { address: text(location.address) } : {}),
-          ...(number(location.lat) !== undefined ? { lat: number(location.lat) } : {}),
-          ...(number(location.lng) !== undefined ? { lng: number(location.lng) } : {}),
-          ...(text(location.precision) ? { precision: text(location.precision) } : {}),
-          ...(houseId ? { houseId } : {}),
-          ...(stringLinks(location.links) ? { links: stringLinks(location.links) } : {}),
+      }
+      if (houseId) {
+        mergeProperty(propertyRows, propertyOrder, houseId, {
+          ...factsFromDetail(payload.data),
+          ...(point ? { location: point, address: point.address } : {}),
         });
       }
-      const rawImages = Array.isArray(payload.images) ? payload.images : [];
-      for (const raw of rawImages) addImage(safeImage(raw), houseId);
+      const detailImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);
+      for (const image of detailImages) addPropertyImage(image, houseId);
+      continue;
+    }
+
+    if (action === "material") {
+      const materialImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);
+      for (const image of materialImages) addPropertyImage(image, houseId);
       continue;
     }
 
@@ -158,22 +392,67 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
       for (const raw of rawPoints) {
         const point = asRecord(raw);
         if (!point) continue;
-        addPoint({
-          name: text(point.name) || "未知点位",
-          ...(text(point.address) ? { address: text(point.address) } : {}),
-          ...(number(point.lat) !== undefined ? { lat: number(point.lat) } : {}),
-          ...(number(point.lng) !== undefined ? { lng: number(point.lng) } : {}),
-          ...(text(point.source) ? { precision: text(point.source) } : {}),
-          ...(stringLinks(point.links) ? { links: stringLinks(point.links) } : {}),
-        });
+        const normalized = locationFromPayload(point);
+        if (normalized) addPoint(normalized);
       }
     }
   }
+
+  const rentValue = (property: ConclusionProperty): number => {
+    const match = (property.rent || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
+    return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+  };
+  const properties: ConclusionProperty[] = [];
+  for (const id of propertyOrder) {
+    const row = propertyRows.get(id);
+    if (!row || (!row.title && !row.rent && !row.area && !row.layout)) continue;
+    row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
+    row.location = row.location || locationsByHouse.get(id);
+    if (!row.title) row.title = propertyTitle(row.community || "", row.layout || "", row.area || "");
+    properties.push(row);
+    if (properties.length >= MAX_CONCLUSION_PROPERTIES) break;
+  }
+
+  properties.sort((a, b) => rentValue(a) - rentValue(b));
 
   return {
     mapEmbedUrl: detailMap || comparisonMap,
     mapTitle: mapTitle || (comparisonMap ? "候选房源分布" : ""),
     points,
     images,
+    properties,
   };
+}
+
+/** 收集本轮工具结果中真实出现的 houseId，用于展示层脱敏。 */
+export function collectEstateHouseIds(parts: AssistantPart[]): string[] {
+  const ids = new Set<string>();
+  for (const part of parts) {
+    if (part.p !== "tool") continue;
+    let payload: Record<string, unknown> | null = null;
+    try { payload = asRecord(JSON.parse(part.result?.content || "")); } catch { continue; }
+    if (!payload) continue;
+    const raw = rawText(payload.data);
+    const direct = text(payload.houseId) || inferHouseId(raw);
+    if (/^\d{6,}$/.test(direct)) ids.add(direct);
+    for (const row of [...parseListingObjects(payload.listings), ...parseSearchRaw(payload.data)]) {
+      if (/^\d{6,}$/.test(row.houseId)) ids.add(row.houseId);
+    }
+    for (const match of raw.matchAll(/"房源ID"\s*:\s*"(\d{6,})"/g)) ids.add(match[1] || "");
+  }
+  ids.delete("");
+  return [...ids].sort((a, b) => b.length - a.length);
+}
+
+/** 去除最终回答中的内部 houseId；表内定位仍保留匹配关系，但不向用户展示编号。 */
+export function stripEstateHouseIds(value: string, ids: string[]): string {
+  let out = value;
+  for (const id of ids) {
+    if (!id) continue;
+    out = out.replace(new RegExp(`(?:ID\\s*[:：]?\\s*)?${escapeRegExp(id)}`, "gi"), "");
+  }
+  return out
+    .split("\n")
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").replace(/\s+([，。；：、])/g, "$1").trimEnd())
+    .join("\n");
 }

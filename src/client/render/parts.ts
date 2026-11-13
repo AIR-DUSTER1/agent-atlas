@@ -26,7 +26,7 @@ import { renderToolEnhancers } from "./tool-enhancers.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
-import { refreshConclusionMedia } from "./conclusion-media.js";
+import { refreshConclusionMedia, sanitizeEstateConclusionText } from "./conclusion-media.js";
 import { enhanceCodeBlocks } from "./code-enhance.js";
 import type {
   AgentEvent, AssistantBlock, AssistantPart, ApprovalPart, ClarificationPart,
@@ -472,6 +472,7 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     el.className = "md";
     body.appendChild(el);
     partEls.set(part, { el });
+    if (!part.streaming) part.text = sanitizeEstateConclusionText(block, part.text);
     renderTextPart(part);
     // 历史回放时没有 done 事件；最终文本挂载完成即可补齐结论附件。
     if (!part.streaming) refreshConclusionMedia(block);

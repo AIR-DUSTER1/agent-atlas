@@ -15,7 +15,7 @@ import { scrollBottom } from "../core/dom.js";
 import { updateContextBar } from "../views/composer-bar.js";
 import { setWorkflowPlan } from "../views/workflow-plan.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
-import { refreshConclusionMedia } from "../render/conclusion-media.js";
+import { refreshConclusionMedia, sanitizeEstateConclusionText } from "../render/conclusion-media.js";
 import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
   updateThinkingPart, updateToolCard, upsertModelRetry,
@@ -33,8 +33,10 @@ function sealStreamingParts(ablock: AssistantBlock, kinds: Array<"text" | "think
   for (const part of ablock.parts) {
     if (!kinds.includes(part.p as "text" | "thinking") || !("streaming" in part) || !part.streaming) continue;
     part.streaming = false;
-    if (part.p === "text") renderTextPart(part);
-    else if (part.p === "thinking") updateThinkingPart(part);
+    if (part.p === "text") {
+      part.text = sanitizeEstateConclusionText(ablock, part.text);
+      renderTextPart(part);
+    } else if (part.p === "thinking") updateThinkingPart(part);
   }
 }
 export function appendToken(ablock: AssistantBlock, text: string, visible = true): void {
@@ -264,8 +266,9 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
     case "ai_message": {
       sealStreamingParts(ablock);
       const last = ablock.parts[ablock.parts.length - 1];
-      if (!last || last.p !== "text" || last.text !== ev.content) {
-        const part: AssistantPart = { p: "text", text: ev.content, streaming: false };
+      const content = sanitizeEstateConclusionText(ablock, ev.content);
+      if (!last || last.p !== "text" || last.text !== content) {
+        const part: AssistantPart = { p: "text", text: content, streaming: false };
         ablock.parts.push(part);
         mountPart(ablock, part);
       }

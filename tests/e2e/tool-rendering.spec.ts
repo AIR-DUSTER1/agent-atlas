@@ -151,8 +151,12 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     clientState.blockBodies.set(block, host);
     const detail = {
       action: "detail",
-      houseId: "10001",
+      houseId: "103155273255",
       city: "青岛",
+      data: JSON.stringify({ 基础信息: {
+        小区名: "测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月",
+        房源所属楼层: "中楼层", 出租朝向: "南", 装修: "精装",
+      } }),
       location: {
         label: "测试花园",
         address: "测试路 1 号",
@@ -168,7 +172,7 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     const image = "data:image/svg+xml;base64," + btoa("<svg xmlns='http://www.w3.org/2000/svg' width='320' height='220'><rect width='320' height='220' fill='#eee'/><text x='20' y='40'>Floor plan</text></svg>");
     const material = {
       action: "material",
-      houseId: "10001",
+      houseId: "103155273255",
       images: [image],
       count: 1,
       presentation: { images: 1 },
@@ -182,15 +186,17 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       mountPart(block, part);
       updateToolCard(part);
     }
-    events.handleEvent({ type: "token", text: "结论：测试花园位置与户型图如下。", node: "agent" }, block, null);
+    events.handleEvent({ type: "token", text: "结论：测试花园 103155273255 位置与户型图如下。", node: "agent" }, block, null);
     const beforeDone = host.querySelectorAll(".conclusion-media").length;
     events.handleEvent({ type: "done" }, block, null);
     const conclusion = host.querySelector(".conclusion-media");
     const md = host.querySelector(".md");
-    const iframe = conclusion?.querySelector(".conclusion-map iframe");
-    const img = conclusion?.querySelector(".conclusion-images img");
+    const iframe = conclusion?.querySelector(".conclusion-property-map iframe");
+    const img = conclusion?.querySelector(".conclusion-table-image img");
+    const table = conclusion?.querySelector(".conclusion-table");
+    const rows = table?.querySelectorAll("tbody tr").length || 0;
     const node = conclusion && md ? md.compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
-    const toolMedia = host.querySelectorAll(".tool-card iframe, .tool-card img, .tool-card .conclusion-images").length;
+    const toolMedia = host.querySelectorAll(".tool-card iframe, .tool-card img, .tool-card .conclusion-images, .tool-card .conclusion-table").length;
     const openToolCards = [...host.querySelectorAll(".tool-card")].filter((card) => card.classList.contains("open")).length;
     const answer = {
       hasConclusion: Boolean(conclusion),
@@ -198,6 +204,9 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       isAfterText: Boolean(node),
       iframeSrc: iframe?.getAttribute("src") || "",
       imageSrc: img?.getAttribute("src") || "",
+      tableText: table?.textContent || "",
+      rows,
+      visibleText: md?.textContent || "",
       toolMedia,
       openToolCards,
     };
@@ -212,6 +221,11 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.iframeSrc).toContain("openstreetmap.org/export/embed.html");
   expect(result.iframeSrc).toContain("marker=36.123456,120.123456");
   expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
+  expect(result.rows).toBe(1);
+  expect(result.tableText).toContain("测试花园 · 2室1厅 · 90㎡");
+  expect(result.tableText).toContain("2400元/月");
+  expect(result.tableText).toContain("36.123456, 120.123456");
+  expect(result.visibleText).not.toContain("103155273255");
   expect(result.toolMedia).toBe(0);
   expect(result.openToolCards).toBe(0);
 });
