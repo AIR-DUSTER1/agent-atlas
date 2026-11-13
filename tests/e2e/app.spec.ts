@@ -171,9 +171,17 @@ test("用户消息与 AI 总结可复制，按钮就地反馈成功", async ({ p
 
   const assistant = page.locator(".msg-assistant").last();
   const summaryCopy = assistant.getByRole("button", { name: "复制总结", exact: true });
+  await expect(assistant.locator(".usage-caption")).toBeVisible({ timeout: 20_000 });
+  await expect(assistant.locator(".assistant-footer")).toBeVisible();
   await assistant.hover();
   await expect(summaryCopy).toHaveCSS("opacity", "1", { timeout: 20_000 });
   expect(await summaryCopy.textContent()).toBe("");
+  const copyBox = await summaryCopy.boundingBox();
+  const usageBox = await assistant.locator(".usage-caption").boundingBox();
+  expect(copyBox).not.toBeNull();
+  expect(usageBox).not.toBeNull();
+  expect(copyBox!.height).toBeGreaterThanOrEqual(28);
+  expect(Math.abs((copyBox!.y + copyBox!.height / 2) - (usageBox!.y + usageBox!.height / 2))).toBeLessThan(3);
   await summaryCopy.click();
   await expect(assistant.getByRole("button", { name: "总结已复制", exact: true })).toBeVisible();
   const summary = await page.evaluate(() => navigator.clipboard.readText());

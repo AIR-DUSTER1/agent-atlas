@@ -484,7 +484,7 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
         h("span", { class: "thinking-title" }, "思考过程"),
         h("span", { class: "thinking-node" }),
         h("span", { class: "thinking-meta" }),
-        h("span", { class: "thinking-chevron" }, icon("ChevronRight", { size: 11 })),
+        h("span", { class: "thinking-chevron" }, icon("ChevronRight", { size: 12 })),
       ),
       h("div", { class: "thinking-body" }, h("pre", { class: "thinking-text" })),
     );
@@ -533,6 +533,7 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
     chip.className = "node-chip";
     chip.textContent = `${nodeIcon(part.name)} ${nodeLabel(part.name)}`;
     const row = document.createElement("div");
+    row.className = "node-row";
     row.appendChild(chip);
     body.appendChild(row);
     partEls.set(part, { el: row });

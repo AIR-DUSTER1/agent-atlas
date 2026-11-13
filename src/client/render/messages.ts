@@ -20,6 +20,16 @@ import type { AssistantBlock, ChatBlock, NoticeBlock } from "../modules/types.js
 
 const COPY_FEEDBACK_MS = 1_800;
 
+/** 助手回合底部操作区：用量与复制按钮共用一行，空回合不占高度。 */
+function syncAssistantFooter(ablock: AssistantBlock): void {
+  const footer = ablock._el?.querySelector<HTMLElement>(".assistant-footer");
+  if (!footer) return;
+  const hasUsage = Boolean(footer.querySelector(".usage-caption"));
+  const actions = footer.querySelector<HTMLElement>(".assistant-actions");
+  const hasActions = Boolean(actions && !actions.classList.contains("hidden"));
+  footer.classList.toggle("is-empty", !hasUsage && !hasActions);
+}
+
 /** 用量小字：↑ 输入 · ↓ 输出 · 缓存 N% */
 export function updateTurnCaption(ablock: AssistantBlock): void {
   const usage = ablock._usage;
@@ -29,13 +39,16 @@ export function updateTurnCaption(ablock: AssistantBlock): void {
   let el = usageEls.get(ablock);
   if (!el || !el.isConnected) {
     el = h("div", { class: "usage-caption" });
-    body.appendChild(el);
+    const meta = body.parentElement?.querySelector<HTMLElement>(".assistant-footer-meta");
+    if (!meta) return;
+    meta.appendChild(el);
     usageEls.set(ablock, el);
   }
   const cache = usage.lastCache > 0 && usage.lastInput > 0
     ? ` · 缓存 ${fmtPercent((usage.lastCache / usage.lastInput) * 100)}`
     : "";
   el.textContent = `↑ ${usage.lastInput.toLocaleString("zh-CN")} · ↓ ${usage.lastOutput.toLocaleString("zh-CN")}${cache}`;
+  syncAssistantFooter(ablock);
 }
 
 function syncEmptySession(): void {
@@ -58,14 +71,14 @@ function createMessageCopyButton(
     class: "message-action",
     title: label,
     "aria-label": label,
-  }, icon("Copy", { size: 12 }));
+  }, icon("Copy", { size: 14 }));
   let resetTimer: number | undefined;
 
   const paint = (nextLabel: string, copied: boolean): void => {
     button.classList.toggle("copied", copied);
     button.title = nextLabel;
     button.setAttribute("aria-label", nextLabel);
-    button.replaceChildren(icon(copied ? "Check" : "Copy", { size: 12 }));
+    button.replaceChildren(icon(copied ? "Check" : "Copy", { size: 14 }));
   };
 
   button.addEventListener("click", () => {
@@ -98,6 +111,7 @@ export function refreshAssistantCopy(ablock: AssistantBlock): void {
   const actions = ablock._el?.querySelector<HTMLElement>(".assistant-actions");
   if (!actions) return;
   actions.classList.toggle("hidden", !assistantSummaryText(ablock));
+  syncAssistantFooter(ablock);
 }
 
 /** 把一个 block 挂到消息流末尾。live=false 用于整段历史重放，不累计“新消息”。 */
@@ -122,7 +136,9 @@ export function mountBlock(block: ChatBlock, live = true): void {
     const actions = h("div", { class: "message-actions user-actions" },
       createMessageCopyButton("复制", "已复制", () => block.text, "这条消息没有可复制的文字"),
     );
-    const content = h("div", { class: "msg-user-content" }, bubble, actions);
+    const content = h("div", { class: "msg-user-content" }, bubble,
+      h("div", { class: "user-message-footer" }, actions),
+    );
     const wrap = h("div", { class: "msg-user" }, content);
     messagesEl.appendChild(wrap);
     block._el = wrap;
@@ -151,7 +167,10 @@ export function mountBlock(block: ChatBlock, live = true): void {
   const actions = h("div", { class: "message-actions assistant-actions hidden" },
     createMessageCopyButton("复制总结", "总结已复制", () => assistantSummaryText(block), "当前回合还没有可复制的总结"),
   );
-  const content = h("div", { class: "assistant-content" }, body, actions);
+  const footer = h("div", { class: "assistant-footer is-empty" }, actions,
+    h("div", { class: "assistant-footer-meta" }),
+  );
+  const content = h("div", { class: "assistant-content" }, body, footer);
   const wrap = h("div", { class: "msg-assistant" }, avatar, content);
   messagesEl.appendChild(wrap);
   block._el = wrap;

@@ -51,6 +51,9 @@ test("用户消息、助手总结与压缩摘要均接入复制按钮和降级�
   const css = await readClientCss();
   assert.match(messages, /class: "message-actions user-actions"/);
   assert.match(messages, /class: "message-actions assistant-actions hidden"/);
+  assert.match(messages, /class: "user-message-footer"/);
+  assert.match(messages, /class: "assistant-footer is-empty"/);
+  assert.match(messages, /class: "assistant-footer-meta"/);
   assert.match(messages, /createMessageCopyButton\("复制"/);
   assert.match(messages, /createMessageCopyButton\("复制总结"/);
   assert.match(messages, /createMessageCopyButton\("复制摘要"/);
@@ -61,6 +64,9 @@ test("用户消息、助手总结与压缩摘要均接入复制按钮和降级�
   assert.match(css, /\.message-action\.copied\s*\{/);
   assert.match(css, /\.msg-user:hover \.message-actions/);
   assert.match(css, /opacity:\s*0/);
+  assert.match(css, /\.assistant-footer\s*\{[^}]*min-height:\s*30px/s);
+  assert.match(css, /\.message-action\s*\{[^}]*width:\s*30px/s);
+  assert.match(css, /\.thinking-summary\s*\{[^}]*min-height:\s*34px/s);
   assert.doesNotMatch(messages, /message-action-label/);
   assert.match(css, /\.message-actions\.hidden\s*\{\s*display:\s*none/s);
 });

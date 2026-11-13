@@ -115,10 +115,15 @@
 
 /* 每回合用量小字（显示在助手回合末尾） */
 .usage-caption {
-  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 2px;
   font-size: 11px;
   color: var(--text-3);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   opacity: .85;
 }
 
