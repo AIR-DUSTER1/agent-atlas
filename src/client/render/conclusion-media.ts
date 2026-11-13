@@ -333,13 +333,6 @@ function renderConclusion(media: EstateConclusionMedia): HTMLElement {
       const map = renderMap(media);
       if (map) section.appendChild(map);
     }
-    const used = new Set(media.properties.flatMap((property) => property.images.map((image) => image.src)));
-    const orphans = media.images.filter((image) => !used.has(image.src));
-    const gallery = renderImages(orphans);
-    if (gallery) {
-      section.appendChild(h("div", { class: "conclusion-subtitle" }, "其他户型图"));
-      section.appendChild(gallery);
-    }
   } else {
     const map = renderMap(media);
     if (map) section.appendChild(map);
@@ -367,7 +360,7 @@ export function refreshConclusionMedia(block: AssistantBlock): void {
     removeConclusion(block, body);
     return;
   }
-  const media = collectEstateConclusionMedia(block.parts);
+  const media = collectEstateConclusionMedia(block.parts, textPart.text);
   if (!media.mapEmbedUrl && !media.points.length && !media.images.length && !media.properties.length) {
     removeConclusion(block, body);
     return;

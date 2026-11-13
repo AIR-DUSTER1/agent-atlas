@@ -136,6 +136,7 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   ]);
   const css = await readClientCss();
   assert.match(app, /collectEstateConclusionMedia/);
+  assert.match(app, /collectEstateConclusionMedia\(block\.parts, textPart\.text\)/);
   assert.match(app, /refreshConclusionMedia/);
   assert.match(app, /sanitizeEstateConclusionText/);
   assert.match(app, /conclusion-table/);
@@ -145,6 +146,7 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.doesNotMatch(css, /\.estate-map-embed|\.estate-material-grid|\.estate-house-thumb/);
   assert.match(css, /\.conclusion-media\s*\{/);
   assert.match(css, /\.conclusion-table\s*\{/);
+  assert.doesNotMatch(app, /其他户型图/);
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
@@ -271,6 +273,27 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
   assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
   assert.equal(media.properties[0]?.vrUrl, VR_URL);
   assert.equal(media.properties[0]?.location?.name, "测试花园");
+});
+
+test("结论表按最终回答选择房源，并让已查询户型图跟房走", () => {
+  const listings = [
+    { id: "103155104968", title: "左岸风度 · 2室1厅 · 90㎡", price: "2700元/月", area: "90㎡" },
+    { id: "103155273255", title: "左岸风度 · 2室2厅 · 90㎡", price: "2400元/月", area: "90㎡" },
+    { id: "103155249731", title: "左岸风度 · 2室1厅 · 89㎡", price: "2700元/月", area: "89㎡" },
+    { id: "103154695352", title: "左岸风度 · 2室1厅 · 107㎡", price: "2800元/月", area: "107㎡" },
+    { id: "103153954713", title: "左岸风度 · 3室2厅 · 135㎡", price: "3800元/月", area: "135㎡" },
+    { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡" },
+    { id: "103147225031", title: "左岸风度 · 3室2厅 · 137㎡", price: "3600元/月", area: "137㎡" },
+  ];
+  const answer = "首选左岸风度 3室2厅 138㎡ ¥3,500/月；次选 2室2厅 90㎡ ¥2,400/月；2室1厅 107㎡ ¥2,800/月；三居 137㎡ ¥3,600/月、135㎡ ¥3,800/月。";
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-many", "house_search", { action: "search", listings }),
+    estateToolPart("material-138", "house_lookup", { action: "material", houseId: "103154626720", images: [IMAGE_ONE] }),
+  ], answer);
+  assert.deepEqual(media.properties.map((property) => property.houseId), [
+    "103155273255", "103154695352", "103154626720", "103147225031", "103153954713",
+  ]);
+  assert.deepEqual(media.properties.find((property) => property.houseId === "103154626720")?.images.map((image) => image.src), [IMAGE_ONE]);
 });
 
 test("无房产媒体时不生成结论附件", () => {

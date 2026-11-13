@@ -16,7 +16,7 @@ import type { AppState, ChatBlock } from "../modules/types.js";
 import { PRODUCT_NAME } from "../modules/product.js";
 
 /** 前端版本标记：改动前端源码后递增，用于确认浏览器跑的是不是最新脚本 */
-export const APP_VERSION = "web-2026-11-13-13";
+export const APP_VERSION = "web-2026-11-13-14";
 
 console.log(
   `%c[${PRODUCT_NAME}] 前端脚本已加载 ` + APP_VERSION,

@@ -222,6 +222,43 @@ function propertyTitle(community: string, layout: string, area: string): string 
   return [community, layout, area].filter(Boolean).join(" · ") || "房源详情";
 }
 
+/** 从面积/租金中提取数值，只用于和最终回答做轻量匹配。 */
+function firstNumber(value: string): string {
+  return value.replace(/[,，\s]/g, "").match(/\d+(?:\.\d+)?/)?.[0] || "";
+}
+
+/** 分句匹配，避免把回答中另一个房源的面积或租金错误套到当前房源。 */
+function normalizedAnswerSegments(answerText: string): string[] {
+  return answerText
+    .replace(/[,，\s]/g, "")
+    .split(/[。；;\n]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 最终回答是用户真正看到的结论。只有同一句中同时命中面积、户型和/或租金的
+ * 房源才优先进入表格，防止搜索前五条挤掉模型最终推荐的房源。
+ */
+function propertyMentionScore(property: ConclusionProperty, segments: string[]): number {
+  const titleArea = firstMatch(property.title, /([\d.]+\s*(?:㎡|平|m²))/i);
+  const area = firstNumber(property.area || titleArea);
+  if (!area) return 0;
+  const rent = firstNumber(property.rent || "");
+  const layout = property.layout || firstMatch(property.title, /(\d+室\d+厅)/);
+  const areaRe = new RegExp(`${escapeRegExp(area)}(?:㎡|平|m²)`, "i");
+  const rentRe = rent ? new RegExp(`(?:¥|￥)?${escapeRegExp(rent)}(?:元|/月|每月)`, "i") : null;
+  let best = 0;
+  for (const segment of segments) {
+    if (!areaRe.test(segment)) continue;
+    let score = 1;
+    if (rentRe?.test(segment)) score += 3;
+    if (layout && segment.includes(layout)) score += 2;
+    best = Math.max(best, score);
+  }
+  return best;
+}
+
 function addUniqueImage(target: ConclusionImage[], seen: Set<string>, raw: unknown, houseId?: string): void {
   if (target.length >= MAX_CONCLUSION_IMAGES) return;
   const src = safeImage(raw);
@@ -355,7 +392,7 @@ function mergeProperty(
 }
 
 /** 解析并去重；详情地图优先，其次 house_map 的多点分布图。 */
-export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConclusionMedia {
+export function collectEstateConclusionMedia(parts: AssistantPart[], answerText = ""): EstateConclusionMedia {
   let detailMap = "";
   let comparisonMap = "";
   let mapTitle = "";
@@ -368,6 +405,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
   const locationsByHouse = new Map<string, ConclusionPoint>();
   const propertyRows = new Map<string, ConclusionProperty>();
   const propertyOrder: string[] = [];
+  const examinedHouseIds = new Set<string>();
 
   const addPoint = (point: ConclusionPoint): void => {
     if (!point.name || points.length >= MAX_CONCLUSION_POINTS) return;
@@ -427,6 +465,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
         }
       }
       if (houseId) {
+        examinedHouseIds.add(houseId);
         const vrUrl = safeVrUrl(payload.vr) || vrUrlFrom(payload);
         mergeProperty(propertyRows, propertyOrder, houseId, {
           ...factsFromDetail(payload.data),
@@ -440,6 +479,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
     }
 
     if (action === "material") {
+      if (houseId) examinedHouseIds.add(houseId);
       const materialImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);
       for (const image of materialImages) addPropertyImage(image, houseId);
       const vrUrl = safeVrUrl(payload.vr) || vrUrlFrom(payload);
@@ -464,18 +504,32 @@ export function collectEstateConclusionMedia(parts: AssistantPart[]): EstateConc
     const match = (property.rent || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
     return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
   };
-  const properties: ConclusionProperty[] = [];
+  const candidates: ConclusionProperty[] = [];
   for (const id of propertyOrder) {
     const row = propertyRows.get(id);
     if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl)) continue;
     row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
     row.location = row.location || locationsByHouse.get(id);
     if (!row.title) row.title = propertyTitle(row.community || "", row.layout || "", row.area || "");
-    properties.push(row);
-    if (properties.length >= MAX_CONCLUSION_PROPERTIES) break;
+    candidates.push(row);
   }
 
-  properties.sort((a, b) => rentValue(a) - rentValue(b));
+  const answerSegments = normalizedAnswerSegments(answerText);
+  const mentioned = candidates
+    .map((property, index) => ({ property, index, score: propertyMentionScore(property, answerSegments) }))
+    .filter((item) => item.score >= 2)
+    .sort((left, right) => right.score - left.score || rentValue(left.property) - rentValue(right.property) || left.index - right.index);
+  const fallback = candidates
+    .map((property, index) => ({ property, index }))
+    .sort((left, right) =>
+      Number(examinedHouseIds.has(right.property.houseId)) - Number(examinedHouseIds.has(left.property.houseId))
+      || rentValue(left.property) - rentValue(right.property)
+      || left.index - right.index
+    );
+  const properties = (mentioned.length ? mentioned : fallback)
+    .slice(0, MAX_CONCLUSION_PROPERTIES)
+    .map((item) => item.property)
+    .sort((left, right) => rentValue(left) - rentValue(right));
 
   return {
     mapEmbedUrl: detailMap || comparisonMap,

@@ -328,6 +328,66 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.openToolCards).toBe(0);
 });
 
+test("结论表跟随最终回答选择房源，户型图不再落入其他户型图", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart }, clientState, events] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+      load("/stream/events.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const image = "data:image/svg+xml;base64," + btoa("<svg xmlns='http://www.w3.org/2000/svg' width='320' height='220'><rect width='320' height='220' fill='#eee'/><text x='20' y='40'>138 floor plan</text></svg>");
+    const listings = [
+      { id: "103155104968", title: "左岸风度 · 2室1厅 · 90㎡", price: "2700元/月", area: "90㎡" },
+      { id: "103155273255", title: "左岸风度 · 2室2厅 · 90㎡", price: "2400元/月", area: "90㎡" },
+      { id: "103155249731", title: "左岸风度 · 2室1厅 · 89㎡", price: "2700元/月", area: "89㎡" },
+      { id: "103154695352", title: "左岸风度 · 2室1厅 · 107㎡", price: "2800元/月", area: "107㎡" },
+      { id: "103153954713", title: "左岸风度 · 3室2厅 · 135㎡", price: "3800元/月", area: "135㎡" },
+      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡" },
+      { id: "103147225031", title: "左岸风度 · 3室2厅 · 137㎡", price: "3600元/月", area: "137㎡" },
+    ];
+    const parts = [
+      { action: "search", listings },
+      { action: "material", houseId: "103154626720", images: [image] },
+    ].map((payload, index) => ({
+      p: "tool", id: `conclusion-selection-${index}`, name: "house_lookup", argsText: "{}",
+      result: { content: JSON.stringify(payload), isError: false },
+    }));
+    for (const part of parts) {
+      block.parts.push(part);
+      mountPart(block, part);
+    }
+    events.handleEvent({
+      type: "token",
+      text: "首选左岸风度 3室2厅 138㎡ ¥3,500/月；次选 2室2厅 90㎡ ¥2,400/月；2室1厅 107㎡ ¥2,800/月；三居 137㎡ ¥3,600/月、135㎡ ¥3,800/月。",
+      node: "agent",
+    }, block, null);
+    events.handleEvent({ type: "done" }, block, null);
+    const table = host.querySelector(".conclusion-table");
+    const rows = [...(table?.querySelectorAll("tbody tr") || [])];
+    const targetRow = rows.find((row) => row.textContent?.includes("138㎡"));
+    return {
+      rowCount: rows.length,
+      tableText: table?.textContent || "",
+      targetImage: targetRow?.querySelector("img")?.getAttribute("src") || "",
+      hasOtherFloorPlanLabel: (host.textContent || "").includes("其他户型图"),
+    };
+  });
+
+  expect(result.rowCount).toBe(5);
+  expect(result.tableText).toContain("138㎡");
+  expect(result.tableText).toContain("137㎡");
+  expect(result.tableText).toContain("135㎡");
+  expect(result.tableText).not.toContain("89㎡");
+  expect(result.targetImage).toMatch(/^data:image\/svg\+xml;base64,/);
+  expect(result.hasOtherFloorPlanLabel).toBe(false);
+});
+
 test("切换地图配置后使用各提供方原生瓦片而不是 iframe", async ({ page }) => {
   await login(page);
   const result = await page.evaluate(async () => {
