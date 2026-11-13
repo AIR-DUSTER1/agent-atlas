@@ -266,3 +266,91 @@ test("写文件成功后清空旧读取缓存，随后同路径重读会重新�
   assert.equal(reads, 2, "写后读取不能复用旧内容");
   assert.match(String((second.messages[0] as ToolMessage).content), /content-v2/);
 });
+
+test("房产只读工具遇到临时服务故障会自动分析并最多尝试三次", async () => {
+  let runs = 0;
+  const flaky = tool(
+    async () => {
+      runs += 1;
+      return runs < 3
+        ? JSON.stringify({ error: "service temporarily unavailable" })
+        : JSON.stringify({ ok: true, data: "recovered" });
+    },
+    { name: "house_lookup", description: "瞬时故障重试测试", schema: z.object({}) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [flaky],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const result = await node(makeState([{ id: "retry-success", name: "house_lookup", args: {} }]) as never);
+  const message = result.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(message.content)) as { retry?: { attempts?: number; recovered?: boolean } };
+  assert.equal(runs, 3);
+  assert.notEqual(message.status, "error");
+  assert.equal(payload.retry?.attempts, 3);
+  assert.equal(payload.retry?.recovered, true);
+});
+
+test("瞬时故障达到三次尝试后熔断，模型不能再次原样调用", async () => {
+  let runs = 0;
+  const failing = tool(
+    async () => {
+      runs += 1;
+      return JSON.stringify({ error: "service temporarily unavailable" });
+    },
+    { name: "house_lookup", description: "重试上限测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [failing],
+    approvalDescriptions: {},
+    profileId: "estate",
+    // 故意配大，执行层仍必须硬限制为三次尝试。
+    toolRetryPolicy: { maxAttempts: 99, toolNames: ["house_lookup"] },
+  });
+  const args = { houseId: "103155273255" };
+  const first = await node(makeState([{ id: "retry-limit-1", name: "house_lookup", args }]) as never);
+  const firstMessage = first.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(firstMessage.content)) as { retry?: { attempts?: number; exhausted?: boolean } };
+  assert.equal(runs, 3);
+  assert.equal(firstMessage.status, "error");
+  assert.equal(payload.retry?.attempts, 3);
+  assert.equal(payload.retry?.exhausted, true);
+
+  const second = await node({
+    messages: [
+      new HumanMessage("继续查同一套房"),
+      new AIMessage({ content: "", tool_calls: [{ id: "retry-limit-1", name: "house_lookup", args, type: "tool_call" }] }),
+      firstMessage,
+      new AIMessage({ content: "", tool_calls: [{ id: "retry-limit-2", name: "house_lookup", args, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 3, "重试耗尽后不得再次执行相同调用");
+  assert.match(String((second.messages[0] as ToolMessage).content), /自动重试已耗尽/);
+});
+
+test("参数或业务确定性错误不自动重试，并把失败分析返回给 Agent", async () => {
+  let runs = 0;
+  const invalid = tool(
+    async () => {
+      runs += 1;
+      return JSON.stringify({ error: "Unknown tool: legacy_house_lookup", ok: false });
+    },
+    { name: "house_lookup", description: "确定性错误测试", schema: z.object({ query: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [invalid],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const result = await node(makeState([{ id: "deterministic", name: "house_lookup", args: { query: "x" } }]) as never);
+  const message = result.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(message.content)) as { retry?: { attempts?: number; retryable?: boolean; analysis?: string } };
+  assert.equal(runs, 1);
+  assert.equal(message.status, "error");
+  assert.equal(payload.retry?.attempts, 1);
+  assert.equal(payload.retry?.retryable, false);
+  assert.match(payload.retry?.analysis || "", /业务返回确定性错误|需要调整参数/);
+});

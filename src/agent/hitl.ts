@@ -30,7 +30,7 @@ import type { StructuredToolInterface } from "@langchain/core/tools";
 import { createChatModel } from "../llm.js";
 import { calculator, getCurrentTime, getWeather, sendEmail } from "../tools.js";
 import { demoApprovals } from "./approvals.js";
-import { createToolMap, type ApprovalDescriptions, type AgentProfileId } from "./profile.js";
+import { createToolMap, type AgentToolRetryPolicy, type ApprovalDescriptions, type AgentProfileId } from "./profile.js";
 import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
 import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor } from "./tool-risk.js";
 
@@ -58,6 +58,8 @@ export interface ApprovalToolsNodeOptions {
   riskAssessor?: ToolRiskAssessor;
   /** 领域标识，仅用于风险审查提示。 */
   profileId?: AgentProfileId;
+  /** 可安全自动重试的只读工具；未登记的工具保持单次执行。 */
+  toolRetryPolicy?: AgentToolRetryPolicy;
 }
 
 /** 把消息 content 拍平为文本，用于给风险审查器补充当前用户意图。 */
@@ -111,6 +113,8 @@ interface TurnToolHistory {
   completedBySignature: Map<string, { content: ToolMessage["content"]; status: string }>;
   /** 同参数确定性失败次数：达到上限后直接熔断，不再让模型重放同一调用。 */
   failedBySignature: Map<string, number>;
+  /** 自动重试已经耗尽的签名：禁止模型跨轮继续原样重放。 */
+  retryExhaustedBySignature: Set<string>;
 }
 
 /** 写操作一旦落地，之前的读取结果可能已经过期，必须让缓存失效。 */
@@ -141,6 +145,7 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
   const calls = new Map<string, string>();
   const completedBySignature = new Map<string, { content: ToolMessage["content"]; status: string }>();
   const failedBySignature = new Map<string, number>();
+  const retryExhaustedBySignature = new Set<string>();
   for (const message of messages.slice(start)) {
     const ai = message as AIMessage;
     if (Array.isArray(ai.tool_calls)) {
@@ -160,12 +165,13 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
       }
       if (message.status !== "error") {
         completedBySignature.set(signature, { content: message.content, status: message.status ?? "success" });
-      } else if (!isTransientToolFailure(toolResultText(message.content))) {
+      } else {
+        if (retryExhaustedFromText(toolResultText(message.content))) retryExhaustedBySignature.add(signature);
         failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
       }
     }
   }
-  return { completedBySignature, failedBySignature };
+  return { completedBySignature, failedBySignature, retryExhaustedBySignature };
 }
 function lastHumanIntent(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -189,9 +195,15 @@ interface ToolInvocationResult {
   /** 字符串或多模态内容块（截屏工具返回 text + image_url 块），类型对齐 ToolMessage.content */
   content: ToolMessage["content"];
   status: "success" | "error";
+  /** 本次模型工具调用实际执行次数（含自动重试）。 */
+  attempts: number;
 }
 
 const MAX_IDENTICAL_TOOL_FAILURES = 2;
+/** 单次工具调用的自动尝试硬上限；即使 profile 配错也不得突破。 */
+const MAX_TOOL_ATTEMPTS = 3;
+/** 瞬时故障退避：最多两次重试，总计不超过三次尝试。 */
+const TOOL_RETRY_DELAYS_MS = [300, 900] as const;
 
 /** JSON 工具约定：顶层 ok:false 或非空 error 是业务失败，不能伪装成成功。 */
 function toolBusinessError(text: string): string | null {
@@ -209,34 +221,171 @@ function toolBusinessError(text: string): string | null {
   return null;
 }
 
-/** 瞬时故障不进入同参数熔断：超时/限流/5xx 可能下一次就会恢复。 */
+interface ToolFailureAnalysis {
+  retryable: boolean;
+  analysis: string;
+}
+
+interface ToolRetryMetadata {
+  attempts: number;
+  maxAttempts: number;
+  retryable: boolean;
+  exhausted: boolean;
+  recovered?: boolean;
+  analysis: string;
+  nextAction?: string;
+}
+
+/** 瞬时故障识别：只描述错误性质，是否重试还取决于 profile 显式登记的工具白名单。 */
 function isTransientToolFailure(text: string): boolean {
-  return /(?:timeout|timed out|超时|429|rate limit|限流|HTTP\s*5\d{2}|ECONN|EAI_AGAIN)/i.test(text);
+  return /(?:timeout|timed out|超时|429|rate limit|限流|too many requests|HTTP\s*(?:408|425|429|5\d{2})|ECONN|EAI_AGAIN|ENOTFOUND|fetch failed|network error|service temporarily unavailable|temporarily unavailable|temporary unavailable|(?:暂时|临时)不可用|系统繁忙)/i.test(text);
+}
+
+/** 把失败拆成「可重试的瞬时故障」和需要修正调用/权限的确定性错误。 */
+function analyzeToolFailure(text: string): ToolFailureAnalysis {
+  if (/(?:401|403|unauthorized|forbidden|authorization|auth required|invalid.*(?:key|token)|expired.*(?:key|token)|登录|鉴权|权限不足|key.*(?:无效|过期))/i.test(text)) {
+    return { retryable: false, analysis: "认证、权限或 Key 失效，重试相同调用不会恢复" };
+  }
+  if (isTransientToolFailure(text)) {
+    return { retryable: true, analysis: "外部服务临时不可用、限流、超时或网络波动" };
+  }
+  if (/(?:参数|required|missing|不能为空|缺少|未提供|bad request|invalid argument|HTTP\s*400)/i.test(text)) {
+    return { retryable: false, analysis: "调用参数缺失或格式不合法，需要先修正参数" };
+  }
+  if (/(?:not found|no result|no data|未找到|没有找到|无结果|暂无数据)/i.test(text)) {
+    return { retryable: false, analysis: "数据源没有匹配结果，原样重试通常无效" };
+  }
+  return { retryable: false, analysis: "业务返回确定性错误，需要调整参数或改用其它工具" };
+}
+
+function withRetryMetadata(content: ToolMessage["content"], metadata: ToolRetryMetadata): ToolMessage["content"] {
+  if (typeof content !== "string") return content;
+  const trimmed = content.trim();
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...(parsed as Record<string, unknown>), retry: metadata });
+    }
+  } catch { /* 纯文本结果按原样处理 */ }
+  if (metadata.recovered) return content;
+  return JSON.stringify({
+    error: trimmed || "工具未返回错误详情",
+    retry: metadata,
+  });
+}
+
+function retryExhaustedFromText(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text.trim()) as { retry?: { exhausted?: unknown } };
+    return parsed.retry?.exhausted === true;
+  } catch {
+    return false;
+  }
+}
+
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(false);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function invokeTool(
   toolFn: StructuredToolInterface,
   args: Record<string, unknown>,
-  config?: { signal?: AbortSignal; configurable?: Record<string, unknown> }
+  config?: { signal?: AbortSignal; configurable?: Record<string, unknown> },
+  retryPolicy?: AgentToolRetryPolicy
 ): Promise<ToolInvocationResult> {
-  try {
-    // thread_id / permission_mode 等会话上下文必须透传给工具；Browser Use 依赖
-    // thread_id 做浏览器上下文隔离，不能从全局单例猜当前会话。
-    const value = await toolFn.invoke(args, {
-      signal: config?.signal,
-      configurable: config?.configurable,
+  const retryAllowed = Boolean(retryPolicy?.toolNames.includes(toolFn.name));
+  const maxAttempts = retryAllowed
+    ? Math.max(1, Math.min(MAX_TOOL_ATTEMPTS, Math.floor(retryPolicy?.maxAttempts ?? 1)))
+    : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let content: ToolMessage["content"];
+    let status: "success" | "error";
+    try {
+      // thread_id / permission_mode 等会话上下文必须透传给工具；Browser Use 依赖
+      // thread_id 做浏览器上下文隔离，不能从全局单例猜当前会话。
+      const value = await toolFn.invoke(args, {
+        signal: config?.signal,
+        configurable: config?.configurable,
+      });
+      if (Array.isArray(value)) {
+        // 多模态工具（如 computer_screenshot）直接返回内容块数组，原样透传。
+        content = value as ToolMessage["content"];
+        status = "success";
+      } else {
+        const text = toolResultText(value);
+        content = text;
+        status = toolBusinessError(text) ? "error" : "success";
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      content = "工具「" + toolFn.name + "」执行失败：" + message;
+      status = "error";
+    }
+
+    if (status === "success") {
+      return {
+        content: attempt > 1
+          ? withRetryMetadata(content, {
+              attempts: attempt,
+              maxAttempts,
+              retryable: true,
+              exhausted: false,
+              recovered: true,
+              analysis: "瞬时故障后自动重试成功",
+            })
+          : content,
+        status,
+        attempts: attempt,
+      };
+    }
+
+    const failureText = toolResultText(content);
+    const failure = analyzeToolFailure(failureText);
+    if (retryAllowed && failure.retryable && attempt < maxAttempts) {
+      const delay = TOOL_RETRY_DELAYS_MS[Math.min(attempt - 1, TOOL_RETRY_DELAYS_MS.length - 1)];
+      const keepGoing = await waitForRetry(delay, config?.signal);
+      if (keepGoing) continue;
+      content = withRetryMetadata(content, {
+        attempts: attempt,
+        maxAttempts,
+        retryable: false,
+        exhausted: true,
+        analysis: "调用已取消，停止自动重试",
+        nextAction: "不要继续重试；等待用户重新发起或说明任务已中止。",
+      });
+      return { content, status: "error", attempts: attempt };
+    }
+
+    const exhausted = failure.retryable && attempt >= maxAttempts;
+    content = withRetryMetadata(content, {
+      attempts: attempt,
+      maxAttempts,
+      retryable: failure.retryable,
+      exhausted,
+      analysis: failure.analysis,
+      nextAction: exhausted
+        ? "自动重试额度已用尽，请分析影响后改用其它工具/参数，或向用户说明暂不可用，不得再次原样调用。"
+        : failure.retryable
+          ? "该工具未登记为可自动重试；请判断是否有安全替代方案。"
+          : "请修正参数或权限，或改用其它工具；不要原样重复调用。",
     });
-    // 多模态工具（如 computer_screenshot）覆写 invoke 直接返回内容块数组，原样透传
-    if (Array.isArray(value)) return { content: value as ToolMessage["content"], status: "success" };
-    const text = toolResultText(value);
-    return { content: text, status: toolBusinessError(text) ? "error" : "success" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      content: `工具「${toolFn.name}」执行失败：${message}。请把原因转述给用户，不要重复执行。`,
-      status: "error",
-    };
+    return { content, status: "error", attempts: attempt };
   }
+
+  return { content: "工具执行失败：未知状态", status: "error", attempts: maxAttempts };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +435,15 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
 
     for (const [callIndex, call] of (lastMessage.tool_calls ?? []).entries()) {
       const signature = canonicalToolSignature(call.name, call.args);
+      if (history.retryExhaustedBySignature.has(signature)) {
+        toolResults.push(new ToolMessageCls({
+          content: `工具「${call.name}」相同参数的自动重试已耗尽，已阻止再次执行。请先分析失败原因，改用不同参数/其它工具，或向用户说明未获取到的数据与影响。`,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: "error",
+        }));
+        continue;
+      }
       if ((history.failedBySignature.get(signature) ?? 0) >= MAX_IDENTICAL_TOOL_FAILURES) {
         toolResults.push(new ToolMessageCls({
           content: `工具「${call.name}」使用相同参数已连续失败 ${MAX_IDENTICAL_TOOL_FAILURES} 次，已熔断本次调用。` +
@@ -376,7 +534,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
           ...(riskReason ? { riskReason } : {}),
         });
         if (decision === "approve") {
-          const result = await invokeTool(toolFn, call.args, config);
+          const result = await invokeTool(toolFn, call.args, config, options.toolRetryPolicy);
           content = result.content;
           status = result.status;
         } else {
@@ -384,7 +542,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         }
       } else {
         // 自主模式判定为低风险：直接执行（其余「可直接执行」的已在批处理里）
-        const result = await invokeTool(toolFn, call.args, config);
+        const result = await invokeTool(toolFn, call.args, config, options.toolRetryPolicy);
         content = result.content;
         status = result.status;
       }
@@ -413,7 +571,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
             // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
             return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
           }
-          const result = await invokeTool(item.toolFn, item.call.args, config);
+          const result = await invokeTool(item.toolFn, item.call.args, config, options.toolRetryPolicy);
           return { item, content: result.content, status: result.status };
         })
       );

@@ -557,6 +557,7 @@ export function createWorkflowGraph(
     approvalDescriptions: profile.approvalDescriptions,
     riskAssessor,
     profileId: profile.id,
+    toolRetryPolicy: profile.toolRetryPolicy,
   });
   const analyzePrompt = profile.analystGuidance
     ? `${ANALYZE_PROMPT}\n${profile.analystGuidance}`

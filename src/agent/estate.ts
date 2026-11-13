@@ -37,6 +37,7 @@ const SYSTEM_PROMPT = [
   "— house_lookup(detail) 返回 location、house_lookup(material) 返回 images 时，前端会按 houseId 把户型图和位置放进最终结论表格。最终文字不要重复贴裸 URL，不能把已有 location 说成“地图未定位”，也不要手工画大表或暴露内部 houseId。",
   "— house_map 只用于跨小区对比；若详情已含 location.lat/lng，必须原样传入 items，禁止让 Nominatim 重新猜地址。单个候选已有详情地图时不要重复调用 house_map。",
   "— 贝壳不保证返回分间卧室面积：字段缺失时标“待核实”，用建筑面积单价作为替代口径并明确二者不同；不要编造达标结论，也不要在同一数据缺口上反复重试，流程步骤应标 skipped 并写明原因。",
+  "— 工具失败后必须先看 error/retry 原因：参数、权限、未找到等确定性错误不要重试；外部服务临时不可用由执行层最多尝试 3 次（含首次）。仍失败时改用其它工具/参数，或明确说明缺口和影响，不能静默略过。",
   "6) 结论文字只讲首选、取舍、命中/未命中与风险；前端表格会展示 3—5 条房源的租金、户型、户型图和位置。禁止输出连续 8 位以上的 houseId / 房源编号，用小区名 + 户型 + 面积 + 租金标识房源。",
   "7) 高风险操作（house_appoint 预约带看 / house_contact 经纪人加微）：用户明确表示要做时才调用，" +
   "预约先复述日期时段；加微 reason 用经纪人口吻（称「您」，不用「我」），系统会人工审批。",
@@ -51,6 +52,11 @@ export const estateProfile: AgentProfile = {
   systemPrompt: SYSTEM_PROMPT,
   tools,
   approvalDescriptions: estateApprovals,
+  toolRetryPolicy: {
+    // 仅只读查询可自动重试；预约带看、经纪人加微等对外动作绝不重放。
+    maxAttempts: 3,
+    toolNames: ["house_search", "house_lookup", "house_market", "house_map", "house_agents"],
+  },
   analystGuidance: [
     "房产任务补充规则：",
     "- 城市和「租房 / 买房」方向是搜索的关键前提；缺少时必须澄清。",
@@ -66,6 +72,7 @@ export const estateProfile: AgentProfile = {
     "- 是否把未审批、未执行的预约或加微描述成已完成。",
     "- 工具结果已有 location/images 时，回答不得再声称无法定位；前端会按 houseId 在最终结论表格中展示对应户型图与位置，不要求文字重复链接。",
     "- 数据源确实缺少分间面积时，如实标待核实并给出替代口径不算失败；编造达标或对同一缺口无限重试才失败。",
+    "- 存在失败工具时，是否说明原因、影响与替代路径；自动重试耗尽后不得原样再次调用。",
     "- 地图定位来源、行情口径和统计限制是否如实说明。",
   ].join("\n"),
   contextPolicy: {

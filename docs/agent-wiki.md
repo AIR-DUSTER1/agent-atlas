@@ -712,7 +712,7 @@ Header: Authorization: Bearer <key>（可留空）
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。
 
-**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。
+**结论表格**：`client/modules/conclusion-media.ts` 按 houseId 聚合 search / detail / material / map，生成“房源 / 户型图 / 地理位置”行；`client/render/conclusion-media.ts` 查找最后一段已完成正文，并把响应式表格固定插入其后，再对回答中出现的真实 houseId 做确定性脱敏。后续 review 思考继续追加时不会撤表，只有新的工具动作或重写开始时才撤下旧表。房产工具卡不进入通用 tools 分组，每次调用独立展示。地图预览改用高德图片瓦片和本地定位点，不再依赖经常被国内网络重置的 OSM iframe；底图加载失败时仍保留坐标与高德/腾讯/百度/OSM 入口。
 
 **失败恢复**：`agent/profile.ts` 的 `toolRetryPolicy` 只允许显式登记的只读房产工具自动重试；认证、权限、参数与未找到等确定性错误不重试。可恢复的服务临时不可用、超时、限流和网络故障最多执行 3 次（含首次）；耗尽后 ToolMessage 会带 `retry.analysis / retry.nextAction`，同一参数再次调用由 hitl 直接熔断，避免模型静默忽略或无限重放。
 
@@ -1672,7 +1672,7 @@ console.log(result.messages.at(-1).content);
 | Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
 | Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
 | 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
-| 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，最终结论表立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。只有地址确实无坐标时才列「未定位」 |
+| 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，最终结论表立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。预览底图使用高德图片瓦片，避免 OSM iframe 在国内网络连接重置；只有地址确实无坐标时才列「未定位」 |
 | 房产调研完成后看不到地图 / 户型图      | 两类原因都要排查：① 户型图 URL 在 material 的嵌套 JSON 中，旧版本未归一为 `images[]`；② 回答后 review 又追加思考时，旧逻辑因“最后一个 part 必须是正文”误删表格。现在 `refreshConclusionMedia` 查找最后一段已完成正文并固定插表，后续思考不撤表；工具卡默认折叠且不承载媒体，内部 ID 不进入可见文字。若原始数据确实没有图片/坐标才如实说明 |
 | 房产详情偶发 `service temporarily unavailable` | 可恢复故障不能直接放弃：只读 `house_*` 工具按 `toolRetryPolicy` 自动尝试，最多 3 次（含首次），并在 ToolMessage 的 `retry` 字段返回错误分类与下一步建议；认证/参数/未找到不重试。三次仍失败后同参数调用会被 hitl 熔断，Agent 必须改用其它工具/参数或向用户说明缺口，不能静默省略 |
 | 房产任务反思反复不通过 / 流程最终 failed | 常见原因是模型做完最后一步却忘了 `update_workflow_plan`，留下唯一 `in_progress`；反思节点因此反复回炉。现在反思已判定结果满足需求时，会在没有 pending / failed 的前提下自动封口唯一 active 步骤，并保留「结果反思确认已完成」证据；真正未执行的步骤仍不会被放行 |

@@ -13,6 +13,14 @@ export type AgentProfileId = "general" | "estate" | "job";
 
 export type ApprovalDescriptions = Record<string, (args: Record<string, unknown>) => string>;
 
+/** 工具瞬时失败策略：只允许显式登记的只读工具自动重试。 */
+export interface AgentToolRetryPolicy {
+  /** 总尝试次数（含首次），执行层硬限制为 3。 */
+  maxAttempts: number;
+  /** 可安全自动重试的工具名；写操作、预约、对外联系不得列入。 */
+  toolNames: readonly string[];
+}
+
 export interface AgentContextPolicy {
   /** 历史消息数量的极端防线；正常裁剪由模型窗口 token 预算决定。 */
   maxRecentMessages: number;
@@ -33,6 +41,8 @@ export interface AgentProfile {
   /** 可选：追加到需求分析 / 结果反思提示词的领域规则。 */
   analystGuidance?: string;
   reviewerGuidance?: string;
+  /** 可选：仅对明确安全的只读工具启用瞬时故障自动重试。 */
+  toolRetryPolicy?: AgentToolRetryPolicy;
   /** 可选：消息与工具结果预算；未配置时使用 workflow 的安全默认值。 */
   contextPolicy?: Partial<AgentContextPolicy>;
 }

@@ -59,6 +59,47 @@ test("同批三个工具按文件读取、图片读取、运行命令分区并�
   expect(result.groupOpened).toBe(false);
 });
 
+test("房产工具每次调用保持独立卡片，不再嵌套同名房产查询分组", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart, groupToolCallsIfNeeded }, clientState] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    for (const [index, action] of ["detail", "detail", "material"].entries()) {
+      const part = {
+        p: "tool", id: `estate-independent-${index}`, name: "house_lookup",
+        argsText: JSON.stringify({ action, city: "青岛", houseId: String(100000000000 + index) }),
+        result: { content: "{}", isError: false },
+      };
+      block.parts.push(part);
+      mountPart(block, part);
+    }
+    const node = { p: "node", name: "tools" };
+    block.parts.push(node);
+    const group = groupToolCallsIfNeeded(block, host, node);
+    const answer = {
+      grouped: Boolean(group),
+      groups: host.querySelectorAll(".tool-group").length,
+      cards: host.querySelectorAll(".tool-card").length,
+      categories: [...host.querySelectorAll(".tool-card")].map((card) => (card as HTMLElement).dataset.toolCategory),
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    return answer;
+  });
+
+  expect(result.grouped).toBe(false);
+  expect(result.groups).toBe(0);
+  expect(result.cards).toBe(3);
+  expect(result.categories).toEqual(["estate", "estate", "estate"]);
+});
+
 test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
   await login(page);
   const result = await page.evaluate(async () => {
@@ -187,11 +228,14 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       updateToolCard(part);
     }
     events.handleEvent({ type: "token", text: "结论：测试花园 103155273255 位置与户型图如下。", node: "agent" }, block, null);
-    const beforeDone = host.querySelectorAll(".conclusion-media").length;
+    const beforeReview = host.querySelectorAll(".conclusion-media").length;
+    events.handleEvent({ type: "reasoning", text: "复核结论与附件", node: "review" }, block, null);
+    const duringReview = host.querySelectorAll(".conclusion-media").length;
     events.handleEvent({ type: "done" }, block, null);
     const conclusion = host.querySelector(".conclusion-media");
     const md = host.querySelector(".md");
-    const iframe = conclusion?.querySelector(".conclusion-property-map iframe");
+    const map = conclusion?.querySelector<HTMLElement>(".conclusion-property-map");
+    const mapTile = conclusion?.querySelector(".conclusion-map-tile");
     const img = conclusion?.querySelector(".conclusion-table-image img");
     const table = conclusion?.querySelector(".conclusion-table");
     const rows = table?.querySelectorAll("tbody tr").length || 0;
@@ -200,9 +244,14 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     const openToolCards = [...host.querySelectorAll(".tool-card")].filter((card) => card.classList.contains("open")).length;
     const answer = {
       hasConclusion: Boolean(conclusion),
-      beforeDone,
+      beforeReview,
+      duringReview,
       isAfterText: Boolean(node),
-      iframeSrc: iframe?.getAttribute("src") || "",
+      mapLat: map?.dataset.mapLat || "",
+      mapLng: map?.dataset.mapLng || "",
+      mapTiles: conclusion?.querySelectorAll(".conclusion-map-tile").length || 0,
+      mapMarker: Boolean(conclusion?.querySelector(".conclusion-map-marker")),
+      mapTileSrc: mapTile?.getAttribute("src") || "",
       imageSrc: img?.getAttribute("src") || "",
       tableText: table?.textContent || "",
       rows,
@@ -215,11 +264,15 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     return answer;
   });
 
-  expect(result.beforeDone).toBe(0);
+  expect(result.beforeReview).toBe(0);
+  expect(result.duringReview).toBe(1);
   expect(result.hasConclusion).toBe(true);
   expect(result.isAfterText).toBe(true);
-  expect(result.iframeSrc).toContain("openstreetmap.org/export/embed.html");
-  expect(result.iframeSrc).toContain("marker=36.123456,120.123456");
+  expect(result.mapLat).toBe("36.123456");
+  expect(result.mapLng).toBe("120.123456");
+  expect(result.mapTiles).toBeGreaterThanOrEqual(9);
+  expect(result.mapMarker).toBe(true);
+  expect(result.mapTileSrc).toContain("is.autonavi.com/appmaptile?style=8");
   expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
   expect(result.rows).toBe(1);
   expect(result.tableText).toContain("测试花园 · 2室1厅 · 90㎡");

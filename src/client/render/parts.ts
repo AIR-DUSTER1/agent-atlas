@@ -262,6 +262,9 @@ export function groupToolCallsIfNeeded(
   while (start >= 0 && block.parts[start].p === "tool") start -= 1;
   const tools = block.parts.slice(start + 1, nodeIndex).filter((p): p is ToolPart => p.p === "tool");
   if (tools.length < TOOL_GROUP_MIN) return null;
+  // 房产业务卡本身已带房源语义；再套一层「房产查询」分组会形成同名嵌套。
+  // 每次 house_* 调用都保留为独立工具卡，失败/重试状态才不会混在一起。
+  if (tools.some((tool) => describeTool(tool).category.id === "estate")) return null;
   const firstCard = partEls.get(tools[0])?.el;
   if (!firstCard || firstCard.parentElement !== body) return null;
 

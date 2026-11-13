@@ -6,7 +6,7 @@
  * 表格，挂到最终回答下方。内部 ID 只参与匹配，不展示给用户；流式或重写
  * 阶段自动撤下旧表，避免结论与过程不一致。
  */
-import { blockBodies } from "../core/state.js";
+import { blockBodies, partEls } from "../core/state.js";
 import {
   collectEstateConclusionMedia,
   collectEstateHouseIds,
@@ -28,6 +28,15 @@ const MAP_LINK_LABELS: Record<string, string> = {
   osm: "OSM",
 };
 const conclusionEls = new WeakMap<AssistantBlock, HTMLElement>();
+
+/** 结论表跟随最后一段已完成正文；反思思考可能排在正文之后，不能因此撤表。 */
+function latestCompletedTextPart(block: AssistantBlock) {
+  for (let index = block.parts.length - 1; index >= 0; index -= 1) {
+    const part = block.parts[index];
+    if (part?.p === "text" && !part.streaming && part.text.trim()) return part;
+  }
+  return null;
+}
 
 function precisionLabel(value: string | undefined): string {
   if (value === "building") return "楼栋精确位置";
@@ -60,14 +69,88 @@ function renderLinks(links: Record<string, string> | undefined): HTMLElement | n
   return row.childElementCount ? row : null;
 }
 
-function renderMapFrame(embedUrl: string, title: string, compact = false): HTMLElement | null {
-  const src = safeHref(embedUrl);
-  if (!src || !/^https:\/\/www\.openstreetmap\.org\//i.test(src)) return null;
-  const iframe = document.createElement("iframe");
-  iframe.src = src;
-  iframe.loading = "lazy";
-  iframe.title = title;
-  return h("div", { class: compact ? "conclusion-property-map" : "conclusion-map" }, iframe);
+const MAP_TILE_SIZE = 256;
+const MAP_ZOOM = 14;
+const MAP_SOURCE_LABEL = "高德地图";
+const MAP_TILE_HOSTS = ["webst01", "webst02", "webst03", "webst04"] as const;
+
+function longitudeWorldPixel(lng: number, zoom: number): number {
+  return ((lng + 180) / 360) * MAP_TILE_SIZE * (2 ** zoom);
+}
+
+function latitudeWorldPixel(lat: number, zoom: number): number {
+  const radians = (lat * Math.PI) / 180;
+  return ((1 - Math.asinh(Math.tan(radians)) / Math.PI) / 2) * MAP_TILE_SIZE * (2 ** zoom);
+}
+
+function coordinatesFromEmbed(raw: string): { lat: number; lng: number } | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || url.hostname !== "www.openstreetmap.org") return null;
+    const marker = url.searchParams.get("marker")?.split(",");
+    if (!marker || marker.length !== 2) return null;
+    const lat = Number(marker[0]);
+    const lng = Number(marker[1]);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}
+
+function amapTileUrl(x: number, y: number, zoom: number, attempt = 0): string {
+  const host = MAP_TILE_HOSTS[(Math.abs(x + y) + attempt) % MAP_TILE_HOSTS.length];
+  return `https://${host}.is.autonavi.com/appmaptile?style=8&x=${x}&y=${y}&z=${zoom}`;
+}
+
+/**
+ * 外部 OSM iframe 在国内网络经常被重置，造成“有坐标但地图是灰色断图”。
+ * 这里改为纯图片瓦片 + 本地定位点，不依赖 iframe/脚本；底图失败仍保留坐标与地图链接。
+ */
+function renderMapFrame(lat: number | undefined, lng: number | undefined, title: string, compact = false): HTMLElement | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat as number) > 90 || Math.abs(lng as number) > 180) return null;
+  const latitude = lat as number;
+  const longitude = lng as number;
+  const map = h("div", {
+    class: compact ? "conclusion-property-map" : "conclusion-map",
+    role: "img",
+    "aria-label": `${title} 地图，坐标 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}，底图来源 ${MAP_SOURCE_LABEL}`,
+    title: `${title} · ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+  });
+  map.dataset.mapLat = latitude.toFixed(6);
+  map.dataset.mapLng = longitude.toFixed(6);
+  map.dataset.mapZoom = String(MAP_ZOOM);
+
+  const worldX = longitudeWorldPixel(longitude, MAP_ZOOM);
+  const worldY = latitudeWorldPixel(latitude, MAP_ZOOM);
+  const centerX = Math.floor(worldX / MAP_TILE_SIZE);
+  const centerY = Math.floor(worldY / MAP_TILE_SIZE);
+  const layer = h("div", { class: "conclusion-map-tiles", "aria-hidden": "true" });
+  for (let tileY = centerY - 1; tileY <= centerY + 1; tileY += 1) {
+    for (let tileX = centerX - 1; tileX <= centerX + 1; tileX += 1) {
+      const img = document.createElement("img");
+      img.className = "conclusion-map-tile";
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.draggable = false;
+      img.style.left = `${tileX * MAP_TILE_SIZE - worldX}px`;
+      img.style.top = `${tileY * MAP_TILE_SIZE - worldY}px`;
+      const initial = amapTileUrl(tileX, tileY, MAP_ZOOM);
+      img.src = initial;
+      img.addEventListener("error", () => {
+        const fallback = amapTileUrl(tileX, tileY, MAP_ZOOM, 1);
+        if (img.src !== fallback) img.src = fallback;
+      }, { once: true });
+      layer.appendChild(img);
+    }
+  }
+
+  const marker = h("span", { class: "conclusion-map-marker", "aria-hidden": "true" });
+  const source = h("span", { class: "conclusion-map-attribution" }, `定位 · ${MAP_SOURCE_LABEL}`);
+  map.append(layer, marker, source);
+  return map;
 }
 
 function renderImageFigure(image: ConclusionImage, compact = false): HTMLElement | null {
@@ -112,9 +195,8 @@ function renderLocationCell(property: ConclusionProperty, media: EstateConclusio
   }
 
   const key = [location.name, location.lat ?? "", location.lng ?? ""].join("|");
-  const embed = location.embedUrl || (media.properties.length === 1 ? media.mapEmbedUrl : "");
-  if (embed && !rendered.has(key)) {
-    const map = renderMapFrame(embed, `${property.title || location.name} 位置`, true);
+  if (Number.isFinite(location.lat) && Number.isFinite(location.lng) && !rendered.has(key)) {
+    const map = renderMapFrame(location.lat, location.lng, `${property.title || location.name} 位置`, true);
     if (map) {
       cell.appendChild(map);
       rendered.add(key);
@@ -164,7 +246,10 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
 }
 
 function renderMap(media: EstateConclusionMedia): HTMLElement | null {
-  return media.mapEmbedUrl ? renderMapFrame(media.mapEmbedUrl, media.mapTitle || "房源位置地图") : null;
+  const point = media.points.find((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
+  if (point) return renderMapFrame(point.lat, point.lng, media.mapTitle || point.name || "房源位置地图");
+  const fallback = coordinatesFromEmbed(media.mapEmbedUrl);
+  return fallback ? renderMapFrame(fallback.lat, fallback.lng, media.mapTitle || "房源位置地图") : null;
 }
 
 function renderPoints(media: EstateConclusionMedia): HTMLElement | null {
@@ -246,8 +331,8 @@ function removeConclusion(block: AssistantBlock, body: HTMLElement): void {
 export function refreshConclusionMedia(block: AssistantBlock): void {
   const body = blockBodies.get(block);
   if (!body) return;
-  const last = block.parts.at(-1);
-  if (!last || last.p !== "text" || last.streaming || !last.text.trim()) {
+  const textPart = latestCompletedTextPart(block);
+  if (!textPart) {
     removeConclusion(block, body);
     return;
   }
@@ -262,8 +347,13 @@ export function refreshConclusionMedia(block: AssistantBlock): void {
   if (existing && existing.parentElement === body) {
     existing.replaceWith(section);
   } else {
-    const usage = body.querySelector<HTMLElement>(".usage-caption");
-    body.insertBefore(section, usage ?? null);
+    const textEl = partEls.get(textPart)?.el;
+    if (textEl?.parentElement === body) {
+      textEl.after(section);
+    } else {
+      const usage = body.querySelector<HTMLElement>(".usage-caption");
+      body.insertBefore(section, usage ?? null);
+    }
   }
   conclusionEls.set(block, section);
   body.classList.add("has-conclusion-media");
