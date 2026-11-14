@@ -86,6 +86,7 @@ function renderDetails(job: JobRecord): string {
     ["福利", job.welfare],
     ["工作地址", job.address],
     ["上架时间", job.published],
+    ["招呼语", job.greeting],
     ["备注", job.remark],
   ];
   const visible = fields.filter(([, value]) => value.trim());

@@ -10,14 +10,16 @@
  *   - 失败不 throw 穿透图：返回中文错误 JSON，让模型转述
  *   - **job_collect 是重操作**：3-5 分钟子进程 + 会登录态访问招聘站点，
  *     在 agent/approvals.ts 的 job profile 策略登记，执行前必须人工审批
- *   - 只读类（查清单 / 补详情）直接执行；补详情也会访问外网但只读公开页面，
+ *   - 只读类（查清单 / 概览 / 招呼语准备）直接执行；补详情也会访问外网但只读公开页面，
  *     登记在审批表里意味着用户能看到「要抓哪些站点」，这是本项目的既有立场
+ *   - job_greet_save 会改写本地清单文件并重出报告，按 §5.4 登记审批
  */
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import {
-  collectJobs, diagnoseJobs, enrichJobs, queryJobs, readManifest,
-  JOB_PLATFORMS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT,
+  collectJobs, diagnoseJobs, enrichJobs, exportJobGreetTargets, initJobGreetProfile, queryJobs,
+  readManifest, saveJobGreetings,
+  JOB_GREETING_MAX_LEN, JOB_PLATFORMS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT, jobIdentity,
   type JobRecord,
 } from "./server/job.js";
 import { isPluginEnabled } from "./plugin-state.js";
@@ -66,6 +68,7 @@ function summarizeJob(job: JobRecord): Record<string, unknown> {
     status: job.status,
     applyUrl: job.applyUrl,
     direction: job.direction,
+    greeting: job.greeting,
   };
 }
 
@@ -229,7 +232,123 @@ export const jobEnrichTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 4. job_profile_summary：清单概览（数量分布，不返回岗位明细）
+// 4. job_greet：招呼语闭环的准备动作（生成画像 / 导出待写 / 查看进度）
+//    纯本地不触外网，与 job_query 同级不登记审批
+// ---------------------------------------------------------------------------
+export const jobGreetTool = tool(
+  async ({ action, top, overwrite, force }) => {
+    const off = pluginOff();
+    if (off) return badArgs(off);
+    try {
+      if (action === "init") {
+        const result = await initJobGreetProfile(force === true);
+        return payload({
+          ok: result.ok,
+          created: result.created,
+          path: result.path,
+          summary: result.summary,
+          note: "请把画像模板给用户过目并请其补全真实经历与量化成果；画像空着就不要开始写招呼语，否则只能写空话。",
+        });
+      }
+      if (action === "export") {
+        const result = await exportJobGreetTargets({
+          ...(typeof top === "number" ? { top } : {}),
+          ...(overwrite === true ? { overwrite: true } : {}),
+        });
+        return payload({
+          ok: true,
+          profilePath: result.profilePath,
+          hasProfile: result.hasProfile,
+          profile: result.profile,
+          maxLen: result.maxLen,
+          remaining: result.remaining,
+          exported: result.exported,
+          items: result.items,
+          note: result.note,
+        });
+      }
+      const manifest = await readManifest();
+      if (!manifest) return badArgs("还没有岗位清单：请先采集一次岗位。");
+      const written = manifest.jobs.filter((job) => job.greeting.trim()).length;
+      const pending = manifest.jobs
+        .filter((job) => !job.greeting.trim())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+        .map((job) => ({ key: jobIdentity(job), title: job.title, company: job.company, score: Math.round(job.score * 10) / 10 }));
+      return payload({
+        ok: true,
+        written,
+        total: manifest.jobs.length,
+        next: pending,
+        note: written === manifest.jobs.length
+          ? "全部岗位都已写招呼语；要重写已写的用 job_greet action=export 加 overwrite=true。"
+          : undefined,
+      });
+    } catch (err) {
+      return badArgs(err instanceof Error ? err.message : String(err));
+    }
+  },
+  {
+    name: "job_greet",
+    description:
+      "招呼语闭环的准备动作：action=init 在求职数据目录生成画像模板 profile.md；action=export 导出待写招呼语清单（含画像全文与 JD 摘要，供撰写）；action=status 查看已写/待写进度。" +
+      "何时用：用户想给目标岗位准备打招呼的开场白、想先建或补全求职画像。" +
+      "何时不用：只看岗位用 job_query；写回已完成的招呼语用 job_greet_save。" +
+      "纯本地操作，不访问外网。",
+    schema: z.object({
+      action: z.enum(["init", "export", "status"]).describe("init=生成画像模板；export=导出待写清单；status=查看进度"),
+      top: z.number().int().min(1).max(MAX_JOBS_IN_RESULT).optional().describe("export 时最多导出几条，默认 10（按分数从高到低）"),
+      overwrite: z.boolean().optional().describe("export 时 true = 连已写过招呼语的岗位一起重新导出，默认只导未写的"),
+      force: z.boolean().optional().describe("init 时 true = 重置已存在的画像模板（用户手填内容会被覆盖，谨慎使用）"),
+    }),
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 5. job_greet_save：写回撰写好的招呼语（写本地清单 → 审批）
+// ---------------------------------------------------------------------------
+export const jobGreetSaveTool = tool(
+  async ({ items }) => {
+    const off = pluginOff();
+    if (off) return badArgs(off);
+    if (!items?.length) {
+      return badArgs("items 为空：请传 [{\"key\":\"…\",\"greeting\":\"…\"}] 数组，key 来自 job_greet 导出的 items。");
+    }
+    try {
+      const result = await saveJobGreetings(items);
+      return payload({
+        ok: true,
+        summary: result.summary,
+        saved: result.saved,
+        truncated: result.truncated,
+        ...(result.xlsxPath ? { xlsxPath: result.xlsxPath } : {}),
+        ...(result.htmlPath ? { htmlPath: result.htmlPath } : {}),
+        note: "招呼语已进入清单与 Excel；再次采集或补详情都不会被覆盖。写超长的部分被截断到 " + JOB_GREETING_MAX_LEN + " 字。",
+      });
+    } catch (err) {
+      return badArgs(err instanceof Error ? err.message : String(err));
+    }
+  },
+  {
+    name: "job_greet_save",
+    description:
+      "把撰写好的招呼语批量写回岗位清单，并重新生成 Excel 与 HTML 报告（只写本地求职数据目录，执行前系统会人工审批）。" +
+      "何时用：job_greet action=export 导出待写清单、逐条撰写完成后一次性提交。" +
+      "何时不用：还没导出待写清单、还没让用户确认画像时先别写。" +
+      "key 必须与导出时一致，任何 key 对不上都会整批拒绝，不会静默丢弃。",
+    schema: z.object({
+      // 不设 min(1)：空 items / 空 greeting 由执行体返回「还缺什么」的中文提示，
+      // 比 zod 的英文校验报错对模型有用（与 job_collect 四要素同思路）
+      items: z.array(z.object({
+        key: z.string().describe("岗位唯一键，来自 job_greet 导出 items 的 key 字段"),
+        greeting: z.string().describe(`招呼语正文，不超过 ${JOB_GREETING_MAX_LEN} 字`),
+      })).describe("待写回的招呼语列表，一次可以提交多条"),
+    }),
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 6. job_profile_summary：清单概览（数量分布，不返回岗位明细）
 // ---------------------------------------------------------------------------
 export const jobSummaryTool = tool(
   async () => {
@@ -331,4 +450,4 @@ export const jobDiagnoseTool = tool(
   }
 );
 
-export const jobTools = [jobCollectTool, jobQueryTool, jobEnrichTool, jobSummaryTool, jobDiagnoseTool];
+export const jobTools = [jobCollectTool, jobQueryTool, jobEnrichTool, jobGreetTool, jobGreetSaveTool, jobSummaryTool, jobDiagnoseTool];

@@ -14,7 +14,7 @@ import { collectNativeJobs, enrichNativeJobs, getJobBrowserInfo, loginNativeJob 
 import { diagnoseNativeJobSites, type JobDiagnosisResult } from "./job-diagnose.js";
 import { JOB_VERDICT_LABEL } from "./job-health.js";
 import {
-  JOB_MAX_KEYWORDS, JOB_MAX_PAGES, JOB_PLATFORMS, JOB_PLATFORM_LABELS, JOB_SUPPORTED_CITIES,
+  JOB_GREETING_MAX_LEN, JOB_MAX_KEYWORDS, JOB_MAX_PAGES, JOB_PLATFORMS, JOB_PLATFORM_LABELS, JOB_SUPPORTED_CITIES,
   MAX_JOBS_IN_RESULT, jobIdentity, mergeJobRecords, normalizeStoredJob, queryJobRecords, scoreJob,
   type JobManifest, type JobPlatform, type JobQuery, type JobRecord, type JobSearchProfile,
 } from "./job-model.js";
@@ -36,7 +36,8 @@ let saved: JobSaved = {};
 let loaded = false;
 
 export {
-  JOB_PLATFORMS, JOB_PLATFORM_LABELS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT,
+  JOB_GREETING_MAX_LEN, JOB_PLATFORMS, JOB_PLATFORM_LABELS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT,
+  jobIdentity,
   type JobManifest, type JobPlatform, type JobQuery, type JobRecord,
 };
 
@@ -120,8 +121,8 @@ export async function readManifest(dataDirHint?: string): Promise<JobManifest | 
   return { jobs, fetchedAt, path };
 }
 
-async function writeManifest(jobs: JobRecord[]): Promise<JobManifest> {
-  const dataDir = resolveJobDataDir();
+async function writeManifest(jobs: JobRecord[], dataDirHint?: string): Promise<JobManifest> {
+  const dataDir = dataDirHint ?? resolveJobDataDir();
   const outDir = join(dataDir, "out");
   await fsp.mkdir(outDir, { recursive: true });
   const fetchedAt = new Date().toISOString();
@@ -184,7 +185,8 @@ function normalizeCollectInput(input: CollectInput): { profile: JobSearchProfile
 function tail(text: string, limit = 2_000): string { return text.length > limit ? text.slice(-limit) : text; }
 
 async function refreshDeliverables(manifest: JobManifest): Promise<{ xlsxPath?: string; htmlPath?: string; htmlError?: string }> {
-  const outDir = join(resolveJobDataDir(), "out");
+  // 输出目录跟着清单走（清单与 Excel 永远同目录），测试传临时数据目录时自然生效
+  const outDir = dirname(manifest.path);
   let xlsxPath: string | undefined;
   let htmlPath: string | undefined;
   let htmlError: string | undefined;
@@ -256,7 +258,7 @@ export async function enrichJobs(limit = 10): Promise<CliOutcome> {
   }
   const jobs = result.jobs.map((job) => {
     const old = previousByKey.get(jobIdentity(job));
-    return old ? { ...job, status: old.status, remark: old.remark } : job;
+    return old ? { ...job, status: old.status, remark: old.remark, greeting: old.greeting } : job;
   });
   const updatedManifest = await writeManifest(jobs);
   const deliverables = await refreshDeliverables(updatedManifest);
@@ -275,6 +277,189 @@ export async function startLogin(platform: JobPlatform): Promise<CliOutcome> {
   await ensureLoaded();
   const result = await loginNativeJob(platform, resolveJobDataDir());
   return { ok: result.ok, summary: result.output, output: result.output };
+}
+
+// ---------------------------------------------------------------------------
+// 招呼语闭环（内化上游 job-hunter 的 greet 三步流）：
+// init 生成画像模板 → export 导出待写清单给模型撰写 → save 校验写回并重新交付。
+// 全程不触外网；画像属于数据目录（随 job-data 走），不属于应用代码。
+// ---------------------------------------------------------------------------
+
+const GREET_PROFILE_NAME = "profile.md";
+/** 导出给模型的 JD 截断长度：足够判断岗位要求，又不撑爆上下文。 */
+const GREET_JD_MAX_CHARS = 1_200;
+const GREET_EXPORT_DEFAULT_TOP = 10;
+const GREET_EXPORT_MAX_TOP = MAX_JOBS_IN_RESULT;
+
+const GREET_PROFILE_TEMPLATE = `# 求职者画像（招呼语撰写依据）
+
+这份画像只有用户本人与求职 Agent 会读：招呼语只允许引用这里真实存在的内容，
+画像里没有的一律不写 —— 宁可短，也不要编造。补全后保存本文件即可重新导出待写清单。
+
+## 基本信息
+- 当前身份：（如「3 年后端经验的工程师」；联系方式不要写进招呼语）
+- 目标方向：（与采集方向一致，如 Agent 开发 / 前端开发）
+
+## 按方向的简历文件（供 agent 挑选对应经历，招呼语里只写要点）
+| 方向 | 简历文件路径 | 备注 |
+|---|---|---|
+| （方向名） | （本地路径） | |
+
+## 技术栈（按真实会用的写）
+- 
+
+## 项目弹药（3-6 个，每条带量化成果）
+1. **项目名**：一句话说清做了什么；量化成果（如「把 X 从 A 降到 B」「支撑 N 次/日调用」）；对应 JD 里的哪些关键词。
+2. 
+
+## 写作要点（招呼语上限 ${JOB_GREETING_MAX_LEN} 字）
+- 开头直点岗位名，不写「尊敬的 HR」这类套话。
+- 中间挑 1-2 个与 JD 最贴的项目，优先量化数字。
+- 岗位要求里有不会的，坦诚说明学习能力，不要硬凑。
+- 不写薪资期望，不写与岗位无关的经历，不编造。
+`;
+
+export interface JobGreetExportItem {
+  key: string;
+  platform: string;
+  title: string;
+  company: string;
+  salary: string;
+  city: string;
+  score: number;
+  direction: string;
+  workRest: string;
+  hrActive: string;
+  companySize: string;
+  companyIndustry: string;
+  applyUrl: string;
+  jdText: string;
+}
+
+export interface JobGreetExport {
+  ok: true;
+  profilePath: string;
+  hasProfile: boolean;
+  profile: string;
+  maxLen: number;
+  remaining: number;
+  exported: number;
+  items: JobGreetExportItem[];
+  note: string;
+}
+
+/** 生成画像模板；已存在时不覆盖（画像内容是用户手填的，覆盖等于毁稿），force 才重置。 */
+export async function initJobGreetProfile(force = false, dataDirHint?: string): Promise<{ ok: boolean; path: string; created: boolean; summary: string }> {
+  await ensureLoaded();
+  const dataDir = dataDirHint ?? resolveJobDataDir();
+  await fsp.mkdir(dataDir, { recursive: true });
+  const path = join(dataDir, GREET_PROFILE_NAME);
+  let exists = false;
+  try { await fsp.access(path); exists = true; } catch { /* 首次生成 */ }
+  if (exists && !force) {
+    return { ok: true, path, created: false, summary: `画像已存在：${path}。请补全内容后再导出待写清单；要重置模板请明确指定 force。` };
+  }
+  await fsp.writeFile(path, GREET_PROFILE_TEMPLATE, "utf8");
+  writeAudit("job.greet", { action: "init", reset: exists, force });
+  return { ok: true, path, created: true, summary: `画像模板已${exists ? "重置" : "生成"}：${path}` };
+}
+
+async function readGreetProfile(dataDirHint?: string): Promise<string> {
+  try {
+    return await fsp.readFile(join(dataDirHint ?? resolveJobDataDir(), GREET_PROFILE_NAME), "utf8");
+  } catch { return ""; }
+}
+
+function slimGreetTarget(job: JobRecord): JobGreetExportItem {
+  return {
+    key: jobIdentity(job),
+    platform: job.platform,
+    title: job.title,
+    company: job.company,
+    salary: job.salary,
+    city: job.city,
+    score: Math.round(job.score * 10) / 10,
+    direction: job.direction,
+    workRest: job.workRest,
+    hrActive: job.hrActive,
+    companySize: job.companySize,
+    companyIndustry: job.companyIndustry,
+    applyUrl: job.applyUrl,
+    jdText: job.jdText.length > GREET_JD_MAX_CHARS ? `${job.jdText.slice(0, GREET_JD_MAX_CHARS)}…` : job.jdText,
+  };
+}
+
+/** 导出待写招呼语清单（默认按分数取前 10 条；overwrite 重写已写过的）。dataDirHint 供测试使用。 */
+export async function exportJobGreetTargets(
+  input: { top?: number; overwrite?: boolean } = {},
+  dataDirHint?: string,
+): Promise<JobGreetExport> {
+  await ensureLoaded();
+  const manifest = await readManifest(dataDirHint);
+  if (!manifest?.jobs.length) throw new Error("还没有岗位清单：请先 job_collect。");
+  const top = Math.max(1, Math.min(GREET_EXPORT_MAX_TOP, Math.round(input.top ?? GREET_EXPORT_DEFAULT_TOP)));
+  const pool = input.overwrite ? manifest.jobs : manifest.jobs.filter((job) => !job.greeting.trim());
+  const ordered = [...pool].sort((a, b) => b.score - a.score).slice(0, top);
+  const profile = await readGreetProfile(dataDirHint);
+  return {
+    ok: true,
+    profilePath: join(dataDirHint ?? resolveJobDataDir(), GREET_PROFILE_NAME),
+    hasProfile: Boolean(profile.trim()),
+    profile,
+    maxLen: JOB_GREETING_MAX_LEN,
+    remaining: pool.length,
+    exported: ordered.length,
+    items: ordered.map(slimGreetTarget),
+    note:
+      "逐条撰写招呼语后用 job_greet_save 写回，JSON 数组格式 [{\"key\":\"…\",\"greeting\":\"…\"}]。" +
+      `每条不超过 ${JOB_GREETING_MAX_LEN} 字：开头直点岗位名，只引用画像里真实存在的内容，优先量化数字，` +
+      "岗位要求超出时坦诚说明，不写薪资期望、不编造。" +
+      (profile.trim() ? "" : "注意：画像还不存在，请先让用户确认后用 job_greet action=init 生成并补全，再撰写。"),
+  };
+}
+
+export interface JobGreetSaveOutcome {
+  ok: boolean;
+  summary: string;
+  saved: number;
+  truncated: number;
+  xlsxPath?: string;
+  htmlPath?: string;
+}
+
+/** 校验并写回招呼语：key 对不上逐条报错（不静默丢弃），超长截断并计数。dataDirHint 供测试使用。 */
+export async function saveJobGreetings(
+  items: Array<{ key: string; greeting: string }>,
+  dataDirHint?: string,
+): Promise<JobGreetSaveOutcome> {
+  await ensureLoaded();
+  const manifest = await readManifest(dataDirHint);
+  if (!manifest?.jobs.length) throw new Error("还没有岗位清单：请先 job_collect。");
+  const byKey = new Map(manifest.jobs.map((job) => [jobIdentity(job), job]));
+  const unknown = items.filter((item) => !byKey.has(item.key)).map((item) => item.key);
+  if (unknown.length) {
+    throw new Error(`以下 key 不在当前清单里（清单可能已重新采集），请用 job_greet 重新导出后再写：${unknown.join("、")}`);
+  }
+  const applied = items.filter((item) => typeof item.greeting === "string" && item.greeting.trim());
+  if (!applied.length) throw new Error("没有可写回的招呼语：每条都需要非空的 greeting 字段。");
+  let truncated = 0;
+  for (const item of applied) {
+    const text = [...item.greeting.trim()];
+    if (text.length > JOB_GREETING_MAX_LEN) truncated += 1;
+    byKey.get(item.key)!.greeting = text.slice(0, JOB_GREETING_MAX_LEN).join("");
+  }
+  const updatedManifest = await writeManifest(manifest.jobs, dataDirHint);
+  const deliverables = await refreshDeliverables(updatedManifest);
+  writeAudit("job.greet", { action: "save", saved: applied.length, truncated });
+  return {
+    ok: true,
+    summary: `招呼语已写回 ${applied.length} 条${truncated ? `，超长截断 ${truncated} 条` : ""}。` +
+      `Excel：${deliverables.xlsxPath ?? "未生成"}；HTML：${deliverables.htmlPath ?? "未生成"}`,
+    saved: applied.length,
+    truncated,
+    ...(deliverables.xlsxPath ? { xlsxPath: deliverables.xlsxPath } : {}),
+    ...(deliverables.htmlPath ? { htmlPath: deliverables.htmlPath } : {}),
+  };
 }
 
 export async function diagnoseJobs(input: JobDiagnoseInput = {}): Promise<JobDiagnoseOutcome> {

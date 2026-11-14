@@ -59,4 +59,8 @@ export const jobApprovals: ApprovalDescriptions = {
     const platforms = Array.isArray(a.platforms) && a.platforms.length ? a.platforms.map(String).join("、") : "四平台全部";
     return `诊断招聘站点结构：${platforms}${a.apply === true ? "，并固化真实验证通过的选择器（会写入 selectors.json）" : "，只读检查，不固化选择器"}`;
   },
+  job_greet_save: (a) => {
+    const count = Array.isArray(a.items) ? a.items.length : 0;
+    return `写回招呼语：${count} 条，更新求职岗位清单并重新生成 Excel 报告（只写本地数据目录）`;
+  },
 };

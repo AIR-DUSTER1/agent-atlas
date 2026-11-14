@@ -1620,6 +1620,9 @@ console.log(result.messages.at(-1).content);
 | 站点改版后采集静默返回 0 条，和真实没岗位/被风控分不清 | 旧适配器把四平台选择器硬编码在各处，容器失效没有统一诊断证据 | `job_diagnose` 按卡片数 + 字段填充率给出 OK/降级/结构变更/被风控；异常时保存 HTML/PNG 快照并推断候选（§3.47） |
 | 自动推断的选择器把下次采集改坏 | 推断结果只代表当前页面，盲写会污染长期配置 | 采集只在内存临时覆盖并重试；永久固化必须 `apply=true` 且候选在真实页面 `verified=true`，写前留 `.bak` 并记 `learned`（§3.47） |
 | BOSS 诊断偶发显示薪资 0/15、被误判结构变更 | BOSS 虚拟列表周期性重渲染，元素引用等待后失效 | 卡片解析紧跟取元素；页面文案探测用 300ms 短超时；整批薪资为空时重新取卡片解析一次（§3.47） |
+| 招聘文本里「单双休」被解析成「双休」 | `parseWorkRest` 的「双休」分支先命中了「单双休」的子串 | 交替判定必须按「长词优先」排：先「单双休」再「双休」，新增词表时同样先查长词（§3.47） |
+| `parseWorkHours` 认不出「早9点-晚6点」 | 时刻前缀的交替分支只写了「晚上」，单字「晚」匹配不上「晚6点」，整个匹配回溯失败 | 交替分支长词在前、单字在后（`晚上|晚`）；「朝九晚六」习语的晚侧固定按下午时段换算（§3.47） |
+| 招呼语写回后部分岗位悄悄没写上 | 重新采集后岗位 key 漂移，按旧 key 写回被静默丢弃 | `saveJobGreetings` 对 key 失配整批拒绝并点名所有失效 key；招呼语与状态/备注一样受增量合并保护（§3.47） |
 | 澄清卡标题紧贴卡片左上角、文字顶着边框 | 澄清卡没套 `.approval-body`（审批卡靠它给内边距），早期版本直接把标题塞进 `.approval-card`，自身又没有 padding | `.clarify-head` / `.clarify-list` / `.clarify-foot` 各自带内边距（§3.48）；`chat-flow.test.ts` 有守门断言 |
 | 多题澄清卡里点一个选项，其它题的输入框失去焦点 | 选中后整卡 `renderClarificationCard()` 重绘，DOM 全换掉 | 选中态就地改 DOM（`syncSelection()`），只刷新进度与按钮可用性（§3.48） |
 | 多题答复提交后模型答非所问 | 只拼了答案没带题面，模型不知道「青岛；前端；15-25K」每项对应什么 | 多题提交拼成「题面：答案；题面：答案」（§3.48）；单题仍回传选项 id 保持旧协议 |
@@ -2264,8 +2267,8 @@ Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调
 | 层 | 文件 | 职责 |
 |---|---|---|
 | profile | `agent/job.ts` | 提示词 + 工具 allowlist + 领域分析/反思规则 |
-| 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_summary` / `job_diagnose` |
-| 领域规则 | `server/job-model.ts` | 岗位字段、同义词扩展、五维评分、外包识别、增量合并、纯本地查询 |
+| 工具 | `tools-job.ts` | `job_collect` / `job_query` / `job_enrich` / `job_greet` / `job_greet_save` / `job_summary` / `job_diagnose` |
+| 领域规则 | `server/job-model.ts` | 岗位字段、平台别名归一化、同义词扩展、五维评分、外包识别、作息解析、增量合并、纯本地查询 |
 | 选择器与 DOM | `server/job-selectors.json` / `job-selectors.ts` / `job-dom.ts` | 默认候选链、本地覆盖与 learned、候选链读取、结构推断与快照 |
 | 卡片解析 | `server/job-cards.ts` | 四平台 RawCard → JobRecord、智联 Vue 列表、51job sensorsdata |
 | 结构诊断 | `server/job-health.ts` / `job-diagnose.ts` | 字段填充率分级、候选真实验证、临时自愈与显式固化 |
@@ -2286,22 +2289,25 @@ Excel / HTML 交付。运行时不查找外部 skill、不要求 Python、不调
 2. **串行访问与导航冷却**：四平台按顺序访问；导航间隔 2–3.5 秒随机抖动，每 8 次导航冷却 7 秒，平台切换再等待 4 秒。
 3. **采集与补详情分开**：`job_collect` 只取列表与已有结构化字段，`job_enrich` 再打开岗位页补 JD；避免短时请求过量。
 4. **四要素 optional 校验**：岗位方向、城市、薪资、年限由工具返回可操作的中文缺口提示，不让 zod 直接抛难懂的 schema 错误。
-5. **增量合并**：岗位链接优先作为主键；旧记录的投递状态、备注不覆盖；本轮未采集的平台原样保留。
+5. **增量合并**：岗位链接优先作为主键；旧记录的投递状态、备注、招呼语不覆盖；本轮未采集的平台原样保留，有投递进展或已写招呼语的岗位即使未再现也保留。
+6. **招呼语闭环（对齐上游 job-hunter 2026-11 的 greet 三步流）**：`job_greet action=init` 在数据目录生成画像模板 `profile.md`（已存在不覆盖，`force` 才重置）→ `action=export` 导出待写清单（默认按分数取前 10 条，JD 截 1200 字，附画像全文）→ Agent 逐条撰写 ≤200 字 → `job_greet_save` 校验写回（key 对不上整批拒绝、超长截断计数）并重出 Excel/HTML。三个函数带 `dataDirHint` 测试缝，不触外网；写回登记审批，准备动作不登记。
 6. **同义词在本地面扩展**：Agent/智能体/AI 应用/大模型应用等方向词参与标题评分，不依赖模型临时扩词。
-7. **不新增前端依赖**：XLSX 由 `job-workbook.ts` 用标准库构建 ZIP/OOXML；HTML 报告全字段转义，不执行站点内容。
-8. **登录不是 Agent 工具**：扫码是交互步骤，只由设置页按钮触发；模型只调采集/查询/补详情。
-9. **选择器单一真源**：站点 DOM 候选链只放在 `job-selectors.json`；用户验证后的覆盖写入数据目录 `selectors.json`，不改源码，写前保留 `.bak` 并记录 `learned` 证据。
-10. **结构自愈两层**：采集时只做内存临时覆盖并重试一次；永久修复必须由 `job_diagnose` 在真实页面验证 `titleRate/linkRate` 后显式 apply，禁止盲写。
-11. **BOSS 虚拟列表**：卡片会在短时间内重渲染；解析紧跟取元素、页面文案探测使用短超时，整批薪资为空时重新取卡片解析一次。
+7. **平台别名归一化（对齐上游 2026-11-12 提交）**：`canonicalJobPlatform` 把 zhipin/BOSS直聘/zhaopin/51job/前程无忧/leipin 等别名统一到 `JOB_PLATFORMS` 的 key；`job_query` 的 platform 过滤经归一化后同时匹配 key 与中文标签，防命名漂移。
+8. **不新增前端依赖**：XLSX 由 `job-workbook.ts` 用标准库构建 ZIP/OOXML；HTML 报告全字段转义，不执行站点内容。
+9. **登录不是 Agent 工具**：扫码是交互步骤，只由设置页按钮触发；模型只调采集/查询/补详情。
+10. **选择器单一真源**：站点 DOM 候选链只放在 `job-selectors.json`；用户验证后的覆盖写入数据目录 `selectors.json`，不改源码，写前保留 `.bak` 并记录 `learned` 证据。
+11. **结构自愈两层**：采集时只做内存临时覆盖并重试一次；永久修复必须由 `job_diagnose` 在真实页面验证 `titleRate/linkRate` 后显式 apply，禁止盲写。
+12. **BOSS 虚拟列表**：卡片会在短时间内重渲染；解析紧跟取元素、页面文案探测使用短超时，整批薪资为空时重新取卡片解析一次。
 
 **数据目录结构**：
 
 ```
 .setting/job-data/
   .profile/             # Chrome/Edge 持久化登录态
+  profile.md            # 求职者画像模板（招呼语撰写依据；用户手填，init 不覆盖）
   selectors.json        # 用户验证后的选择器覆盖（可选；同目录保留 .bak）
   out/diagnose/         # 结构诊断 JSON、HTML/PNG 快照
-  out/最新岗位清单.json  # 权威数据源，含完整岗位字段
+  out/最新岗位清单.json  # 权威数据源，含完整岗位字段与招呼语
   out/岗位清单_<时间>.xlsx
   out/岗位清单_<时间>.html
 ```

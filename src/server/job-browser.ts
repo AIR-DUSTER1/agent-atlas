@@ -411,7 +411,7 @@ export async function collectNativeJobs(
       await sleep(PLATFORM_GAP_MS);
     }
     const scored = dedupeJobs(jobs).map((job) => {
-      const outsourcing = detectOutsourcing(job.company, job.jdText, job.companyIndustry);
+      const outsourcing = detectOutsourcing(job.title, job.company, job.jdText, job.companyIndustry);
       return scoreJob({ ...job, ...outsourcing }, profile);
     });
     return { jobs: scored, warnings };
@@ -493,7 +493,7 @@ export async function enrichJobInPage(page: Page, job: JobRecord, runtime: JobSe
   const blob = `${job.welfare} ${job.jdText} ${text.slice(0, 4_000)}`;
   job.workRest ||= parseWorkRest(blob);
   job.workHours ||= parseWorkHours(blob);
-  Object.assign(job, detectOutsourcing(job.company, job.jdText, job.companyIndustry));
+  Object.assign(job, detectOutsourcing(job.title, job.company, job.jdText, job.companyIndustry));
   return true;
 }
 

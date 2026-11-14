@@ -21,6 +21,37 @@ export type JobSupportedCity = (typeof JOB_SUPPORTED_CITIES)[number];
 export const JOB_STATUS_OPTIONS = ["待投递", "已投递", "已面试", "已结束"] as const;
 export type JobStatusValue = (typeof JOB_STATUS_OPTIONS)[number];
 
+/** 招呼语上限（字）：超长的开场白在招聘平台会被截断，写回前统一截断并计数。 */
+export const JOB_GREETING_MAX_LEN = 200;
+
+/**
+ * 平台别名归一（对齐上游 job-hunter 的 canonical_platform）：
+ * 用户与模型嘴里说的是「BOSS直聘 / zhipin / 前程无忧 / 51job」这类别名，
+ * 存储与采集只认 JOB_PLATFORMS 的 key，查询与配置入口统一在此归一，防命名漂移。
+ */
+const JOB_PLATFORM_ALIASES: Record<string, JobPlatform> = {
+  boss: "boss",
+  "boss直聘": "boss",
+  zhipin: "boss",
+  zhilian: "zhilian",
+  智联: "zhilian",
+  "智联招聘": "zhilian",
+  zhaopin: "zhilian",
+  job51: "job51",
+  "51job": "job51",
+  "51": "job51",
+  前程无忧: "job51",
+  liepin: "liepin",
+  猎聘: "liepin",
+  leipin: "liepin",
+};
+
+export function canonicalJobPlatform(input: string): JobPlatform | null {
+  const key = input.trim().toLowerCase().replace(/\s+/g, "");
+  if (!key) return null;
+  return JOB_PLATFORM_ALIASES[key] ?? null;
+}
+
 /** 平台搜索编码；缺失值的城市在工具层拒绝，不进入浏览器。 */
 export const JOB_CITY_CODES = {
   boss: { 青岛: "101120200", 济南: "101120100", 北京: "101010100", 上海: "101020100", 深圳: "101280600", 杭州: "101210100", 成都: "101270100" },
@@ -58,6 +89,7 @@ export interface JobRecord {
   jdText: string;
   direction: string;
   remark: string;
+  greeting: string;
   fetchedAt: string;
   companyUrl: string;
 }
@@ -94,9 +126,12 @@ export const MAX_JOBS_IN_RESULT = 40;
 export const JOB_MAX_KEYWORDS = 6;
 export const JOB_MAX_PAGES = 3;
 
-const OUTSOURCING_COMPANY = /(人力资源|劳务|派遣|外包|驻场|人才服务|科锐|中软国际|软通动力|文思海辉|博彦|法本|佰钧成|中电金信)/i;
-const OUTSOURCING_TEXT = /(人力外包|劳务派遣|驻场开发|驻场|外派|客户现场|按人天|人员外包|项目外包)/i;
+// 外包词表对齐上游 job-hunter 最新版：公司名一层、JD 正文一层、行业一层，
+// 用户反馈误判时优先扩充这里的 token，而不是改判定逻辑。
+const OUTSOURCING_COMPANY = /(人力资源|劳务|派遣|外包|驻场|人才服务|科锐|猎头|中软国际|软通动力|文思海辉|博彦|法本|佰钧成|中电金信|京北方|神州数码|思特沃克|东软集团)/i;
+const OUTSOURCING_TEXT = /(人力外包|劳务派遣|驻场开发|驻场|外派|客户现场|甲方现场|按人天|入职甲方|人员外包|项目外包)/i;
 const OUTSOURCING_SOFT = /(短期项目|项目制|客户项目|驻点)/i;
+const OUTSOURCING_INDUSTRY = /(人力资源|人力服务|劳务派遣|中介服务|中介)/;
 
 /** BOSS 页面会把薪资数字替换成私有区字符，统一还原成普通数字。 */
 export function decodeObfuscatedDigits(value: string): string {
@@ -231,12 +266,19 @@ function scoreActivity(hrActive: string, published: string): number {
   return Math.min(10, score);
 }
 
-export function detectOutsourcing(company: string, jdText: string, industry: string): Pick<JobRecord, "isOutsourcing" | "outsourcingReason"> {
+export function detectOutsourcing(
+  title: string,
+  company: string,
+  jdText: string,
+  industry: string,
+): Pick<JobRecord, "isOutsourcing" | "outsourcingReason"> {
   const companyHit = company.match(OUTSOURCING_COMPANY)?.[1];
   if (companyHit) return { isOutsourcing: "是", outsourcingReason: `公司名称命中：${companyHit}` };
+  const titleHit = title.match(/外包/)?.[0];
+  if (titleHit) return { isOutsourcing: "是", outsourcingReason: "职位名称包含「外包」" };
   const textHit = jdText.match(OUTSOURCING_TEXT)?.[1];
   if (textHit) return { isOutsourcing: "是", outsourcingReason: `岗位描述命中：${textHit}` };
-  if (/人力资源|中介/.test(industry)) return { isOutsourcing: "待确认", outsourcingReason: `行业为${industry}` };
+  if (OUTSOURCING_INDUSTRY.test(industry)) return { isOutsourcing: "待确认", outsourcingReason: `行业为${industry}` };
   const soft = jdText.match(OUTSOURCING_SOFT)?.[1];
   if (soft) return { isOutsourcing: "待确认", outsourcingReason: `岗位描述出现：${soft}` };
   return { isOutsourcing: "否", outsourcingReason: "" };
@@ -244,19 +286,90 @@ export function detectOutsourcing(company: string, jdText: string, industry: str
 
 export function parseWorkRest(text: string): string {
   const value = text.replace(/\s+/g, "");
+  // 「单双休」包含「双休」子串，必须先判，否则被误报成「双休」（上游踩过的坑）
+  if (/单双休/.test(value)) return "单双休";
   if (/双休|周末双休/.test(value)) return "双休";
   if (/大小周/.test(value)) return "大小周";
   if (/单休/.test(value)) return "单休";
   if (/做五休二|上五休二/.test(value)) return "做五休二";
+  if (/弹性(工作|作息|时间)?/.test(value)) return "弹性";
   return "";
 }
 
+/** 作息语境词：数字时段必须出现在这些词附近，避免把客服热线、门店营业时间当上下班时间。 */
+const WORK_HOURS_CONTEXT = /(上班|下班|工作时间|作息|工作日|办公时间|工时)/;
+/** 时段跨度上限（小时）：超过 14h 基本是噪声，宁缺毋滥。 */
+const WORK_HOURS_SPAN_MAX_HOURS = 14;
+/** 数字时段允许往前找语境词的距离（字符）。 */
+const WORK_HOURS_CONTEXT_WINDOW = 40;
+
+interface WorkHoursRange {
+  index: number;
+  raw: string;
+  value: string;
+}
+
+function padTwo(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function to24h(hours: number, afternoon: boolean): number {
+  return afternoon && hours < 12 ? hours + 12 : hours;
+}
+
+/** 下午语义前缀：下午/晚上（含单字「晚」）都算 PM 时段，「晚6点」= 18 点。 */
+const AFTERNOON_PREFIX = /下午|晚上|晚/;
+
+function buildWorkHours(startH: number, startM: number, endH: number, endM: number): string {
+  const span = (endH * 60 + endM) - (startH * 60 + startM);
+  if (span <= 0 || span > WORK_HOURS_SPAN_MAX_HOURS * 60) return "";
+  return `${padTwo(startH)}:${padTwo(startM)}-${padTwo(endH)}:${padTwo(endM)}`;
+}
+
+function collectWorkHoursRanges(value: string): WorkHoursRange[] {
+  const ranges: WorkHoursRange[] = [];
+  // 形态一：9:00-18:00；前缀（上午/下午/早上/晚上，含单字 早/晚）只作用于各自一侧
+  // 注意交替分支必须把单字「早/晚」放最后：只有「晚上」匹配不了「晚6点」这种单字写法
+  for (const m of value.matchAll(/(上午|下午|早上|晚上|早|晚)?(\d{1,2}):(\d{2})[-~—至]+(上午|下午|早上|晚上|早|晚)?(\d{1,2}):(\d{2})/g)) {
+    const startH = to24h(Number(m[2]!), AFTERNOON_PREFIX.test(m[1] ?? ""));
+    const endH = to24h(Number(m[5]!), AFTERNOON_PREFIX.test(m[4] ?? ""));
+    const normalized = buildWorkHours(startH, Number(m[3]!), endH, Number(m[6]!));
+    if (normalized) ranges.push({ index: m.index ?? 0, raw: m[0], value: normalized });
+  }
+  // 形态二：早9点-晚6点 / 上午9点至下午6点（中文 12 小时制规整）；单字「晚」必须单列，见形态一注释
+  for (const m of value.matchAll(/(早|上午|下午|晚上|晚)?(\d{1,2})点[-~—至]+(早|上午|下午|晚上|晚)?(\d{1,2})点/g)) {
+    const startH = to24h(Number(m[2]!), AFTERNOON_PREFIX.test(m[1] ?? ""));
+    const endH = to24h(Number(m[4]!), AFTERNOON_PREFIX.test(m[3] ?? ""));
+    const normalized = buildWorkHours(startH, 0, endH, 0);
+    if (normalized) ranges.push({ index: m.index ?? 0, raw: m[0], value: normalized });
+  }
+  // 形态三：朝九晚六 / 朝10晚7 这类习语，本身就是作息表达，不需要语境词；
+  // 「晚X」的 X 一定是下午时段（朝九晚六 = 9 点到 18 点，不是凌晨 6 点）
+  const cnDigits: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  for (const m of value.matchAll(/朝([一二三四五六七八九十\d]{1,2})晚([一二三四五六七八九十\d]{1,2})/g)) {
+    const read = (token: string): number => /^\d$/.test(token) ? Number(token) : cnDigits[token] ?? 0;
+    const end = read(m[2]!);
+    const normalized = buildWorkHours(read(m[1]!), 0, end < 12 ? end + 12 : end, 0);
+    if (normalized) ranges.push({ index: m.index ?? 0, raw: m[0], value: normalized });
+  }
+  return ranges.sort((a, b) => a.index - b.index);
+}
+
 export function parseWorkHours(text: string): string {
-  const match = text.match(/(?:上午|下午|早上|晚上)?\s*(\d{1,2}):(\d{2})\s*[-~至]\s*(?:上午|下午|早上|晚上)?\s*(\d{1,2}):(\d{2})/);
-  if (!match) return "";
-  let end = Number(match[3]);
-  if (/下午|晚上/.test(match[0]) && end < 12) end += 12;
-  return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}-${String(end).padStart(2, "0")}:${match[4]}`;
+  const value = text.replace(/\s+/g, "");
+  if (!value) return "";
+  const ranges = collectWorkHoursRanges(value);
+  if (!ranges.length) return "";
+  // 习语 / 中文时刻自带作息语义；数字时段必须落在语境词附近才算数
+  const qualified = ranges.filter((range) => {
+    if (/朝.*晚/.test(range.raw)) return true;
+    if (/点/.test(range.raw) && /(早|上午|下午|晚上)/.test(range.raw)) return true;
+    const from = Math.max(0, range.index - WORK_HOURS_CONTEXT_WINDOW);
+    return WORK_HOURS_CONTEXT.test(value.slice(from, range.index + range.raw.length));
+  });
+  // 短文本（福利标签行等）没有语境词也放行第一个时段，避免把「9:00-18:00 双休」误杀
+  const picked = qualified[0] ?? (value.length <= 80 ? ranges[0] : undefined);
+  return picked?.value ?? "";
 }
 
 export function createJobRecord(platform: string, partial: Partial<JobRecord>): JobRecord {
@@ -289,6 +402,7 @@ export function createJobRecord(platform: string, partial: Partial<JobRecord>): 
     jdText: "",
     direction: "",
     remark: "",
+    greeting: "",
     fetchedAt: "",
     companyUrl: "",
     ...partial,
@@ -362,6 +476,7 @@ export function normalizeStoredJob(raw: unknown): JobRecord | null {
     jdText: text("jdText", "jd_text"),
     direction: text("direction"),
     remark: text("remark"),
+    greeting: text("greeting"),
     fetchedAt: text("fetchedAt", "fetched_at"),
     companyUrl: text("companyUrl", "company_url"),
   });
@@ -393,13 +508,15 @@ export function mergeJobRecords(
       ...job,
       status: old.status || job.status,
       remark: old.remark || job.remark,
+      // 招呼语与投递状态、备注一样是人工/agent 产物，再次采集不能被空值覆盖
+      greeting: old.greeting || job.greeting,
       fetchedAt: now,
     };
   });
   for (const old of previous) {
     if (freshKeys.has(jobIdentity(old))) continue;
     const samePlatform = activePlatforms.has(old.platform);
-    if (!samePlatform || old.status !== "待投递" || old.remark) {
+    if (!samePlatform || old.status !== "待投递" || old.remark || old.greeting) {
       jobs.push(old);
       carried += 1;
     }
@@ -409,6 +526,9 @@ export function mergeJobRecords(
 
 export function queryJobRecords(jobs: JobRecord[], query: JobQuery, limit: number): JobRecord[] {
   const keyword = query.keyword?.trim().toLowerCase() ?? "";
+  // 平台过滤先归一化：用户/模型说「zhipin」「前程无忧」「51job」也要能命中对应平台
+  const platformKey = query.platform ? canonicalJobPlatform(query.platform) : null;
+  const platformLabel = platformKey ? JOB_PLATFORM_LABELS[platformKey] : "";
   return jobs
     .filter((job) => {
       if (keyword && !`${job.title} ${job.company} ${job.direction} ${job.companyIndustry}`.toLowerCase().includes(keyword)) return false;
@@ -416,7 +536,7 @@ export function queryJobRecords(jobs: JobRecord[], query: JobQuery, limit: numbe
       if (query.excludeOutsourcing && job.isOutsourcing === "是") return false;
       if (typeof query.minScore === "number" && job.score < query.minScore) return false;
       if (query.status && job.status !== query.status) return false;
-      if (query.platform && job.platform !== query.platform) return false;
+      if (platformKey && job.platform !== platformLabel && job.platform !== platformKey) return false;
       return true;
     })
     .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "zh-CN"))

@@ -12,9 +12,9 @@ import { JOB_STATUS_OPTIONS } from "./job-model.js";
 const HEADERS = [
   "平台", "岗位名称", "公司名称", "薪资", "地区", "经验要求", "学历要求", "综合得分",
   "是否外包", "外包判定理由", "上架时间", "HR最近活跃", "公司规模", "行业", "融资阶段",
-  "单双休", "上下班时间", "岗位福利", "工作地址", "投递状态", "投递链接", "备注", "得分拆解", "岗位方向", "采集时间",
+  "单双休", "上下班时间", "岗位福利", "工作地址", "投递状态", "投递链接", "招呼语", "备注", "得分拆解", "岗位方向", "采集时间",
 ] as const;
-const WIDTHS = [14, 28, 28, 14, 18, 12, 10, 10, 10, 26, 18, 20, 14, 18, 12, 12, 18, 34, 34, 12, 40, 20, 42, 18, 20];
+const WIDTHS = [14, 28, 28, 14, 18, 12, 10, 10, 10, 26, 18, 20, 14, 18, 12, 12, 18, 34, 34, 12, 40, 36, 20, 42, 18, 20];
 const STATUS_COLUMN = 20;
 const APPLY_LINK_COLUMN = 21;
 
@@ -52,14 +52,15 @@ function rowXml(rowNumber: number, job: JobRecord): string {
     job.platform, job.title, job.company, job.salary, job.city, job.experience, job.education, job.score,
     job.isOutsourcing, job.outsourcingReason, job.published, job.hrActive, job.companySize, job.companyIndustry,
     job.companyFinancing, job.workRest, job.workHours, job.welfare, job.address, job.status, job.applyUrl,
-    job.remark, job.scoreDetail, job.direction, job.fetchedAt,
+    job.greeting, job.remark, job.scoreDetail, job.direction, job.fetchedAt,
   ];
   const cells = values.map((value, index) => {
     const ref = `${columnName(index + 1)}${rowNumber}`;
     if (typeof value === "number") return numberCell(ref, value);
     if (index === APPLY_LINK_COLUMN - 1 && value) return inlineCell(ref, "点击投递", 3);
     if (index === HEADERS.length - 1 && value) return inlineCell(ref, value, 2);
-    if (index === 17 || index === 18 || index === 22) return inlineCell(ref, value, 2);
+    // 换行列：岗位福利 / 工作地址 / 招呼语 / 得分拆解（招呼语插入后备注前移，索引按 values 下标）
+    if (index === 17 || index === 18 || index === 21 || index === 23) return inlineCell(ref, value, 2);
     return inlineCell(ref, value);
   });
   return `<row r="${rowNumber}">${cells.join("")}</row>`;
