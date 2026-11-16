@@ -63,6 +63,12 @@ test("房产弹窗操作按钮统一高度并对齐，状态独占下一行", as
   assert.match(css, /#estate-modal \.kb-actions > \.settings-status[^}]*flex:\s*1 1 100%/s);
 });
 
+test("知识库操作按钮统一高度并对齐，避免测试连接被默认上边距推偏", async () => {
+  const css = await readFile(join(CLIENT, "styles", "plugins.css"), "utf8");
+  assert.match(css, /\.kb-actions > button[^}]*display:\s*inline-flex[^}]*min-height:\s*36px[^}]*margin-top:\s*0/s);
+  assert.match(css, /\.kb-actions > button[^}]*box-sizing:\s*border-box/s);
+});
+
 test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
   const [css, estate] = await Promise.all([
     readFile(join(CLIENT, "styles", "chat.css"), "utf8"),

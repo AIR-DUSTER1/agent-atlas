@@ -375,6 +375,16 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 .kb-row2 { display: flex; gap: 12px; }
 .kb-row2 .field { flex: 1; min-width: 0; }
 .kb-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+
+/* 同一操作行混用 .btn 与 .ghost-btn：统一高度和盒模型，去掉 ghost 按钮默认上边距，避免按钮错位。 */
+.kb-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin-top: 0;
+  box-sizing: border-box;
+}
 .kb-actions .settings-status { margin: 0; flex: 1; min-width: 0; }
 .kb-toolbar { margin-bottom: 10px; }
 .kb-docs-list { min-height: 110px; max-height: 200px; flex: none; }
