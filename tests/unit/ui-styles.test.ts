@@ -69,6 +69,12 @@ test("知识库操作按钮统一高度并对齐，避免测试连接被默认�
   assert.match(css, /\.kb-actions > button[^}]*box-sizing:\s*border-box/s);
 });
 
+test("求职登录提示使用高对比警示底色，避免黄底灰字看不清", async () => {
+  const css = await readFile(join(CLIENT, "styles", "settings.css"), "utf8");
+  assert.match(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--warning-bg\)[^}]*color:\s*var\(--content-1\)[^}]*font-size:\s*var\(--font-md\)/s);
+  assert.doesNotMatch(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--amber-soft\)/s);
+});
+
 test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
   const [css, estate] = await Promise.all([
     readFile(join(CLIENT, "styles", "chat.css"), "utf8"),

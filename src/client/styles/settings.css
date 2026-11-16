@@ -1011,13 +1011,14 @@ html[data-theme="light"] .stats-chart-empty { background: rgba(255,255,255,.88);
 .job-check-value.err { color: var(--red); }
 .job-fix-hint {
   margin: 0 0 12px;
-  padding: 8px 10px;
-  border-left: 3px solid var(--amber);
-  background: var(--amber-soft);
+  padding: 9px 12px;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-bg);
   border-radius: var(--radius-sm);
-  color: var(--text-2);
-  font-size: var(--font-sm);
-  line-height: 1.6;
+  color: var(--content-1);
+  font-size: var(--font-md);
+  font-weight: 500;
+  line-height: 1.65;
 }
 .job-fix-hint.hidden { display: none; }
 .job-doctor-output {

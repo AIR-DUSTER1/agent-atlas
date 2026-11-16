@@ -136,6 +136,9 @@ test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导
     "mem-personalization-enabled", "mem-personalization-text", "mem-personalization-save-btn",
     "mem-profile-filter", "mem-search", "mem-history-toggle", "mem-export-btn", "mem-import-file",
   ]) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /id="mem-personalization-text"[^>]*placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。"/);
+  assert.doesNotMatch(html, /例如：我在青岛从事前端开发/);
+  assert.match(html, /请勿填写密钥或敏感凭据/);
   assert.match(html, /id="mem-http-api-key" type="password"/);
   assert.match(source, /refreshMemorySettings/);
   assert.match(source, /testMemoryHttpFromForm/);
