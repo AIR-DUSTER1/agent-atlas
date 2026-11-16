@@ -283,6 +283,52 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
     const node = conclusion && md ? md.compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
     const toolMedia = host.querySelectorAll(".tool-card iframe, .tool-card img, .tool-card .conclusion-images, .tool-card .conclusion-table").length;
     const openToolCards = [...host.querySelectorAll(".tool-card")].filter((card) => card.classList.contains("open")).length;
+
+    const imageButton = conclusion?.querySelector<HTMLButtonElement>(".conclusion-image-open");
+    imageButton?.focus();
+    imageButton?.click();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const imagePreviewMask = document.getElementById("media-preview-mask");
+    const imagePreviewSurface = document.getElementById("media-preview-surface");
+    const imagePreview = {
+      open: Boolean(imagePreviewMask && !imagePreviewMask.classList.contains("hidden")),
+      kind: imagePreviewSurface?.dataset.kind || "",
+      title: document.getElementById("media-preview-title")?.textContent || "",
+      zoomInitial: document.getElementById("media-preview-zoom-value")?.textContent || "",
+      zoomAfter: "",
+      zoomOut: "",
+      zoomBeforeReset: "",
+      zoomReset: "",
+      closedByEscape: false,
+      hasImage: Boolean(imagePreviewSurface?.querySelector("img")),
+      pageInert: document.getElementById("app")?.hasAttribute("inert") || false,
+    };
+    imagePreviewMask?.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+    imagePreview.zoomAfter = document.getElementById("media-preview-zoom-value")?.textContent || "";
+    document.getElementById("media-preview-zoom-out")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    imagePreview.zoomOut = document.getElementById("media-preview-zoom-value")?.textContent || "";
+    document.getElementById("media-preview-zoom-in")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.getElementById("media-preview-zoom-in")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    imagePreview.zoomBeforeReset = document.getElementById("media-preview-zoom-value")?.textContent || "";
+    document.getElementById("media-preview-reset")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    imagePreview.zoomReset = document.getElementById("media-preview-zoom-value")?.textContent || "";
+    imagePreviewMask?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    imagePreview.closedByEscape = Boolean(imagePreviewMask?.classList.contains("hidden"));
+    const imageFocusRestored = document.activeElement === imageButton;
+
+    const mapButton = conclusion?.querySelector<HTMLElement>(".conclusion-map-preview-trigger");
+    mapButton?.focus();
+    mapButton?.click();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const mapPreview = {
+      open: Boolean(document.getElementById("media-preview-mask") && !document.getElementById("media-preview-mask")?.classList.contains("hidden")),
+      kind: document.getElementById("media-preview-surface")?.dataset.kind || "",
+      hasMap: Boolean(document.getElementById("media-preview-surface")?.querySelector(".conclusion-map")),
+      iframes: document.querySelectorAll("#media-preview iframe").length,
+    };
+    document.getElementById("media-preview-close")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const mapFocusRestored = document.activeElement === mapButton;
+
     const answer = {
       hasConclusion: Boolean(conclusion),
       beforeReview,
@@ -301,6 +347,10 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       visibleText: md?.textContent || "",
       toolMedia,
       openToolCards,
+      imagePreview,
+      imageFocusRestored,
+      mapPreview,
+      mapFocusRestored,
     };
     host.remove();
     clientState.blockBodies.delete(block);
@@ -326,6 +376,15 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.visibleText).not.toContain("103155273255");
   expect(result.toolMedia).toBe(0);
   expect(result.openToolCards).toBe(0);
+  expect(result.imagePreview).toEqual({
+    open: true, kind: "image", title: "户型图预览",
+    zoomInitial: "100%", zoomAfter: "125%", zoomOut: "100%",
+    zoomBeforeReset: "150%", zoomReset: "100%",
+    hasImage: true, pageInert: true, closedByEscape: true,
+  });
+  expect(result.imageFocusRestored).toBe(true);
+  expect(result.mapPreview).toEqual({ open: true, kind: "map", hasMap: true, iframes: 0 });
+  expect(result.mapFocusRestored).toBe(true);
 });
 
 test("结论表跟随最终回答选择房源，户型图不再落入其他户型图", async ({ page }) => {

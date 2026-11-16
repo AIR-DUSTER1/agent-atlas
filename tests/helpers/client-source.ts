@@ -31,6 +31,7 @@ export const CLIENT_SOURCES = [
   "ui/card.ts",
   "ui/empty.ts",
   "ui/dialog.ts",
+  "ui/media-preview.ts",
   "ui/menu.ts",
   "ui/toast.ts",
   "ui/scroll-to-bottom.ts",

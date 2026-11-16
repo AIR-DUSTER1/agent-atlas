@@ -20,6 +20,21 @@ test("dialog 队列、焦点陷阱、inert 与焦点恢复均在统一实现中"
   assert.match(source, /aria-describedby/);
 });
 
+test("媒体预览支持缩放、拖动、Esc 关闭与焦点恢复", async () => {
+  const source = await read("ui/media-preview.ts");
+  assert.match(source, /const MIN_SCALE = 0\.5/);
+  assert.match(source, /const MAX_SCALE = 4/);
+  assert.match(source, /aria-label": "放大预览"/);
+  assert.match(source, /event\.deltaY < 0 \? ZOOM_STEP : -ZOOM_STEP/);
+  assert.match(source, /pointermove/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /event\.stopPropagation\(\)/);
+  assert.match(source, /event\.key === "\+" \|\| event\.key === "="/);
+  assert.match(source, /previous\?\.isConnected\) previous\.focus\(\)/);
+  assert.match(source, /surface\.replaceChildren\(content\)/);
+  assert.doesNotMatch(source, /innerHTML/);
+});
+
 test("浮动菜单统一处理点外关闭、Esc、方向键与焦点返回", async () => {
   const source = await read("ui/menu.ts");
   assert.match(source, /pointerdown/);

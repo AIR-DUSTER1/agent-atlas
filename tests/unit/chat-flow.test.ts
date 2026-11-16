@@ -132,7 +132,7 @@ test("工具卡按类别展示并保留原始工具名，批量调用内部按�
 test("房产地图与户型图进入最终结论表格，工具组保持折叠", async () => {
   const app = await readClientFiles([
     "modules/conclusion-media.ts", "render/conclusion-media.ts", "render/parts.ts",
-    "stream/events.ts", "render/messages.ts", "views/estate.ts",
+    "stream/events.ts", "render/messages.ts", "views/estate.ts", "ui/media-preview.ts",
   ]);
   const css = await readClientCss();
   assert.match(app, /collectEstateConclusionMedia/);
@@ -140,12 +140,17 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.match(app, /refreshConclusionMedia/);
   assert.match(app, /sanitizeEstateConclusionText/);
   assert.match(app, /conclusion-table/);
+  assert.match(app, /openMediaPreview/);
+  assert.match(app, /conclusion-map-preview-trigger/);
+  assert.match(app, /conclusion-image-open/);
   assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
   assert.match(app, /h\("details", \{ class: "tool-group" \}/);
   assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
   assert.doesNotMatch(css, /\.estate-map-embed|\.estate-material-grid|\.estate-house-thumb/);
   assert.match(css, /\.conclusion-media\s*\{/);
   assert.match(css, /\.conclusion-table\s*\{/);
+  assert.match(css, /#media-preview-mask\s*\{/);
+  assert.match(css, /\.conclusion-map-preview-trigger\s*\{/);
   assert.doesNotMatch(app, /其他户型图/);
 });
 

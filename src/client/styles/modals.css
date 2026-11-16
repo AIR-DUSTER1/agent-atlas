@@ -84,6 +84,88 @@
 .btn-danger { background: var(--red); color: #fff; font-weight: 600; }
 .btn-danger:hover { filter: brightness(1.12); }
 
+/* ---------- 图片 / 地图放大预览 ---------- */
+#media-preview-mask {
+  position: fixed; inset: 0; z-index: 320;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(0,0,0,.76); backdrop-filter: blur(4px);
+}
+#media-preview {
+  width: min(1180px, 96vw);
+  height: min(820px, 94vh);
+  min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-elev);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, var(--green) 25%);
+  border-radius: 16px;
+  box-shadow: 0 28px 90px rgba(0,0,0,.55);
+  animation: slideIn .18s ease;
+}
+.media-preview-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.media-preview-heading { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.media-preview-heading h2 { margin: 0; font-size: 15px; color: var(--text); }
+.media-preview-description { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.media-preview-toolbar { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.media-preview-control, .media-preview-reset, .media-preview-close {
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-2);
+  border-radius: 8px; cursor: pointer; font-family: var(--sans); font-size: 14px;
+  transition: background .15s, border-color .15s, color .15s, opacity .15s;
+}
+.media-preview-control { width: 32px; height: 32px; display: inline-grid; place-items: center; font-size: 19px; line-height: 1; }
+.media-preview-reset { height: 32px; padding: 0 9px; font-family: var(--mono); font-size: 10.5px; }
+.media-preview-close { width: 34px; height: 34px; display: inline-grid; place-items: center; flex: none; }
+.media-preview-control:hover:not(:disabled), .media-preview-reset:hover, .media-preview-close:hover { background: var(--bg-hover); border-color: var(--green); color: var(--text); }
+.media-preview-control:disabled { opacity: .35; cursor: not-allowed; }
+.media-preview-control:focus-visible, .media-preview-reset:focus-visible, .media-preview-close:focus-visible, .media-preview-stage:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.media-preview-zoom-value { min-width: 48px; text-align: center; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.media-preview-stage {
+  position: relative; flex: 1; min-height: 0; overflow: hidden;
+  display: grid; place-items: center; padding: 18px;
+  background-color: #1b1f24;
+  background-image: linear-gradient(45deg, rgba(255,255,255,.025) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,.025) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,.025) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.025) 75%);
+  background-size: 22px 22px; background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+  cursor: grab; touch-action: none; user-select: none;
+}
+.media-preview-stage.is-panning { cursor: grabbing; }
+.media-preview-surface {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  transform-origin: center center; transition: transform .12s ease-out;
+  will-change: transform;
+}
+.media-preview-stage.is-panning .media-preview-surface { transition: none; }
+.media-preview-surface[data-kind="image"] > img {
+  display: block; max-width: 100%; max-height: 100%;
+  width: auto; height: auto; object-fit: contain;
+  background: #fff; box-shadow: 0 10px 34px rgba(0,0,0,.35);
+  user-select: none; -webkit-user-drag: none;
+}
+.media-preview-surface[data-kind="map"] { padding: 2px; }
+.media-preview-surface[data-kind="map"] .conclusion-map {
+  width: min(1080px, 100%); height: min(600px, 100%); min-height: 260px;
+  border-radius: 9px; box-shadow: 0 10px 34px rgba(0,0,0,.35);
+}
+.media-preview-hint {
+  padding: 9px 16px 11px; border-top: 1px solid var(--border-soft);
+  font-size: 11px; color: var(--text-3); text-align: center;
+}
+@media (max-width: 640px) {
+  #media-preview-mask { padding: 8px; }
+  #media-preview { width: 98vw; height: 94vh; border-radius: 12px; }
+  .media-preview-head { padding: 10px 12px; gap: 8px; }
+  .media-preview-heading h2 { font-size: 14px; }
+  .media-preview-toolbar { flex-wrap: wrap; }
+  .media-preview-stage { padding: 8px; }
+  .media-preview-hint { display: none; }
+}
+
 /* ============================== 文件选择器 ============================== */
 /* 遮罩必须自己定位：只切 .hidden 时 #fs-mask 会留在文档流末尾，看起来像“点击没反应” */
 #fs-mask, #estate-mask {

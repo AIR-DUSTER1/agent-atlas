@@ -21,6 +21,7 @@ import { mapLinkKey, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapC
 import type { MapRuntimeConfig } from "../modules/types-api.js";
 import { h } from "../ui/h.js";
 import { icon } from "../ui/icon.js";
+import { openMediaPreview } from "../ui/media-preview.js";
 import type { AssistantBlock } from "../modules/types.js";
 
 const MAP_LINK_LABELS: Record<string, string> = {
@@ -179,11 +180,55 @@ function renderImageFigure(image: ConclusionImage, compact = false): HTMLElement
   img.alt = image.alt;
   img.loading = compact ? "lazy" : "eager";
   img.decoding = "async";
-  const href = safeHref(src);
-  const visual = href
-    ? h("a", { class: "conclusion-image-open", href, target: "_blank", rel: "noopener noreferrer" }, img)
-    : img;
-  return h("figure", { class: compact ? "conclusion-image-card compact" : "conclusion-image-card" }, visual);
+  img.draggable = false;
+  const trigger = h("button", {
+    type: "button",
+    class: "conclusion-image-open",
+    title: "点击放大预览",
+    "aria-label": `放大预览：${image.alt}`,
+  }, img);
+  trigger.addEventListener("click", () => {
+    openMediaPreview({
+      title: "户型图预览",
+      description: image.alt,
+      kind: "image",
+      createContent: () => {
+        const preview = document.createElement("img");
+        preview.src = src;
+        preview.alt = image.alt;
+        preview.decoding = "async";
+        preview.draggable = false;
+        return preview;
+      },
+    });
+  });
+  return h("figure", { class: compact ? "conclusion-image-card compact" : "conclusion-image-card" }, trigger);
+}
+
+function renderMapPreviewTrigger(map: HTMLElement, lat: number, lng: number, title: string, description: string, config?: MapRuntimeConfig): HTMLElement {
+  const trigger = h("div", {
+    class: "conclusion-map-preview-trigger",
+    role: "button",
+    tabindex: "0",
+    title: "点击放大预览地图",
+    "aria-label": `放大预览：${title}`,
+  }, map);
+  const openPreview = (): void => {
+    openMediaPreview({
+      title: "地理位置预览",
+      description,
+      kind: "map",
+      createContent: () => renderMapFrame(lat, lng, title, false, config)
+        ?? h("div", { class: "conclusion-empty" }, "地图暂时无法加载"),
+    });
+  };
+  trigger.addEventListener("click", openPreview);
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openPreview();
+  });
+  return trigger;
 }
 
 function renderImageCell(property: ConclusionProperty): HTMLElement {
@@ -215,9 +260,12 @@ function renderLocationCell(property: ConclusionProperty, media: EstateConclusio
   const mapConfig = resolveMapConfig(state.config?.map);
   const key = [location.name, location.lat ?? "", location.lng ?? ""].join("|");
   if (Number.isFinite(location.lat) && Number.isFinite(location.lng) && !rendered.has(key)) {
-    const map = renderMapFrame(location.lat, location.lng, `${property.title || location.name} 位置`, true, mapConfig);
+    const title = `${property.title || location.name} 位置`;
+    const map = renderMapFrame(location.lat, location.lng, title, true, mapConfig);
     if (map) {
-      cell.appendChild(map);
+      const previewDescription = [location.name, precisionLabel(location.precision), coordinateText(location)]
+        .filter(Boolean).join(" · ");
+      cell.appendChild(renderMapPreviewTrigger(map, location.lat as number, location.lng as number, title, previewDescription, mapConfig));
       rendered.add(key);
     }
   } else if (rendered.has(key)) {
@@ -276,9 +324,15 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
 
 function renderMap(media: EstateConclusionMedia): HTMLElement | null {
   const point = media.points.find((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
-  if (point) return renderMapFrame(point.lat, point.lng, media.mapTitle || point.name || "房源位置地图");
-  const fallback = coordinatesFromEmbed(media.mapEmbedUrl);
-  return fallback ? renderMapFrame(fallback.lat, fallback.lng, media.mapTitle || "房源位置地图") : null;
+  const fallback = point ?? coordinatesFromEmbed(media.mapEmbedUrl);
+  if (!fallback) return null;
+  const lat = fallback.lat;
+  const lng = fallback.lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const title = media.mapTitle || point?.name || "房源位置地图";
+  const map = renderMapFrame(lat, lng, title);
+  if (!map) return null;
+  return renderMapPreviewTrigger(map, lat as number, lng as number, title, `${(lat as number).toFixed(6)}, ${(lng as number).toFixed(6)}`, undefined);
 }
 
 function renderPoints(media: EstateConclusionMedia): HTMLElement | null {
