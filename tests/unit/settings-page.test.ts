@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { readClientFiles, readClientSource } from "../helpers/client-source.js";
 import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../../src/client/modules/reasoning-display.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const root = new URL("../../src/client/", import.meta.url);
 
 test("设置导航按工作台/扩展/数据分组，并支持搜索过滤与 / 聚焦", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const settings = await readClientFiles(["views/settings.ts", "main.ts"]);
   assert.match(html, /id="settings-search"/);
   assert.match(html, /data-settings-group="workbench"/);
@@ -21,7 +22,7 @@ test("设置导航按工作台/扩展/数据分组，并支持搜索过滤与 / 
   assert.match(settings, /bindSettingsNavigation\(\);/);
 });
 test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const topbar = html.slice(html.indexOf('<header id="topbar">'), html.indexOf("</header>"));
   assert.doesNotMatch(topbar, /id="(memories|stats|settings)-btn"/);
   assert.doesNotMatch(topbar, /id="provider-btn"|class="provider-switch"/);
@@ -30,7 +31,7 @@ test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮
 });
 
 test("设置页包含返回按钮、全部分区与集中面板", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   assert.match(html, /id="settings-page"/);
   assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('class="settings-nav-item active"'));
   for (const view of ["models", "plugins", "subagents", "memories", "stats"]) {
@@ -40,7 +41,7 @@ test("设置页包含返回按钮、全部分区与集中面板", async () => {
 });
 
 test("插件页不再重复展示 MCP 接入类型", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const start = html.indexOf('id="settings-view-plugins"');
   const end = html.indexOf('id="settings-view-subagents"', start);
   assert.ok(start >= 0 && end > start);
@@ -50,7 +51,7 @@ test("插件页不再重复展示 MCP 接入类型", async () => {
   assert.match(html, /data-settings-view="mcp"/);
 });
 test("设置页大标题不再重复展示说明文案", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const start = html.indexOf('id="settings-page"');
   const end = html.indexOf("<!-- 供应商连接配置", start);
   assert.ok(start >= 0 && end > start);
@@ -68,7 +69,7 @@ test("前端通过独立页面函数切换分区并统一关闭", async () => {
 });
 test("模型与供应商采用左栏选择、右栏模型详情", async () => {
   const root = new URL("../../src/client/", import.meta.url);
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
     const app = await readClientSource();
   assert.match(html, /class="provider-workspace"/);
   assert.match(html, /id="provider-list"/);
@@ -81,7 +82,7 @@ test("模型与供应商采用左栏选择、右栏模型详情", async () => {
 });
 
 test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创建态覆盖", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
     const app = await readClientSource();
   const detailStart = html.indexOf('id="provider-detail"');
   const detailEnd = html.indexOf('id="settings-status"', detailStart);
@@ -97,7 +98,7 @@ test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创�
 });
 
 test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const stats = await readClientFiles(["views/stats/index.ts", "views/stats/kpi.ts", "views/stats/charts.ts", "views/stats/tables.ts"]);
   assert.match(html, /id="stats-window-overview"/);
   assert.match(html, /id="stats-kpis"/);
@@ -116,7 +117,7 @@ test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", as
   assert.match(stats, /8_000/);
 });
 test("设置表单密钥只显示掩码，必填错误就地呈现", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const forms = await readClientFiles([
     "views/settings-memories.ts", "views/settings-commands.ts", "ui/field.ts",
   ]);
@@ -128,7 +129,7 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
   assert.match(forms, /aria-invalid/);
 });
 test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导入导出齐备", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const source = await readClientFiles(["views/settings-memories.ts", "views/settings.ts"]);
   for (const id of [
     "mem-active-provider", "mem-health-badge", "mem-http-enabled", "mem-http-preset",
@@ -150,7 +151,7 @@ test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导
   assert.doesNotMatch(source, /innerHTML\s*=\s*`[^`]*\$\{[^}]*apiKey/);
 });
 test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与弹窗编辑", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const source = await readClientFiles(["views/settings-mcp.ts", "main.ts", "views/settings.ts"]);
   for (const id of [
     "mcp-summary", "mcp-global-enabled", "mcp-global-state", "mcp-import-btn",
@@ -178,7 +179,7 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
   assert.doesNotMatch(source, /innerHTML/);
 });
 test("技能库支持上传、启停、分页与卡片删除", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const source = await readClientFiles(["views/settings-skills.ts", "main.ts", "views/settings.ts"]);
   for (const id of [
     "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-upload-file",
@@ -212,7 +213,7 @@ test("技能库支持上传、启停、分页与卡片删除", async () => {
 
 
 test("子代理设置页支持列表、启停、新增编辑删除与继承/固定模型", async () => {
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const source = await readClientFiles(["views/settings-subagents.ts", "views/settings.ts", "main.ts"]);
   const css = await readFile(new URL("styles/subagents.css", root), "utf8");
   for (const id of [

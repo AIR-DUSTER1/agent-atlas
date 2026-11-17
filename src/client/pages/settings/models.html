@@ -1,0 +1,121 @@
+        <section id="settings-view-models" class="settings-view" data-settings-panel="models" role="tabpanel">
+          <div id="settings-modal" role="region" aria-labelledby="models-title">
+            <h2 id="models-title"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i> 模型与供应商</h2>
+
+            <div class="provider-workspace">
+              <aside class="provider-picker" aria-label="供应商列表">
+                <div class="provider-picker-head">
+                  <div><strong>供应商</strong><span id="provider-count" class="key-state"></span></div>
+                  <button id="add-provider-btn" class="provider-add-btn" type="button" title="添加供应商">＋</button>
+                </div>
+                <div id="provider-list" class="provider-nav-list"></div>
+              </aside>
+
+              <section class="provider-panel" aria-label="供应商配置与模型">
+                <div id="provider-empty" class="provider-empty">
+                  <span class="provider-empty-icon"><i class="ui-icon" data-icon="Menu" aria-hidden="true"></i></span>
+                  <strong>先从左侧选择供应商</strong>
+                  <span>选中后会显示它保存的 Key 状态、网关地址和已配置模型。</span>
+                </div>
+
+                <div id="provider-detail" class="hidden">
+                  <div class="provider-detail-head">
+                    <div class="provider-detail-title">
+                      <div class="provider-detail-name-row">
+                        <h3 id="provider-detail-name"></h3>
+                        <span id="provider-detail-active" class="provider-active-badge hidden">启用中</span>
+                      </div>
+                      <div id="provider-detail-url" class="provider-detail-url"></div>
+                      <div id="provider-detail-badges" class="provider-detail-badges"></div>
+                    </div>
+                    <div class="provider-detail-actions">
+                      <button id="provider-use-btn" type="button" class="ghost-btn small">启用</button>
+                      <button id="provider-edit-btn" type="button" class="ghost-btn small">编辑连接</button>
+                      <button id="provider-delete-btn" type="button" class="ghost-btn small danger-text">删除</button>
+                    </div>
+                  </div>
+
+                  <div class="model-section">
+                    <div class="field-label model-head">
+                      <span>已配置模型</span>
+                      <em id="pf-model-count" class="key-state"></em>
+                    </div>
+                    <div id="pf-model-list" class="model-list"></div>
+
+                    <div class="key-row model-add-row">
+                      <input id="pf-model-new" aria-label="输入模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" />
+                      <button id="pf-fetch-models" type="button" class="ghost-btn small" title="从网关拉取可用模型列表">获取列表</button>
+                      <button id="pf-model-add-btn" type="button" class="ghost-btn small">＋ 添加</button>
+                    </div>
+                    <div id="gateway-models" class="gw-models"></div>
+                  </div>
+
+                  <div id="model-form-wrap" class="model-form hidden">
+                    <div class="field-label edit-title">正在编辑模型：<em id="mf-mode" class="key-state"></em></div>
+
+                    <label class="field">
+                      <span class="field-label">模型名 MODEL <em class="key-state">真正发给网关的 model 字段</em></span>
+                      <input id="mf-name" type="text" spellcheck="false" placeholder="例如 deepseek-v4-pro" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">显示名 <em class="key-state">可选，留空则显示模型名</em></span>
+                      <input id="mf-label" type="text" spellcheck="false" placeholder="例如 V4 Pro（强推理）" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">能力与上下文</span>
+                      <div class="cap-row">
+                        <label class="cap-check" title="勾选后可附加图片（多模态模型才支持图片输入）">
+                          <input id="mf-vision" type="checkbox" />
+                          <span>多模态（支持图片输入）</span>
+                        </label>
+                        <input id="mf-ctx" class="cap-ctx" type="number" min="1024" step="1"
+                               placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
+                      </div>
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">思考等级划分方式 <em id="mf-dialect-hint" class="key-state"></em></span>
+                      <select id="mf-dialect" class="pf-select"></select>
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">思考等级 <em class="key-state">档位随「划分方式」变化 —— 每家供应商的划分并不一样</em></span>
+                      <select id="mf-level" class="pf-select"></select>
+                    </label>
+
+                    <textarea id="mf-custom" aria-label="自定义 JSON 请求参数" class="reason-custom hidden" rows="2" spellcheck="false"
+                              placeholder='自定义 JSON，例如 {"reasoning": {"effort": "high"}}'></textarea>
+                    <p id="mf-scheme" class="reason-scheme"></p>
+
+                    <div class="settings-actions">
+                      <button id="mf-activate" class="ghost-btn" type="button">设为启用模型</button>
+                      <div class="spacer"></div>
+                      <button id="mf-delete" class="ghost-btn" type="button">删除模型</button>
+                      <button id="mf-save" class="btn btn-approve" type="button">保存模型</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+      <div id="settings-status" class="settings-status"></div>
+
+      <!-- ---------- 备份与恢复（F9）：整机本地状态快照 ---------- -->
+      <div class="field-label backup-head">备份与恢复 <em class="key-state">含 API Key，请妥善保管备份目录</em></div>
+      <div class="key-row backup-actions">
+        <button id="backup-create-btn" type="button" class="ghost-btn small"><i class="ui-icon" data-icon="Database" aria-hidden="true"></i> 创建备份</button>
+        <span id="backup-list-hint" class="key-state">会话记录 / 检查点 / 长期记忆 / 供应商配置 / 审计日志</span>
+      </div>
+      <div id="backup-list" class="backup-list"></div>
+
+      <p class="settings-note">
+        「启用」的供应商 + 它当前的模型决定聊天用哪个模型；顶栏 <strong>▾</strong> 可以直接切换「任意供应商的任意模型」并调整思考等级。
+        思考等级按各家供应商的划分方式适配：OpenAI 是 <code>reasoning_effort</code> 强度档（minimal→high），
+        智谱 GLM 是 <code>thinking.type</code> 开关，DeepSeek 是开关 + 强度，Anthropic 是 <code>budget_tokens</code> 预算，Gemini 是 <code>thinkingBudget</code>/<code>thinkingLevel</code>；
+        选「自定义 JSON」还能直接手写网关需要的字段。
+        配置保存在本地 <code>.web-config.json</code>（已 gitignore），优先于 <code>.env</code>。
+      </p>
+          </div>
+        </section>
+

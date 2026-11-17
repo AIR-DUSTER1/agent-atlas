@@ -1,0 +1,47 @@
+    <!-- ============ 侧栏：会话管理（参考 ZCode 的会话列表） ============ -->
+    <aside id="sidebar">
+      <div class="side-header">
+        <div class="logo">
+          <span class="logo-mark"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></span>
+          <div class="logo-text">
+            <strong>agentatlas</strong>
+            <span>可扩展 Agent 工具集 · 内置学习示例</span>
+          </div>
+        </div>
+        <button id="new-chat-btn" title="新建对话（选择 Agent，归属当前项目）">＋ 新建对话</button>
+        <div class="project-switch" id="project-switch">
+          <button id="project-btn" class="project-btn" title="选择项目文件夹（本地 / 云端）">
+            <span id="project-btn-icon"><i class="ui-icon" data-icon="FolderTree" aria-hidden="true"></i></span>
+            <span id="project-btn-text">全部项目</span>
+            <i class="ui-icon chevron-down" data-icon="ChevronDown" aria-hidden="true"></i>
+          </button>
+          <div id="project-menu" class="project-menu hidden"></div>
+        </div>
+
+        <div class="session-tools">
+          <label class="session-search">
+            <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+            <input id="session-search" type="search" spellcheck="false" placeholder="搜索会话标题 / 内容" title="按标题或本浏览器缓存的消息内容实时过滤" />
+          </label>
+          <button id="cleanup-btn" class="ghost-btn small" title="批量清理创建超过 N 天的旧会话" aria-label="批量清理旧会话"><i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i></button>
+        </div>
+      </div>
+
+      <nav id="session-list" aria-label="会话列表"></nav>
+
+      <div class="side-footer">
+        <button id="settings-btn" class="side-settings-btn" title="打开设置页（模型 / 子代理 / 插件 / 记忆 / 统计）">
+          <span class="side-settings-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
+          <span class="side-settings-copy">
+            <strong>设置</strong>
+            <small>模型 · 插件 · 统计</small>
+          </span>
+          <span class="side-settings-arrow">›</span>
+        </button>
+        <button id="side-model" class="side-model" title="当前模型：点击打开模型设置">
+          <span class="dot"></span>
+          <span id="side-model-text">加载中…</span>
+        </button>
+        <div id="side-foot-note" class="foot-note">当前模型 · 点击也可打开模型设置</div>
+      </div>
+    </aside>

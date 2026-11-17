@@ -1,0 +1,25 @@
+  <!-- ============ 文件选择器：项目 / 远程文件夹 / 本地上传 ============ -->
+  <div id="fs-mask" class="hidden">
+    <div id="fs-modal" role="dialog" aria-modal="true" aria-labelledby="fs-title">
+      <h2 id="fs-title"><i class="ui-icon" data-icon="Paperclip" aria-hidden="true"></i> 附加文件</h2>
+      <div class="fs-toolbar">
+        <select id="fs-root" class="fs-root-select" title="选择位置"></select>
+        <button id="fs-up" class="ghost-btn small" title="上一级"><i class="ui-icon" data-icon="ArrowLeft" aria-hidden="true"></i> 上级</button>
+        <span id="fs-path" class="fs-path"></span>
+      </div>
+      <div class="fs-toolbar fs-toolbar-2">
+        <button id="fs-remote" class="ghost-btn small"><i class="ui-icon" data-icon="Globe" aria-hidden="true"></i> 打开远程文件夹</button>
+        <button id="fs-upload-btn" class="ghost-btn small" type="button"><i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传本地文件</button>
+        <button id="fs-upload-help" class="ghost-btn small" type="button" title="上传没反应？">?</button>
+        <input id="fs-upload-input" aria-label="选择要上传的文件" type="file" multiple
+               style="position:absolute;width:1px;height:1px;opacity:0.01;pointer-events:none;" />
+        <span class="fs-hint">云端部署可上传本机文件；也可以把文件直接<b>拖拽</b>到本窗口上传（部分自动化启动的浏览器会屏蔽系统选择框）</span>
+      </div>
+      <div id="fs-list" class="fs-list"></div>
+      <div class="fs-footer">
+        <div id="fs-selected" class="fs-selected">未选择文件</div>
+        <button id="fs-done" class="btn btn-approve">完成</button>
+      </div>
+    </div>
+  </div>
+

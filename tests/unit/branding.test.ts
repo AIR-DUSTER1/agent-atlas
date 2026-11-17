@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "../../src/product.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -31,7 +32,7 @@ test("正式产品名为 agentatlas，且包与 lockfile 一致", async () => {
 });
 
 test("Web、桌面端与容器入口使用同一产品名", async () => {
-  const html = await read("src/client/index.html");
+  const html = await readClientIndexHtml();
   const desktop = await read("desktop/main.ts");
   const dockerfile = await read("Dockerfile");
   assert.match(html, /<title>agentatlas<\/title>/);

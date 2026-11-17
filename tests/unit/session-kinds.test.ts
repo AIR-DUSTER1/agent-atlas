@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { isAgentKind as serverIsAgentKind } from "../../src/server/sessions.js";
 import { isAgentKind as clientIsAgentKind } from "../../src/client/modules/session-kind.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const ROOT = join(fileURLToPath(new URL("../../", import.meta.url)));
 const SRC = join(ROOT, "src");
@@ -148,7 +149,7 @@ test("求职子代理与房产子代理的关键词名片不重叠", async () =>
 });
 
 test("设置页领域下拉提供 job 选项，且提交时不被静默丢弃", async () => {
-  const html = await readFile(join(SRC, "client", "index.html"), "utf8");
+  const html = await readClientIndexHtml();
   assert.match(html, /<option value="job">/, "领域下拉必须有 job 选项");
   const form = await readFile(join(SRC, "client", "views", "settings-subagents.ts"), "utf8");
   // 曾硬编码只认 estate，选 job 会被静默丢成「通用后台子代理提示词」

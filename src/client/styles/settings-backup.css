@@ -1,0 +1,50 @@
+/* ---------- 设置弹窗：备份与恢复 ---------- */
+.backup-head { margin-top: 18px; }
+.backup-actions { margin-bottom: 10px; align-items: center; }
+.backup-list { margin-bottom: 8px; }
+.backup-row {
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  padding: 9px 12px; margin-bottom: 6px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+}
+.backup-row .b-name { font-size: 13px; color: var(--text); font-family: var(--mono); }
+.backup-row .b-meta { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.settings-status.err { color: var(--red); }
+
+.settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.settings-actions .spacer { flex: 1; }
+.settings-actions .ghost-btn { margin-top: 0; }
+.settings-note {
+  margin: 14px 0 0;
+  font-size: 11.5px; color: var(--text-3); line-height: 1.7;
+}
+.settings-note code {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 4px;
+}
+
+/* 供应商「能力与上下文」行 */
+.cap-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cap-check {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cap-check input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.cap-ctx {
+  flex: 1; min-width: 220px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: var(--mono);
+  outline: none;
+  transition: border-color .15s;
+}
+.cap-ctx:focus { border-color: var(--accent); }
+
+

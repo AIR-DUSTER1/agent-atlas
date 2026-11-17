@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 import { readClientSource } from "../helpers/client-source.js";
 import {
   BUILTIN_PLUGINS,
@@ -29,7 +30,7 @@ test("内置 RAG / 贝壳 / Browser Use / Computer Use 按真实接入类型分�
 
 test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插件分区并可启停", async () => {
   const root = new URL("../../src/client/", import.meta.url);
-  const html = await readFile(new URL("index.html", root), "utf8");
+  const html = await readClientIndexHtml();
   const shell = await readFile(new URL("views/shell.ts", root), "utf8");
   const navigation = await readFile(new URL("views/navigation.ts", root), "utf8");
   const pluginSettings = await readFile(new URL("views/settings-plugins.ts", root), "utf8");

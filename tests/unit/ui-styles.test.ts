@@ -9,12 +9,13 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const CLIENT = join(fileURLToPath(new URL("../../src/client/", import.meta.url)));
 
 test("index 样式全部位于 styles 且构建文件存在", async () => {
-  const html = await readFile(join(CLIENT, "index.html"), "utf8");
-  const links = [...html.matchAll(/<link rel="stylesheet" href="\/styles\/([a-z-]+\.css)"/g)].map((match) => match[1] ?? "");
+  const html = await readClientIndexHtml();
+  const links = [...html.matchAll(/<link rel="stylesheet" href="\/styles\/([a-z0-9-]+\.css)"/g)].map((match) => match[1] ?? "");
   assert.ok(links.length >= 10);
   assert.deepEqual(links.slice(0, 2), ["tokens.css", "reset.css"]);
   assert.equal(links.at(-1), "ui.css");
@@ -70,14 +71,14 @@ test("知识库操作按钮统一高度并对齐，避免测试连接被默认�
 });
 
 test("求职登录提示使用高对比警示底色，避免黄底灰字看不清", async () => {
-  const css = await readFile(join(CLIENT, "styles", "settings.css"), "utf8");
+  const css = await readFile(join(CLIENT, "styles", "settings-job.css"), "utf8");
   assert.match(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--warning-bg\)[^}]*color:\s*var\(--content-1\)[^}]*font-size:\s*var\(--font-md\)/s);
   assert.doesNotMatch(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--amber-soft\)/s);
 });
 
 test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
   const [css, estate] = await Promise.all([
-    readFile(join(CLIENT, "styles", "chat.css"), "utf8"),
+    readFile(join(CLIENT, "styles", "chat-tools.css"), "utf8"),
     readFile(join(CLIENT, "views", "estate.ts"), "utf8"),
   ]);
   assert.match(css, /\.tool-card\.needs-approval,[\s\S]*?\.tool-card\.needs-action\s*\{[^}]*border-left-color:\s*var\(--amber\)/s);
@@ -87,7 +88,7 @@ test("贝壳登录失效显示为需要处理并自动展开登录入口", async
   assert.match(estate, /settingsButton\.textContent = "打开找房数据源设置"/);
 });
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
-  const html = await readFile(join(CLIENT, "index.html"), "utf8");
+  const html = await readClientIndexHtml();
   const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");
   const exported = new Set(
     iconsSource

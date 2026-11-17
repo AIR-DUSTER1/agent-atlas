@@ -1,0 +1,198 @@
+/* ============================================================
+   chat-messages.css — 消息流与消息级操作
+   ============================================================ */
+/* ============================== 消息流 ============================== */
+#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+
+.welcome { max-width: var(--content-w); margin: 0 auto; padding: 7vh 24px 30px; }
+.welcome-hero { text-align: center; margin-bottom: 34px; }
+.welcome-logo {
+  width: 64px; height: 64px; margin: 0 auto 18px;
+  display: grid; place-items: center;
+  font-size: 32px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(91,140,255,.35);
+}
+.welcome-hero h1 { margin: 0 0 10px; font-size: 24px; }
+.welcome-hero p { margin: 0; color: var(--text-2); font-size: 14px; }
+
+.demo-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* 「试试这些」通用示例 chips */
+.examples-label {
+  font-size: 12px; color: var(--text-3);
+  margin: 22px 0 10px;
+  letter-spacing: .5px;
+}
+.example-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.example-chips .ex-chip {
+  padding: 8px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: var(--sans);
+}
+.example-chips .ex-chip:hover { border-color: var(--accent); color: var(--text); background: rgba(91,140,255,.08); }
+
+.demo-card .d-default {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(63,185,111,.15); color: var(--green);
+  vertical-align: 1px;
+}
+.demo-card {
+  text-align: left;
+  padding: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  color: var(--text);
+  font-family: var(--sans);
+}
+.demo-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.demo-card .d-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.demo-card .d-num {
+  width: 22px; height: 22px; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: 6px;
+}
+.demo-card .d-name { font-size: 14px; font-weight: 600; }
+.demo-card .d-desc { font-size: 12px; color: var(--text-2); margin-bottom: 10px; }
+.demo-card .d-eg {
+  font-size: 11.5px; color: var(--accent-soft);
+  background: rgba(91,140,255,.08);
+  border-radius: 6px; padding: 6px 8px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* --- 消息 --- */
+#messages { max-width: var(--content-w); margin: 0 auto; padding: 24px 28px 32px; }
+
+.msg-user { display: flex; justify-content: flex-end; margin: 22px 0 16px; }
+.msg-user-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  max-width: 78%;
+}
+.msg-user .bubble {
+  max-width: 100%;
+  background: rgba(91,140,255,.14);
+  border: 1px solid rgba(91,140,255,.25);
+  padding: 10px 14px;
+  border-radius: 14px 14px 4px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.msg-assistant { display: flex; gap: 14px; margin: 28px 0 24px; min-width: 0; }
+.avatar {
+  width: 30px; height: 30px; min-width: 30px;
+  display: grid; place-items: center;
+  font-size: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: 9px;
+  margin-top: 2px;
+}
+.assistant-content { position: relative; flex: 1; min-width: 0; }
+.assistant-body { min-width: 0; overflow: hidden; }
+
+/* 消息级复制：操作区预留稳定高度，悬停时只浮出图标，避免按钮贴着正文或跳动。 */
+.message-actions {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity .15s, transform .15s;
+}
+.message-actions.hidden { display: none; }
+.user-message-footer {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 30px;
+  margin-top: 4px;
+}
+.assistant-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  margin-top: 10px;
+}
+.assistant-footer.is-empty { display: none; }
+.assistant-footer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  margin-left: auto;
+}
+.msg-user:hover .message-actions,
+.msg-assistant:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.message-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s, transform .15s;
+}
+.message-action:hover {
+  border-color: var(--border-subtle);
+  background: var(--surface-hover);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.message-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-action:disabled { cursor: wait; opacity: .7; }
+.message-action.copied { color: var(--green); border-color: rgba(63,185,111,.28); background: rgba(63,185,111,.08); }
+@media (hover: none) {
+  .message-actions { opacity: 1; pointer-events: auto; transform: none; }
+}
+
+/* 节点徽章（agent / tools / researcher…）—— 参考 ZCode 的步骤指示 */
+.node-row { display: flex; align-items: center; margin: 14px 0 0; }
+.node-row + .node-row { margin-top: 8px; }
+.node-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 28px;
+  margin: 0;
+  font-size: 11.5px; font-family: var(--mono);
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--bg-elev) 88%, var(--accent-2) 12%);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, var(--accent-2) 24%);
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.node-chip::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(139,92,246,.12);
+}
+

@@ -6,12 +6,13 @@
  * CSP hash，任何缺产物或清单漂移都必须非 0 退出。
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { buildVendors } from "./build-vendor.js";
-import { assertCspHashes } from "./csp-integrity.js";
+import { assertCspHashHtml } from "./csp-integrity.js";
+import { composeHtml } from "./compose-html.js";
 
 const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,8 +20,8 @@ const SRC = join(ROOT, "src", "client");
 const OUT = join(ROOT, "src", "server", "public");
 const STYLE_DIR = join(SRC, "styles");
 
-/** 需要原样拷到产物目录的静态资源（TS 编译器不处理非 .ts 文件） */
-const STATIC_ASSETS = ["index.html"];
+
+
 
 /**
  * 样式按目录自动发现，禁止再维护第二份手写白名单。
@@ -52,8 +53,9 @@ async function main(): Promise<void> {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
-  // 内联脚本一旦改动而 CSP hash 未同步，浏览器会直接拒绝执行；先 fail-fast
-  await assertCspHashes(join(SRC, "index.html"));
+  // 页面先按 include 清单组装；CSP hash 必须针对最终 HTML 计算，否则片段迁移会白屏
+  const indexHtml = await composeHtml(join(SRC, "index.html"), SRC);
+  assertCspHashHtml(indexHtml);
 
   // tsc 用项目本地版本：直接调 node_modules 里的 tsc，避免 PATH 差异
   const tscBin = join(ROOT, "node_modules", "typescript", "bin", "tsc");
@@ -69,12 +71,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const indexHtml = await readFile(join(SRC, "index.html"), "utf8");
   await copyStyles(indexHtml);
-
-  for (const name of STATIC_ASSETS) {
-    await copyFile(join(SRC, name), join(OUT, name));
-  }
+  await writeFile(join(OUT, "index.html"), indexHtml, "utf8");
 
   // wrapper 已由 tsc 输出；这里生成同名隔离的 *-lib.js 并做自包含检查
   await buildVendors();

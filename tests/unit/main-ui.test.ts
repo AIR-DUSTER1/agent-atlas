@@ -8,9 +8,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { readClientFiles, readClientSource } from "../helpers/client-source.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 test("空会话提供三个快捷起步且不会自动发送", async () => {
-  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  const html = await readClientIndexHtml();
   const main = await readClientFiles(["main.ts"]);
   assert.match(html, /id="empty-session"/);
   assert.equal((html.match(/data-empty-prompt=/g) ?? []).length, 3);
@@ -20,7 +21,7 @@ test("空会话提供三个快捷起步且不会自动发送", async () => {
 });
 
 test("顶栏面包屑与空状态切换已接线", async () => {
-  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  const html = await readClientIndexHtml();
   const source = await readClientFiles(["views/navigation.ts"]);
   assert.match(html, /id="breadcrumb-project"/);
   assert.match(html, /data-icon="ChevronRight"/);
@@ -38,7 +39,7 @@ test("新建会话会刷新上下文容量条，不残留上一会话用量", as
 });
 
 test("执行流程窗体位于上下文条和输入控制上方", async () => {
-  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  const html = await readClientIndexHtml();
   const workflow = html.indexOf('id="workflow-panel"');
   const context = html.indexOf('id="context-bar"');
   const composer = html.indexOf('id="composer-bar"');
@@ -81,7 +82,7 @@ test("消息流有回到底部按钮与未读累计", async () => {
 test("没有项目时首屏和新建对话直接进入 Agent 选择页", async () => {
   const main = await readClientFiles(["main.ts"]);
   const navigation = await readClientFiles(["views/navigation.ts"]);
-  const html = await readFile(new URL("../../src/client/index.html", import.meta.url), "utf8");
+  const html = await readClientIndexHtml();
   assert.match(main, /state\.projects\.length === 0/);
   assert.match(main, /showWelcomeState\("agent-picker"\)/);
   assert.match(navigation, /WelcomeMode = "default" \| "agent-picker"/);

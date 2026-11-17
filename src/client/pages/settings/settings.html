@@ -1,0 +1,81 @@
+  <!-- ============ 设置页：模型与供应商 / 长期记忆 / 使用统计 ============ -->
+  <section id="settings-page" class="settings-page hidden" aria-labelledby="settings-title">
+    <header class="settings-page-head">
+      <button id="settings-back-btn" class="settings-back-btn" type="button" title="返回 agentatlas（Esc）">
+        <span class="back-arrow"><i class="ui-icon" data-icon="ArrowLeft" aria-hidden="true"></i></span><span>返回</span>
+      </button>
+      <div class="settings-page-heading">
+        <h1 id="settings-title">设置</h1>
+      </div>
+      <button id="settings-logout-btn" class="settings-logout-btn hidden" type="button" title="退出当前访问会话">退出登录</button>
+    </header>
+
+    <div class="settings-page-body">
+      <nav class="settings-nav" aria-label="设置分类">
+        <label class="settings-search">
+          <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+          <input id="settings-search" type="search" placeholder="搜索设置项" autocomplete="off" spellcheck="false" />
+          <kbd>/</kbd>
+        </label>
+        <div class="settings-nav-scroll" role="tablist" aria-label="设置分区">
+          <div class="settings-nav-group" data-settings-group="workbench">
+            <div class="settings-nav-group-title">agentatlas</div>
+            <button type="button" class="settings-nav-item active" data-settings-view="models" role="tab" aria-selected="true" aria-controls="settings-view-models">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>模型与供应商</strong><small>网关、Key、模型与备份</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="plugins" role="tab" aria-selected="false" aria-controls="settings-view-plugins">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>插件</strong><small>RAG、数据源与浏览器 / 电脑控制</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="subagents" role="tab" aria-selected="false" aria-controls="settings-view-subagents">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>子代理</strong><small>模型、启停与动态委派能力</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="routing" role="tab" aria-selected="false" aria-controls="settings-view-routing">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>路由决策</strong><small>按请求自动挑子代理</small></span>
+            </button>
+          </div>
+          <div class="settings-nav-group" data-settings-group="extensions">
+            <div class="settings-nav-group-title">扩展</div>
+            <button type="button" class="settings-nav-item" data-settings-view="memories" role="tab" aria-selected="false" aria-controls="settings-view-memories">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>记忆与个性化</strong><small>默认上下文与相关性记忆</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="commands" role="tab" aria-selected="false" aria-controls="settings-view-commands">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>自定义命令</strong><small>斜杠菜单里的提示词模板</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="skills" role="tab" aria-selected="false" aria-controls="settings-view-skills">
+              <span class="sn-icon"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>技能库</strong><small>按关键词自动加载的领域指南</small></span>
+            </button>
+            <button type="button" class="settings-nav-item" data-settings-view="mcp" role="tab" aria-selected="false" aria-controls="settings-view-mcp">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>MCP 服务器</strong><small>接入外部工具（默认需审批）</small></span>
+            </button>
+          </div>
+          <div class="settings-nav-group" data-settings-group="data">
+            <div class="settings-nav-group-title">数据</div>
+            <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
+              <span class="sn-icon"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>使用统计</strong><small>Token 用量与会话运行</small></span>
+            </button>
+          </div>
+        </div>
+      </nav>
+      <div class="settings-page-content">
+
+        <!-- @include ./models.html -->
+        <!-- @include ./plugins.html -->
+        <!-- @include ./subagents.html -->
+        <!-- @include ./routing.html -->
+        <!-- @include ./memories.html -->
+        <!-- @include ./commands.html -->
+        <!-- @include ./skills.html -->
+        <!-- @include ./mcp.html -->
+        <!-- @include ./stats.html -->
+      </div>
+    </div>
+  </section>

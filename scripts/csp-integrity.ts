@@ -21,12 +21,15 @@ export function computeInlineScriptHashes(html: string): string[] {
   return hashes;
 }
 
-export async function assertCspHashes(indexPath: string): Promise<void> {
-  const html = await readFile(indexPath, "utf8");
+export function assertCspHashHtml(html: string): void {
   const actual = computeInlineScriptHashes(html);
   if (actual.length !== CSP_SCRIPT_HASHES.length || actual.some((hash, index) => hash !== CSP_SCRIPT_HASHES[index])) {
     throw new Error(
       `CSP hash 已过期：index 实际为 ${actual.join(", ")}；请同步 src/server/csp-hashes.ts`,
     );
   }
+}
+
+export async function assertCspHashes(indexPath: string): Promise<void> {
+  assertCspHashHtml(await readFile(indexPath, "utf8"));
 }

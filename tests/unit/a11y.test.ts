@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const read = (path: string): Promise<string> => readFile(new URL(`../../src/client/${path}`, import.meta.url), "utf8");
 
@@ -30,7 +31,7 @@ test("核心正文与弱化文字满足 WCAG AA 4.5:1", () => {
 });
 
 test("表单控件具有可访问名称，消息流与状态点使用 live region", async () => {
-  const html = await read("index.html");
+  const html = await readClientIndexHtml();
   for (const id of [
     "input", "cmd-name", "cmd-template", "skill-upload-file", "skills-search",
     "mcp-id", "mcp-command", "kb-query", "ui-dialog-input",

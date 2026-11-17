@@ -372,7 +372,13 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
 
   for (const file of [
     "/styles/tokens.css", "/styles/reset.css", "/styles/layout.css", "/styles/typography.css",
-    "/styles/chat.css", "/styles/composer.css", "/styles/modals.css", "/styles/settings.css",
+    "/styles/chat-messages.css", "/styles/chat-runtime.css", "/styles/chat-tools.css",
+    "/styles/chat-approval.css", "/styles/chat-feedback.css", "/styles/chat-routing.css",
+    "/styles/composer.css", "/styles/modals.css",
+    "/styles/settings-shell.css", "/styles/settings-models.css", "/styles/settings-memories.css",
+    "/styles/settings-skills.css", "/styles/settings-stats.css", "/styles/settings-backup.css",
+    "/styles/settings-models-editor.css", "/styles/settings-stats-v2.css", "/styles/settings-nav.css",
+    "/styles/settings-memories-slot.css", "/styles/settings-routing.css", "/styles/settings-job.css",
     "/styles/plugins.css", "/styles/responsive.css", "/styles/desktop.css", "/styles/ui.css",
   ]) {
     const res = await fetch(srv.base + file);

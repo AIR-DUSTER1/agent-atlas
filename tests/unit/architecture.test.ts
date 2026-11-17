@@ -49,6 +49,13 @@ async function violations(dir: string, forbidden: RegExp): Promise<string[]> {
   return found;
 }
 
+async function readWorkflowSources(): Promise<string> {
+  const facade = await readFile(join(SRC, "agent", "workflow.ts"), "utf8");
+  const modules = await Promise.all((await listTs(join(SRC, "agent", "workflow"))).map((file) => readFile(file, "utf8")));
+  return [facade, ...modules].join("\n");
+}
+
+
 test("agent 层禁止依赖 server / client，保持 CLI 可独立运行", async () => {
   assert.deepEqual(await violations(join(SRC, "agent"), /(^|\/)(server|client)(\/|$)/), []);
 });
@@ -90,7 +97,7 @@ test("routes 不直接操作文件系统，统一走持久化服务", async () =
 
 test("聊天 SSE 不按墙钟中断静默等待，模型请求超时仍由供应商调用层负责", async () => {
   const chat = await readFile(join(SRC, "server", "routes", "chat.ts"), "utf8");
-  const workflow = await readFile(join(SRC, "agent", "workflow.ts"), "utf8");
+  const workflow = await readWorkflowSources();
   assert.doesNotMatch(chat, /taskLimit|agentIdleTimeoutMs|TaskLimitError/);
   assert.match(workflow, /modelRequestTimeoutMs/);
 });
@@ -100,7 +107,7 @@ test("架构例外清单为空；新增例外必须先修改本测试并完成�
   assert.deepEqual(exceptions, []);
 });
 test("Agent 与工具只依赖 Memory Slot，不直接触碰具体 Provider/旧存储", async () => {
-  const workflow = await readFile(join(SRC, "agent", "workflow.ts"), "utf8");
+  const workflow = await readWorkflowSources();
   const tools = await readFile(join(SRC, "tools-memory.ts"), "utf8");
   assert.doesNotMatch(workflow, /memory-store|memory\/providers\//);
   assert.doesNotMatch(tools, /memory-store|memory\/providers\//);

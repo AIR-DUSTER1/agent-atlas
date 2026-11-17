@@ -13,6 +13,7 @@ import { computeInlineScriptHashes } from "../../scripts/csp-integrity.js";
 import { CSP_SCRIPT_HASHES } from "../../src/server/csp-hashes.js";
 import { SECURITY_HEADERS } from "../../src/server/http-guard.js";
 import { VENDOR_ENTRIES, VENDOR_WRAPPER_FILES } from "../../scripts/vendor-entries.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const ROOT = join(fileURLToPath(new URL("../../", import.meta.url)));
 const CLIENT = join(ROOT, "src", "client");
@@ -117,7 +118,7 @@ test("存量 innerHTML / insertAdjacentHTML 只减不增", async () => {
 });
 
 test("CSP hash 与 index 内联脚本严格同步且不放行任意 inline script", async () => {
-  const html = await readFile(join(CLIENT, "index.html"), "utf8");
+  const html = await readClientIndexHtml();
   assert.deepEqual(computeInlineScriptHashes(html), [...CSP_SCRIPT_HASHES]);
   const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
@@ -126,7 +127,7 @@ test("CSP hash 与 index 内联脚本严格同步且不放行任意 inline scrip
 });
 
 test("index.html 引用的样式全部进入构建产物", async () => {
-  const html = await readFile(join(CLIENT, "index.html"), "utf8");
+  const html = await readClientIndexHtml();
   const linked = [...html.matchAll(/href=["']\/styles\/([^"'?#]+\.css)(?:[?#][^"']*)?["']/g)]
     .map((match) => match[1] ?? "");
   assert.ok(linked.includes("subagents.css"), "子代理页样式必须由 index.html 显式引用");

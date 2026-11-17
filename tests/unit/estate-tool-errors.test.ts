@@ -10,6 +10,7 @@ import { assertTrustedInstallUrl, beikeBusinessError, buildBeikeChildEnv, isBeik
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../src/config.js";
 import { buildStaticMapUrl, parseStaticMapQuery } from "../../src/server/map-static.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(
@@ -110,7 +111,7 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   const [source, client, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/client/index.html", import.meta.url), "utf8"),
+    readClientIndexHtml(),
   ]);
   const start = source.slice(
     source.indexOf("export function startBeikeLogin"),

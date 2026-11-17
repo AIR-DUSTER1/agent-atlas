@@ -16,6 +16,7 @@ import { generalProfileWithPlugins } from "../../src/agent/general.js";
 import { resetPluginStateForTests, setPluginEnabledState } from "../../src/plugin-state.js";
 import { buildDelegationCatalog } from "../../src/delegation-catalog.js";
 import { createWorkflowGraph, type WorkflowChatModel } from "../../src/agent/workflow.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 
 beforeEach(() => resetPluginStateForTests());
 afterEach(() => resetPluginStateForTests());
@@ -96,7 +97,7 @@ test("browser_act 在人工审批前不会触碰浏览器", async () => {
 });
 
 test("右侧 Browser Use 面板、样式与工具卡增强已接线", async () => {
-  const html = await readFile("src/client/index.html", "utf8");
+  const html = await readClientIndexHtml();
   const main = await readFile("src/client/main.ts", "utf8");
   const view = await readFile("src/client/views/browser-use.ts", "utf8");
   const serverIndex = await readFile("src/server/index.ts", "utf8");

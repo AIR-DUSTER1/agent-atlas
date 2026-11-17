@@ -20,6 +20,7 @@ import { writeJobWorkbook } from "../../src/server/job-workbook.js";
 import { checkJobListHealth } from "../../src/server/job-health.js";
 import { applyJobSelector, loadJobSelectorRuntime } from "../../src/server/job-selectors.js";
 import { parseNativeCard } from "../../src/server/job-cards.js";
+import { readClientIndexHtml } from "../helpers/client-html.js";
 import {
   canonicalJobPlatform, createJobRecord, detectOutsourcing, mergeJobRecords, normalizeStoredJob, parseSalaryK,
   parseWorkHours, parseWorkRest, queryJobRecords, scoreJob,
@@ -321,7 +322,7 @@ test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚
   assert.match(source, /launchPersistentContext/);
   assert.match(source, /collectNativeJobs/);
   const [html, view] = await Promise.all([
-    readFile(new URL("../../src/client/index.html", import.meta.url), "utf8"),
+    readClientIndexHtml(),
     readFile(new URL("../../src/client/views/job.ts", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(html, /job-skill-dir|job-python-bin|技能根目录|Python 解释器/);

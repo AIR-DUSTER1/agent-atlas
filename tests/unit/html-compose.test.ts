@@ -1,0 +1,51 @@
+/**
+ * tests/unit/html-compose.test.ts — 页面片段组装安全回归
+ * ============================================================
+ * 守：入口能组合出完整页面；include 不能越界、不能跟随符号链接、不能循环。
+ */
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { composeHtml } from "../../scripts/compose-html.js";
+
+const CLIENT = fileURLToPath(new URL("../../src/client/", import.meta.url));
+
+test("源码入口可组装出完整页面且不保留 include 标记", async () => {
+  const html = await composeHtml(join(CLIENT, "index.html"), CLIENT);
+  assert.match(html, /<title>agentatlas<\/title>/);
+  assert.match(html, /id="settings-page"/);
+  assert.match(html, /id="plugin-list"/);
+  assert.match(html, /id="kb-modal"/);
+  assert.match(html, /id="job-fix-hint"/);
+  assert.doesNotMatch(html, /<!--\s*@include\s+/);
+});
+
+test("HTML include 检测循环引用", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-html-compose-"));
+  try {
+    const pages = join(root, "pages");
+    await mkdir(pages, { recursive: true });
+    await writeFile(join(root, "index.html"), "<!-- @include pages/a.html -->", "utf8");
+    await writeFile(join(pages, "a.html"), "<!-- @include b.html -->", "utf8");
+    await writeFile(join(pages, "b.html"), "<!-- @include a.html -->", "utf8");
+    await assert.rejects(() => composeHtml(join(root, "index.html"), root), /循环引用/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("HTML include 拒绝越出 pages 的路径", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-html-compose-"));
+  try {
+    const pages = join(root, "pages");
+    await mkdir(pages, { recursive: true });
+    await writeFile(join(root, "secret.html"), "secret", "utf8");
+    await writeFile(join(root, "index.html"), "<!-- @include pages/../secret.html -->", "utf8");
+    await assert.rejects(() => composeHtml(join(root, "index.html"), root), /越出 pages/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
