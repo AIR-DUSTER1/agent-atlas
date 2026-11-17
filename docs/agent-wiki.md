@@ -104,6 +104,9 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── events.ts     # SSE 事件协议定义
         └── public/       # ★ 前端构建产物（tsc 编译 src/client/**.ts，gitignore）
   client/               # 前端源码（TypeScript）：main + core/modules/render/stream/views/actions
+    index.html          # 仅根壳、CSP 内联脚本与 @include 清单
+    pages/              # 构建期 HTML 片段：sidebar/workspace/settings/overlays
+    styles/             # tokens 与 chat-*.css / settings-*.css 功能分层样式
 ```
 
 ### 1.3 运行方式（3 秒上手）
@@ -820,10 +823,9 @@ Dockerfile 用 `CMD ["node", "--import", "tsx", ...]`，信号直达应用。
 多副本/共享存储不属于当前支持范围。桌面端仍是开发壳（Windows 退出用 `taskkill /F`，
 不触发优雅退出），生产交付以 Web + Docker 为准。
 
-### 3.20 `src/agent/workflow.ts` — 产品默认编排（需求理解 / 澄清 / 反思）
+### 3.20 `src/agent/workflow.ts` + `src/agent/workflow/*` — 产品默认编排（需求理解 / 澄清 / 反思）
 
-**设计立场**：把「执行前理解、执行后检查」做成图内节点，而不是散落在路由或
-prompt 里；`general.ts` / `estate.ts` 各自导出 profile，避免两套编排漂移。
+**设计立场**：把「执行前理解、执行后检查」做成图内节点，而不是散落在路由或 prompt 里；`general.ts` / `estate.ts` / `job.ts` 各自导出 profile，避免多套编排漂移。`workflow.ts` 只保留稳定导出，`analyze / clarify / route / agent / review` 等节点分别位于 `workflow/nodes/`，`graph.ts` 是唯一图装配入口。
 
 ```text
 START → analyze → clarify? → agent ⇄ tools → review → END
@@ -846,6 +848,8 @@ START → analyze → clarify? → agent ⇄ tools → review → END
 - 判据切到 `CONTINUOUS_REVIEW_PROMPT`：从「回答是否够好」换成「目标动作是否执行完并验证」，feedback 必须是下一步行动指令而不是文风建议；
 - 超步保险丝单独放宽：`stream.ts` 对 `continuous` 请求用 `CONTINUOUS_RECURSION_LIMIT = 20000` 而不是 `AGENT_RECURSION_LIMIT = 1000`——一个回炉周期 ≈ 3-6 超步，小时级任务按 1000 会先撞 GraphRecursionError；`/api/resume` 由前端重传 `continuous` 延续放宽（图状态里的 `continuousMode` 只驱动循环，不决定这个上限）；
 - 连续请求在图输入里前置一条 `GOAL_MODE_NOTE` 注记（`routes/chat.ts`）：反思闸会拦「提前收尾」，但第一轮就让模型知道规则能省一次回炉；不改会话权限，高风险操作照常审批。
+
+**拆分边界**：`types.ts` / `limits.ts` / `state.ts` / `prompts.ts` / `parsing.ts` 只承载数据与协议；`runtime.ts` 承载模型、工具与 usage 回调；`nodes/*` 只执行业务节点；`edges.ts` 只返回条件边；`graph.ts` 只装配节点和 compile。新增节点应放进 `nodes/`，禁止把节点实现重新写回门面。
 
 **关键坑**：
 
@@ -1909,7 +1913,7 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 `toolsUsed` / `usage`），前端委派卡在运行中展示目标子代理和授权工具，完成后展示实际模型、耗时、用量与工具轨迹。子 Agent
 的完整对话仍是黑盒，但关键执行事实足以让用户判断结论可信度。
 
-### 3.34 `scripts/build-vendor.ts` + `src/client/vendor/*` — 前端依赖隔离与 CSP hash
+### 3.34 `scripts/build-vendor.ts` + `scripts/compose-html.ts` + `src/client/vendor/*` — 前端组装、依赖隔离与 CSP hash
 
 **问题**：图表 / 图标 / Markdown / 高亮不能整包塞进应用代码，也不能让业务直接依赖 npm
 库；同时 `script-src 'unsafe-inline'` 会削弱 XSS 防线。
@@ -1955,7 +1959,7 @@ stdout/stderr 的 Socket，**测试进程会「跑完全部用例却一直不退
 | token | `tokens.css` | primitive / semantic、主题、间距、字号、圆角、阴影、焦点环 |
 | base | `reset.css` / `typography.css` | 文档基线、滚动条、Markdown 排版 |
 | layout | `layout.css` / `responsive.css` / `desktop.css` | 侧栏、主区、窄屏与 Electron 拖拽区 |
-| surface | `chat.css` / `composer.css` / `settings.css` / `modals.css` / `plugins.css` | 各自业务表面 |
+| surface | `chat-*.css` / `settings-*.css` / `composer.css` / `modals.css` / `plugins.css` | 各业务表面按消息流、工具、审批、设置分区和运行时状态拆分 |
 | primitive | `ui.css` | 无业务 UI 原语、Toast、菜单、对话框 |
 
 **图标**：静态 HTML 只输出 `<i class="ui-icon" data-icon="Settings">`；`ui/icon.ts` 在空闲时异步

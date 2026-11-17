@@ -154,6 +154,8 @@ flowchart LR
 ```text
 src/
   agent/          LangGraph 图、Agent Profile、权限与工具边界
+    workflow.ts   稳定的工作流公共门面
+    workflow/     状态、提示词、解析、运行时、节点、边与图装配
   client/         Web 前端源码
   server/         HTTP / SSE、配置、会话、持久化与运维接口
   tools-*.ts      各领域工具集
@@ -161,11 +163,16 @@ src/
   config.ts       运行时配置
   cli.ts          CLI 入口
 
+  client/pages/    构建期 HTML 片段，入口只保留 include 清单
+  client/styles/   chat-*.css / settings-*.css 按功能分层
+
 desktop/          Electron 主进程与 preload
 docs/             架构、部署、记忆、安全与运维文档
 tests/            单元、集成、安全、E2E、故障与负载测试
 scripts/          构建、检查、备份与发布辅助脚本
 ```
+
+维护边界：`src/client/index.html` 只保留根壳和 `@include` 清单，`npm run build:client` 由 `scripts/compose-html.ts` 合成完整页面；`src/agent/workflow.ts` 只保留稳定导出，具体节点在 `src/agent/workflow/nodes/`。内部门禁会阻止这些入口重新长成单体。
 
 ## 配置说明
 

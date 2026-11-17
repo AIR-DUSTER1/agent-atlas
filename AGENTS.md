@@ -70,7 +70,8 @@ src/
   plugin-state.ts  # 内置插件运行时启停状态（agent 层只读，不直接碰 server）
   memory-store.ts  # 跨会话长期记忆（每轮动态注入 system 注记）
   tools-*.ts       # 新增同类工具集按 tools-<主题>.ts 命名，一个文件一个主题
-  agent/           # LangGraph 图定义（State/Node/Edge 全在这里；general.ts = 产品默认图）
+  agent/           # LangGraph 图定义与 profile；workflow.ts 是公共门面，具体节点在 workflow/ 下
+  agent/workflow/  # types/state/prompts/parsing/runtime/nodes/edges/graph 分层，禁止把节点重新塞回 workflow.ts
   cli.ts           # CLI 入口；server/ 不 import cli，cli 可 import 一切
   server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
                    #   mcp.ts = MCP 客户端（JSON-RPC over stdio）；commands.ts = 自定义命令
@@ -80,7 +81,7 @@ src/
     main.ts        #   入口：初始化与全部 DOM 事件绑定
     core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
     ui/            #   无业务 DOM 原语（h/button/input/dialog/menu/toast…）
-    styles/        #   tokens 与按职责拆分的 CSS
+    styles/        #   tokens、chat-*.css、settings-*.css 等按功能拆分的 CSS
     modules/       #   纯函数与协议类型（format / chat-flow / types…）
     vendor/        #   第三方库唯一隔离层；业务只能 import wrapper，不能直接 import npm 前端库
     render/        #   渲染层（parts 部件 / messages 块）
@@ -88,7 +89,8 @@ src/
     composer/      #   输入框 / 命令与 @ 文件菜单
     views/         #   各业务视图（会话/项目/设置/RAG/房产/Browser Use…；settings-plugins.ts = 插件目录与开关）
     actions/       #   审批、压缩等动作
-    index.html / styles/*.css
+    index.html     #   仅保留 head、内联 CSP 脚本与 include 清单
+    pages/         #   构建期 HTML 片段：sidebar/workspace/settings/overlays
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
 desktop/           # Electron 桌面端源码（TypeScript）
   main.ts          #   主进程：子进程托管 Web 服务 + 窗口（编成 ESM .js 运行）
@@ -107,6 +109,8 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
 - 前端 `src/client/**` 只能与 `/api/*` 通信，不 import 服务端代码（类型也不允许）。
 - 业务前端源码不得直接 import npm 前端库；只允许 `src/client/vendor/*` wrapper 接触第三方 API。
 - 通用消息渲染不得 import 房产 / 租房实现；业务专属工具卡通过渲染增强注册表注入。
+- `src/agent/workflow.ts` 只允许作为稳定 re-export 门面；节点实现必须落到 `src/agent/workflow/nodes/`，图接线落到 `workflow/graph.ts`。
+- `src/client/index.html` 只允许保留根壳和 include 清单；页面结构落到 `src/client/pages/`，构建脚本负责合成产物。
 
 ## 4. 代码风格（全仓库统一）
 
