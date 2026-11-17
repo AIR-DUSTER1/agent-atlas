@@ -11,6 +11,16 @@ import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../src/config.js";
 import { buildStaticMapUrl, parseStaticMapQuery } from "../../src/server/map-static.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
+import { buildEstateSearchQuery, inferEstateSearchScope } from "../../src/tools-estate.js";
+
+test("房产搜索把锚点与半径结构化拼入查询，不被邻近板块替代", () => {
+  assert.equal(buildEstateSearchQuery("两室 出租 2000-3000元", "左岸风度", 3), "左岸风度附近3公里内 两室 出租 2000-3000元");
+  assert.equal(buildEstateSearchQuery("两室 出租", "左岸风度"), "左岸风度附近 两室 出租");
+  assert.equal(buildEstateSearchQuery("左岸风度附近3公里内 两室", "左岸风度", 3), "左岸风度附近3公里内 两室");
+  assert.equal(buildEstateSearchQuery("两室 出租"), "两室 出租");
+  assert.deepEqual(inferEstateSearchScope("左岸风度附近3公里内 两室 出租"), { near: "左岸风度", radiusKm: 3 });
+  assert.deepEqual(inferEstateSearchScope("两室 出租"), {});
+});
 
 test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(

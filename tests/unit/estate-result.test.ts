@@ -10,6 +10,7 @@ import { test } from "node:test";
 import {
   extractEstateImageUrls,
   extractEstateLocation,
+  extractEstateSearchListings,
   extractEstateVrUrl,
   normalizeEstateDetail,
   normalizeEstateMaterial,
@@ -19,7 +20,7 @@ import { buildCompareMap } from "../../src/server/estate-geo.js";
 
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/floorplan.jpg!m_fit,h_843,w_1125,l_fbk_v1,lo_0.22,f_jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/living-room.webp?x=1";
-const VR_URL = "https://vr.ke.com/#/vr?houseid=10001";
+const VR_URL = "https://vr.ke.com/#/vr?houseid=100001";
 
 function detailPayload(): string {
   return [
@@ -87,6 +88,40 @@ test("material 归一化：图片与官方 VR 链接都进入稳定字段", () =
   assert.equal(normalized.presentation.images, 2);
   assert.equal(normalized.presentation.vr, true);
   assert.match(normalized.note, /直接展示/);
+});
+
+test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入口", () => {
+  const raw = [
+    "<参考数据><租赁房源>",
+    "<100001>",
+    JSON.stringify({ 摘要信息: {
+      户型信息: "2室1厅，出租面积90㎡，朝向南，整租",
+      区位交通: "位于崂山区西韩板块测试花园小区，距离地铁站步行8分钟",
+      房源亮点: "有VR，有钥匙",
+      租赁价格: "月租金2400元/月",
+    } }),
+    "</100001>",
+    "<100002>",
+    JSON.stringify({ 摘要信息: {
+      户型信息: "3室2厅，建筑面积120㎡，朝向南/北",
+      区位交通: "位于崂山区测试花园小区，距离地铁站步行6分钟",
+      房源亮点: "无VR",
+      总价: "300万元",
+    } }),
+    "</100002>",
+    "</租赁房源></参考数据>",
+  ].join("\n");
+  const rows = extractEstateSearchListings(raw);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], {
+    id: "100001", title: "测试花园 · 2室1厅 · 90㎡", layout: "2室1厅", area: "90㎡",
+    price: "月租金2400元/月", addressText: "位于崂山区西韩板块测试花园小区，距离地铁站步行8分钟",
+    community: "测试花园", vr: "https://vr.ke.com/#/vr?houseid=100001", hasVr: true,
+  });
+  assert.equal(rows[1]?.price, "300万元");
+  assert.equal(rows[1]?.area, "120㎡");
+  assert.equal(rows[1]?.hasVr, false);
+  assert.equal(rows[1]?.vr, undefined);
 });
 
 test("VR 提取只接受 HTTPS 贝壳官方域名，并支持嵌套对象与 VR链接字段", () => {

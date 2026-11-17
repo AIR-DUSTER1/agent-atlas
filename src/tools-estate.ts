@@ -18,7 +18,7 @@ import {
   houseSearch, houseInfo, houseArea, houseResolve, houseMarket, houseAgents,
   houseContact, houseAppoint, buildCompareMap, GEOCODE_LIMITS,
 } from "./server/estate.js";
-import { extractEstateVrUrl, normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
+import { extractEstateSearchListings, extractEstateVrUrl, normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
 import { isPluginEnabled } from "./plugin-state.js";
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
@@ -98,33 +98,69 @@ function extractListings(data: unknown): Array<{ id?: string; title?: string; pr
   });
 }
 
+/** 兼容模型仍把半径写进 query 的情况：从“左岸风度附近3公里内”恢复锚点和半径。 */
+export function inferEstateSearchScope(query: string): { near?: string; radiusKm?: number } {
+  const match = query.match(/([^\s，,。；;]{2,30}?)附近\s*(\d+(?:\.\d+)?)\s*(?:公里|千米|km)/i);
+  if (!match) return {};
+  const radiusKm = Number(match[2]);
+  return {
+    ...(match[1] ? { near: match[1].trim() } : {}),
+    ...(Number.isFinite(radiusKm) && radiusKm > 0 ? { radiusKm } : {}),
+  };
+}
+
+/** 把「锚点 + 半径」结构化参数拼进贝壳查询，避免模型把 3km 误换成邻近板块。 */
+export function buildEstateSearchQuery(query: string, near?: string, radiusKm?: number): string {
+  const base = query.trim();
+  const anchor = near?.trim() || "";
+  if (!anchor) return base;
+  if (radiusKm === undefined) return base.includes(anchor) ? base : `${anchor}附近 ${base}`;
+  const radius = Number.isInteger(radiusKm) ? String(radiusKm) : radiusKm.toFixed(1);
+  const phrase = `${anchor}附近${radius}公里内`;
+  return base.includes(phrase) ? base : `${phrase} ${base}`;
+}
+
 // ---------------------------------------------------------------------------
 // 1. house_search：买房/租房搜索
 // ---------------------------------------------------------------------------
 export const houseSearchTool = tool(
-  async ({ mode, city, query, houseType }) => {
+  async ({ mode, city, query, houseType, near, radiusKm }) => {
     if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
     if (!city?.trim()) return badArgs("city 不能为空：先向用户确认城市再搜索");
     if (!query?.trim()) return badArgs("query 不能为空：请把用户的找房条件整理成一句话");
     if (houseType && mode === "rent") return badArgs("listing_type 只适用于买房（mode=buy）");
-    const r = await houseSearch(mode, city.trim(), query.trim(), houseType ?? undefined);
+    const requestedQuery = query.trim();
+    const inferredScope = inferEstateSearchScope(requestedQuery);
+    const resolvedNear = near?.trim() || inferredScope.near;
+    const resolvedRadiusKm = radiusKm ?? inferredScope.radiusKm;
+    const effectiveQuery = buildEstateSearchQuery(requestedQuery, resolvedNear, resolvedRadiusKm);
+    const r = await houseSearch(mode, city.trim(), effectiveQuery, houseType ?? undefined);
     if (!r.ok) return JSON.stringify({ error: r.error });
-    const listings = extractListings(r.data);
+    const objectListings = extractListings(r.data);
+    const listings = objectListings.length ? objectListings : extractEstateSearchListings(r.data);
     // 抽不出结构化字段 → 原样给模型（前端降级显示原始 JSON）
     if (!listings.length) return finalize(r);
-    return JSON.stringify({ action: "search", mode, city: city.trim(), query: query.trim(), count: listings.length, listings });
+    return JSON.stringify({
+      action: "search", mode, city: city.trim(), query: effectiveQuery, requestedQuery,
+      ...(resolvedNear ? { near: resolvedNear } : {}),
+      ...(resolvedRadiusKm !== undefined ? { radiusKm: resolvedRadiusKm } : {}),
+      count: listings.length, listings,
+    });
   },
   {
     name: "house_search",
     description:
       "找房搜索（贝壳官方数据）：搜索二手房/新房（mode=buy，可用 listing_type 区分 second/new）或在租房源（mode=rent）。" +
       "何时用：用户给出城市，且已有至少一个真实筛选条件（区域/通勤/预算/户型…）并确认需求摘要后调用。" +
-      "何时不用：用户只有城市时先追问，不要搜索；对比几套房子的区位分布请改用 house_map。",
+      "何时不用：用户只有城市时先追问，不要搜索；对比几套房子的区位分布请改用 house_map。" +
+      "用户明确说附近/周边/3km内时，near 与 radiusKm 必须单独传入，query 只写户型/预算/出租方式等筛选条件。",
     schema: z.object({
       mode: z.enum(["buy", "rent"]).describe("buy=买房（二手+新房），rent=租房"),
       city: z.string().describe("城市名，如 北京"),
       query: z.string().describe("搜索条件一句话，如 「望京 两居 500-700万」"),
       houseType: z.enum(["second", "new"]).optional().describe("仅买房时可选：second=二手房，new=新房"),
+      near: z.string().optional().describe("用户说「附近/周边」时的锚点小区或板块名；不要用邻近地铁站替代"),
+      radiusKm: z.number().min(0.1).max(20).optional().describe("用户明确给出的搜索半径（公里），如 3km 传 3"),
     }),
   }
 );

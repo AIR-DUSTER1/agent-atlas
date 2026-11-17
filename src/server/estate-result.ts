@@ -11,11 +11,14 @@
 import { buildMapLinks, buildPointMapEmbed, type GeocodePoint } from "./estate-geo.js";
 
 const MAX_ESTATE_IMAGES = 12;
+const MAX_SEARCH_LISTINGS = 10;
+const VR_PAGE_BASE = "https://vr.ke.com/#/vr?houseid=";
 const MAX_STRING_DEPTH = 12;
 const IMAGE_URL_RE = /https:\/\/[^\s"'<>\\]+?\.(?:jpe?g|png|webp|gif|avif)(?:[!?][^\s"'<>\\]*)?/gi;
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
 const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
+const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
 const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com"] as const;
 
@@ -145,6 +148,87 @@ function matchJsonStringField(strings: string[], field: string): string {
     if (hit) return hit;
   }
   return "";
+}
+
+export interface EstateSearchListing {
+  id: string;
+  title: string;
+  layout?: string;
+  area?: string;
+  price?: string;
+  addressText?: string;
+  community?: string;
+  vr?: string;
+  hasVr: boolean;
+}
+
+function rawText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try { return JSON.stringify(value); } catch { return ""; }
+}
+
+function firstField(raw: string, names: string[]): string {
+  for (const name of names) {
+    const value = matchJsonStringField([raw], name);
+    if (value) return value;
+  }
+  return "";
+}
+
+function firstMatchText(raw: string, pattern: RegExp): string {
+  return raw.match(pattern)?.[1]?.trim() || "";
+}
+
+function searchArea(raw: string): string {
+  const field = firstField(raw, ["出租面积", "建筑面积", "面积"])
+    || firstField(raw, ["户型信息", "房型", "户型"]);
+  return firstMatchText(field, /([\d.]+\s*(?:㎡|平|m²))/i).replace(/\s+/g, "");
+}
+
+function searchLayout(raw: string): string {
+  const field = firstField(raw, ["户型信息", "房型", "户型"]);
+  return firstMatchText(field, /(\d+室\d+厅)/);
+}
+
+/**
+ * 把贝壳 search 的文本块归一成模型可直接比较的候选列表。
+ * 旧工具只识别对象数组，当前 CLI 返回的是 <houseId> JSON </houseId> 文本，
+ * 结果模型只能面对一万多字原文，容易只挑前两条；这里保留真实 id 与 VR 标记，
+ * 让 Agent 先拿到完整候选池，再由前端做最终表格展示。
+ */
+export function extractEstateSearchListings(data: unknown): EstateSearchListing[] {
+  const raw = rawText(data);
+  if (!raw) return [];
+  const rows: EstateSearchListing[] = [];
+  const blockRe = /<(\d{6,})>\s*([\s\S]*?)<\/\1>/g;
+  for (const match of raw.matchAll(blockRe)) {
+    const id = match[1] || "";
+    const body = match[2] || "";
+    const layout = searchLayout(body);
+    const area = searchArea(body);
+    const price = firstField(body, ["租赁价格", "总价", "售价", "价格"]);
+    const traffic = firstField(body, ["区位交通", "位置", "地址"]);
+    const community = firstField(body, ["小区名称", "小区名"])
+      || firstMatchText(traffic, /板块\s*([^，,。]+?)小区/)
+      || firstMatchText(traffic, /小区\s*([^，,。]+)/);
+    const hasVr = VR_POSITIVE_RE.test(body);
+    const vr = extractEstateVrUrl(body) || (hasVr ? VR_PAGE_BASE + encodeURIComponent(id) : "");
+    const title = [community, layout, area].filter(Boolean).join(" · ") || "房源 " + id;
+    rows.push({
+      id,
+      title,
+      ...(layout ? { layout } : {}),
+      ...(area ? { area } : {}),
+      ...(price ? { price } : {}),
+      ...(traffic ? { addressText: traffic } : {}),
+      ...(community ? { community } : {}),
+      ...(vr ? { vr } : {}),
+      hasVr: hasVr || Boolean(vr),
+    });
+    if (rows.length >= MAX_SEARCH_LISTINGS) break;
+  }
+  return rows;
 }
 
 function firstAddressPart(raw: string): string {

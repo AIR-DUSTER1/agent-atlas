@@ -14,6 +14,7 @@ const MAX_CONCLUSION_POINTS = 8;
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
 const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
+const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
 const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com"] as const;
 
@@ -132,7 +133,7 @@ function vrUrlFrom(value: unknown, hinted = false, depth = 0): string {
 
 /** 搜索块只给「有VR」而没有 URL 时，用官方页面模板生成可核对入口。 */
 function inferVrUrlFromHint(houseId: string, hint: unknown): string {
-  if (!houseId || (hint !== true && !VR_HINT_RE.test(rawText(hint)))) return "";
+  if (!houseId || (hint !== true && !VR_POSITIVE_RE.test(rawText(hint)))) return "";
   return safeVrUrl(`https://vr.ke.com/#/vr?houseid=${encodeURIComponent(houseId)}`);
 }
 

@@ -219,6 +219,10 @@ test("通用与房产 profile 注入不同的分析 / 反思领域规则", () =>
   assert.match(estateProfile.systemPrompt, /house_lookup\(action=material\)/);
   assert.match(estateProfile.systemPrompt, /location\.lat\/lng/);
   assert.match(estateProfile.systemPrompt, /最终结论/);
+  assert.match(estateProfile.systemPrompt, /near.*radiusKm/);
+  assert.match(estateProfile.systemPrompt, /有效候选少于 3 条/);
+  assert.match(estateProfile.systemPrompt, /houseType 区分 second\/new/);
+  assert.match(estateProfile.analystGuidance ?? "", /houseType/);
 });
 
 test("工作流：需求不清时 interrupt，选择后继续 ReAct 并完成反思", async () => {
