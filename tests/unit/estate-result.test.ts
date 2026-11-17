@@ -20,7 +20,7 @@ import { buildCompareMap } from "../../src/server/estate-geo.js";
 
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/floorplan.jpg!m_fit,h_843,w_1125,l_fbk_v1,lo_0.22,f_jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/living-room.webp?x=1";
-const VR_URL = "https://vr.ke.com/#/vr?houseid=100001";
+const VR_URL = "https://realsee.com/vr/tour-100001";
 
 function detailPayload(): string {
   return [
@@ -98,6 +98,7 @@ test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入�
       户型信息: "2室1厅，出租面积90㎡，朝向南，整租",
       区位交通: "位于崂山区西韩板块测试花园小区，距离地铁站步行8分钟",
       房源亮点: "有VR，有钥匙",
+      VR链接: VR_URL,
       租赁价格: "月租金2400元/月",
     } }),
     "</100001>",
@@ -116,7 +117,7 @@ test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入�
   assert.deepEqual(rows[0], {
     id: "100001", title: "测试花园 · 2室1厅 · 90㎡", layout: "2室1厅", area: "90㎡",
     price: "月租金2400元/月", addressText: "位于崂山区西韩板块测试花园小区，距离地铁站步行8分钟",
-    community: "测试花园", vr: "https://vr.ke.com/#/vr?houseid=100001", hasVr: true,
+    community: "测试花园", vr: VR_URL, hasVr: true,
   });
   assert.equal(rows[1]?.price, "300万元");
   assert.equal(rows[1]?.area, "120㎡");
@@ -124,12 +125,20 @@ test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入�
   assert.equal(rows[1]?.vr, undefined);
 });
 
-test("VR 提取只接受 HTTPS 贝壳官方域名，并支持嵌套对象与 VR链接字段", () => {
-  const nested = JSON.stringify({ 房源资料: { VR链接: { pcUrl: "//vr.ke.com/#/vr?houseid=10002" } } });
-  assert.equal(extractEstateVrUrl(nested), "https://vr.ke.com/#/vr?houseid=10002");
-  assert.equal(extractEstateVrUrl({ vr_url: "http://vr.ke.com/#/vr?houseid=10003" }), "");
+test("有 VR 亮点但无真实链接时不拼旧模板入口", () => {
+  const raw = '<100005>' + JSON.stringify({ 摘要信息: { 户型信息: "2室1厅，出租面积80㎡", 房源亮点: "有VR", 租赁价格: "2500元/月" } }) + '</100005>';
+  const rows = extractEstateSearchListings(raw);
+  assert.equal(rows[0]?.hasVr, true);
+  assert.equal(rows[0]?.vr, undefined);
+});
+
+test("VR 提取只接受 HTTPS 官方真实域名，拒绝旧 houseid 模板", () => {
+  const nested = JSON.stringify({ 房源资料: { VR链接: { pcUrl: "//realsee.com/vr/tour-10002" } } });
+  assert.equal(extractEstateVrUrl(nested), "https://realsee.com/vr/tour-10002");
+  assert.equal(extractEstateVrUrl({ vr_url: "http://realsee.com/vr/tour-10003" }), "");
   assert.equal(extractEstateVrUrl({ vr: "https://evil.example/vr?houseid=10004" }), "");
   assert.equal(extractEstateVrUrl({ vr: "https://ke-image.ljcdn.com/frame/vr-cover.jpg" }), "");
+  assert.equal(extractEstateVrUrl({ vr: "https://vr.ke.com/#/vr?houseid=10005" }), "");
 });
 
 test("精确坐标不会触发二次 geocode，单点地图保留 marker", async () => {

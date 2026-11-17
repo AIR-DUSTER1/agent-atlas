@@ -11,8 +11,7 @@
 import { buildMapLinks, buildPointMapEmbed, type GeocodePoint } from "./estate-geo.js";
 
 const MAX_ESTATE_IMAGES = 12;
-const MAX_SEARCH_LISTINGS = 10;
-const VR_PAGE_BASE = "https://vr.ke.com/#/vr?houseid=";
+const MAX_SEARCH_LISTINGS = 50;
 const MAX_STRING_DEPTH = 12;
 const IMAGE_URL_RE = /https:\/\/[^\s"'<>\\]+?\.(?:jpe?g|png|webp|gif|avif)(?:[!?][^\s"'<>\\]*)?/gi;
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
@@ -20,7 +19,9 @@ const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
 const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
-const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com"] as const;
+const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com", "realsee.com", "realsee-cdn.cn"] as const;
+/** 旧模板会跳到如视营销首页，不能当成房源全景入口。 */
+const LEGACY_VR_PLACEHOLDER_RE = /^#\/vr\?houseid=/i;
 
 export interface EstateLocation {
   lat: number;
@@ -85,6 +86,7 @@ function normalizeEstateVrUrl(raw: string): string {
     const host = url.hostname.toLowerCase();
     if (!VR_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) return "";
     if (VR_IMAGE_RE.test(url.pathname)) return "";
+    if ((host === "vr.ke.com" || host === "www.realsee.com") && url.pathname === "/" && LEGACY_VR_PLACEHOLDER_RE.test(url.hash)) return "";
     return url.toString();
   } catch {
     return "";
@@ -213,7 +215,9 @@ export function extractEstateSearchListings(data: unknown): EstateSearchListing[
       || firstMatchText(traffic, /板块\s*([^，,。]+?)小区/)
       || firstMatchText(traffic, /小区\s*([^，,。]+)/);
     const hasVr = VR_POSITIVE_RE.test(body);
-    const vr = extractEstateVrUrl(body) || (hasVr ? VR_PAGE_BASE + encodeURIComponent(id) : "");
+    // 「有VR」只是搜索亮点，不代表 material 返回了可打开的全景地址。
+    // 缺 URL 时保留 hasVr 供 UI 诚实标注，禁止凭 houseId 拼旧模板跳营销页。
+    const vr = extractEstateVrUrl(body);
     const title = [community, layout, area].filter(Boolean).join(" · ") || "房源 " + id;
     rows.push({
       id,

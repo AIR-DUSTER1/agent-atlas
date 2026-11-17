@@ -10,7 +10,7 @@
  *   - house_appoint（预约带看）/ house_contact（加微经纪人）是「对外动作」，
  *     在 agent/approvals.ts 的 estate profile 策略登记，执行前必须人工审批
  *   - 运行结果统一 JSON 字符串：模型读全文，前端按工具名渲染专属卡片
- *     （房源列表卡 / 地图卡 / 户型图卡 —— 见 public/app.js updateToolCard）
+ *     （房源列表卡 / 地图卡 / 户型图卡 —— 见 client/views/estate.ts）
  */
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
@@ -19,7 +19,11 @@ import {
   houseContact, houseAppoint, buildCompareMap, GEOCODE_LIMITS,
 } from "./server/estate.js";
 import { extractEstateSearchListings, extractEstateVrUrl, normalizeEstateDetail, normalizeEstateMaterial } from "./server/estate-result.js";
+import { writeEstateWorkbook, type EstateWorkbookListing } from "./server/estate-workbook.js";
 import { isPluginEnabled } from "./plugin-state.js";
+
+/** 结论表一次最多展示 12 套；超出部分必须通过 Excel 对比清单交付。 */
+export const ESTATE_RECOMMENDATION_LIMIT = 12;
 
 /** 通用收尾：把 estate.ts 的 BeikeOutcome 压成模型的最终工具结果字符串 */
 function finalize(outcome: {
@@ -62,7 +66,29 @@ function badArgs(message: string): string {
 /** 把 CLI 返回里的候选数组抽出来，映射成前端友好字段（宽松键名匹配）：
  *  贝壳 CLI 输出形状未公开文档化，按 list/houses 等常见键名取数组；取不到
  *  就整体原样返回（模型仍可总结，前端降级只显示原始 JSON）。 */
-function extractListings(data: unknown): Array<{ id?: string; title?: string; price?: string; area?: string; url?: string; cover?: string; addressText?: string; vr?: string }> {
+interface EstateToolListing {
+  id?: string;
+  houseId?: string;
+  title?: string;
+  community?: string;
+  layout?: string;
+  price?: string;
+  rent?: string;
+  area?: string;
+  floor?: string;
+  orientation?: string;
+  decoration?: string;
+  url?: string;
+  detailUrl?: string;
+  cover?: string;
+  addressText?: string;
+  address?: string;
+  vr?: string;
+  vrUrl?: string;
+  hasVr?: boolean;
+}
+
+function extractListings(data: unknown): EstateToolListing[] {
   if (!data || typeof data !== "object") return [];
   const root = data as Record<string, unknown>;
   const buckets: Array<Record<string, unknown>> = [];
@@ -83,14 +109,21 @@ function extractListings(data: unknown): Array<{ id?: string; title?: string; pr
     }
     return undefined;
   };
-  return buckets.slice(0, 8).map((o) => {
+  return buckets.slice(0, 50).map((o) => {
     const vr = extractEstateVrUrl(o);
     return {
       id: pick(o, ["id", "houseId", "house_id", "houseid", "hsId"]),
       title: pick(o, ["title", "name", "houseName"]),
+      community: pick(o, ["community", "communityName", "xiaoqu", "resblockName"]),
+      layout: pick(o, ["layout", "houseType", "roomType"]),
       price: pick(o, ["price", "totalPrice", "total_price", "zongjia", "priceDesc", "rent"]),
+      rent: pick(o, ["rent", "rentPrice", "monthPrice"]),
       area: pick(o, ["area", "surface", "square", "mianji", "areaDesc"]),
+      floor: pick(o, ["floor", "floorInfo", "floorDesc"]),
+      orientation: pick(o, ["orientation", "direction"]),
+      decoration: pick(o, ["decoration", "decorationDesc", "fitment"]),
       url: pick(o, ["url", "link", "detailUrl", "detail_url", "pageUrl"]),
+      detailUrl: pick(o, ["detailUrl", "detail_url", "pageUrl"]),
       cover: pick(o, ["cover", "img", "image", "pic", "coverPic", "thumb"]),
       addressText: pick(o, ["addressText", "address", "position", "communityName", "xiaoqu"]),
       ...(vr ? { vr } : {}),
@@ -137,14 +170,29 @@ export const houseSearchTool = tool(
     const r = await houseSearch(mode, city.trim(), effectiveQuery, houseType ?? undefined);
     if (!r.ok) return JSON.stringify({ error: r.error });
     const objectListings = extractListings(r.data);
-    const listings = objectListings.length ? objectListings : extractEstateSearchListings(r.data);
+    const listings: EstateToolListing[] = objectListings.length ? objectListings : extractEstateSearchListings(r.data);
     // 抽不出结构化字段 → 原样给模型（前端降级显示原始 JSON）
     if (!listings.length) return finalize(r);
+    let excel: Awaited<ReturnType<typeof writeEstateWorkbook>> | undefined;
+    let excelError = "";
+    if (listings.length > ESTATE_RECOMMENDATION_LIMIT) {
+      try {
+        excel = await writeEstateWorkbook(listings as EstateWorkbookListing[], {
+          mode, city: city.trim(), query: effectiveQuery,
+        });
+      } catch (err) {
+        excelError = `候选超过 ${ESTATE_RECOMMENDATION_LIMIT} 套，但 Excel 生成失败：${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
     return JSON.stringify({
       action: "search", mode, city: city.trim(), query: effectiveQuery, requestedQuery,
       ...(resolvedNear ? { near: resolvedNear } : {}),
       ...(resolvedRadiusKm !== undefined ? { radiusKm: resolvedRadiusKm } : {}),
-      count: listings.length, listings,
+      recommendationLimit: ESTATE_RECOMMENDATION_LIMIT,
+      count: listings.length,
+      ...(excel ? { excel } : {}),
+      ...(excelError ? { excelError } : {}),
+      listings,
     });
   },
   {
@@ -166,7 +214,64 @@ export const houseSearchTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 2. house_lookup：详情 / 户型图 / 小区 / 板块 / 地名消歧
+// 2. house_export：超过 12 套时的完整候选 Excel（本地生成，不改外部世界）
+// ---------------------------------------------------------------------------
+const estateExportListingSchema = z.object({
+  houseId: z.string().regex(/^\d{6,}$/, "houseId 必须是 house_search/house_lookup 真实返回的数字 ID"),
+  title: z.string().optional().describe("房源标题，优先复制工具返回"),
+  community: z.string().optional().describe("小区名"),
+  layout: z.string().optional().describe("户型，如 2室1厅"),
+  area: z.string().optional().describe("面积"),
+  price: z.string().optional().describe("租金或总价"),
+  floor: z.string().optional().describe("楼层"),
+  orientation: z.string().optional().describe("朝向"),
+  decoration: z.string().optional().describe("装修"),
+  address: z.string().optional().describe("地址或区位"),
+  matchReason: z.string().optional().describe("这套房为何适合用户的简短匹配说明"),
+  hasVr: z.boolean().optional().describe("搜索亮点是否标记有 VR；没有真实 URL 不代表可打开"),
+  vrUrl: z.string().optional().describe("只填工具返回的真实 VR 链接，禁止按 houseId 拼地址"),
+  detailUrl: z.string().optional().describe("只填工具返回的真实详情链接"),
+});
+
+export const houseExportTool = tool(
+  async ({ mode, city, query, listings }) => {
+    if (!isPluginEnabled("estate")) return badArgs("找房数据源插件已停用，请先在「设置 → 插件」中启用。");
+    if (!city?.trim()) return badArgs("city 不能为空");
+    if (listings.length <= ESTATE_RECOMMENDATION_LIMIT) {
+      return badArgs(`只有超过 ${ESTATE_RECOMMENDATION_LIMIT} 套合适候选时才生成 Excel；当前 ${listings.length} 套请直接用结论表展示`);
+    }
+    try {
+      const excel = await writeEstateWorkbook(listings, { mode, city: city.trim(), query: query?.trim() });
+      return JSON.stringify({
+        action: "export",
+        ok: true,
+        count: excel.count,
+        excel,
+        note: `完整候选已写入 ${excel.fileName}；聊天结论只展示前 ${ESTATE_RECOMMENDATION_LIMIT} 套，并保留 Excel 下载入口。`,
+      });
+    } catch (err) {
+      return JSON.stringify({ error: `Excel 对比清单生成失败：${err instanceof Error ? err.message : String(err)}` });
+    }
+  },
+  {
+    name: "house_export",
+    description:
+      "把本轮筛出的合适房源写成 Excel 对比清单（本地文件，不对外发送）。" +
+      `何时用：Agent 汇总多轮搜索/详情后，合适候选超过 ${ESTATE_RECOMMENDATION_LIMIT} 套，必须调用；` +
+      `不超过 ${ESTATE_RECOMMENDATION_LIMIT} 套时不要调用。listings 只复制 house_search / house_lookup 的真实返回，` +
+      "禁止编造 houseId、价格、VR 或详情链接；内部 ID 不会写入用户可见表格。",
+    schema: z.object({
+      mode: z.enum(["buy", "rent"]).describe("业务方向"),
+      city: z.string().describe("城市名"),
+      query: z.string().optional().describe("本轮筛选条件摘要，用于文件和审计上下文"),
+      listings: z.array(estateExportListingSchema).min(ESTATE_RECOMMENDATION_LIMIT + 1).max(100)
+        .describe(`完整的合适候选；数量 ${ESTATE_RECOMMENDATION_LIMIT + 1}-100`),
+    }),
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 3. house_lookup：详情 / 户型图 / 小区 / 板块 / 地名消歧
 // ---------------------------------------------------------------------------
 export const houseLookupTool = tool(
   async ({ action, mode, city, query, houseId }) => {
@@ -212,7 +317,7 @@ export const houseLookupTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 3. house_market：行情 / 成交 / 榜单 / 学区 / 政策
+// 4. house_market：行情 / 成交 / 榜单 / 学区 / 政策
 // ---------------------------------------------------------------------------
 export const houseMarketTool = tool(
   async ({ action, mode, city, query }) => {
@@ -244,7 +349,7 @@ export const houseMarketTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 4. house_map：对比区位 → 前端在聊天里渲染地图卡（iframe + 直达链接）
+// 5. house_map：对比区位 → 前端直接渲染原生地图瓦片与直达链接
 // ---------------------------------------------------------------------------
 export const houseMapTool = tool(
   async ({ city, items }) => {
@@ -302,7 +407,7 @@ export const houseMapTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 5. house_agents：经纪人检索 / 详情
+// 6. house_agents：经纪人检索 / 详情
 // ---------------------------------------------------------------------------
 export const houseAgentsTool = tool(
   async ({ mode, action, city, query, agentUcid }) => {
@@ -331,7 +436,7 @@ export const houseAgentsTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 6. house_appoint：预约带看（高风险 → 人工审批）
+// 7. house_appoint：预约带看（高风险 → 人工审批）
 // ---------------------------------------------------------------------------
 export const houseAppointTool = tool(
   async ({ houseId, date, start, end }) => {
@@ -355,7 +460,7 @@ export const houseAppointTool = tool(
 );
 
 // ---------------------------------------------------------------------------
-// 7. house_contact：获取经纪人企微二维码（高风险 → 人工审批，对外发起联系）
+// 8. house_contact：获取经纪人企微二维码（高风险 → 人工审批，对外发起联系）
 // ---------------------------------------------------------------------------
 export const houseContactTool = tool(
   async ({ mode, city, agentUcid, reason, biz }) => {
@@ -383,6 +488,6 @@ export const houseContactTool = tool(
 );
 
 export const estateTools = [
-  houseSearchTool, houseLookupTool, houseMarketTool, houseMapTool,
+  houseSearchTool, houseExportTool, houseLookupTool, houseMarketTool, houseMapTool,
   houseAgentsTool, houseAppointTool, houseContactTool,
 ];

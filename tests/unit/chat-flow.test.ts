@@ -143,6 +143,8 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.match(app, /openMediaPreview/);
   assert.match(app, /conclusion-map-preview-trigger/);
   assert.match(app, /conclusion-image-open/);
+  assert.match(app, /conclusion-export-link/);
+  assert.match(app, /conclusion-vr-pending/);
   assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
   assert.match(app, /h\("details", \{ class: "tool-group" \}/);
   assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
@@ -151,6 +153,7 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.match(css, /\.conclusion-table\s*\{/);
   assert.match(css, /#media-preview-mask\s*\{/);
   assert.match(css, /\.conclusion-map-preview-trigger\s*\{/);
+  assert.match(css, /\.conclusion-export-bar\s*\{/);
   assert.doesNotMatch(app, /其他户型图/);
 });
 
@@ -230,7 +233,7 @@ const DETAIL_MAP = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4
 const MAP_MULTI = "https://www.openstreetmap.org/export/embed.html?bbox=1,2,3,4&layer=mapnik";
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/a.jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/b.webp";
-const VR_URL = "https://vr.ke.com/#/vr?houseid=10001";
+const VR_URL = "https://realsee.com/vr/tour-10001";
 
 function estateToolPart(id: string, name: string, payload: unknown): ToolPart {
   return {
@@ -301,14 +304,14 @@ test("结论表按最终回答选择房源，并让已查询户型图跟房走",
   assert.deepEqual(media.properties.find((property) => property.houseId === "103154626720")?.images.map((image) => image.src), [IMAGE_ONE]);
 });
 
-test("结论表识别简写租金并按小区匹配，同时从有VR标记生成官方入口", () => {
+test("结论表识别简写租金，并只把真实 VR 链接放入结论", () => {
   const listings = [
     { id: "103155521758", title: "高科园居民一 · 2室1厅 · 91㎡", price: "2200元/月", area: "91㎡" },
-    { id: "103155465087", title: "大埠东 · 3室1厅 · 90㎡", price: "2200元/月", area: "90㎡", vr: true },
-    { id: "103155360793", title: "大埠东 · 3室1厅 · 90㎡", price: "2500元/月", area: "90㎡", vr: true },
-    { id: "103155521674", title: "竹韵山色 · 2室1厅 · 95㎡", price: "3100元/月", area: "95㎡", vr: true },
-    { id: "103155512461", title: "金光丽园 · 2室1厅 · 84㎡", price: "3000元/月", area: "84㎡", vr: true },
-    { id: "103155073965", title: "蒙地卡罗 · 3室1厅 · 95㎡", price: "2500元/月", area: "95㎡", vr: true },
+    { id: "103155465087", title: "大埠东 · 3室1厅 · 90㎡", price: "2200元/月", area: "90㎡", hasVr: true },
+    { id: "103155360793", title: "大埠东 · 3室1厅 · 90㎡", price: "2500元/月", area: "90㎡", hasVr: true },
+    { id: "103155521674", title: "竹韵山色 · 2室1厅 · 95㎡", price: "3100元/月", area: "95㎡", hasVr: true },
+    { id: "103155512461", title: "金光丽园 · 2室1厅 · 84㎡", price: "3000元/月", area: "84㎡", hasVr: true },
+    { id: "103155073965", title: "蒙地卡罗 · 3室1厅 · 95㎡", price: "2500元/月", area: "95㎡", hasVr: true },
   ];
   const answer = "首选大埠东 90㎡ 三室 ¥2,200/月；其余候选大埠东 90㎡ 精装 ¥2,500、竹韵山色 95㎡ ¥3,100、金光丽园 84㎡ ¥3,000；高科园居民一 91㎡ ¥2,200。";
   const media = collectEstateConclusionMedia([
@@ -321,8 +324,49 @@ test("结论表识别简写租金并按小区匹配，同时从有VR标记生成
     "金光丽园 · 2室1厅 · 84㎡",
     "竹韵山色 · 2室1厅 · 95㎡",
   ]);
-  assert.equal(media.properties[1]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155465087");
-  assert.equal(media.properties[4]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155521674");
+  assert.equal(media.properties[1]?.vrUrl, undefined);
+  assert.equal(media.properties[1]?.hasVr, true);
+  assert.equal(media.properties[4]?.vrUrl, undefined);
+  assert.equal(media.properties[4]?.hasVr, true);
+});
+
+test("结论表最多展示 12 套并收集 Excel 下载入口", () => {
+  const listings = Array.from({ length: 15 }, (_, index) => ({
+    id: `10315552${String(index).padStart(4, "0")}`,
+    title: `测试小区 · 2室1厅 · ${80 + index}㎡`,
+    price: `${2200 + index * 100}元/月`,
+    area: `${80 + index}㎡`,
+  }));
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-many", "house_search", {
+      action: "search",
+      count: listings.length,
+      listings,
+      excel: {
+        fileName: "房源对比_青岛_租房_20261117_120000.xlsx",
+        downloadUrl: "/api/estate/exports/123e4567-e89b-42d3-a456-426614174000",
+        count: listings.length,
+      },
+    }),
+  ]);
+  assert.equal(media.properties.length, 12);
+  assert.equal(media.exports.length, 1);
+  assert.equal(media.exports[0]?.count, 15);
+  assert.match(media.exports[0]?.downloadUrl || "", /^\/api\/estate\/exports\//);
+});
+
+test("手工 house_export 结果同样成为结论下载入口", () => {
+  const media = collectEstateConclusionMedia([
+    estateToolPart("export", "house_export", {
+      action: "export",
+      excel: {
+        fileName: "房源对比_青岛_买房_20261117_120000.xlsx",
+        downloadUrl: "/api/estate/exports/223e4567-e89b-42d3-a456-426614174000",
+        count: 18,
+      },
+    }),
+  ]);
+  assert.equal(media.exports[0]?.count, 18);
 });
 
 test("无房产媒体时不生成结论附件", () => {
@@ -415,7 +459,8 @@ test("历史原始 detail/material 结果也能按房源匹配表格、户型图
   assert.equal(media.properties[0]?.houseId, "103155273255");
   assert.equal(media.properties[0]?.title, "左岸风度 · 2室2厅 · 90㎡");
   assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE]);
-  assert.equal(media.properties[0]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155273255");
+  assert.equal(media.properties[0]?.vrUrl, undefined);
+  assert.notEqual(media.properties[0]?.hasVr, true);
   assert.equal(media.properties[0]?.location?.lat, 36.123971);
   assert.equal(media.properties[0]?.location?.lng, 120.421197);
 });

@@ -102,7 +102,7 @@ import {
 } from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
-import { handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
+import { handleEstateExport, handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
@@ -533,6 +533,8 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/rag/clear" && req.method === "POST") { await handleClearRag(res, req); return; }
 
     // 房产 Agent（贝壳 CLI）
+    const estateExportMatch = pathname.match(/^\/api\/estate\/exports\/([0-9a-f-]{36})$/i);
+    if (estateExportMatch && req.method === "GET") { await handleEstateExport(res, estateExportMatch[1]!); return; }
     if (pathname === "/api/estate" && req.method === "GET") { await handleGetEstate(res); return; }
     if (pathname === "/api/estate/install" && req.method === "POST") { await handleInstallBeike(res, req); return; }
     if (pathname === "/api/estate/login" && req.method === "POST") { await handleStartBeikeLogin(res, req); return; }

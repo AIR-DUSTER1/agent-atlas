@@ -11,6 +11,7 @@ import {
   collectEstateConclusionMedia,
   collectEstateHouseIds,
   stripEstateHouseIds,
+  type ConclusionExport,
   type ConclusionImage,
   type ConclusionPoint,
   type ConclusionProperty,
@@ -75,6 +76,28 @@ function renderLinks(links: Record<string, string> | undefined, preferredKey?: s
     }, MAP_LINK_LABELS[label] || label));
   }
   return row.childElementCount ? row : null;
+}
+
+function renderExports(exports: ConclusionExport[]): HTMLElement | null {
+  if (!exports.length) return null;
+  const bar = h("div", { class: "conclusion-export-bar" });
+  for (const item of exports) {
+    const href = safeHref(item.downloadUrl);
+    if (!href) continue;
+    bar.appendChild(h("a", {
+      class: "conclusion-export-link",
+      href,
+      download: item.fileName,
+      "aria-label": `下载 ${item.fileName}，共 ${item.count} 套房源`,
+    },
+      icon("Download", { size: 15 }),
+      h("span", { class: "conclusion-export-copy" },
+        h("strong", null, "下载 Excel 对比清单"),
+        h("small", null, `${item.count} 套完整候选 · ${item.fileName}`),
+      ),
+    ));
+  }
+  return bar.childElementCount ? bar : null;
 }
 
 function coordinatesFromEmbed(raw: string): { lat: number; lng: number } | null {
@@ -312,6 +335,11 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
         rel: "noopener noreferrer",
         "aria-label": `${property.title || property.community || "房源"} VR 看房`,
       }, icon("Eye", { size: 14 }), h("span", null, "VR 看房")));
+    } else if (property.hasVr) {
+      facts.appendChild(h("span", {
+        class: "conclusion-vr-pending",
+        title: "搜索亮点标记有 VR，但素材接口没有返回可打开的全景链接",
+      }, "有 VR 标记 · 专属入口未返回"));
     }
     row.appendChild(facts);
     row.appendChild(renderImageCell(property));
@@ -365,21 +393,24 @@ function renderImages(images: ConclusionImage[]): HTMLElement | null {
 
 function renderConclusion(media: EstateConclusionMedia): HTMLElement {
   const hasTable = media.properties.length > 0;
+  const hasExports = media.exports.length > 0;
   const hasVr = media.properties.some((property) => Boolean(property.vrUrl));
   const section = h("section", {
     class: "conclusion-media",
     "aria-label": "本轮结论中的房源对比表",
   },
     h("div", { class: "conclusion-media-head" },
-      h("span", { class: "conclusion-media-icon" }, icon(hasTable ? "House" : "MapPin", { size: 14 })),
+      h("span", { class: "conclusion-media-icon" }, icon(hasTable || hasExports ? "House" : "MapPin", { size: 14 })),
       h("div", { class: "conclusion-media-copy" },
-        h("strong", null, hasTable ? "推荐房源对比" : "结论附图：位置与户型"),
+        h("strong", null, hasTable ? "推荐房源对比" : hasExports ? "房源对比清单" : "结论附图：位置与户型"),
         h("span", null, hasTable
-          ? `按月租从低到高；${hasVr ? "户型图、VR 与位置" : "户型图与位置"}按房源自动匹配；内部编号已隐藏`
-          : "地图与图片直接来自本轮工具结果"),
+          ? `最多展示 12 套${hasExports ? "，完整候选已写入 Excel" : ""}；${hasVr ? "真实 VR" : "户型图"}与位置按房源自动匹配；内部编号已隐藏`
+          : hasExports ? "完整候选已写入 Excel，可直接下载后继续筛选比对" : "地图与图片直接来自本轮工具结果"),
       ),
     ),
   );
+  const exports = renderExports(media.exports);
+  if (exports) section.appendChild(exports);
   if (hasTable) {
     const { table, mappedLocations } = renderPropertyTable(media);
     section.appendChild(table);
@@ -415,7 +446,7 @@ export function refreshConclusionMedia(block: AssistantBlock): void {
     return;
   }
   const media = collectEstateConclusionMedia(block.parts, textPart.text);
-  if (!media.mapEmbedUrl && !media.points.length && !media.images.length && !media.properties.length) {
+  if (!media.mapEmbedUrl && !media.points.length && !media.images.length && !media.properties.length && !media.exports.length) {
     removeConclusion(block, body);
     return;
   }

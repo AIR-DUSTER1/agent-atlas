@@ -6,13 +6,24 @@
  * 服务端按规定从 tests/helpers 启动（临时端口 + 临时 journal / 配置文件）。
  */
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { startServer, type RunningServer } from "../helpers/server.js";
+import { writeEstateWorkbook } from "../../src/server/estate-workbook.js";
 
 let srv: RunningServer;
+let estateExportDir = "";
 
-before(async () => { srv = await startServer(); });
-after(async () => { await srv?.stop(); });
+before(async () => {
+  estateExportDir = await mkdtemp(join(tmpdir(), "agentatlas-estate-http-"));
+  srv = await startServer({ ESTATE_EXPORT_DIR: estateExportDir });
+});
+after(async () => {
+  await srv?.stop();
+  if (estateExportDir) await rm(estateExportDir, { recursive: true, force: true });
+});
 
 async function json(path: string, init?: RequestInit): Promise<{ status: number; body: any }> {
   const res = await fetch(srv.base + path, init);
@@ -85,6 +96,33 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   const activeModel = activeProvider?.models.find((model: { active: boolean }) => model.active);
   assert.equal(activeModel?.contextWindow, 200_000);
   assert.equal(activeModel?.contextWindowSource, "default");
+});
+
+test("Excel 对比清单通过同源认证接口下载，文件名与 XLSX 类型正确", async () => {
+  const previous = process.env.ESTATE_EXPORT_DIR;
+  process.env.ESTATE_EXPORT_DIR = estateExportDir;
+  try {
+    const artifact = await writeEstateWorkbook(
+      Array.from({ length: 13 }, (_, index) => ({
+        houseId: `10315553${String(index).padStart(4, "0")}`,
+        title: `下载验证小区 · 2室1厅 · ${80 + index}㎡`,
+        community: "下载验证小区",
+        layout: "2室1厅",
+        area: `${80 + index}㎡`,
+        price: `${2300 + index * 100}元/月`,
+      })),
+      { mode: "rent", city: "青岛", query: "下载接口" },
+    );
+    const res = await fetch(srv.base + artifact.downloadUrl);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") || "", /spreadsheetml\.sheet/);
+    assert.match(res.headers.get("content-disposition") || "", /filename\*=UTF-8''/);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.equal(bytes.subarray(0, 2).toString("utf8"), "PK");
+  } finally {
+    if (previous === undefined) delete process.env.ESTATE_EXPORT_DIR;
+    else process.env.ESTATE_EXPORT_DIR = previous;
+  }
 });
 
 test("地图静态代理按 provider 明确报缺失 Key，服务端字段不下发前端", async () => {

@@ -6,6 +6,7 @@
  */
 import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { getEstatePublic, installBeike, saveBeikeKey, startBeikeLogin } from "../estate.js";
+import { readEstateExport } from "../estate-workbook.js";
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -69,4 +70,23 @@ export async function handleStartBeikeLogin(
     if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
     sendJson(res, 500, { ok: false, url: "", opened: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** GET /api/estate/exports/:id —— 下载候选对比 Excel；只接受 UUID，路径由服务端固定拼接。 */
+export async function handleEstateExport(
+  res: import("node:http").ServerResponse,
+  id: string,
+): Promise<void> {
+  const file = await readEstateExport(id);
+  if (!file) {
+    sendJson(res, 404, { error: "Excel 对比文件不存在或已清理，请重新生成" });
+    return;
+  }
+  const asciiName = `estate-comparison-${id.slice(0, 8)}.xlsx`;
+  res.writeHead(200, {
+    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Length": file.data.length,
+    "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+  });
+  res.end(file.data);
 }

@@ -9,14 +9,16 @@
 import type { AssistantPart } from "./types.js";
 
 const MAX_CONCLUSION_IMAGES = 6;
-const MAX_CONCLUSION_PROPERTIES = 5;
+const MAX_CONCLUSION_PROPERTIES = 12;
 const MAX_CONCLUSION_POINTS = 8;
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
 const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
 const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
-const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com"] as const;
+const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com", "realsee.com", "realsee-cdn.cn"] as const;
+const LEGACY_VR_PLACEHOLDER_RE = /^#\/vr\?houseid=/i;
+const ESTATE_EXPORT_PATH_RE = /^\/api\/estate\/exports\/[0-9a-f-]{36}$/i;
 
 export interface ConclusionPoint {
   name: string;
@@ -38,6 +40,7 @@ export interface ConclusionImage {
 export interface ConclusionProperty {
   houseId: string;
   title: string;
+  hasVr?: boolean;
   community?: string;
   layout?: string;
   area?: string;
@@ -51,12 +54,19 @@ export interface ConclusionProperty {
   vrUrl?: string;
 }
 
+export interface ConclusionExport {
+  fileName: string;
+  downloadUrl: string;
+  count: number;
+}
+
 export interface EstateConclusionMedia {
   mapEmbedUrl: string;
   mapTitle: string;
   points: ConclusionPoint[];
   images: ConclusionImage[];
   properties: ConclusionProperty[];
+  exports: ConclusionExport[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -98,6 +108,7 @@ function safeVrUrl(raw: unknown): string {
     const host = url.hostname.toLowerCase();
     if (!VR_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) return "";
     if (VR_IMAGE_RE.test(url.pathname)) return "";
+    if ((host === "vr.ke.com" || host === "www.realsee.com") && url.pathname === "/" && LEGACY_VR_PLACEHOLDER_RE.test(url.hash)) return "";
     return url.toString();
   } catch {
     return "";
@@ -129,12 +140,6 @@ function vrUrlFrom(value: unknown, hinted = false, depth = 0): string {
     if (hit) return hit;
   }
   return "";
-}
-
-/** 搜索块只给「有VR」而没有 URL 时，用官方页面模板生成可核对入口。 */
-function inferVrUrlFromHint(houseId: string, hint: unknown): string {
-  if (!houseId || (hint !== true && !VR_POSITIVE_RE.test(rawText(hint)))) return "";
-  return safeVrUrl(`https://vr.ke.com/#/vr?houseid=${encodeURIComponent(houseId)}`);
 }
 
 function inferHouseId(raw: string): string {
@@ -252,7 +257,7 @@ function propertyCommunity(property: ConclusionProperty): string {
 
 /**
  * 最终回答是用户真正看到的结论。只有同一句中同时命中面积、户型和/或租金的
- * 房源才优先进入表格，防止搜索前五条挤掉模型最终推荐的房源。
+ * 房源才优先进入表格，防止搜索前几条挤掉模型最终推荐的房源。
  */
 function propertyMentionScore(property: ConclusionProperty, segments: string[], knownCommunities: string[]): number {
   const titleArea = firstMatch(property.title, /([\d.]+\s*(?:㎡|平|m²))/i);
@@ -308,9 +313,11 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
     const traffic = field(body, ["区位交通"]);
     const community = firstMatch(traffic, /板块\s*([^，,。]+?)小区/)
       || firstMatch(traffic, /小区\s*([^，,。]+)/);
-    const vrUrl = vrUrlFrom(body) || inferVrUrlFromHint(houseId, body);
+    const vrUrl = vrUrlFrom(body);
+    const hasVr = VR_POSITIVE_RE.test(body);
     rows.push({
       houseId,
+      hasVr,
       ...(community ? { community } : {}),
       ...(layout ? { layout } : {}),
       ...(area ? { area } : {}),
@@ -336,10 +343,12 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
     const area = text(record?.area);
     const address = text(record?.addressText) || text(record?.address);
     const community = text(record?.community) || text(record?.communityName) || firstMatch(title, /^([^·]+)\s*·/);
-    const vrHint = record?.hasVr ?? record?.has_vr ?? record?.vr;
-    const vrUrl = vrUrlFrom(record) || inferVrUrlFromHint(houseId, vrHint);
+    const vrHint = record?.hasVr ?? record?.has_vr ?? (record?.vr === true ? true : undefined);
+    const vrUrl = vrUrlFrom(record);
+    const hasVr = vrHint === true || VR_POSITIVE_RE.test(rawText(vrHint)) || Boolean(vrUrl);
     rows.push({
       houseId,
+      hasVr,
       ...(community ? { community } : {}),
       ...(title ? { title } : {}),
       ...(rent ? { rent } : {}),
@@ -361,8 +370,10 @@ function factsFromDetail(data: unknown): Partial<ConclusionProperty> {
   const orientation = field(raw, ["出租朝向"]);
   const decoration = field(raw, ["装修"]);
   const vrUrl = vrUrlFrom(data);
+  const hasVr = /"是否有VR"\s*:\s*"有"/.test(raw) || Boolean(vrUrl);
   return {
     ...(community ? { community } : {}),
+    ...(hasVr ? { hasVr } : {}),
     ...(layout ? { layout } : {}),
     ...(area ? { area } : {}),
     ...(rent ? { rent } : {}),
@@ -411,7 +422,23 @@ function mergeProperty(
     const value = text(patch[key]);
     if (value) row[key] = value;
   }
+  if (typeof patch.hasVr === "boolean") row.hasVr = patch.hasVr;
   if (patch.location) row.location = patch.location;
+}
+
+function conclusionExportFrom(payload: Record<string, unknown>): ConclusionExport | null {
+  const raw = asRecord(payload.excel) ?? (text(payload.action) === "export" ? payload : null);
+  if (!raw) return null;
+  const downloadUrl = text(raw.downloadUrl);
+  if (!ESTATE_EXPORT_PATH_RE.test(downloadUrl)) return null;
+  const fileName = text(raw.fileName).toLowerCase().endsWith(".xlsx")
+    ? text(raw.fileName)
+    : "房源对比清单.xlsx";
+  return {
+    fileName,
+    downloadUrl,
+    count: Math.max(0, Math.floor(number(raw.count) ?? 0)),
+  };
 }
 
 /** 解析并去重；详情地图优先，其次 house_map 的多点分布图。 */
@@ -426,6 +453,8 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
   const imagesByHouse = new Map<string, ConclusionImage[]>();
   const imageSeenByHouse = new Map<string, Set<string>>();
   const locationsByHouse = new Map<string, ConclusionPoint>();
+  const exports: ConclusionExport[] = [];
+  const exportSeen = new Set<string>();
   const propertyRows = new Map<string, ConclusionProperty>();
   const propertyOrder: string[] = [];
   const examinedHouseIds = new Set<string>();
@@ -460,6 +489,11 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
     const action = text(payload.action);
     const raw = rawText(payload.data);
     const houseId = text(payload.houseId) || inferHouseId(raw) || undefined;
+    const exportArtifact = conclusionExportFrom(payload);
+    if (exportArtifact && !exportSeen.has(exportArtifact.downloadUrl)) {
+      exportSeen.add(exportArtifact.downloadUrl);
+      exports.push(exportArtifact);
+    }
 
     if (action === "search") {
       const listings = parseListingObjects(payload.listings);
@@ -530,7 +564,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
   const candidates: ConclusionProperty[] = [];
   for (const id of propertyOrder) {
     const row = propertyRows.get(id);
-    if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl)) continue;
+    if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl && !row.hasVr)) continue;
     row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
     row.location = row.location || locationsByHouse.get(id);
     if (!row.title) row.title = propertyTitle(row.community || "", row.layout || "", row.area || "");
@@ -561,6 +595,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
     points,
     images,
     properties,
+    exports,
   };
 }
 

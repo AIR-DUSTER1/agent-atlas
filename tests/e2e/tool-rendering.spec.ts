@@ -255,7 +255,7 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
       houseId: "103155273255",
       images: [image],
       count: 1,
-      vr: "https://vr.ke.com/#/vr?houseid=103155273255",
+      vr: "https://realsee.com/vr/tour-103155273255",
       presentation: { images: 1, vr: true },
     };
     const parts = [detail, material].map((payload, index) => ({
@@ -367,7 +367,7 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(result.mapMarker).toBe(true);
   expect(result.mapTileSrc).toContain("is.autonavi.com/appmaptile?style=8");
   expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
-  expect(result.vrHref).toBe("https://vr.ke.com/#/vr?houseid=103155273255");
+  expect(result.vrHref).toBe("https://realsee.com/vr/tour-103155273255");
   expect(result.vrText).toContain("VR 看房");
   expect(result.rows).toBe(1);
   expect(result.tableText).toContain("测试花园 · 2室1厅 · 90㎡");
@@ -407,7 +407,7 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
       { id: "103155249731", title: "左岸风度 · 2室1厅 · 89㎡", price: "2700元/月", area: "89㎡" },
       { id: "103154695352", title: "左岸风度 · 2室1厅 · 107㎡", price: "2800元/月", area: "107㎡" },
       { id: "103153954713", title: "左岸风度 · 3室2厅 · 135㎡", price: "3800元/月", area: "135㎡" },
-      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡", vr: true },
+      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡", hasVr: true },
       { id: "103147225031", title: "左岸风度 · 3室2厅 · 137㎡", price: "3600元/月", area: "137㎡" },
     ];
     const parts = [
@@ -431,11 +431,13 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
     const rows = [...(table?.querySelectorAll("tbody tr") || [])];
     const targetRow = rows.find((row) => row.textContent?.includes("138㎡"));
     const targetVr = targetRow?.querySelector<HTMLAnchorElement>(".conclusion-vr-link")?.href || "";
+    const vrPending = targetRow?.querySelector(".conclusion-vr-pending")?.textContent || "";
     return {
       rowCount: rows.length,
       tableText: table?.textContent || "",
       targetImage: targetRow?.querySelector("img")?.getAttribute("src") || "",
       targetVr,
+      vrPending,
       hasOtherFloorPlanLabel: (host.textContent || "").includes("其他户型图"),
     };
   });
@@ -446,8 +448,62 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
   expect(result.tableText).toContain("135㎡");
   expect(result.tableText).not.toContain("89㎡");
   expect(result.targetImage).toMatch(/^data:image\/svg\+xml;base64,/);
-  expect(result.targetVr).toBe("https://vr.ke.com/#/vr?houseid=103154626720");
+  expect(result.targetVr).toBe("");
+  expect(result.vrPending).toContain("入口未返回");
   expect(result.hasOtherFloorPlanLabel).toBe(false);
+});
+
+test("结论表最多展示 12 套并显示 Excel 下载入口", async ({ page }) => {
+  await login(page);
+  const result = await page.evaluate(async () => {
+    const load = (specifier: string): Promise<any> => import(specifier);
+    const [{ mountPart }, clientState, events] = await Promise.all([
+      load("/render/parts.js"),
+      load("/core/state.js"),
+      load("/stream/events.js"),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const block = { t: "assistant", parts: [] } as any;
+    clientState.blockBodies.set(block, host);
+    const listings = Array.from({ length: 15 }, (_, index) => ({
+      id: `10315554${String(index).padStart(4, "0")}`,
+      title: `容量测试小区 · 2室1厅 · ${80 + index}㎡`,
+      price: `${2300 + index * 100}元/月`,
+      area: `${80 + index}㎡`,
+    }));
+    const part = {
+      p: "tool", id: "estate-export-ui", name: "house_search", argsText: "{}",
+      result: { content: JSON.stringify({
+        action: "search",
+        listings,
+        count: listings.length,
+        recommendationLimit: 12,
+        excel: {
+          fileName: "房源对比_青岛_租房_20261117_120000.xlsx",
+          downloadUrl: "/api/estate/exports/123e4567-e89b-42d3-a456-426614174000",
+          count: listings.length,
+        },
+      }), isError: false },
+    };
+    block.parts.push(part);
+    mountPart(block, part);
+    events.handleEvent({ type: "token", text: "共筛出 15 套，以下按优先级展示。", node: "agent" }, block, null);
+    events.handleEvent({ type: "done" }, block, null);
+    const conclusion = host.querySelector(".conclusion-media");
+    const exportLink = conclusion?.querySelector<HTMLAnchorElement>(".conclusion-export-link");
+    const answer = {
+      rows: conclusion?.querySelectorAll(".conclusion-table tbody tr").length || 0,
+      exportHref: exportLink?.getAttribute("href") || "",
+      exportText: exportLink?.textContent || "",
+    };
+    host.remove();
+    clientState.blockBodies.delete(block);
+    return answer;
+  });
+  expect(result.rows).toBe(12);
+  expect(result.exportHref).toBe("/api/estate/exports/123e4567-e89b-42d3-a456-426614174000");
+  expect(result.exportText).toContain("15 套完整候选");
 });
 
 test("切换地图配置后使用各提供方原生瓦片而不是 iframe", async ({ page }) => {

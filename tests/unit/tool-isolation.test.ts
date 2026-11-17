@@ -70,6 +70,7 @@ test("profile 工具集互不越界，审批项都包含在各自 allowlist 内"
   assert.ok(!estateNames.includes("write_file"));
   assert.ok(!estateNames.includes("send_email"));
   assert.ok(!estateNames.includes("retrieve_docs"));
+  assert.ok(estateNames.includes("house_export"), "超过 12 套的 Excel 对比工具必须属于房产 Agent");
 
   for (const name of Object.keys(generalProfile.approvalDescriptions)) {
     assert.ok(generalNames.includes(name), `通用审批项缺少工具：${name}`);

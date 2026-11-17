@@ -246,6 +246,9 @@ interface EstatePayload {
   url?: string;
   qrcode?: string;
   image?: string;
+  recommendationLimit?: number;
+  excel?: { fileName?: string; downloadUrl?: string; count?: number };
+  excelError?: string;
 }
 
 function estateExtra(card: HTMLElement): HTMLElement {
@@ -260,9 +263,14 @@ function linkButton(label: string, href: string): HTMLAnchorElement {
   const a = document.createElement("a");
   a.className = "estate-link";
   a.textContent = label;
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noopener";
+  const safe = safeHref(href);
+  if (safe) {
+    a.href = safe;
+    a.target = "_blank";
+    a.rel = "noopener";
+  } else {
+    a.setAttribute("aria-disabled", "true");
+  }
   return a;
 }
 
@@ -357,6 +365,17 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     return;
   }
 
+  if (data.action === "export" && data.excel?.downloadUrl) {
+    const extra = estateExtra(card);
+    const hint = document.createElement("div");
+    hint.className = "estate-conclusion-hint";
+    hint.textContent = `完整候选已写入 Excel（${data.excel.count || 0} 套），下载入口也已放进本轮结论。`;
+    const link = linkButton(`下载 ${data.excel.fileName || "房源对比清单.xlsx"}`, data.excel.downloadUrl);
+    if (data.excel.fileName) link.download = data.excel.fileName;
+    extra.append(hint, link);
+    return;
+  }
+
   // 房产交付物统一放到最终结论附件区；工具卡只保留可折叠的执行轨迹。
   if (data.action === "detail" || data.action === "map" || data.action === "material") {
     const hasMedia = data.action === "material"
@@ -397,7 +416,8 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
       title.className = "estate-extra-title";
       title.textContent = `🏙 ${data.city || ""} ${data.mode === "rent" ? "租房" : "买房"}结果 · ${listings.length} 套`;
       extra.appendChild(title);
-      for (const h of listings.slice(0, 8)) {
+      const recommendationLimit = Math.max(1, Math.min(12, Math.floor(data.recommendationLimit || 12)));
+      for (const h of listings.slice(0, recommendationLimit)) {
         const row = document.createElement("div");
         row.className = "estate-house";
         row.innerHTML = `
@@ -425,6 +445,25 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
         }
         if (!linkAdded) links?.remove();
         extra.appendChild(row);
+      }
+      if (listings.length > recommendationLimit) {
+        const overflow = document.createElement("div");
+        overflow.className = "estate-missed";
+        overflow.textContent = data.excel?.downloadUrl
+          ? `另有 ${listings.length - recommendationLimit} 套已写入 Excel，完整对比请看下载入口。`
+          : `另有 ${listings.length - recommendationLimit} 套未在结论表展开，可继续筛选或导出 Excel。`;
+        extra.appendChild(overflow);
+      }
+      if (data.excel?.downloadUrl) {
+        const excelLink = linkButton(`下载 Excel 对比清单（${data.excel.count || listings.length} 套）`, data.excel.downloadUrl);
+        if (data.excel.fileName) excelLink.download = data.excel.fileName;
+        extra.appendChild(excelLink);
+      }
+      if (data.excelError) {
+        const error = document.createElement("div");
+        error.className = "estate-missed";
+        error.textContent = data.excelError;
+        extra.appendChild(error);
       }
     } else if (data.error) {
       const miss = document.createElement("div");
