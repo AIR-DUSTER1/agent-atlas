@@ -407,7 +407,7 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
       { id: "103155249731", title: "左岸风度 · 2室1厅 · 89㎡", price: "2700元/月", area: "89㎡" },
       { id: "103154695352", title: "左岸风度 · 2室1厅 · 107㎡", price: "2800元/月", area: "107㎡" },
       { id: "103153954713", title: "左岸风度 · 3室2厅 · 135㎡", price: "3800元/月", area: "135㎡" },
-      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡" },
+      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡", vr: true },
       { id: "103147225031", title: "左岸风度 · 3室2厅 · 137㎡", price: "3600元/月", area: "137㎡" },
     ];
     const parts = [
@@ -430,10 +430,12 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
     const table = host.querySelector(".conclusion-table");
     const rows = [...(table?.querySelectorAll("tbody tr") || [])];
     const targetRow = rows.find((row) => row.textContent?.includes("138㎡"));
+    const targetVr = targetRow?.querySelector<HTMLAnchorElement>(".conclusion-vr-link")?.href || "";
     return {
       rowCount: rows.length,
       tableText: table?.textContent || "",
       targetImage: targetRow?.querySelector("img")?.getAttribute("src") || "",
+      targetVr,
       hasOtherFloorPlanLabel: (host.textContent || "").includes("其他户型图"),
     };
   });
@@ -444,6 +446,7 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
   expect(result.tableText).toContain("135㎡");
   expect(result.tableText).not.toContain("89㎡");
   expect(result.targetImage).toMatch(/^data:image\/svg\+xml;base64,/);
+  expect(result.targetVr).toBe("https://vr.ke.com/#/vr?houseid=103154626720");
   expect(result.hasOtherFloorPlanLabel).toBe(false);
 });
 

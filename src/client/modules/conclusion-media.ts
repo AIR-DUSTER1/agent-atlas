@@ -130,6 +130,12 @@ function vrUrlFrom(value: unknown, hinted = false, depth = 0): string {
   return "";
 }
 
+/** 搜索块只给「有VR」而没有 URL 时，用官方页面模板生成可核对入口。 */
+function inferVrUrlFromHint(houseId: string, hint: unknown): string {
+  if (!houseId || (hint !== true && !VR_HINT_RE.test(rawText(hint)))) return "";
+  return safeVrUrl(`https://vr.ke.com/#/vr?houseid=${encodeURIComponent(houseId)}`);
+}
+
 function inferHouseId(raw: string): string {
   return firstMatch(raw, /<(\d{6,})>/)
     || firstMatch(raw, /"?(\d{9,})"?\s*:/)
@@ -230,26 +236,39 @@ function firstNumber(value: string): string {
 /** 分句匹配，避免把回答中另一个房源的面积或租金错误套到当前房源。 */
 function normalizedAnswerSegments(answerText: string): string[] {
   return answerText
-    .replace(/[,，\s]/g, "")
-    .split(/[。；;\n]+/)
+    // 千分位逗号属于金额本身，先去掉；其它逗号、顿号是候选之间的天然边界，必须拆开。
+    .replace(/(\d)[,，](?=\d{3}(?:\D|$))/g, "$1")
+    .replace(/\s+/g, "")
+    .split(/[。；;，,\n、]+/)
     .map((segment) => segment.trim())
     .filter(Boolean);
+}
+
+/** 小区名既可能来自结构化字段，也可能藏在「小区 · 户型 · 面积」标题里。 */
+function propertyCommunity(property: ConclusionProperty): string {
+  return (property.community || firstMatch(property.title, /^([^·]+)\s*·/)).replace(/[,，\s]/g, "");
 }
 
 /**
  * 最终回答是用户真正看到的结论。只有同一句中同时命中面积、户型和/或租金的
  * 房源才优先进入表格，防止搜索前五条挤掉模型最终推荐的房源。
  */
-function propertyMentionScore(property: ConclusionProperty, segments: string[]): number {
+function propertyMentionScore(property: ConclusionProperty, segments: string[], knownCommunities: string[]): number {
   const titleArea = firstMatch(property.title, /([\d.]+\s*(?:㎡|平|m²))/i);
   const area = firstNumber(property.area || titleArea);
   if (!area) return 0;
   const rent = firstNumber(property.rent || "");
   const layout = property.layout || firstMatch(property.title, /(\d+室\d+厅)/);
+  const community = propertyCommunity(property);
   const areaRe = new RegExp(`${escapeRegExp(area)}(?:㎡|平|m²)`, "i");
-  const rentRe = rent ? new RegExp(`(?:¥|￥)?${escapeRegExp(rent)}(?:元|/月|每月)`, "i") : null;
+  // 结论常用「¥2,500」这种不带 /月的简写，也必须算命中；否则会漏掉正文里明确推荐的房源。
+  const rentRe = rent
+    ? new RegExp(`(?:(?:¥|￥)${escapeRegExp(rent)}(?=\\D|$)|${escapeRegExp(rent)}(?:元|/月|每月))`, "i")
+    : null;
   let best = 0;
   for (const segment of segments) {
+    const segmentCommunities = knownCommunities.filter((name) => segment.includes(name));
+    if (segmentCommunities.length && (!community || !segmentCommunities.some((name) => name.includes(community) || community.includes(name)))) continue;
     if (!areaRe.test(segment)) continue;
     let score = 1;
     if (rentRe?.test(segment)) score += 3;
@@ -288,7 +307,7 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
     const traffic = field(body, ["区位交通"]);
     const community = firstMatch(traffic, /板块\s*([^，,。]+?)小区/)
       || firstMatch(traffic, /小区\s*([^，,。]+)/);
-    const vrUrl = vrUrlFrom(body);
+    const vrUrl = vrUrlFrom(body) || inferVrUrlFromHint(houseId, body);
     rows.push({
       houseId,
       ...(community ? { community } : {}),
@@ -315,9 +334,12 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
     const rent = text(record?.price);
     const area = text(record?.area);
     const address = text(record?.addressText) || text(record?.address);
-    const vrUrl = vrUrlFrom(record);
+    const community = text(record?.community) || text(record?.communityName) || firstMatch(title, /^([^·]+)\s*·/);
+    const vrHint = record?.hasVr ?? record?.has_vr ?? record?.vr;
+    const vrUrl = vrUrlFrom(record) || inferVrUrlFromHint(houseId, vrHint);
     rows.push({
       houseId,
+      ...(community ? { community } : {}),
       ...(title ? { title } : {}),
       ...(rent ? { rent } : {}),
       ...(area ? { area } : {}),
@@ -515,8 +537,9 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
   }
 
   const answerSegments = normalizedAnswerSegments(answerText);
+  const knownCommunities = [...new Set(candidates.map(propertyCommunity).filter(Boolean))];
   const mentioned = candidates
-    .map((property, index) => ({ property, index, score: propertyMentionScore(property, answerSegments) }))
+    .map((property, index) => ({ property, index, score: propertyMentionScore(property, answerSegments, knownCommunities) }))
     .filter((item) => item.score >= 2)
     .sort((left, right) => right.score - left.score || rentValue(left.property) - rentValue(right.property) || left.index - right.index);
   const fallback = candidates

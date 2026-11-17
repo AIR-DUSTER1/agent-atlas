@@ -301,6 +301,30 @@ test("结论表按最终回答选择房源，并让已查询户型图跟房走",
   assert.deepEqual(media.properties.find((property) => property.houseId === "103154626720")?.images.map((image) => image.src), [IMAGE_ONE]);
 });
 
+test("结论表识别简写租金并按小区匹配，同时从有VR标记生成官方入口", () => {
+  const listings = [
+    { id: "103155521758", title: "高科园居民一 · 2室1厅 · 91㎡", price: "2200元/月", area: "91㎡" },
+    { id: "103155465087", title: "大埠东 · 3室1厅 · 90㎡", price: "2200元/月", area: "90㎡", vr: true },
+    { id: "103155360793", title: "大埠东 · 3室1厅 · 90㎡", price: "2500元/月", area: "90㎡", vr: true },
+    { id: "103155521674", title: "竹韵山色 · 2室1厅 · 95㎡", price: "3100元/月", area: "95㎡", vr: true },
+    { id: "103155512461", title: "金光丽园 · 2室1厅 · 84㎡", price: "3000元/月", area: "84㎡", vr: true },
+    { id: "103155073965", title: "蒙地卡罗 · 3室1厅 · 95㎡", price: "2500元/月", area: "95㎡", vr: true },
+  ];
+  const answer = "首选大埠东 90㎡ 三室 ¥2,200/月；其余候选大埠东 90㎡ 精装 ¥2,500、竹韵山色 95㎡ ¥3,100、金光丽园 84㎡ ¥3,000；高科园居民一 91㎡ ¥2,200。";
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-short-rent", "house_search", { action: "search", listings }),
+  ], answer);
+  assert.deepEqual(media.properties.map((property) => property.title), [
+    "高科园居民一 · 2室1厅 · 91㎡",
+    "大埠东 · 3室1厅 · 90㎡",
+    "大埠东 · 3室1厅 · 90㎡",
+    "金光丽园 · 2室1厅 · 84㎡",
+    "竹韵山色 · 2室1厅 · 95㎡",
+  ]);
+  assert.equal(media.properties[1]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155465087");
+  assert.equal(media.properties[4]?.vrUrl, "https://vr.ke.com/#/vr?houseid=103155521674");
+});
+
 test("无房产媒体时不生成结论附件", () => {
   const media = collectEstateConclusionMedia([
     estateToolPart("search", "house_search", { action: "search", listings: [{ title: "房源" }] }),
