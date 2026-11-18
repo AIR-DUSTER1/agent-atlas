@@ -12,7 +12,8 @@
 
 import { $, chatScroll, inputEl, sendBtn, setSidebarOpen, stopBtn, toggleTheme, updateThemeBtn, desktopBridge } from "./core/dom.js";
 import { api, authFetch } from "./core/api.js";
-import { APP_VERSION, LS_SESSIONS, loadLocal, saveLocal, state } from "./core/state.js";
+import { LS_SESSIONS, loadLocal, saveLocal, state } from "./core/state.js";
+import { formatBuildLabel, logBuildInfo } from "./core/build-info.js";
 import { cancelActiveDialog, showFatalBanner, uiAlert, uiConfirm, uiPrompt } from "./ui/dialog.js";
 import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
@@ -116,7 +117,7 @@ async function init(): Promise<void> {
   }
   applyConfigState(state.config);
   const footNote = $("side-foot-note");
-  if (footNote) footNote.textContent = `点击模型名可修改配置 · ${APP_VERSION.replace(/^web-\d{4}-/, "v")}`;
+  if (footNote) footNote.textContent = `点击模型名可修改配置 · ${formatBuildLabel()}`;
   await loadProjects();
   await loadExternalAgents();
   await loadRag();
@@ -536,6 +537,7 @@ function isProviderFormOpen(): boolean {
 }
 
 // 入口兜底：init 抛错时在页面上直接可见（否则所有按钮都静默失效）
+logBuildInfo();
 installClientErrorReporting();
 init().catch((err) => {
   document.documentElement.dataset.appReady = "error";

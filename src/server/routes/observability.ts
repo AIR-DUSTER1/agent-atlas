@@ -8,6 +8,12 @@ import { incCounter } from "../observability/metrics.js";
 import { log } from "../logging.js";
 import { renderMetrics } from "../observability/metrics.js";
 import { buildDiagnostics } from "../observability/diagnostics.js";
+import { BUILD_INFO } from "../build-info.js";
+
+export function handleVersion(res: ServerResponse): void {
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(BUILD_INFO));
+}
 
 export function handleMetrics(res: ServerResponse): void {
   res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8", "Cache-Control": "no-store" });
@@ -33,9 +39,11 @@ export async function handleClientError(req: IncomingMessage, res: ServerRespons
   const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
   const message = typeof body.message === "string" ? body.message.replace(/\s+/g, " ").trim().slice(0, 300) : "unknown";
   const version = typeof body.version === "string" ? body.version.slice(0, 40) : "";
+  const commit = typeof body.commit === "string" && /^[0-9a-f]{7,64}$/i.test(body.commit) ? body.commit.toLowerCase() : "";
+  const buildId = typeof body.buildId === "string" && /^[a-z]+[A-Za-z0-9._-]{1,119}$/.test(body.buildId) ? body.buildId : "";
   const view = typeof body.view === "string" && /^[a-z0-9_-]{1,60}$/i.test(body.view) ? body.view : "unknown";
   incCounter("agent_client_errors_total", { view });
-  log("warn", "client_error", { requestId, version, view, message });
+  log("warn", "client_error", { requestId, version, commit, buildId, view, message });
   res.writeHead(204, { "Cache-Control": "no-store" });
   res.end();
 }

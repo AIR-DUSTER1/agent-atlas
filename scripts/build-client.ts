@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import { buildVendors } from "./build-vendor.js";
 import { assertCspHashHtml } from "./csp-integrity.js";
 import { composeHtml } from "./compose-html.js";
+import { createBuildInfo, injectBuildInfoHtml, writeBuildInfo } from "../src/versioning.js";
 
 const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,8 +54,9 @@ async function main(): Promise<void> {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
-  // 页面先按 include 清单组装；CSP hash 必须针对最终 HTML 计算，否则片段迁移会白屏
-  const indexHtml = await composeHtml(join(SRC, "index.html"), SRC);
+  // 页面先组装并注入自动构建身份；CSP hash 必须针对最终 HTML 计算，否则片段迁移会白屏
+  const buildInfo = await createBuildInfo({ root: ROOT });
+  const indexHtml = injectBuildInfoHtml(await composeHtml(join(SRC, "index.html"), SRC), buildInfo);
   assertCspHashHtml(indexHtml);
 
   // tsc 用项目本地版本：直接调 node_modules 里的 tsc，避免 PATH 差异
@@ -73,6 +75,7 @@ async function main(): Promise<void> {
 
   await copyStyles(indexHtml);
   await writeFile(join(OUT, "index.html"), indexHtml, "utf8");
+  await writeBuildInfo(ROOT, buildInfo);
 
   // wrapper 已由 tsc 输出；这里生成同名隔离的 *-lib.js 并做自包含检查
   await buildVendors();
@@ -83,7 +86,7 @@ async function main(): Promise<void> {
     console.error("✗ 构建产物缺少 main.js（tsconfig.client.json 的 outDir 是否被改过？）");
     process.exit(1);
   }
-  console.log("✓ 前端构建完成 → src/server/public/");
+  console.log(`✓ 前端构建完成 → src/server/public/ (${buildInfo.version} · ${buildInfo.buildId})`);
 }
 
 void main();

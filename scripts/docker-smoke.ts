@@ -58,14 +58,16 @@ async function main(): Promise<void> {
   const git = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true });
   const commit = process.env.GIT_COMMIT || (git.status === 0 ? git.stdout.trim() : "unknown");
   const buildTime = new Date().toISOString();
+  const releaseChannel = process.env.RELEASE_CHANNEL || "dev";
   const suffix = randomBytes(4).toString("hex");
   const image = process.env.SMOKE_IMAGE || `agentatlas:smoke-${suffix}`;
   const container = `agent-smoke-${suffix}`;
   const baseTagArgs = [
     "build",
-    "--build-arg", `APP_VERSION=${version}`,
+    "--build-arg", `IMAGE_VERSION=${version}`,
     "--build-arg", `GIT_COMMIT=${commit}`,
     "--build-arg", `BUILD_TIME=${buildTime}`,
+    "--build-arg", `RELEASE_CHANNEL=${releaseChannel}`,
     "-t", image,
     ".",
   ];
@@ -77,6 +79,9 @@ async function main(): Promise<void> {
   const labels = JSON.parse(must([
     "image", "inspect", "--format", "{{json .Config.Labels}}", image,
   ]).stdout) as Record<string, string>;
+  if (labels["org.opencontainers.image.version"] !== version) {
+    throw new Error(`镜像版本标签 ${labels["org.opencontainers.image.version"] || "(missing)"} 与 package.json ${version} 不一致`);
+  }
   const imageId = must(["image", "inspect", "--format", "{{.Id}}", image]).stdout;
   const imageSize = Number(must(["image", "inspect", "--format", "{{.Size}}", image]).stdout);
 
@@ -120,6 +125,9 @@ async function main(): Promise<void> {
     const base = `http://127.0.0.1:${match[1]}`;
 
     const health = await waitHttp(`${base}/healthz`);
+    const healthBody = await health.json() as { version?: string; buildId?: string; commit?: string };
+    if (healthBody.version !== version) throw new Error(`healthz 版本 ${healthBody.version || "(missing)"} 与 package.json ${version} 不一致`);
+    if (!healthBody.buildId || !healthBody.commit) throw new Error("healthz 缺少 buildId/commit");
     const ready = await waitHttp(`${base}/readyz`);
     const index = await waitHttp(`${base}/`);
     const csp = index.headers.get("content-security-policy") || "";
@@ -145,6 +153,15 @@ async function main(): Promise<void> {
       signal: AbortSignal.timeout(5_000),
     });
     if (!status.ok) throw new Error(`认证状态 smoke 失败：HTTP ${status.status}`);
+    const versionResponse = await fetch(`${base}/api/version`, {
+      headers: { Cookie: cookie },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!versionResponse.ok) throw new Error(`版本接口 smoke 失败：HTTP ${versionResponse.status}`);
+    const versionBody = await versionResponse.json() as { version?: string; buildId?: string; commit?: string };
+    if (versionBody.version !== version || !versionBody.buildId || !versionBody.commit) {
+      throw new Error(`版本接口内容异常：${JSON.stringify(versionBody)}`);
+    }
     const metrics = await fetch(`${base}/metrics`, {
       headers: { Authorization: `Bearer smoke-metrics-${suffix}-token` },
       signal: AbortSignal.timeout(5_000),
@@ -175,6 +192,7 @@ async function main(): Promise<void> {
         readyz: ready.status,
         index: index.status,
         authCookie: true,
+        versionApi: versionResponse.status,
         metrics: metrics.status,
         logout: logout.status,
         gracefulStop: true,

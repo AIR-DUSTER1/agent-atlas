@@ -9,7 +9,7 @@
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="LangGraph.js" src="https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.16-F59E0B">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0--beta.1-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -260,6 +260,19 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 并发语义：单会话同一时刻只允许一条流；供应商级并发占满时请求进入队列，排队超时返回 **HTTP 429** 与 `Retry-After`（可重试，不要当成请求错误）。可用 `MODEL_CONCURRENCY_PER_PROVIDER` 与 `MODEL_QUEUE_WAIT_MS` 调整。
 
+## 版本与发布
+
+当前为 `0.7.0-beta.1` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
+
+```text
+0.7.0-beta.1 · 816ba5c
+```
+
+- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.7.0-beta.1` 形式。
+- `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
+- 生产镜像使用不可变 digest，不使用 `latest`。
+- 完整规则见 [版本规范](docs/versioning.md)。
+
 ## 开发与测试
 
 ```bash
@@ -271,6 +284,7 @@ npm run build:desktop   # 构建 Electron 主进程、启动原语与 preload
 npm run desktop         # 启动桌面端；自动处理端口冲突与退出清理
 npm run audit:prod      # 检查生产依赖高危漏洞
 npm run data:check      # 校验配置、journal、checkpoint 与备份
+npm run version:check   # 校验产品版本、构建身份与文档是否漂移
 ```
 
 提交前至少执行：
@@ -286,6 +300,7 @@ npm run build:client
 | 文档 | 内容 |
 |---|---|
 | [Agent Wiki](docs/agent-wiki.md) | 模块职责、调用链、架构约束与踩坑记录 |
+| [版本规范](docs/versioning.md) | SemVer、构建标识、tag、镜像标签与发布流程 |
 | [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
 | [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
 | [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |

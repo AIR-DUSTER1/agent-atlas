@@ -18,6 +18,7 @@ import {
   productionEnvironmentChecks,
   type ReadinessCheck,
 } from "./production.js";
+import { readBuildInfoFile } from "../versioning.js";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -28,6 +29,7 @@ export const REQUIRED_RUNTIME_ASSETS = [
   "scripts/data-cli.ts",
   "src/server/public/index.html",
   "src/server/public/main.js",
+  "src/server/public/build-info.json",
   "src/server/public/vendor/chart.js",
   "src/server/public/vendor/chart-lib.js",
   "src/server/public/vendor/icons.js",
@@ -141,6 +143,22 @@ export async function collectProductionReleaseChecks(
     checks.push(result("package", true, `运行包 ${pkg.version || "unknown"} 可读取`, "deployment"));
   } catch (err) {
     checks.push(result("package", false, `package.json 不可读：${err instanceof Error ? err.message : String(err)}`, "deployment"));
+  }
+  try {
+    const buildInfo = await readBuildInfoFile(root);
+    checks.push(result(
+      "build-info",
+      buildInfo.version === pkg.version,
+      `构建身份 ${buildInfo.version} · ${buildInfo.buildId}`,
+      "deployment"
+    ));
+  } catch (err) {
+    checks.push(result(
+      "build-info",
+      false,
+      `build-info.json 无效或缺失：${err instanceof Error ? err.message : String(err)}`,
+      "deployment"
+    ));
   }
   checks.push(result(
     "tsx-dependency",

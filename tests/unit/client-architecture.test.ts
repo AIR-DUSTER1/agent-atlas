@@ -220,10 +220,12 @@ test("切换更小窗口模型前走 ZCode 式压缩守门", async () => {
   assert.match(menu, /prepareModelSwitch\(p\.id, m\.id\)/);
 });
 
-test("客户端错误上报只发送摘要、版本与视图，不发送 stack/密钥/对话", async () => {
+test("客户端错误上报只发送摘要、版本身份与视图，不发送 stack/密钥/对话", async () => {
   const source = await readFile(join(CLIENT, "observability", "client-errors.ts"), "utf8");
   assert.doesNotMatch(source, /\.stack\b|Authorization|AUTH_TOKEN|localStorage|prompt/i);
   assert.match(source, /message:\s*summary/);
-  assert.match(source, /version:\s*APP_VERSION/);
+  assert.match(source, /version:\s*BUILD_INFO\.version/);
+  assert.match(source, /commit:\s*BUILD_INFO\.commit/);
+  assert.match(source, /buildId:\s*BUILD_INFO\.buildId/);
   assert.match(source, /view:\s*currentView\(\)/);
 });

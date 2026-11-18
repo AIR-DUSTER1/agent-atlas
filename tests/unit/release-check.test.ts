@@ -30,13 +30,22 @@ const PRODUCTION_ENV: NodeJS.ProcessEnv = {
 async function makeRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agent-release-check-"));
   await writeFile(join(root, "package.json"), JSON.stringify({
-    version: "0.9.0-beta.13",
+    version: "0.7.0-beta.1",
     dependencies: { tsx: "4.23.15", "playwright-core": "1.64.1" },
   }));
   for (const relative of REQUIRED_RUNTIME_ASSETS) {
     await mkdir(dirname(join(root, relative)), { recursive: true });
+    if (relative === "src/server/public/build-info.json") continue;
     await writeFile(join(root, relative), "fixture", "utf8");
   }
+  await writeFile(join(root, "src/server/public/build-info.json"), JSON.stringify({
+    version: "0.7.0-beta.1",
+    channel: "dev",
+    releaseStage: "beta",
+    commit: "12345678",
+    builtAt: "2026-11-18T12:00:00.000Z",
+    buildId: "dev.20261118T120000Z.12345678",
+  }), "utf8");
   await mkdir(join(root, "node_modules", "tsx"), { recursive: true });
   await writeFile(join(root, "node_modules", "tsx", "package.json"), JSON.stringify({ name: "tsx", version: "4.23.15", main: "index.cjs" }));
   await writeFile(join(root, "node_modules", "tsx", "index.cjs"), "module.exports = {};\n", "utf8");
@@ -103,7 +112,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "0.9.0-beta.16");
+  assert.equal(pkg.version, "0.7.0-beta.1");
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);

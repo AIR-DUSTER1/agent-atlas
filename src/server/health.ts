@@ -9,18 +9,15 @@
  */
 import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type { ServerResponse } from "node:http";
 import { SETTINGS_FILE } from "./config-store.js";
 import { journalPath } from "./session-store.js";
 import { lifecycle } from "./lifecycle.js";
+import { BUILD_INFO, RUNTIME_VERSION } from "./build-info.js";
 
 /** 本地 fs 检查上限：网络盘/杀毒软件卡住时，探针最多等这么久 */
 const READY_CHECK_TIMEOUT_MS = 1_500;
-
-const pkg = createRequire(import.meta.url)("../../package.json") as { version?: string };
-export const RUNTIME_VERSION = pkg.version ?? "0.0.0";
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
@@ -59,6 +56,9 @@ export async function handleHealthz(res: ServerResponse): Promise<void> {
   writeJson(res, 200, {
     ok: true,
     version: RUNTIME_VERSION,
+    channel: BUILD_INFO.channel,
+    commit: BUILD_INFO.commit,
+    buildId: BUILD_INFO.buildId,
     uptimeSeconds: uptimeSeconds(),
   });
 }
@@ -66,6 +66,11 @@ export async function handleHealthz(res: ServerResponse): Promise<void> {
 export interface ReadinessSnapshot {
   ok: boolean;
   version: string;
+  channel: string;
+  releaseStage: string;
+  commit: string;
+  builtAt: string;
+  buildId: string;
   uptimeSeconds: number;
   shuttingDown: boolean;
   checks: { configStore: boolean; sessionStore: boolean };
@@ -81,6 +86,11 @@ export async function readinessSnapshot(): Promise<ReadinessSnapshot> {
   return {
     ok: !shuttingDown && checks.configStore && checks.sessionStore,
     version: RUNTIME_VERSION,
+    channel: BUILD_INFO.channel,
+    releaseStage: BUILD_INFO.releaseStage,
+    commit: BUILD_INFO.commit,
+    builtAt: BUILD_INFO.builtAt,
+    buildId: BUILD_INFO.buildId,
     uptimeSeconds: uptimeSeconds(),
     shuttingDown,
     checks,

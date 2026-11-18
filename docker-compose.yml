@@ -10,9 +10,10 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${APP_VERSION:-dev}
+        IMAGE_VERSION: ${IMAGE_VERSION:-}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_TIME: ${BUILD_TIME:-unknown}
+        RELEASE_CHANNEL: ${RELEASE_CHANNEL:-dev}
     image: ${AGENT_IMAGE:-agentatlas:dev}
     init: true
     restart: unless-stopped

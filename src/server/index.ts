@@ -8,6 +8,7 @@
  * 路由：
  *   GET  /                  前端页面（public/ 下的静态文件）
  *   GET  /api/config        模型/模式元信息（是否 mock、模型名、供应商×模型清单、思考等级、Demo 清单）
+ *   GET  /api/version       产品版本与不可变构建标识
  *   GET  /api/map/static    高德/腾讯/百度官方静态图同源代理（Key 只在服务端使用）
  *   GET  /api/sessions      会话列表
  *   POST /api/sessions      新建会话 { demo }
@@ -71,11 +72,12 @@ import { checkpointFilePath, flushCheckpointLog } from "../checkpoint.js";
 import { loadMemories, memoryStoreDir, flushMemoryUsage } from "../memory-store.js";
 import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
+import { BUILD_INFO } from "./build-info.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
 import { collectProductionReleaseChecks, failedReleaseChecks } from "./release-check.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
 import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics } from "./observability/metrics.js";
-import { handleClientError, handleDiagnostics, handleMetrics } from "./routes/observability.js";
+import { handleClientError, handleDiagnostics, handleMetrics, handleVersion } from "./routes/observability.js";
 import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { applyMemoryRuntime } from "./memory-http.js";
 import { installMemoryMetricsSink } from "./memory-observability.js";
@@ -512,7 +514,8 @@ const server = createServer(async (req, res) => {
       await refreshMcpTools(true);
       return;
     }
-    // 运维诊断（受认证保护；不返回路径、提示词或密钥）
+    // 版本与运维诊断（受认证保护；不返回路径、提示词或密钥）
+    if (pathname === "/api/version" && req.method === "GET") { handleVersion(res); return; }
     if (pathname === "/api/diagnostics" && req.method === "GET") { await handleDiagnostics(res); return; }
     if (pathname === "/api/client-errors" && req.method === "POST") { await handleClientError(req, res, requestId); return; }
 
@@ -689,6 +692,10 @@ server.listen(PORT, HOST, async () => {
     authEnabled: AUTH_ENABLED,
     mockMode: !config.apiKey,
     model: config.model,
+    version: BUILD_INFO.version,
+    channel: BUILD_INFO.channel,
+    commit: BUILD_INFO.commit,
+    buildId: BUILD_INFO.buildId,
   });
   // 人类可读横幅只在终端输出；容器/管道场景保持 stdout 纯 NDJSON
   if (process.stdout.isTTY && !isProductionMode()) {

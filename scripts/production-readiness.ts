@@ -14,10 +14,12 @@ import { journalPath } from "../src/server/session-store.js";
 import { checkpointFilePath } from "../src/checkpoint.js";
 import { memoryStoreDir } from "../src/memory-store.js";
 import { auditFilePath } from "../src/server/audit.js";
+import { readBuildInfoFile, readPackageVersion } from "../src/versioning.js";
 
 const REQUIRED_ARTIFACTS = [
   "src/server/public/index.html",
   "src/server/public/main.js",
+  "src/server/public/build-info.json",
   "src/server/public/styles/tokens.css",
   "src/server/public/styles/layout.css",
   "src/server/public/vendor/chart.js",
@@ -45,6 +47,21 @@ async function checkArtifacts(): Promise<ReadinessCheck[]> {
 function stableObject(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return JSON.stringify(value);
   return JSON.stringify(Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))));
+}
+
+async function checkVersionIdentity(): Promise<ReadinessCheck[]> {
+  try {
+    const [version, info] = await Promise.all([readPackageVersion(PROJECT_ROOT), readBuildInfoFile(PROJECT_ROOT)]);
+    const ok = version === info.version;
+    return [check(
+      "version-identity",
+      ok,
+      ok ? `版本身份一致：${version} · ${info.buildId}` : `构建版本 ${info.version} 与 package ${version} 不一致`,
+      "deployment"
+    )];
+  } catch (err) {
+    return [check("version-identity", false, `版本身份不可用：${err instanceof Error ? err.message : String(err)}`, "deployment")];
+  }
 }
 
 async function checkLockfile(): Promise<ReadinessCheck[]> {
@@ -82,6 +99,7 @@ async function main(): Promise<void> {
     check("production-mode", isProductionMode(), "PRODUCTION=1 已启用", "deployment"),
     ...productionEnvironmentChecks(),
     ...await checkArtifacts(),
+    ...await checkVersionIdentity(),
     ...await checkLockfile(),
     ...await inspectWritableDirectories(dataFiles.map((file) => dirname(file))),
   ];

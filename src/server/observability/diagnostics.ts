@@ -9,6 +9,7 @@ import { auditBackups } from "../backup.js";
 import { auditHealthReport } from "../audit.js";
 import { CONFIG_SCHEMA_VERSION, configSecretsState } from "../config-store.js";
 import { readinessSnapshot } from "../health.js";
+import { BUILD_INFO } from "../build-info.js";
 import { isAuthEnabled } from "../auth.js";
 import { checkpointHealthReport, CHECKPOINT_SCHEMA_VERSION } from "../../checkpoint.js";
 import { journalHealthReport, JOURNAL_SCHEMA_VERSION } from "../session-store.js";
@@ -61,6 +62,11 @@ export async function buildDiagnostics(): Promise<Record<string, unknown>> {
     status: !ready.ok ? "error" : degraded ? "degraded" : "ok",
     runtime: {
       version: ready.version,
+      channel: BUILD_INFO.channel,
+      releaseStage: BUILD_INFO.releaseStage,
+      commit: BUILD_INFO.commit,
+      buildId: BUILD_INFO.buildId,
+      builtAt: BUILD_INFO.builtAt,
       uptimeSeconds: ready.uptimeSeconds,
       production: isProductionMode(),
       authRequired: isAuthEnabled(),

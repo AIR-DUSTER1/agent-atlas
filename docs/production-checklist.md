@@ -1,4 +1,4 @@
-> 当前为开发预览阶段（`0.9.0-beta.15`）。本 Checklist 用于部署前自检，不代表正式生产发布。
+> 当前为开发预览阶段（`0.7.0-beta.1`）。本 Checklist 用于部署前自检，不代表正式生产发布。
 
 # 生产上线 Checklist
 
@@ -40,7 +40,7 @@
 ## 部署与资源
 
 - [ ] **P0** 单实例部署；没有两个进程同时写同一个 `/data`。
-- [ ] **P0** 镜像版本与 digest 已记入发布记录。
+- [ ] **P0** 镜像版本、buildId、commit 与 digest 已记入发布记录，并与 `/healthz`、`/api/version` 一致。
 - [ ] **P0** 已保存上一可用镜像 digest 和对应数据备份。
 - [ ] **P1** CPU / 内存限制已设置；容器重启策略为 `unless-stopped`。
 - [ ] **P1** `stop_grace_period` 大于应用 10 秒排空超时。
@@ -51,6 +51,7 @@
 
 ## 质量门
 
+- [ ] **P0** `npm run version:check` 通过。
 - [ ] **P0** `npm run typecheck` 通过。
 - [ ] **P0** `npm test` 通过。
 - [ ] **P0** `npm run e2e` 通过。

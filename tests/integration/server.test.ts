@@ -72,6 +72,9 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(health.status, 200);
   assert.equal(health.body.ok, true);
   assert.match(health.body.version, /^\d+\.\d+\.\d+/);
+  assert.equal(health.body.channel, "dev");
+  assert.match(health.body.commit, /^[0-9a-f]{7,64}$/);
+  assert.match(health.body.buildId, /^dev\./);
   assert.ok(health.body.uptimeSeconds >= 0);
 
   const ready = await json("/readyz");
@@ -79,6 +82,16 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(ready.body.ok, true);
   assert.equal(ready.body.shuttingDown, false);
   assert.deepEqual(ready.body.checks, { configStore: true, sessionStore: true });
+  assert.equal(ready.body.version, health.body.version);
+  assert.equal(ready.body.buildId, health.body.buildId);
+
+  const version = await json("/api/version");
+  assert.equal(version.status, 200);
+  assert.equal(version.body.version, health.body.version);
+  assert.equal(version.body.releaseStage, "beta");
+  assert.equal(version.body.commit, health.body.commit);
+  assert.equal(version.body.buildId, health.body.buildId);
+  assert.match(version.body.builtAt, /^\d{4}-\d{2}-\d{2}T/);
 
   const cfg = await json("/api/config");
   assert.equal(cfg.status, 200);
@@ -659,9 +672,12 @@ test("运维指标与诊断接口：受认证边界保护的结构化快照", as
   assert.match(text, /agent_process_resident_memory_bytes/);
   assert.match(text, /memory_save_total/);
 
+  const versionInfo = await json("/api/version");
   const diagnostics = await json("/api/diagnostics");
   assert.equal(diagnostics.status, 200);
   assert.equal(typeof diagnostics.body.status, "string");
+  assert.equal(diagnostics.body.runtime.version, versionInfo.body.version);
+  assert.equal(diagnostics.body.runtime.buildId, versionInfo.body.buildId);
   assert.ok(diagnostics.body.schemaVersions);
   assert.equal(diagnostics.body.schemaVersions.memory, 3);
   assert.ok(diagnostics.body.data.journal);
@@ -678,7 +694,7 @@ test("客户端错误上报只接收摘要并返回 204", async () => {
   const res = await fetch(srv.base + "/api/client-errors", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "TypeError: boom", version: "web-test", view: "settings", stack: "should-be-ignored" }),
+    body: JSON.stringify({ message: "TypeError: boom", version: "0.7.0-beta.1", commit: "1234567", buildId: "dev.test.1234567", view: "settings", stack: "should-be-ignored" }),
   });
   assert.equal(res.status, 204);
   assert.equal(await res.text(), "");

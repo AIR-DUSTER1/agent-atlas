@@ -5,7 +5,7 @@
  * 只上报错误类型/摘要、前端版本与视图名；绝不发送 stack、对话、附件或令牌。
  * 同页最多 20 条且按摘要去重，避免错误风暴打满服务端。
  */
-import { APP_VERSION } from "../core/state.js";
+import { BUILD_INFO } from "../core/build-info.js";
 
 let installed = false;
 const sent = new Set<string>();
@@ -32,7 +32,13 @@ function report(message: unknown): void {
     credentials: "same-origin",
     keepalive: true,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: summary, version: APP_VERSION, view: currentView() }),
+    body: JSON.stringify({
+      message: summary,
+      version: BUILD_INFO.version,
+      commit: BUILD_INFO.commit,
+      buildId: BUILD_INFO.buildId,
+      view: currentView(),
+    }),
   }).catch(() => {});
 }
 

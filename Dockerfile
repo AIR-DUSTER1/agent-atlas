@@ -9,6 +9,9 @@
 ARG NODE_IMAGE=node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8
 
 FROM ${NODE_IMAGE} AS builder
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG RELEASE_CHANNEL=dev
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -18,8 +21,8 @@ COPY scripts ./scripts
 COPY tests ./tests
 COPY desktop ./desktop
 RUN npm run typecheck \
- && npm run build:client \
- && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/main.js','src/server/public/vendor/chart-lib.js','src/server/public/styles/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
+ && RELEASE_CHANNEL="${RELEASE_CHANNEL}" GIT_COMMIT="${GIT_COMMIT}" BUILD_TIME="${BUILD_TIME}" npm run build:client \
+ && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/main.js','src/server/public/build-info.json','src/server/public/vendor/chart-lib.js','src/server/public/styles/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
 
 FROM ${NODE_IMAGE} AS production-deps
 WORKDIR /app
@@ -27,12 +30,12 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
-ARG APP_VERSION=0.0.0
+ARG IMAGE_VERSION=
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 LABEL org.opencontainers.image.title="agentatlas" \
       org.opencontainers.image.description="Production self-hosted agentatlas workspace" \
-      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_TIME}" \
       org.opencontainers.image.licenses="MIT"
