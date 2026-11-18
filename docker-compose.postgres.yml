@@ -1,0 +1,49 @@
+# ============================================================
+# docker-compose.postgres.yml — 同机 PostgreSQL 叠加层
+# ============================================================
+# 与生产 compose 叠加使用：
+# docker compose --env-file production.env \
+#   -f docker-compose.production.yml \
+#   -f docker-compose.postgres.yml up -d
+#
+# 使用外部托管 PostgreSQL 时不要启用本文件，只在生产 env 中配置 DATABASE_URL。
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE 必须是固定 digest}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agentatlas}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD 必填}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD 必填}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/10-agentatlas.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    shm_size: 128mb
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  agent:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      STATE_BACKEND: postgres
+      DATABASE_URL: postgresql://agent_app:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentatlas}
+      DATABASE_ADMIN_URL: postgresql://${POSTGRES_ADMIN_USER:-agent}:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentatlas}
+      DATABASE_SSL: disable
+
+volumes:
+  postgres-data:

@@ -117,6 +117,32 @@ docker run --rm \
 
 根文件系统为只读，只有 `/data` 和临时 `/tmp` 可写。必须保证宿主机目录仅由受信任管理员与服务用户访问。
 
+## 6.1 PostgreSQL 多用户模式
+
+默认 `STATE_BACKEND=file`。生产多用户请启用：
+
+```env
+STATE_BACKEND=postgres
+DATABASE_URL=postgresql://agent_app:APP_PASSWORD@postgres:5432/agentatlas
+DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
+```
+
+如使用同机 PostgreSQL：
+
+```bash
+docker compose --env-file production.env \
+  -f docker-compose.production.yml \
+  -f docker-compose.postgres.yml up -d
+```
+
+`DATABASE_URL` 必须是 `NOSUPERUSER NOBYPASSRLS` 的 `agent_app` 角色；不要用表 owner 运行应用。创建普通用户：
+
+```bash
+docker compose ... exec -T agent \
+  npm run user:create -- --name "Alice" --email alice@example.com
+```
+
+完整的角色、RLS、备份和回滚说明见 [PostgreSQL 多用户与 RLS](postgres-multitenant.md)。
 ## 7. 首次验收
 
 - [ ] `/healthz`、`/readyz` 返回 200。

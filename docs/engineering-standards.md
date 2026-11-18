@@ -52,6 +52,12 @@
 | `dompurify` 3.4.17 | 渲染前 HTML 净化 | MPL-2.0 OR Apache-2.0 | 30 KB / 12 KB | 已安装 |
 | `highlight.js` 11.12.0 | 按语言子包导入的代码高亮 | BSD-3-Clause | 67 KB / 22 KB | 已安装 |
 
+### 3.1 服务端依赖登记
+
+| 依赖 | 用途 | 约束 |
+|---|---|---|
+| `pg` | PostgreSQL 多租户持久化、RLS owner 事务 | 仅限 `src/server/persistence/**`、认证/迁移脚本；业务代码不得直接 `new Pool` |
+| `@types/pg` | `pg` 类型声明 | 仅 devDependency |
 新增 vendor 库时必须同步：`scripts/build-vendor.ts` 入口清单、`src/server/static.ts` 目录白名单、`src/client/vendor/*` wrapper、本文登记表和构建测试。
 
 ## 4. 目录与依赖方向

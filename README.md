@@ -190,6 +190,22 @@ scripts/          构建、检查、备份与发布辅助脚本
 - 会话、审批记录、导出、统计与 Browser Use 都按设备隔离；拿到其他设备的 `sessionId` 也无法读取。
 - 浏览器无法读取真实 MAC，因此这里使用服务端签名的设备 Cookie，而不是伪造“MAC 认证”。清除站点数据或换浏览器会生成新设备身份。
 
+## PostgreSQL 多用户模式
+
+默认 `STATE_BACKEND=file` 仍适合本地/桌面端。需要多个真实用户互不可见时，启用：
+
+```env
+STATE_BACKEND=postgres
+DATABASE_URL=postgresql://agent_app:APP_PASSWORD@postgres:5432/agentatlas
+DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
+```
+
+- `AUTH_TOKEN` 只作为管理员 bootstrap；普通用户通过 `npm run user:create -- --name Alice` 获取独立访问令牌。
+- 会话、审批、checkpoint、项目和统计由 `ownerId` 隔离；数据库表启用 RLS。
+- 供应商、插件、MCP、技能、备份和诊断配置只允许管理员修改。
+- 当前仍是单实例运行，SSE、限流和内存流锁尚未迁移到多实例。
+
+完整部署、角色权限、备份和回滚说明见 [PostgreSQL 多用户与 RLS](docs/postgres-multitenant.md)。
 ## 配置说明
 
 常用环境变量：
@@ -199,7 +215,8 @@ scripts/          构建、检查、备份与发布辅助脚本
 | `BASE_URL` / `API_KEY` / `MODEL` | 模型网关地址、密钥与默认模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
 | `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
-| `AUTH_TOKEN` | 首次设备配对令牌；本机直连和已配对设备自动续期，对外监听时必须设置 |
+| `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为管理员 bootstrap 密钥 |
+| `STATE_BACKEND` / `DATABASE_URL` / `DATABASE_ADMIN_URL` | 可选 PostgreSQL 多租户后端与迁移/运行角色 |
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
 | `SESSION_SECRET` / `DATA_KEY` | 生产会话与设备凭据签名、配置加密密钥 |
 | `DEVICE_TTL_DAYS` | 已配对设备凭据有效期，默认 180 天（1–365） |

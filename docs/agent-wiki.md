@@ -48,6 +48,11 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 | 5 | `src/agent/parallel.ts` | Send / 自定义 State / reducer | 并行 map-reduce：动态分发、汇聚结果 |
 
 > 示例 1~4 同时出现在 Web 界面与 CLI 中；示例 5 目前仅 CLI（`npm run demo:5`）。
+> **多用户/多租户数据面**：设置 `STATE_BACKEND=postgres` 后，真实用户由 `users.id` 作为
+> `ownerId`，会话 journal、LangGraph checkpoint、项目和用户设置通过 PostgreSQL RLS 隔离；
+> `DATABASE_URL` 必须是 `NOBYPASSRLS` 的 `agent_app` 角色，`DATABASE_ADMIN_URL` 只用于迁移和
+> bootstrap。部署、角色、用户令牌和 pg_dump 流程见 [postgres-multitenant.md](postgres-multitenant.md)。
+> 当前仍是单实例进程模型，SSE、限流和内存流锁不支持多副本。
 
 ### 1.2 项目结构
 

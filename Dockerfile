@@ -62,6 +62,8 @@ COPY --from=builder --chown=node:node /app/src/memory ./src/memory
 COPY --from=builder --chown=node:node /app/src/routing ./src/routing
 COPY --from=builder --chown=node:node /app/src/server ./src/server
 COPY --from=builder --chown=node:node /app/scripts/data-cli.ts ./scripts/data-cli.ts
+COPY --from=builder --chown=node:node /app/scripts/db-migrate.ts ./scripts/db-migrate.ts
+COPY --from=builder --chown=node:node /app/scripts/create-user.ts ./scripts/create-user.ts
 RUN mkdir -p /data && chown node:node /data
 
 USER node

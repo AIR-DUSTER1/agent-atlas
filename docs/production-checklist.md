@@ -29,6 +29,15 @@
 - [ ] **P1** 升级前自动备份，升级后运行 `data:check`。
 - [ ] **P2** 定期验证恢复后的旧会话可读、审批状态正确、长期记忆可召回。
 
+## PostgreSQL 多用户（启用 `STATE_BACKEND=postgres` 时）
+
+- [ ] **P0** `DATABASE_URL` 使用 `agent_app` 角色且 `rolsuper=false`、`rolbypassrls=false`。
+- [ ] **P0** `DATABASE_ADMIN_URL` 仅用于迁移/bootstrap，不进入浏览器或普通业务日志。
+- [ ] **P0** 所有用户私有表已启用并强制 RLS，跨用户 session/checkpoint/project 测试返回 404。
+- [ ] **P0** 已完成数据库 dump 与恢复演练；`/data` 备份和 PostgreSQL 备份分开保存。
+- [ ] **P0** 升级前已记录数据库 schema 版本与应用镜像 digest。
+- [ ] **P1** 已限制普通用户修改全局供应商、插件、MCP、技能、备份与诊断配置。
+- [ ] **P1** 已确认普通用户不能添加服务器任意本地目录。
 ## 可观测性
 
 - [ ] **P1** `/healthz` 用于 liveness，`/readyz` 用于 readiness，并设置 3 次以上失败阈值。

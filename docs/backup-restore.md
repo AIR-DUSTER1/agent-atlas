@@ -114,6 +114,24 @@ docker compose --env-file production.env -f docker-compose.production.yml \
 - 审计追加没有断档；
 - 新写入后再创建一份备份。
 
+## 5.1 PostgreSQL 多用户模式
+
+`STATE_BACKEND=postgres` 时，应用内 `npm run backup` 只覆盖 `/data` 文件，**不包含数据库**。必须同时做 PostgreSQL 备份：
+
+```bash
+docker compose --env-file production.env \
+  -f docker-compose.production.yml \
+  -f docker-compose.postgres.yml \
+  exec -T postgres pg_dump -U agent -d agentatlas -Fc -f /tmp/agentatlas.dump
+```
+
+将 dump 复制到独立故障域，并与 `DATA_KEY` 分开保存。恢复时先停止 `agent`，再执行：
+
+```bash
+pg_restore -U agent -d agentatlas --clean --if-exists -Fc agentatlas.dump
+```
+
+数据库恢复完成后再启动应用并运行 `npm run data:check`。如果应用已执行新 schema migration，恢复旧 dump 后必须使用兼容旧 schema 的镜像。
 ## 6. 灾难恢复顺序
 
 1. 准备同版本镜像和正确 `DATA_KEY`。

@@ -8,6 +8,7 @@
 | 文档 | 适用场景 |
 |---|---|
 | [快速自托管](self-hosting.md) | 首次构建 / 拉取镜像、配置密钥、启动、验证 |
+| [PostgreSQL 多用户与 RLS](postgres-multitenant.md) | 多租户账号、ownerId、RLS、数据库部署与恢复 |
 | [生产上线 Checklist](production-checklist.md) | 上线前逐项确认安全、数据、可观测性与回滚 |
 | [安全与 TLS](security-and-tls.md) | Nginx / Caddy、Cookie、代理信任边界、监控令牌 |
 | [备份与恢复](backup-restore.md) | 定期备份、离线副本、灾难恢复、数据校验 |
@@ -18,7 +19,7 @@
 | [版本规范](versioning.md) | SemVer、构建标识、tag、镜像标签与发布流程 |
 | [支持策略](support.md) | 版本生命周期、兼容承诺、已知限制、安全报告 |
 
-## 生产运行拓扑
+## 生产运行拓扑（文件后端）
 
 ```text
 Browser
@@ -40,6 +41,34 @@ agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
       └── backups/                 # 校验清单 v2 + 保留策略
 ```
 
+## 多用户生产拓扑
+
+```text
+Browser A / Browser B
+        │ HTTPS
+        ▼
+Nginx / Caddy
+        │
+        ▼
+agentatlas 容器（单实例）
+        │
+        ├── PostgreSQL
+        │   ├── users / auth_tokens / devices
+        │   ├── session_journal_events（owner_id + RLS）
+        │   ├── checkpoint_rows / checkpoint_writes（owner_id + RLS）
+        │   ├── projects / user_settings（owner_id + RLS）
+        │   └── audit_events（owner_id + RLS）
+        │
+        └── /data
+            ├── web-config.json          # 管理员级全局配置
+            ├── memory-store/            # 当前仍为 owner-scoped 文件
+            ├── audit.ndjson
+            └── backups/
+```
+
+数据库连接使用两个角色：`DATABASE_ADMIN_URL` 只用于迁移/bootstrap，`DATABASE_URL` 使用
+`agent_app` 低权限角色并启用 RLS。角色权限、账号创建和 pg_dump 流程见
+[PostgreSQL 多用户与 RLS](postgres-multitenant.md)。
 ## 健康模型
 
 | 端点 | 认证 | 含义 |
