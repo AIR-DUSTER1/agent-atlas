@@ -69,6 +69,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
 └── src/
     ├── config.ts         # 统一读取 .env 配置
     ├── product.ts        # 产品名与对外客户端身份（UA / MCP clientInfo）
+    ├── versioning.ts     # SemVer、构建标识与仓库版本一致性（§3.55）
     ├── llm.ts            # 模型工厂：多协议（OpenAI/Responses/Anthropic/Gemini）接入任意网关
     ├── reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（§3.42）
     ├── tools.ts          # 4 个自定义工具（zod 定义参数）
@@ -1770,6 +1771,8 @@ console.log(result.messages.at(-1).content);
 | Hindsight 两个 Agent 读到同一组记忆 | 两个 profile 共用 bank | `general` / `estate` bank 必填且不同，配置保存时拒绝共用；scope 仍由服务端注入 |
 | 导入到一半留下半批数据 | 导入逐条写文件，后一条校验失败时前面已落盘 | 先整批校验，再通过 `updateLocalRecords` 一次原子写入；替换模式只改当前 scope |
 | 记忆指标里出现用户隐私 | 把记忆正文或查询词当标签 | 指标只允许 provider / profile / operation / result 等低基数标签；日志不记录正文、URL、Authorization |
+| 页面版本、健康探针与镜像标签互相不一致 | 产品版本被同时写在 package、前端日期常量、Docker 参数和文档里 | `package.json.version` 唯一来源；构建时生成 `build-info.json` 并注入 HTML meta，`npm run version:check` 阻断漂移 |
+
 ---
 
 ## 8. 概念速查表
@@ -2544,3 +2547,35 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 
 **测试**：`ui-primitives.test.ts` 验证组件类标记；`ui-styles.test.ts` 守护公共样式；
 `app.spec.ts` 在真实浏览器检查供应商配置输入的尺寸、边框、背景和焦点环。
+
+### 3.55 `src/versioning.ts` + `server/build-info.ts` + `client/core/build-info.ts` — 版本与构建身份
+
+**定位**：把产品版本、构建标识、API 契约版本和数据 schema 版本彻底分开，避免再次出现
+`package.json`、前端日期常量、Docker 标签和文档各写一套版本号。
+
+| 层 | 实现 | 关键约束 |
+|---|---|---|
+| 产品版本 | `package.json.version` | 唯一来源；SemVer 2.0；只允许 alpha / beta / rc 预发布段 |
+| 构建工具 | `src/versioning.ts` | 读取 package、Git commit、构建时间和渠道，生成 `build-info.json` 与 HTML meta |
+| 服务端读取 | `src/server/build-info.ts` | 探针、诊断、日志和 `/api/version` 共享同一对象 |
+| 浏览器读取 | `src/client/core/build-info.ts` | 只读 HTML meta，不再手工维护前端日期版本 |
+| 发布守门 | `scripts/check-version.ts` | 校验 package、lock、README、部署文档与已生成构建身份 |
+
+构建身份示例：
+
+```json
+{
+  "version": "0.7.0-beta.1",
+  "channel": "dev",
+  "releaseStage": "beta",
+  "commit": "816ba5c3",
+  "builtAt": "2026-11-18T06:25:00.000Z",
+  "buildId": "dev.20261118T062500Z.816ba5c"
+}
+```
+
+**为什么构建号不能混进产品版本**：产品版本用于表达功能与兼容性，构建号用于定位一次具体产物。
+如果把日期、CI 序号和产品版本拼成一个字段，桌面更新、Docker 标签、错误聚合与文档都会产生第二套排序规则。
+
+**发布边界**：当前没有 Git tag；达到发布条件后才允许对 package 版本创建 `v<version>` 注解 tag。
+生产镜像可以有人类可读标签，但部署必须固定 digest。完整规范见 `docs/versioning.md`。

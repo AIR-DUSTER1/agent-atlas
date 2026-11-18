@@ -58,6 +58,7 @@ ESM 放 `public/vendor/`；`tsc` 照旧从 `node_modules` 读类型；浏览器�
 src/
   config.ts        # 全局运行时配置（.env 播种，可被内存覆盖；勿在别处直接读 process.env）
   product.ts       # 产品名与对外客户端身份常量（UA / MCP clientInfo 统一来源）
+  versioning.ts    # 产品版本、构建标识与仓库一致性权威工具；package.json 是唯一版本源
   llm.ts           # 唯一的模型工厂：多协议差异全部收拢于此，graph 代码不感知协议
   reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（在 llm.ts 的 fetch 边界补字段）
   tools.ts         # 基础工具（calculator / 时间 / 天气 / send_email），zod 声明参数
@@ -79,7 +80,7 @@ src/
                    #   browser-use.ts = 无头 Chrome/Edge 会话池；routes/browser-use.ts = 画面/状态 API
   client/          # 前端源码（TypeScript，唯一真相）
     main.ts        #   入口：初始化与全部 DOM 事件绑定
-    core/          #   状态 / DOM / API（state.ts 是唯一可变状态源）
+    core/          #   状态 / DOM / API / 构建身份（state.ts 是唯一可变状态源）
     ui/            #   无业务 DOM 原语（h/button/input/dialog/menu/toast…）
     styles/        #   tokens、chat-*.css、settings-*.css 等按功能拆分的 CSS
     modules/       #   纯函数与协议类型（format / chat-flow / types…）
@@ -89,7 +90,7 @@ src/
     composer/      #   输入框 / 命令与 @ 文件菜单
     views/         #   各业务视图（会话/项目/设置/RAG/房产/Browser Use…；settings-plugins.ts = 插件目录与开关）
     actions/       #   审批、压缩等动作
-    index.html     #   仅保留 head、内联 CSP 脚本与 include 清单
+    index.html     #   仅保留 head、内联 CSP 脚本、build-info 注入点与 include 清单
     pages/         #   构建期 HTML 片段：sidebar/workspace/settings/overlays
   server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
 desktop/           # Electron 桌面端源码（TypeScript）
@@ -110,7 +111,8 @@ docs/              # 公开文档（agent-wiki.md 等），只放用户可读内
 - 业务前端源码不得直接 import npm 前端库；只允许 `src/client/vendor/*` wrapper 接触第三方 API。
 - 通用消息渲染不得 import 房产 / 租房实现；业务专属工具卡通过渲染增强注册表注入。
 - `src/agent/workflow.ts` 只允许作为稳定 re-export 门面；节点实现必须落到 `src/agent/workflow/nodes/`，图接线落到 `workflow/graph.ts`。
-- `src/client/index.html` 只允许保留根壳和 include 清单；页面结构落到 `src/client/pages/`，构建脚本负责合成产物。
+- `src/client/index.html` 只允许保留根壳、构建身份注入点与 include 清单；页面结构落到 `src/client/pages/`，构建脚本负责合成产物。
+- `package.json.version` 是唯一产品版本源；禁止手工维护前端日期版本，构建脚本负责生成 `build-info.json` 与 HTML meta。
 
 ## 4. 代码风格（全仓库统一）
 
@@ -193,7 +195,7 @@ Hook 为后续规划项，不属于当前运行时。落地时按“可执行代
 2. `index.ts` 在**兜底 404 之前**插 `if (pathname === ... && method)`：
    `readBody` → try 里 `await 业务` 再 `writeHead(200)`；catch 转 400 JSON；
    注意「先 await 业务，再 writeHead」顺序，失败才可能正常回 4xx；
-3. GET /api/* 已统一 no-store，无需重复设置；新前端逻辑配套更新 `APP_VERSION`。
+3. GET /api/* 已统一 no-store，无需重复设置；新增版本相关逻辑必须复用 `src/versioning.ts` 与构建期 `build-info.json`。
 
 新增工具：schema 用 zod + `describe` 中文；`description` 写清「何时用/何时不用」；
 在相关 graph 的 `tools` 数组绑定；高风险则 §5.4 登记；依赖网络/外部服务的能力放 server 层。
@@ -209,6 +211,7 @@ session 级；持久化字段的**读取处要兼容字段缺失**（旧配置�
 ## 7. 质量门（交付前必须全绿）
 
 ```bash
+npm run version:check        # 产品版本、锁文件、文档与构建身份一致性
 npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
 npm run build:client         # 前端构建门：编译 + 自检 main.js / index.html / styles / vendor 产物
 npm run build:desktop        # 桌面端构建门：编译 + 自检 main.js / preload.cjs 产物
@@ -224,7 +227,7 @@ npm test                     # 单测 / 集成 / 安全三档（mock 模式，�
 小脚本」模拟（参考 Temp 目录 mock-rag.cjs 模式）。**验证严禁消耗用户真实 API 配额**：
 不配置 Key 走 mock 模式，或临时覆盖环境变量，或只测不调模型的部分。
 
-前端有改动时：确认 `APP_VERSION` 已递增（页面顶部横幅可肉眼核对），并测一遍
+前端有改动时：确认 `npm run build:client` 生成了新的 buildId，页面左下角/控制台与 `/api/version` 一致，并测一遍
 主题切换、发送、停止、弹窗开关（Esc / 点遮罩）不回归。
 
 ## 8. 平台与环境坑（Windows / PowerShell 5.1 着重看）
@@ -323,3 +326,14 @@ fix: 补充 flexHeight、rowClassName、size 等缺失属性到 BasicTableProps 
   含真实 Key/内网地址的文件；`git ls-files | grep -i plan` 应为空。
 - 提交前自查 `git diff`：不得遗留调试用 `console.log`、临时脚本或注释掉的代码块。
 - 大改动拆逻辑相邻的小提交；提交前必须通过 §7 全部质量门。
+
+## 11. 版本与发布
+
+- 产品版本使用 SemVer 2.0：`MAJOR.MINOR.PATCH[-alpha.N|beta.N|rc.N]`；当前基线为 `0.7.0-beta.1`。
+- `package.json.version` 是唯一产品版本源；`package-lock.json`、README 徽章和发布文档必须一致。
+- 构建标识独立于产品版本，包含 `channel / commit / builtAt / buildId`，由 `npm run build:client` 自动生成。
+- API 契约版本与 config / journal / checkpoint / memory schema 版本不得跟随产品版本自动变化。
+- 普通开发提交不递增版本；只有形成发布基线时才更新版本。
+- 当前阶段不创建 tag；发布时只允许对通过全部质量门的提交创建 `v<package.version>` 注解 tag。
+- 生产镜像使用不可变 digest，禁止 `latest`；镜像版本标签必须与 package 版本一致。
+- 完整规范见 `docs/versioning.md`；版本漂移必须运行 `npm run version:check` 修复后才能交付。
