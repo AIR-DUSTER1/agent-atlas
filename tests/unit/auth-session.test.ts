@@ -8,6 +8,10 @@ import {
   sessionTtlHours, setSessionCookie, verifySessionRequest, verifySessionToken,
 } from "../../src/server/security/session.js";
 import { FailureRateLimiter, clientIp } from "../../src/server/security/rate-limit.js";
+import {
+  deviceCookie, ensureDeviceIdentity, ensureDeviceSession, hasAuthorizedDeviceSession,
+  isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken,
+} from "../../src/server/security/device.js";
 
 test("HMAC 会话可校验；篡改与过期均失败", () => {
   process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
@@ -198,4 +202,79 @@ test("限流 clear/reset 清除单 IP 与全局桶，剩余次数可见", () => 
   assert.equal(decision.allowed, true);
   assert.equal(decision.remainingIp, 3);
   assert.equal(decision.remainingGlobal, 4);
+});
+
+
+test("设备身份 HMAC 可校验；篡改、过期与生产 Cookie 属性正确", () => {
+  process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
+  process.env.DEVICE_TTL_DAYS = "90";
+  try {
+    const now = Date.now();
+    const issued = issueDeviceIdentity(now);
+    assert.equal(verifyDeviceToken(issued.token, now + 1)?.did, issued.payload.did);
+    assert.equal(verifyDeviceToken(issued.token.slice(0, -1) + (issued.token.endsWith("a") ? "b" : "a"), now + 1), null);
+    assert.equal(verifyDeviceToken(issued.token, issued.payload.exp + 1), null);
+    const cookie = deviceCookie(issued.token, { PRODUCTION: "1", COOKIE_SECURE: "true" });
+    assert.match(cookie, /lg_agent_device=/);
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Strict/);
+    assert.match(cookie, /Secure/);
+    assert.match(cookie, /Max-Age=7776000/);
+  } finally {
+    delete process.env.SESSION_SECRET;
+    delete process.env.DEVICE_TTL_DAYS;
+  }
+});
+
+function fakeResponse(): import("node:http").ServerResponse {
+  const headers = new Map<string, string | number | readonly string[]>();
+  return {
+    setHeader(name: string, value: string | number | readonly string[]) { headers.set(name.toLowerCase(), value); },
+    getHeader(name: string) { return headers.get(name.toLowerCase()); },
+  } as unknown as import("node:http").ServerResponse;
+}
+
+test("本机直连才自动信任，代理转发头会强制按远端设备处理", () => {
+  process.env.AUTH_TOKEN = "auth-token-for-device-test";
+  try {
+    const localRes = fakeResponse();
+    const local = fakeRequest();
+    assert.equal(isDirectLoopbackRequest(local), true);
+    assert.equal(ensureDeviceIdentity(local, localRes), "local");
+    assert.equal(localRes.getHeader("set-cookie"), undefined);
+
+    const proxied = fakeRequest({ forwarded: "198.51.100.8, 127.0.0.1" });
+    assert.equal(isDirectLoopbackRequest(proxied), false);
+    assert.equal(ensureDeviceIdentity(proxied, fakeResponse()), null);
+  } finally {
+    delete process.env.AUTH_TOKEN;
+  }
+});
+
+test("可信本机设备在业务入口直接获得短期会话，不先制造 401", () => {
+  process.env.AUTH_TOKEN = "auth-token-for-device-test";
+  process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
+  try {
+    const req = fakeRequest();
+    const res = fakeResponse();
+    assert.equal(ensureDeviceSession(req, res), "local");
+    assert.equal(hasAuthorizedDeviceSession(req), true);
+    assert.match(String(res.getHeader("set-cookie")), /lg_agent_session=/);
+  } finally {
+    delete process.env.AUTH_TOKEN;
+    delete process.env.SESSION_SECRET;
+  }
+});
+
+test("认证关闭时远端设备自动获得签名设备 Cookie", () => {
+  delete process.env.AUTH_TOKEN;
+  process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
+  try {
+    const res = fakeResponse();
+    const deviceId = ensureDeviceIdentity(fakeRequest({ remote: "198.51.100.9" }), res);
+    assert.ok(deviceId && deviceId !== "local");
+    assert.match(String(res.getHeader("set-cookie")), /lg_agent_device=/);
+  } finally {
+    delete process.env.SESSION_SECRET;
+  }
 });

@@ -24,8 +24,9 @@ cp production.env.example production.env
 | 变量 | 要求 |
 |---|---|
 | `AGENT_IMAGE` | `registry/仓库@sha256:...`，生产禁止 `latest` |
-| `AUTH_TOKEN` | 浏览器登录引导密钥，至少 16 位 |
-| `SESSION_SECRET` | HttpOnly 会话签名密钥，至少 32 位 |
+| `AUTH_TOKEN` | 首次设备配对密钥，至少 16 位 |
+| `SESSION_SECRET` | 设备/HttpOnly 会话签名密钥，至少 32 位 |
+| `DEVICE_TTL_DAYS` | 已配对设备凭据有效期，默认 180 天（1–365） |
 | `DATA_KEY` | 32 字节 base64，用于 AES-256-GCM |
 | `METRICS_TOKEN` | Prometheus 只读令牌，至少 16 位 |
 | `BASE_URL` / `API_KEY` / `MODEL` | 首次启动至少一套可用模型 |
@@ -84,7 +85,9 @@ curl -fsS http://127.0.0.1:3000/readyz
 docker compose --env-file production.env -f docker-compose.production.yml logs --tail=100
 ```
 
-经 TLS 反代访问页面，输入 `AUTH_TOKEN` 登录。首次登录会把旧版明文敏感字段迁移为 AES-256-GCM 密文。
+经 TLS 反代访问页面；新设备首次输入一次 `AUTH_TOKEN` 完成配对，之后短期会话过期会由 HttpOnly 设备 Cookie 静默续期。每个设备只能看到自己的会话、审批、统计与 Browser Use。首次配对会把旧版明文敏感字段迁移为 AES-256-GCM 密文。
+
+反向代理必须覆盖 `X-Forwarded-For`；否则同机代理可能被误判为 loopback 直连。
 
 ## 5. 发布自检
 

@@ -6,6 +6,9 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Session, TurnRecord } from "../../src/server/sessions.js";
 import { buildPrehistoryNote } from "../../src/server/sessions.js";
 
@@ -16,6 +19,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     agentProfileId: "general",
     demo: null,
     agentId: null,
+    deviceId: "local",
     projectId: "default",
     title: "测试",
     createdAt: Date.now(),
@@ -93,4 +97,46 @@ test("超长文本按 2000/4000 字符截断", () => {
   assert.ok(!note.includes("U".repeat(2001)));
   assert.ok(note.includes("A".repeat(4000)));
   assert.ok(!note.includes("A".repeat(4001)));
+});
+
+test("journal compact 必须保留设备归属，重启回放后仍按原设备隔离", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agent-journal-compact-"));
+  const file = join(dir, "sessions.ndjson");
+  const previous = process.env.SESSIONS_FILE;
+  process.env.SESSIONS_FILE = file;
+  const store = await import("../../src/server/session-store.js");
+  try {
+    store.resetJournalStore();
+    const filler = "x".repeat(2_100_000);
+    const lines = [
+      JSON.stringify({ ev: "schema", schemaVersion: store.JOURNAL_SCHEMA_VERSION }),
+      JSON.stringify({
+        ev: "session",
+        session: {
+          id: "session-a", kind: "agent", agentProfileId: "general", demo: null, agentId: null,
+          deviceId: "device-a", projectId: "default", title: "设备 A", createdAt: Date.now(),
+          threadId: "thread-a", permissionMode: "approve",
+        },
+      }),
+      JSON.stringify({
+        ev: "turn", id: "session-a", turnId: "turn-a", user: filler,
+        events: [], startedAt: Date.now(),
+      }),
+    ];
+    await writeFile(file, lines.join("\n") + "\n", "utf8");
+    await store.replaySessions();
+    await store.maybeCompactJournal();
+    const compacted = await readFile(file, "utf8");
+    assert.match(compacted, /"deviceId":"device-a"/);
+
+    store.resetJournalStore();
+    await store.replaySessions();
+    assert.equal(store.journalSnapshot()[0]?.deviceId, "device-a");
+  } finally {
+    store.resetJournalStore();
+    if (previous === undefined) delete process.env.SESSIONS_FILE;
+    else process.env.SESSIONS_FILE = previous;
+    store.resetJournalStore();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
+import { LOCAL_DEVICE_ID } from "./security/device.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
 // 避免跑测试把假会话写进开发者真实的 .setting/sessions.ndjson。
@@ -63,6 +64,8 @@ export interface SessionRecord {
   agentProfileId: AgentProfileId | null;
   demo: 1 | 2 | 3 | 4 | null;
   agentId: string | null;
+  /** 会话属于哪个浏览器设备；旧 journal 缺失时回落到本机身份。 */
+  deviceId?: string;
   projectId: string;
   title: string;
   createdAt: number;
@@ -142,7 +145,7 @@ export async function flushJournal(): Promise<void> {
 export function journalSession(rec: {
   id: string; kind: SessionKind;
   demo: 1 | 2 | 3 | 4 | null;
-  agentId: string | null; projectId: string; title: string; createdAt: number; threadId: string;
+  agentId: string | null; deviceId?: string; projectId: string; title: string; createdAt: number; threadId: string;
   permissionMode?: PermissionMode;
 }): void {
   // profile identity 只由服务端从 kind 派生，不接受调用方注入。
@@ -272,6 +275,7 @@ function applyEvent(ev: Record<string, unknown>): void {
       agentProfileId: profileIdForKind(kind),
       demo: s.demo ?? null,
       agentId: s.agentId ?? null,
+      deviceId: typeof s.deviceId === "string" && s.deviceId ? s.deviceId : base.deviceId,
       projectId: s.projectId ?? "default",
       title: s.title ?? base.title,
       createdAt: typeof s.createdAt === "number" ? s.createdAt : base.createdAt,
@@ -347,7 +351,8 @@ function findOrMake(id: string): SessionRecord {
   let rec = state.get(id);
   if (!rec) {
     rec = {
-      id, kind: "agent", agentProfileId: null, demo: null, agentId: null, projectId: "default",
+      id, kind: "agent", agentProfileId: null, demo: null, agentId: null, deviceId: LOCAL_DEVICE_ID,
+      projectId: "default",
       title: "", createdAt: Date.now(), threadId: "", pendingApproval: null, turns: 0, turnHistory: [],
       contextSummary: null, contextSummaryInjected: false, lastCompactTurnId: null, lastCompact: null,
     };
@@ -371,7 +376,7 @@ async function compactJournal(): Promise<void> {
   const snapshot = journalSnapshot();
   const lines: string[] = [JSON.stringify({ ts: Date.now(), ev: "schema", schemaVersion: JOURNAL_SCHEMA_VERSION })];
   for (const rec of snapshot) {
-    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
+    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, deviceId: rec.deviceId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
     if (rec.contextSummary) {
       lines.push(JSON.stringify({
         ts: Date.now(), ev: "compact", id: rec.id, threadId: rec.threadId,

@@ -5,10 +5,17 @@ export const E2E_TOKEN = "e2e-login-token-123456";
 export async function login(page: Page): Promise<void> {
   await page.goto("/");
   const input = page.locator("#ui-dialog-input");
-  await expect(input).toBeVisible();
-  await input.fill(E2E_TOKEN);
-  await page.locator("#ui-dialog-ok").click();
-  await expect(page.locator("#ui-dialog-input")).toBeHidden();
+  // 本机直连会静默建立设备会话；只有模拟公网新设备时才需要首次配对。
+  await page.waitForFunction(() => {
+    if (document.documentElement.dataset.appReady === "true") return true;
+    const dialogInput = document.querySelector<HTMLElement>("#ui-dialog-input");
+    return Boolean(dialogInput && dialogInput.offsetParent !== null);
+  });
+  if (await input.isVisible()) {
+    await input.fill(E2E_TOKEN);
+    await page.locator("#ui-dialog-ok").click();
+    await expect(input).toBeHidden();
+  }
   await expect(page.locator("html")).toHaveAttribute("data-app-ready", "true");
   await expect(page.locator("#new-chat-btn")).toBeVisible();
 }

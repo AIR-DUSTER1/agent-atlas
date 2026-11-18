@@ -1,8 +1,9 @@
 /**
  * ============================================================
- * routes/auth.ts — 会话登录 / 状态 / 续期 / 注销
+ * routes/auth.ts — 设备静默会话 / 登录 / 续期 / 注销
  * ============================================================
- * 登录失败按 IP + 全局双桶限流；认证响应只含过期时间，不回显密钥。
+ * 本机直连和已配对设备不再反复弹出令牌框；新公网设备仍需一次 AUTH_TOKEN
+ * 配对。设备 Cookie 只负责换短期会话，所有业务 API 仍校验短期会话。
  */
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -12,6 +13,10 @@ import {
   clearSessionCookieOnResponse, issueSession, revokeSession, sessionFromRequest,
   sessionTtlHours, setSessionCookie, verifySessionToken, verifySessionRequest,
 } from "../security/session.js";
+import {
+  clearDeviceCookieOnResponse, ensureDeviceIdentity, enrollDeviceIdentity, LOCAL_DEVICE_ID,
+  renewDeviceCookie,
+} from "../security/device.js";
 import { authFailureLimiter, clientIp, type RateLimitDecision } from "../security/rate-limit.js";
 import { writeAudit } from "../audit.js";
 import { migrateStoredSecrets } from "../config-store.js";
@@ -43,30 +48,57 @@ function recordFailure(req: IncomingMessage): RateLimitDecision {
   return authFailureLimiter.recordFailure(clientIp(req));
 }
 
-export async function handleAuthStatus(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!isAuthEnabled()) {
-    writeJson(res, 200, { authenticated: true, authRequired: false });
-    return;
-  }
-  const payload = verifySessionRequest(req);
-  if (!payload) {
-    writeJson(res, 401, { authenticated: false, authRequired: true, error: "未登录或会话已过期" });
-    return;
-  }
+function issueAutoSession(req: IncomingMessage, res: ServerResponse, deviceId: string): void {
+  const { token, payload } = issueSession();
+  setSessionCookie(res, token);
+  renewDeviceCookie(res, deviceId);
+  writeAudit("auth_session_issued", { ip: ipTag(clientIp(req)), mode: deviceId === LOCAL_DEVICE_ID ? "loopback" : "device" });
   writeJson(res, 200, {
+    ok: true,
     authenticated: true,
-    authRequired: true,
+    authRequired: isAuthEnabled(),
+    autoSession: true,
     expiresAt: payload.exp,
-    ttlSeconds: Math.max(0, Math.round((payload.exp - Date.now()) / 1000)),
+    ttlSeconds: sessionTtlHours() * 3600,
   });
 }
 
-export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleAuthStatus(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const deviceId = ensureDeviceIdentity(req, res);
   if (!isAuthEnabled()) {
-    writeJson(res, 200, { ok: true, authRequired: false });
+    writeJson(res, 200, { authenticated: true, authRequired: false, autoSession: true });
     return;
   }
-  if (!assertRateAvailable(req, res)) return;
+
+  const payload = verifySessionRequest(req);
+  if (payload) {
+    if (deviceId) renewDeviceCookie(res, deviceId);
+    writeJson(res, 200, {
+      authenticated: true,
+      authRequired: true,
+      autoSession: Boolean(deviceId),
+      expiresAt: payload.exp,
+      ttlSeconds: Math.max(0, Math.round((payload.exp - Date.now()) / 1000)),
+    });
+    return;
+  }
+
+  if (deviceId) {
+    issueAutoSession(req, res, deviceId);
+    return;
+  }
+
+  writeJson(res, 401, { authenticated: false, authRequired: true, needsPairing: true, error: "此设备尚未配对" });
+}
+
+export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let deviceId = ensureDeviceIdentity(req, res);
+  if (!isAuthEnabled()) {
+    if (!deviceId) deviceId = enrollDeviceIdentity(res);
+    issueAutoSession(req, res, deviceId);
+    return;
+  }
+
   let token = "";
   try {
     const body = JSON.parse((await readBody(req)) || "{}") as { token?: unknown };
@@ -75,7 +107,23 @@ export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse)
     recordFailure(req);
     throw err;
   }
-  if (!token || !verifyLoginSecret(token)) {
+
+  if (!token) {
+    if (deviceId) {
+      issueAutoSession(req, res, deviceId);
+      return;
+    }
+    writeJson(res, 401, {
+      authenticated: false,
+      authRequired: true,
+      needsPairing: true,
+      error: "此设备尚未配对，请输入一次访问令牌",
+    });
+    return;
+  }
+
+  if (!assertRateAvailable(req, res)) return;
+  if (!verifyLoginSecret(token)) {
     const decision = recordFailure(req);
     writeAudit("auth_login_failed", { ip: ipTag(clientIp(req)), remaining: decision.remainingIp });
     if (!decision.allowed) {
@@ -89,6 +137,8 @@ export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse)
   authFailureLimiter.clear(clientIp(req));
   const { token: sessionToken, payload } = issueSession();
   setSessionCookie(res, sessionToken);
+  if (!deviceId) deviceId = enrollDeviceIdentity(res);
+  else renewDeviceCookie(res, deviceId);
   await migrateStoredSecrets().catch((err) => {
     log("warn", "config_secret_migration_failed", {
       message: err instanceof Error ? err.message : String(err),
@@ -98,38 +148,44 @@ export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse)
   writeJson(res, 200, {
     ok: true,
     authenticated: true,
+    authRequired: true,
+    autoSession: true,
     expiresAt: payload.exp,
     ttlSeconds: sessionTtlHours() * 3600,
   });
 }
 
 export async function handleAuthRenew(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const deviceId = ensureDeviceIdentity(req, res);
   if (!isAuthEnabled()) {
-    writeJson(res, 200, { ok: true, authRequired: false });
+    writeJson(res, 200, { ok: true, authRequired: false, autoSession: true });
     return;
   }
-  if (!assertRateAvailable(req, res)) return;
+
   const token = sessionFromRequest(req);
   const payload = token ? verifySessionToken(token) : null;
-  if (!payload) {
-    const decision = recordFailure(req);
-    if (!decision.allowed) {
-      rateLimited(res, decision);
-      return;
-    }
-    writeJson(res, 401, { error: "会话已过期，请重新登录" });
+  if (payload || deviceId) {
+    const next = issueSession(Date.now(), payload?.sid);
+    setSessionCookie(res, next.token);
+    if (deviceId) renewDeviceCookie(res, deviceId);
+    writeAudit("auth_session_renewed", { ip: ipTag(clientIp(req)), mode: deviceId ? "device" : "session" });
+    writeJson(res, 200, { ok: true, autoSession: Boolean(deviceId), expiresAt: next.payload.exp });
     return;
   }
-  const next = issueSession(Date.now(), payload.sid);
-  setSessionCookie(res, next.token);
-  writeAudit("auth_session_renewed", { ip: ipTag(clientIp(req)) });
-  writeJson(res, 200, { ok: true, expiresAt: next.payload.exp });
+
+  const decision = recordFailure(req);
+  if (!decision.allowed) {
+    rateLimited(res, decision);
+    return;
+  }
+  writeJson(res, 401, { error: "会话已过期，请重新配对设备" });
 }
 
 export async function handleAuthLogout(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const token = sessionFromRequest(req);
   revokeSession(token);
   clearSessionCookieOnResponse(res);
+  clearDeviceCookieOnResponse(res);
   writeAudit("auth_logout", { ip: ipTag(clientIp(req)) });
   writeJson(res, 200, { ok: true });
 }

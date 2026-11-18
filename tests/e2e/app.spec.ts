@@ -7,7 +7,14 @@
 import { expect, test } from "@playwright/test";
 import { createChat, login, sendMessage } from "./helpers.js";
 
-test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
+test("本机直连静默建立设备会话，不再弹出令牌框", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-app-ready", "true");
+  await expect(page.locator("#ui-dialog-input")).toBeHidden();
+  await expect(page.locator("#new-chat-btn")).toBeVisible();
+});
+
+test("静默会话、设置分区、供应商弹窗与设备隔离提示", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await login(page);
@@ -67,10 +74,9 @@ test("登录、设置分区、供应商弹窗与退出", async ({ page }) => {
   await expect(page.locator("#settings-page")).toBeHidden();
 
   await page.locator("#settings-btn").click();
-  await page.locator("#settings-logout-btn").click();
-  await expect(page.locator("#ui-dialog-ok")).toBeVisible();
-  await page.locator("#ui-dialog-ok").click();
-  await expect(page.locator("#ui-dialog-input")).toBeVisible();
+  // 静默设备会话可自动恢复，主动退出没有实际意义，因此不再展示退出按钮。
+  await expect(page.locator("#settings-logout-btn")).toBeHidden();
+  await expect(page.locator("#ui-dialog-input")).toBeHidden();
   expect(pageErrors).toEqual([]);
 });
 

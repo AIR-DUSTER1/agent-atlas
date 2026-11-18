@@ -45,7 +45,7 @@
 import { createServer } from "node:http";
 import { config } from "../config.js";
 import { PRODUCT_NAME } from "../product.js";
-import { bumpConfigVersion, restoreSessions } from "./sessions.js";
+import { bumpConfigVersion, getSessionByThreadForDevice, restoreSessions } from "./sessions.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
 import { loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
@@ -60,6 +60,7 @@ import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes
 import { configureRoutingBreaker, configureRoutingVectorFinder } from "../routing/state.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
+import { adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, requireDeviceIdentity } from "./security/device.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
@@ -281,6 +282,13 @@ const server = createServer(async (req, res) => {
       if (originReject) { respondForbidden(req, res, originReject); return; }
     }
 
+    // 设备身份必须在认证端点前解析：本机直连自动建立 local 身份，
+    // 已配对设备或旧有效会话会获得可跨重启的签名设备 Cookie。
+    if (pathname.startsWith("/api/")) {
+      if (pathname.startsWith("/api/auth/")) ensureDeviceIdentity(req, res);
+      else ensureDeviceSession(req, res);
+    }
+
     // 认证端点自身不能要求已登录 Cookie；静态页匿名可加载后由前端发起登录。
     if (pathname === "/api/auth/session" && req.method === "GET") { await handleAuthStatus(req, res); return; }
     if (pathname === "/api/auth/session" && req.method === "POST") { await handleAuthLogin(req, res); return; }
@@ -319,6 +327,10 @@ const server = createServer(async (req, res) => {
       }
       return;
     }
+    // 旧 Bearer 兼容请求虽然没有浏览器设备 Cookie，也必须获得稳定的设备归属，
+    // 否则创建会话后下一条脚本请求会被设备隔离误拒绝。
+    if (pathname.startsWith("/api/")) adoptBearerIdentity(req, res);
+
     // Phase 0 止血：非 loopback 绑定且未启用认证 → 所有写请求全部拒绝。
     // 用「方法级」而非接口枚举：新增路由默认落在防线内侧，不会因漏单位置绕过。
     // GET（只读信息）不受限：config/sessions 等只含掩码/元信息，无副作用。
@@ -386,12 +398,12 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/sessions") { await handleSessions(res, req); return; }
     // 批量清理要放在 sessionMatch 之前：/api/sessions/cleanup 不能被当成会话 id
     if (pathname === "/api/sessions/cleanup" && req.method === "POST") { await handleCleanupSessions(res, req); return; }
-    if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, sessionMatch[1]); return; }
+    if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, req, sessionMatch[1]); return; }
     if (compactMatch && req.method === "POST") { await handleCompactSession(res, req, compactMatch[1]); return; }
     if (permissionMatch && req.method === "POST") { await handleSessionPermission(res, req, permissionMatch[1]); return; }
-    if (transcriptMatch && req.method === "GET") { await handleTranscript(res, transcriptMatch[1]); return; }
+    if (transcriptMatch && req.method === "GET") { await handleTranscript(res, req, transcriptMatch[1]); return; }
     const exportMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/export$/);
-    if (exportMatch && req.method === "GET") { await handleExportSession(res, exportMatch[1]); return; }
+    if (exportMatch && req.method === "GET") { await handleExportSession(res, req, exportMatch[1]); return; }
 
     // 外部 Agent
     if (pathname === "/api/external-agents" && req.method === "GET") { await handleListExternalAgents(res); return; }
@@ -520,7 +532,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/client-errors" && req.method === "POST") { await handleClientError(req, res, requestId); return; }
 
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
-    if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res); return; }
+    if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res, req); return; }
 
     // 备份与恢复（F9：换机 / 误删 / 升级前的整机状态快照）
     if (pathname === "/api/backup" && req.method === "POST") { await handleCreateBackup(res); return; }
@@ -557,6 +569,18 @@ const server = createServer(async (req, res) => {
       let browserSessionId = "";
       try { browserSessionId = decodeURIComponent(browserMatch[1] || ""); }
       catch { res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify({ error: "浏览器会话 id 编码非法" })); return; }
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(browserSessionId)) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "浏览器会话 id 格式非法" }));
+        return;
+      }
+      const deviceId = requireDeviceIdentity(req, res);
+      if (!deviceId) return;
+      if (!getSessionByThreadForDevice(browserSessionId, deviceId)) {
+        res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Browser Use 会话不存在或不属于当前设备" }));
+        return;
+      }
       if (!browserMatch[2] && req.method === "GET") { handleBrowserState(res, browserSessionId); return; }
       if (browserMatch[2] && req.method === "GET") { handleBrowserScreenshot(res, browserSessionId); return; }
       if (!browserMatch[2] && req.method === "POST") { await handleBrowserClose(res, req, browserSessionId); return; }

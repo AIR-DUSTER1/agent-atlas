@@ -5,7 +5,8 @@
  * / { kind: "external", agentId } / { kind: "estate" } / { kind: "job" }；兼容旧 { demo: N }。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { createSession, deleteSession, getSession, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
+import { createSession, deleteSession, getSessionForDevice, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
+import { requireDeviceIdentity } from "../security/device.js";
 import { closeBrowserSession } from "../browser-use.js";
 import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
@@ -13,9 +14,11 @@ import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
 import { writeAudit } from "../audit.js";
 
 export async function handleSessions(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
   if (req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(listSessions().map((s) => ({
+    res.end(JSON.stringify(listSessions(deviceId).map((s) => ({
       id: s.id, kind: s.kind, agentProfileId: s.agentProfileId, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
       permissionMode: s.permissionMode,
       pendingApproval: Boolean(s.pendingApproval),
@@ -40,7 +43,11 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
     }
     const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : getActiveProjectId();
     try {
-      const session = createSession(kind, demo, projectId, body.title, typeof body.agentId === "string" ? body.agentId : null);
+      const session = createSession(
+        kind, demo, projectId, body.title,
+        typeof body.agentId === "string" ? body.agentId : null,
+        deviceId,
+      );
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ id: session.id, kind: session.kind, agentProfileId: session.agentProfileId, demo: session.demo, agentId: session.agentId, projectId: session.projectId, title: session.title, createdAt: session.createdAt }));
     } catch (err) {
@@ -50,18 +57,32 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
   }
 }
 
-export async function handleDeleteSession(res: import("node:http").ServerResponse, id: string): Promise<void> {
-  await closeBrowserSession(id).catch(() => {});
+export async function handleDeleteSession(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  id: string,
+): Promise<void> {
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(id, deviceId);
+  if (!session) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前设备" }));
+    return;
+  }
+  await closeBrowserSession(session.threadId).catch(() => {});
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ ok: deleteSession(id) }));
 }
 
 /** POST /api/sessions/:id/compact —— 压缩当前会话上下文（模型摘要 + 重建线程） */
 export async function handleCompactSession(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, id: string): Promise<void> {
-  const session = getSession(id);
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(id, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前设备" }));
     return;
   }
   try {
@@ -74,11 +95,17 @@ export async function handleCompactSession(res: import("node:http").ServerRespon
 }
 
 /** GET /api/sessions/:id/transcript —— 历史轮次回放（本地浏览器无该会话缓存时前端拉取重放） */
-export async function handleTranscript(res: import("node:http").ServerResponse, id: string): Promise<void> {
-  const session = getSession(id);
+export async function handleTranscript(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  id: string,
+): Promise<void> {
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(id, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前设备" }));
     return;
   }
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -92,10 +119,12 @@ export async function handleSessionPermission(
   req: import("node:http").IncomingMessage,
   id: string
 ): Promise<void> {
-  const session = getSession(id);
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(id, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前设备" }));
     return;
   }
   const body = JSON.parse((await readBody(req)) || "{}") as { mode?: unknown };
@@ -156,12 +185,15 @@ function turnToMarkdown(record: TurnRecord): string {
 /** GET /api/sessions/:id/export —— 导出为 Markdown 附件（任何编辑器可读） */
 export async function handleExportSession(
   res: import("node:http").ServerResponse,
-  id: string
+  req: import("node:http").IncomingMessage,
+  id: string,
 ): Promise<void> {
-  const session = getSession(id);
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(id, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前设备" }));
     return;
   }
   const records = getTurnHistory(session);
@@ -200,6 +232,8 @@ export async function handleCleanupSessions(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage
 ): Promise<void> {
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
   const body = JSON.parse((await readBody(req)) || "{}") as { daysBefore?: unknown };
   const days = typeof body.daysBefore === "number" ? Math.floor(body.daysBefore) : NaN;
   if (!Number.isFinite(days) || days < CLEANUP_MIN_DAYS || days > CLEANUP_MAX_DAYS) {
@@ -208,10 +242,10 @@ export async function handleCleanupSessions(
     return;
   }
   const cutoff = Date.now() - days * 86_400_000;
-  const victims: Session[] = listSessions().filter((s) => s.createdAt < cutoff);
+  const victims: Session[] = listSessions(deviceId).filter((s) => s.createdAt < cutoff);
   for (const s of victims) {
     deleteSession(s.id);
-    await closeBrowserSession(s.id).catch(() => {});
+    await closeBrowserSession(s.threadId).catch(() => {});
   }
   writeAudit("sessions.cleanup", { daysBefore: days, removed: victims.length });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });

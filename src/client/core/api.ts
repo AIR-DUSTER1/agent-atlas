@@ -2,11 +2,11 @@
  * ============================================================
  * core/api.ts — 带会话自愈的 fetch 封装
  * ============================================================
- * 职责：所有 /api 请求的唯一出口。401 时弹框收集 AUTH_TOKEN，换取
- * HttpOnly Cookie 后只重试一次。
+ * 职责：所有 /api 请求的唯一出口。401 时先静默用设备凭据换短期会话，
+ * 只有新公网设备才弹一次 AUTH_TOKEN 配对框，并只重试一次。
  * 设计立场：
  *  - 引导密钥不写入 localStorage，浏览器请求只携带 HttpOnly 会话；
- *  - 并发 401 共用同一次登录提示，避免连弹多个框；
+ *  - 本机与已配对设备不弹框；并发 401 共用同一次静默恢复；
  *  - 登录失败 / 限流文案原样透传，不吞成笼统网络错误。
  */
 
@@ -26,23 +26,34 @@ export class ApiError extends Error {
   }
 }
 
+async function postSession(token?: string): Promise<Response> {
+  return fetch("/api/auth/session", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(token ? { token } : {}),
+  });
+}
+
 async function loginSession(hint?: string): Promise<boolean> {
+  const silent = await postSession();
+  if (silent.ok) return true;
+  if (silent.status !== 401) {
+    const data = await silent.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error || `建立设备会话失败（HTTP ${silent.status}）`);
+  }
+
   const token = await uiPrompt(
-    hint || "服务已开启访问认证，请输入访问令牌（服务端 .env 的 AUTH_TOKEN）：",
-    { title: "访问认证", okText: "登录", password: true }
+    hint || "此设备尚未配对。首次使用请输入访问令牌（服务端 .env 的 AUTH_TOKEN），之后将自动保持登录：",
+    { title: "设备配对", okText: "配对", password: true }
   );
   if (token == null || typeof token !== "string" || !token.trim()) {
     throw new Error("未提供访问令牌，请求已取消");
   }
-  const res = await fetch("/api/auth/session", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: token.trim() }),
-  });
+  const res = await postSession(token.trim());
   if (res.ok) return true;
   const data = await res.json().catch(() => ({})) as { error?: string };
-  throw new Error(data.error || `登录失败（HTTP ${res.status}）`);
+  throw new Error(data.error || `设备配对失败（HTTP ${res.status}）`);
 }
 
 async function ensureAuthSession(hint?: string): Promise<void> {

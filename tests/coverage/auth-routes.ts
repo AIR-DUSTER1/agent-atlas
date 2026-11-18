@@ -30,10 +30,15 @@ Object.assign(process.env, {
   SKILLS_DIR: join(data, "skills"),
   AUDIT_FILE: join(data, "audit.ndjson"),
   BACKUP_DIR: join(data, "backups"),
+  TRUST_PROXY: "1",
 });
 
 await import("../../src/server/index.js");
 const base = `http://127.0.0.1:${port}`;
+const remoteFetch = (path: string, init: RequestInit = {}): Promise<Response> => fetch(base + path, {
+  ...init,
+  headers: { ...(init.headers as Record<string, string> | undefined), "X-Forwarded-For": "198.51.100.30" },
+});
 for (let i = 0; i < 80; i += 1) {
   try {
     if ((await fetch(base + "/healthz")).ok) break;
@@ -41,21 +46,21 @@ for (let i = 0; i < 80; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
-let response = await fetch(base + "/api/auth/session");
+let response = await remoteFetch("/api/auth/session");
 assert.equal(response.status, 401);
-response = await fetch(base + "/api/auth/session", {
+response = await remoteFetch("/api/auth/session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ token: "wrong-token" }),
 });
 assert.equal(response.status, 401);
-response = await fetch(base + "/api/auth/session", {
+response = await remoteFetch("/api/auth/session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: "{bad-json",
 });
 assert.equal(response.status, 400);
-response = await fetch(base + "/api/auth/session", {
+response = await remoteFetch("/api/auth/session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ token: "coverage-auth-token-123456" }),
@@ -63,34 +68,34 @@ response = await fetch(base + "/api/auth/session", {
 assert.equal(response.status, 200);
 let cookie = (response.headers.get("set-cookie") || "").split(";")[0] || "";
 assert.match(cookie, /lg_agent_session=/);
-response = await fetch(base + "/api/auth/session", { headers: { Cookie: cookie } });
+response = await remoteFetch("/api/auth/session", { headers: { Cookie: cookie } });
 assert.equal(response.status, 200);
-response = await fetch(base + "/api/auth/session/renew", {
+response = await remoteFetch("/api/auth/session/renew", {
   method: "POST",
   headers: { Cookie: cookie, "Content-Type": "application/json" },
   body: "{}",
 });
 assert.equal(response.status, 200);
 cookie = (response.headers.get("set-cookie") || "").split(";")[0] || cookie;
-response = await fetch(base + "/api/auth/logout", {
+response = await remoteFetch("/api/auth/logout", {
   method: "POST",
   headers: { Cookie: cookie, "Content-Type": "application/json" },
   body: "{}",
 });
 assert.equal(response.status, 200);
-response = await fetch(base + "/api/auth/session", { headers: { Cookie: cookie } });
+response = await remoteFetch("/api/auth/session", { headers: { Cookie: cookie } });
 assert.equal(response.status, 401);
 
 // 续期伪造 Cookie 连续失败：最后一次应从“会话过期 401”升级为 429 冷却。
 for (let i = 0; i < 4; i += 1) {
-  response = await fetch(base + "/api/auth/session/renew", {
+  response = await remoteFetch("/api/auth/session/renew", {
     method: "POST",
     headers: { Cookie: "lg_agent_session=forged", "Content-Type": "application/json" },
     body: "{}",
   });
   assert.equal(response.status, 401);
 }
-response = await fetch(base + "/api/auth/session/renew", {
+response = await remoteFetch("/api/auth/session/renew", {
   method: "POST",
   headers: { Cookie: "lg_agent_session=forged", "Content-Type": "application/json" },
   body: "{}",
@@ -99,7 +104,7 @@ assert.equal(response.status, 429);
 assert.ok(Number(response.headers.get("retry-after")) > 0);
 
 // 已冷却 IP 即使提交正确引导密钥也先被入口限流拦截。
-response = await fetch(base + "/api/auth/session", {
+response = await remoteFetch("/api/auth/session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ token: "coverage-auth-token-123456" }),
@@ -108,15 +113,15 @@ assert.equal(response.status, 429);
 
 // 关闭认证后的三个无认证兼容分支。
 process.env.AUTH_TOKEN = "";
-response = await fetch(base + "/api/auth/session");
+response = await remoteFetch("/api/auth/session");
 assert.equal(response.status, 200);
-response = await fetch(base + "/api/auth/session", {
+response = await remoteFetch("/api/auth/session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: "{}",
 });
 assert.equal(response.status, 200);
-response = await fetch(base + "/api/auth/session/renew", {
+response = await remoteFetch("/api/auth/session/renew", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: "{}",

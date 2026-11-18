@@ -12,6 +12,7 @@
  * 时间窗口按服务器本地自然日计算，包含今天；journal 回放后的 turnHistory 同样计入。
  */
 import { listSessions, type Session, type TurnRecord } from "../sessions.js";
+import { requireDeviceIdentity } from "../security/device.js";
 
 const RANGE_WINDOWS = [
   { id: "7d", label: "近 7 天", days: 7 },
@@ -350,7 +351,12 @@ export function buildStats(sessions: Session[], generatedAt = Date.now()): Stats
   };
 }
 
-export async function handleStats(res: import("node:http").ServerResponse): Promise<void> {
+export async function handleStats(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+): Promise<void> {
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(buildStats(listSessions())));
+  res.end(JSON.stringify(buildStats(listSessions(deviceId))));
 }

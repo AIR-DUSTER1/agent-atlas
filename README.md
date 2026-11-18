@@ -43,7 +43,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
 | 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆；上下文条精简展示占比、请求量、缓存与输出均速 |
-| 安全与运维 | 高风险审批、审计日志、登录认证、配置加密、用量统计、备份恢复与 Prometheus 指标 |
+| 安全与运维 | 高风险审批、审计日志、设备静默认证、按设备隔离会话、配置加密、用量统计、备份恢复与 Prometheus 指标 |
 
 ## 界面预览
 
@@ -183,6 +183,13 @@ scripts/          构建、检查、备份与发布辅助脚本
 
 维护边界：`src/client/index.html` 只保留根壳和 `@include` 清单，`npm run build:client` 由 `scripts/compose-html.ts` 合成完整页面；`src/agent/workflow.ts` 只保留稳定导出，具体节点在 `src/agent/workflow/nodes/`。内部门禁会阻止这些入口重新长成单体。
 
+## 访问与设备隔离
+
+- 本机 `127.0.0.1` 直连自动建立设备会话，不再弹出令牌框。
+- 公网新设备首次输入一次 `AUTH_TOKEN`，之后设备 Cookie 自动续期；短期会话过期不会要求重新输入。
+- 会话、审批记录、导出、统计与 Browser Use 都按设备隔离；拿到其他设备的 `sessionId` 也无法读取。
+- 浏览器无法读取真实 MAC，因此这里使用服务端签名的设备 Cookie，而不是伪造“MAC 认证”。清除站点数据或换浏览器会生成新设备身份。
+
 ## 配置说明
 
 常用环境变量：
@@ -192,9 +199,10 @@ scripts/          构建、检查、备份与发布辅助脚本
 | `BASE_URL` / `API_KEY` / `MODEL` | 模型网关地址、密钥与默认模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
 | `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
-| `AUTH_TOKEN` | 开启登录认证；对外监听时必须设置 |
+| `AUTH_TOKEN` | 首次设备配对令牌；本机直连和已配对设备自动续期，对外监听时必须设置 |
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
-| `SESSION_SECRET` / `DATA_KEY` | 生产会话签名与配置加密密钥 |
+| `SESSION_SECRET` / `DATA_KEY` | 生产会话与设备凭据签名、配置加密密钥 |
+| `DEVICE_TTL_DAYS` | 已配对设备凭据有效期，默认 180 天（1–365） |
 | `METRICS_TOKEN` | Prometheus 指标端点的只读令牌 |
 | `MODEL_REQUEST_TIMEOUT_MS` | 单次模型请求超时，默认 90 秒；审批与工具等待不受此值影响 |
 | `MODEL_REQUEST_RETRIES` | 可重试模型错误的自动重试次数，默认 10 |

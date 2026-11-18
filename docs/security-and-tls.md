@@ -4,9 +4,10 @@
 
 | 边界 | 实现 |
 |---|---|
-| 登录 | `AUTH_TOKEN` 仅换取短期签名会话；浏览器不保存引导密钥 |
-| Cookie | `HttpOnly`、`SameSite=Strict`；生产强制 `Secure` |
-| 会话 | HMAC-SHA256、进程 boot nonce、可注销、过期失效 |
+| 设备配对 | `AUTH_TOKEN` 只用于新公网设备首次配对；浏览器不保存引导密钥 |
+| 静默恢复 | 本机直连自动建立 `local` 身份；已配对设备用长期设备 Cookie 静默换短期会话 |
+| Cookie | 会话与设备 Cookie 均为 `HttpOnly`、`SameSite=Strict`；生产强制 `Secure` |
+| 会话 | HMAC-SHA256、进程 boot nonce、可注销、过期失效；会话按设备归属隔离 |
 | 失败限流 | IP 5 次 / 15 分钟，全局 100 次 / 15 分钟 |
 | 密钥落盘 | 供应商 API Key、MCP env 等使用 AES-256-GCM |
 | CSRF | 变更请求校验 Origin / `Sec-Fetch-Site` |
@@ -15,7 +16,23 @@
 | 外部请求 | SSRF 防护、协议白名单、超时、熔断与资源队列 |
 | 审批 | 高风险工具必须经过审批或显式权限模式 |
 
-## 2. 反向代理要求
+## 2. 设备身份与会话隔离
+
+浏览器和 HTTP 服务都无法可靠读取物理 MAC：公网请求经过路由、代理和容器后只剩 IP，
+浏览器也没有相应 Web API；即使服务端运行在本机，网卡地址也可能变化且可被伪造。
+因此产品使用服务端签名的设备 Cookie 作为稳定设备身份：
+
+- 设备 Cookie 默认 180 天，使用 `SESSION_SECRET` HMAC 签名，跨服务重启保持有效；
+- 短期会话默认 12 小时；过期后前端自动用设备 Cookie 换取新会话，不弹令牌框；
+- 本机直连自动建立 `local` 设备身份，适用于个人桌面环境；
+- 新公网设备仍需用 `AUTH_TOKEN` 配对一次；清除站点数据或更换浏览器视为新设备；
+- 每个会话 journal 记录设备归属，列表、聊天、审批、导出、统计、Browser Use 和清理
+  均校验设备归属，拿到他人的 `sessionId` 也不能读取或操作。
+
+设备 Cookie 是长期刷新凭据，不等同于物理硬件认证。若业务需要账号级权限、跨设备同步
+或审计到自然人，应在反向代理接入 OIDC / SSO，并把代理断言再映射为租户身份。
+
+## 3. 反向代理要求
 
 Agent 必须只监听 loopback：
 
@@ -34,7 +51,10 @@ ports:
 
 只有代理会正确覆盖转发头时，才设置 `TRUST_PROXY=1`。直连场景保持关闭，否则攻击者可伪造 IP 绕过认证限流。
 
-## 3. Nginx
+本机静默会话只在「TCP 对端是 loopback 且没有任何转发头」时启用。反向代理必须发送
+`X-Forwarded-For`（并覆盖客户端伪造值）；否则同机代理会把公网请求伪装成本机请求。
+
+## 4. Nginx
 
 ```nginx
 server {
@@ -76,7 +96,7 @@ server {
 }
 ```
 
-## 4. Caddy
+## 5. Caddy
 
 ```caddyfile
 agent.example.com {
@@ -88,7 +108,7 @@ agent.example.com {
 
 Caddy 自动管理 TLS。若需要对 `/metrics` 限制来源，在站点内增加 `@metrics` matcher 与 `remote_ip` 规则。
 
-## 5. Prometheus 指标认证
+## 6. Prometheus 指标认证
 
 生产环境浏览器会话是 HttpOnly Cookie，不适合作为 Prometheus 凭据。设置独立的 `METRICS_TOKEN`：
 
@@ -106,7 +126,7 @@ scrape_configs:
 
 该 token 只授权 `/metrics`，访问 `/api/*` 仍返回 401。轮换时先更新 Prometheus secret，再重启 Agent。
 
-## 6. 数据边界
+## 7. 数据边界
 
 - `.env`、`production.env`、`.web-config.json`、`.setting/`、`data/` 不得进入 Git 或镜像。
 - 生产数据卷权限建议 `0700` 目录、`0600` 敏感文件（以宿主操作系统能力为准）。
@@ -114,7 +134,7 @@ scrape_configs:
 - `DATA_KEY` 不属于备份目录，需单独保存在密码管理器或 KMS。
 - 浏览器只通过 HTTPS；在纯 HTTP 下生产 Cookie 不会被发送，登录表现为“成功后仍回到登录框”。
 
-## 7. 安全变更规则
+## 8. 安全变更规则
 
 - 不关闭认证、CSP、同源检查和审批来“临时绕过”。
 - 新增执行命令、写文件、发送消息或控制电脑的工具，必须在 `hitl.ts` 登记为高风险。

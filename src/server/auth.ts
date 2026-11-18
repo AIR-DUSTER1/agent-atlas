@@ -9,6 +9,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { verifyBearer } from "./auth-bearer.js";
 import { verifySessionRequest } from "./security/session.js";
+import { hasAuthorizedDeviceSession } from "./security/device.js";
 
 function currentToken(): string {
   return (process.env.AUTH_TOKEN ?? "").trim();
@@ -19,7 +20,7 @@ export function isAuthEnabled(): boolean {
 }
 
 export const UNAUTHORIZED_MSG =
-  "需要认证：请先通过 POST /api/auth/session 使用 AUTH_TOKEN 登录；会话过期后重新登录即可";
+  "需要认证：请先通过 POST /api/auth/session 建立设备会话；本机直连和已配对设备会自动续期";
 
 function constantTimeSecretEqual(candidate: string, expected: string): boolean {
   if (!candidate || !expected) return false;
@@ -50,7 +51,7 @@ export function verifyMetricsAuth(req: IncomingMessage): boolean {
 /** 受保护 API：Cookie 会话优先；仅非生产环境接受旧 Bearer 兼容。 */
 export function verifyRequestAuth(req: IncomingMessage): boolean {
   if (!isAuthEnabled()) return true;
-  if (verifySessionRequest(req)) return true;
+  if (hasAuthorizedDeviceSession(req) || verifySessionRequest(req)) return true;
   if (process.env.PRODUCTION !== "1" && verifyBearer(req)) return true;
   return false;
 }

@@ -732,7 +732,7 @@ Header: Authorization: Bearer <key>（可留空）
 
 | 文件 | 职责 | 关键设计（踩过的坑在 §7.3） |
 |---|---|---|
-| `auth.ts` | Bearer 认证 | 惰性读 env（防 ESM 早求值）；token 比 sha256 摘要 + `timingSafeEqual`（防时序侧信道）；401 统一文案 + `Connection: close` |
+| `auth.ts` / `security/device.ts` | 设备静默认证 | 本机直连、已配对设备和旧有效会话可静默换短期会话；公网新设备只需一次 `AUTH_TOKEN` 配对；设备 Cookie 用 HMAC 签名并跨重启有效；token 比 sha256 摘要 + `timingSafeEqual`（防时序侧信道）；401 统一文案 + `Connection: close` |
 | `http-guard.ts` | 请求层防线 | `checkSameOrigin`（`Sec-Fetch-Site: cross-site` / `Origin` 不符 → 403，即使带令牌也拒——防恶意页面借浏览器自动携带凭证）；`SECURITY_HEADERS`（nosniff / no-referrer / X-Frame-Options / CSP；地图静态图走同源代理，不放外部脚本或 frame-src）；`shedRequestBodyAfterResponse` 拒绝路径排水（**空 body 的 GET 不能 destroy**，会在响应 flush 前带 RST） |
 | `subprocess.ts` | 受控运行器 | `runControlled` 统一 stdin/超时/abort/输出上限（stdout 头部 4MB、stderr 尾部 64KB、超限树杀），`killProcessTree`（win32 `taskkill /T /F`、unix detached 组杀）；`realRunner` 可替换 → 测试不碰真进程 |
 | `audit.ts` | 审计日志 | `writeAudit(ev, detail)` fire-and-forget 自吞异常；append-only NDJSON 到 `.setting/audit.ndjson`；`AUDIT_MAX_BYTES=1MB` 超限尾部截断重写；事件族：`external.*`、`beike.*`、`browser.opened/closed/idleClosed/requestBlocked` |
@@ -2053,7 +2053,7 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 | 领域 | 模块 | 关键契约 |
 |---|---|---|
 | 生产门禁 | `server/production.ts`、`server/release-check.ts` | `PRODUCTION=1` 时密钥、真实模型、目录写探针、非 root、运行面 fail-closed |
-| 会话认证 | `server/security/session.ts`、`routes/auth.ts` | HMAC 短期 HttpOnly Cookie、续期、注销、boot nonce、失败限流 |
+| 会话认证 | `server/security/{session,device}.ts`、`routes/auth.ts` | 设备 Cookie 静默续期、HMAC 短期 HttpOnly 会话、按设备隔离、boot nonce、失败限流 |
 | 密钥保护 | `server/security/secrets.ts`、`config-store.ts` | AES-256-GCM；旧明文原子迁移；缺 Key / 篡改拒绝启动 |
 | 数据迁移 | `server/persistence/migrations.ts`、`ndjson-health.ts` | JSON schema 升级；NDJSON 坏行隔离；未来版本拒绝写入 |
 | 备份恢复 | `server/backup.ts`、`scripts/data-cli.ts` | manifest v2、SHA-256、自动快照、保留策略、恢复回滚 |
@@ -2062,6 +2062,10 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 | 发布工程 | `Dockerfile`、`docker-compose.production.yml`、`scripts/docker-smoke.ts` | builder / prod-deps / runtime 三层；固定基础镜像 digest；镜像自检 |
 | 供应链 | `audit-production.ts`、`write-sbom.ts`、CI | high/critical 阻断、CycloneDX、Trivy advisory、dependency review |
 | 自动化验证 | `tests/e2e`、fixture、fault/load/architecture/coverage | 浏览器主链路、旧数据、断连、MCP 死亡、1000 会话、100KB 消息 |
+
+> 设备身份不是物理 MAC 认证：浏览器无法读取 MAC，且代理/容器会丢失链路层地址。
+> 产品使用服务端签名的设备 Cookie；会话 owner 写入 journal，所有 session 相关 API
+> 都按 owner fail-closed 校验，跨设备请求统一返回 404。
 
 **生产启动顺序**：读生产环境 → 配置迁移 → 设置/扩展加载 → 真实模型与目录门禁 → journal 回放 → HTTP 监听。任何硬门失败只输出结构化错误并退出 1，不进入半可用状态。
 

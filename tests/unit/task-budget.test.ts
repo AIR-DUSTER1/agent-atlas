@@ -13,7 +13,7 @@ import {
 
 function session(): Session {
   return {
-    id: "s", kind: "agent", agentProfileId: "general", demo: null, agentId: null,
+    id: "s", kind: "agent", agentProfileId: "general", demo: null, agentId: null, deviceId: "local",
     projectId: "default", title: "t", createdAt: 0, graph: null, threadId: "th",
     pendingApproval: null, configVersion: 1, turns: 0, turnHistory: [],
     resumeUninjected: false, resumeUnavailable: false, contextSummary: null,

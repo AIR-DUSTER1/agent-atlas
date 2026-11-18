@@ -13,7 +13,7 @@ import { analyzeEstateTurn } from "../estate.js";
 import { resolveChatFiles, buildUserContent, type ChatFileRef } from "../files.js";
 import { ingestChatAttachments } from "../rag.js";
 import {
-  getSession, rebuildIfStale, beginTurnRecord, completeTurnRecord, isAgentKind,
+  getSessionForDevice, rebuildIfStale, beginTurnRecord, completeTurnRecord, isAgentKind,
   recordApproval, recordDecision, buildPrehistoryNote, takeContextSummary, type Session,
 } from "../sessions.js";
 import { getActiveId, getActiveModality, getContextWindowForActive } from "../settings.js";
@@ -24,6 +24,7 @@ import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
 import { getActiveModelLabel } from "../settings.js";
 import { incCounter, incGauge } from "../observability/metrics.js";
+import { requireDeviceIdentity } from "../security/device.js";
 import { runWithModelSlot, acquireModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
 import { scheduleMemoryDistillation } from "../memory-distillation.js";
@@ -307,10 +308,12 @@ export async function handleChat(
   sessionId: string,
   body: { message?: unknown; files?: unknown; headless?: unknown; continuous?: unknown }
 ): Promise<void> {
-  const session = getSession(sessionId);
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(sessionId, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启，请新建会话" }));
+    res.end(JSON.stringify({ error: "会话不存在、不属于当前设备，或服务已重启" }));
     return;
   }
   const message = typeof body.message === "string" ? body.message.trim() : "";
@@ -441,10 +444,12 @@ export async function handleResume(
   sessionId: string,
   body: { decision?: unknown; choice?: unknown; continuous?: unknown }
 ): Promise<void> {
-  const session = getSession(sessionId);
+  const deviceId = requireDeviceIdentity(req, res);
+  if (!deviceId) return;
+  const session = getSessionForDevice(sessionId, deviceId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "会话不存在或服务已重启" }));
+    res.end(JSON.stringify({ error: "会话不存在、不属于当前设备，或服务已重启" }));
     return;
   }
 

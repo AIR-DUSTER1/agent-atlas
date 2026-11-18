@@ -118,11 +118,34 @@ export function clearSessionCookie(env: NodeJS.ProcessEnv = process.env): string
 }
 
 export function setSessionCookie(res: ServerResponse, token: string): void {
-  res.setHeader("Set-Cookie", sessionCookie(token));
+  prependSetCookie(res, sessionCookie(token));
 }
 
 export function clearSessionCookieOnResponse(res: ServerResponse): void {
-  res.setHeader("Set-Cookie", clearSessionCookie());
+  appendSetCookie(res, clearSessionCookie());
+}
+
+/**
+ * 追加 Set-Cookie。设备身份 Cookie 与短期会话 Cookie 必须同时下发，
+ * 直接 setHeader 会让后写入的一项覆盖前一项，导致静默续期丢失设备身份。
+ */
+export function appendSetCookie(res: ServerResponse, cookie: string): void {
+  const current = typeof res.getHeader === "function" ? res.getHeader("Set-Cookie") : undefined;
+  const values = current == null
+    ? []
+    : Array.isArray(current) ? current.map(String) : [String(current)];
+  values.push(cookie);
+  res.setHeader("Set-Cookie", values);
+}
+
+/** 会话 Cookie 必须排在设备 Cookie 前，便于客户端/测试按首项识别短期会话。 */
+export function prependSetCookie(res: ServerResponse, cookie: string): void {
+  const current = typeof res.getHeader === "function" ? res.getHeader("Set-Cookie") : undefined;
+  const values = current == null
+    ? []
+    : Array.isArray(current) ? current.map(String) : [String(current)];
+  values.unshift(cookie);
+  res.setHeader("Set-Cookie", values);
 }
 
 /** 注销当前 token：即使攻击者留下旧副本，下一次验证也会因 sid 撤销而失败。 */

@@ -8,6 +8,7 @@
 
 - [ ] **P0** `PRODUCTION=1`、`NODE_ENV=production`。
 - [ ] **P0** `AUTH_TOKEN`、`SESSION_SECRET`、`DATA_KEY` 均为随机值且不在仓库中。
+- [ ] **P0** 已确认同一浏览器只访问一个设备身份；清除站点数据会生成新身份，旧会话不会跨设备恢复。
 - [ ] **P0** `COOKIE_SECURE=true`，浏览器只通过 HTTPS 访问。
 - [ ] **P0** `TRUST_PROXY=1` 仅在可信反向代理后启用，代理覆盖而非透传客户端伪造的转发头。
 - [ ] **P0** 容器端口只绑定 `127.0.0.1`，公网入口由 TLS 反代承担。

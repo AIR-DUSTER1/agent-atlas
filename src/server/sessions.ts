@@ -33,6 +33,7 @@ import {
 import type { AgentEvent, InterruptPayload } from "./events.js";
 import { canonicalizeTurnEvents, describeTurnStorage, type TurnStorageSummary } from "./turn-record.js";
 import type { TaskRunState } from "./task-budget.js";
+import { LOCAL_DEVICE_ID } from "./security/device.js";
 
 export interface DemoMeta {
   id: 1 | 2 | 3 | 4;
@@ -102,6 +103,8 @@ export interface Session {
   demo: 1 | 2 | 3 | 4 | null;
   /** kind === "external"：接入的第三方 Agent id（external.ts 注册表） */
   agentId: string | null;
+  /** 浏览器设备隔离键；API 只能访问本设备创建的会话。 */
+  deviceId: string;
   /** 归属的项目文件夹（"default" = 未归属会话的内部兜底标识） */
   projectId: string;
   title: string;
@@ -189,7 +192,14 @@ export async function rebuildIfStale(session: Session): Promise<boolean> {
   return true;
 }
 
-export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, projectId: string | undefined, title?: string, agentId?: string | null): Session {
+export function createSession(
+  kind: SessionKind,
+  demo: 1 | 2 | 3 | 4 | null,
+  projectId: string | undefined,
+  title?: string,
+  agentId?: string | null,
+  deviceId: string = LOCAL_DEVICE_ID,
+): Session {
   // 外部 Agent 会话不建 LangGraph：每条消息直接启动第三方工具的子进程（external.ts）
   const external = kind === "external" ? getExternalAgent(agentId ?? "") : undefined;
   if (kind === "external" && !external) throw new Error("外部 Agent 不存在或已被移除");
@@ -206,6 +216,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
     agentProfileId: profileIdForKind(kind),
     demo: kind === "demo" ? demo : null,
     agentId: external?.id ?? null,
+    deviceId,
     projectId: projectId || "default",
     title: title?.trim() || defaultTitle,
     createdAt: Date.now(),
@@ -228,7 +239,7 @@ export function createSession(kind: SessionKind, demo: 1 | 2 | 3 | 4 | null, pro
   // T2-2：创建即落 journal —— 白名单挑字段（Session 内含编译图/内存结构，严禁整只序列化）
   journalSession({
     id: session.id, kind: session.kind,
-    demo: session.demo, agentId: session.agentId,
+    demo: session.demo, agentId: session.agentId, deviceId: session.deviceId,
     projectId: session.projectId, title: session.title, createdAt: session.createdAt, threadId: session.threadId,
     permissionMode: session.permissionMode,
   });
@@ -308,8 +319,24 @@ export function getSession(id: string): Session | undefined {
   return sessions.get(id);
 }
 
-export function listSessions(): Session[] {
-  return [...sessions.values()].sort((a, b) => b.createdAt - a.createdAt);
+/** 业务 API 的默认入口：会话 id 只有与设备归属同时匹配才返回。 */
+export function getSessionForDevice(id: string, deviceId: string): Session | undefined {
+  const session = sessions.get(id);
+  return session?.deviceId === deviceId ? session : undefined;
+}
+
+/** Browser Use 使用 threadId 作为会话键，必须沿 threadId 再做一次设备归属校验。 */
+export function getSessionByThreadForDevice(threadId: string, deviceId: string): Session | undefined {
+  for (const session of sessions.values()) {
+    if (session.threadId === threadId && session.deviceId === deviceId) return session;
+  }
+  return undefined;
+}
+
+export function listSessions(deviceId?: string): Session[] {
+  return [...sessions.values()]
+    .filter((session) => !deviceId || session.deviceId === deviceId)
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** 切换会话权限模式：只改字段 + 落 journal，下一轮消息即生效（无需重建图）。
@@ -417,6 +444,7 @@ export async function restoreSessions(): Promise<number> {
       agentProfileId: profileIdForKind(kind),
       demo: rec.demo,
       agentId: rec.agentId,
+      deviceId: rec.deviceId ?? LOCAL_DEVICE_ID,
       projectId: rec.projectId,
       title: rec.title || "已恢复的对话",
       createdAt: rec.createdAt,

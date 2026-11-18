@@ -121,7 +121,7 @@ export function bindSettingsNavigation(): void {
   const logout = $("settings-logout-btn");
   logout?.addEventListener("click", () => {
     void (async () => {
-      const confirmed = await uiConfirm("退出后需要重新输入访问令牌，确定退出？", { title: "退出登录", okText: "退出", danger: true });
+      const confirmed = await uiConfirm("退出后本设备需要重新配对，确定退出？", { title: "退出登录", okText: "退出", danger: true });
       if (!confirmed) return;
       await logoutSession();
       window.location.reload();
@@ -133,10 +133,10 @@ export function bindSettingsNavigation(): void {
   void fetch("/api/auth/session", { credentials: "same-origin" })
     .then(async (res) => {
       if (!res.ok) return null;
-      return await res.json() as { authenticated?: boolean; authRequired?: boolean };
+      return await res.json() as { authenticated?: boolean; authRequired?: boolean; autoSession?: boolean };
     })
     .then((status) => {
-      logout?.classList.toggle("hidden", !(status?.authenticated && status.authRequired));
+      logout?.classList.toggle("hidden", !(status?.authenticated && status.authRequired && !status.autoSession));
     })
     .catch(() => {});
   const input = $("settings-search") as HTMLInputElement | null;

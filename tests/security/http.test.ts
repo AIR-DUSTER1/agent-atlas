@@ -15,7 +15,7 @@ let authSrv: RunningServer;
 
 before(async () => {
   srv = await startServer();
-  authSrv = await startServer({ AUTH_TOKEN: "test-secret" });
+  authSrv = await startServer({ AUTH_TOKEN: "test-secret", TRUST_PROXY: "1" });
 });
 after(async () => {
   await srv?.stop();
@@ -114,14 +114,98 @@ test("探针免认证：开启 AUTH_TOKEN 后 /healthz 与 /readyz 仍可直接�
 });
 
 test("认证开启：无 Bearer 401，正确 Bearer 放行", async () => {
-  const noAuth = await fetch(authSrv.base + "/api/sessions");
+  const remote = { "X-Forwarded-For": "198.51.100.20" };
+  const noAuth = await fetch(authSrv.base + "/api/sessions", { headers: remote });
   assert.equal(noAuth.status, 401);
 
-  const ok = await fetch(authSrv.base + "/api/sessions", { headers: { Authorization: "Bearer test-secret" } });
+  const ok = await fetch(authSrv.base + "/api/sessions", { headers: { ...remote, Authorization: "Bearer test-secret" } });
   assert.equal(ok.status, 200);
 
-  const wrong = await fetch(authSrv.base + "/api/sessions", { headers: { Authorization: "Bearer wrong" } });
+  const wrong = await fetch(authSrv.base + "/api/sessions", { headers: { ...remote, Authorization: "Bearer wrong" } });
   assert.equal(wrong.status, 401);
+});
+
+function cookieValue(headers: Headers, name: string): string {
+  const raw = headers.get("set-cookie") ?? "";
+  const match = new RegExp(`${name}=([^;,]+)`).exec(raw);
+  assert.ok(match, `响应缺少 ${name} Cookie`);
+  return `${name}=${match[1]}`;
+}
+
+async function pairRemoteDevice(base: string, token: string, forwardedFor: string): Promise<string> {
+  const response = await fetch(base + "/api/auth/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Forwarded-For": forwardedFor },
+    body: JSON.stringify({ token }),
+  });
+  assert.equal(response.status, 200);
+  return `${cookieValue(response.headers, "lg_agent_session")}; ${cookieValue(response.headers, "lg_agent_device")}`;
+}
+
+test("不同设备会话完全隔离，跨设备 sessionId 与统计不可访问", async () => {
+  const isolated = await startServer({
+    AUTH_TOKEN: "device-isolation-token-123456",
+    SESSION_SECRET: "device-isolation-session-secret-at-least-thirty-two-chars",
+    TRUST_PROXY: "1",
+    COOKIE_SECURE: "false",
+  });
+  try {
+    const aCookie = await pairRemoteDevice(isolated.base, "device-isolation-token-123456", "198.51.100.10");
+    const bCookie = await pairRemoteDevice(isolated.base, "device-isolation-token-123456", "198.51.100.11");
+    const headers = (cookie: string, ip: string): Record<string, string> => ({
+      Cookie: cookie,
+      "X-Forwarded-For": ip,
+      "Content-Type": "application/json",
+    });
+
+    const created = await fetch(isolated.base + "/api/sessions", {
+      method: "POST",
+      headers: headers(aCookie, "198.51.100.10"),
+      body: JSON.stringify({ kind: "agent", title: "设备 A 私有会话" }),
+    });
+    assert.equal(created.status, 200);
+    const sessionId = (await created.json() as { id: string }).id;
+
+    const aList = await fetch(isolated.base + "/api/sessions", { headers: headers(aCookie, "198.51.100.10") });
+    assert.equal(aList.status, 200);
+    assert.deepEqual((await aList.json() as Array<{ id: string }>).map((item) => item.id), [sessionId]);
+
+    const bList = await fetch(isolated.base + "/api/sessions", { headers: headers(bCookie, "198.51.100.11") });
+    assert.equal(bList.status, 200);
+    assert.deepEqual(await bList.json(), []);
+
+    const bTranscript = await fetch(isolated.base + `/api/sessions/${sessionId}/transcript`, {
+      headers: headers(bCookie, "198.51.100.11"),
+    });
+    assert.equal(bTranscript.status, 404);
+    const aTranscript = await fetch(isolated.base + `/api/sessions/${sessionId}/transcript`, {
+      headers: headers(aCookie, "198.51.100.10"),
+    });
+    assert.equal(aTranscript.status, 200);
+
+    const bDelete = await fetch(isolated.base + `/api/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers: headers(bCookie, "198.51.100.11"),
+    });
+    assert.equal(bDelete.status, 404);
+
+    const bStats = await fetch(isolated.base + "/api/stats", { headers: headers(bCookie, "198.51.100.11") });
+    assert.equal(bStats.status, 200);
+    const stats = await bStats.json() as { ranges: Array<{ totals: { sessions: number } }> };
+    assert.ok(stats.ranges.every((range) => range.totals.sessions === 0));
+
+    const deviceOnly = aCookie.split("; ").find((item) => item.startsWith("lg_agent_device="));
+    assert.ok(deviceOnly);
+    const silent = await fetch(isolated.base + "/api/auth/session", {
+      method: "POST",
+      headers: { Cookie: deviceOnly, "X-Forwarded-For": "198.51.100.10", "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(silent.status, 200);
+    assert.match(silent.headers.get("set-cookie") ?? "", /lg_agent_session=/);
+  } finally {
+    await isolated.stop();
+  }
 });
 
 test("静态分发拒绝目录穿越、未知扩展与 vendor 探测", async () => {
@@ -143,9 +227,10 @@ test("静态分发拒绝目录穿越、未知扩展与 vendor 探测", async () 
 });
 
 test("会话登录 → Cookie 访问 → 续期 → 注销后旧 Cookie 失效", async () => {
+  const remote = { "X-Forwarded-For": "198.51.100.21" };
   const login = await fetch(authSrv.base + "/api/auth/session", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...remote, "Content-Type": "application/json" },
     body: JSON.stringify({ token: "test-secret" }),
   });
   assert.equal(login.status, 200);
@@ -155,16 +240,16 @@ test("会话登录 → Cookie 访问 → 续期 → 注销后旧 Cookie 失效",
   assert.match(setCookie, /SameSite=Strict/i);
   const cookie = setCookie.split(";")[0];
 
-  const status = await fetch(authSrv.base + "/api/auth/session", { headers: { Cookie: cookie } });
+  const status = await fetch(authSrv.base + "/api/auth/session", { headers: { ...remote, Cookie: cookie } });
   assert.equal(status.status, 200);
   assert.equal((await status.json() as { authenticated?: boolean }).authenticated, true);
 
-  const sessions = await fetch(authSrv.base + "/api/sessions", { headers: { Cookie: cookie } });
+  const sessions = await fetch(authSrv.base + "/api/sessions", { headers: { ...remote, Cookie: cookie } });
   assert.equal(sessions.status, 200);
 
   const renew = await fetch(authSrv.base + "/api/auth/session/renew", {
     method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json" },
+    headers: { ...remote, Cookie: cookie, "Content-Type": "application/json" },
     body: "{}",
   });
   assert.equal(renew.status, 200);
@@ -173,13 +258,13 @@ test("会话登录 → Cookie 访问 → 续期 → 注销后旧 Cookie 失效",
 
   const logout = await fetch(authSrv.base + "/api/auth/logout", {
     method: "POST",
-    headers: { Cookie: renewedCookie, "Content-Type": "application/json" },
+    headers: { ...remote, Cookie: renewedCookie, "Content-Type": "application/json" },
     body: "{}",
   });
   assert.equal(logout.status, 200);
   assert.match(logout.headers.get("set-cookie") ?? "", /Max-Age=0/);
 
-  const replay = await fetch(authSrv.base + "/api/sessions", { headers: { Cookie: renewedCookie } });
+  const replay = await fetch(authSrv.base + "/api/sessions", { headers: { ...remote, Cookie: renewedCookie } });
   assert.equal(replay.status, 401, "注销后的 token 不能重放");
 });
 
@@ -214,13 +299,14 @@ test("登录失败达到阈值返回 429，正确密钥也不能绕过冷却", a
 });
 test("认证开启时 /metrics 与 /api/diagnostics 不可匿名读取", async () => {
   assert.equal((await fetch(authSrv.base + "/metrics")).status, 401);
-  assert.equal((await fetch(authSrv.base + "/api/diagnostics")).status, 401);
+  assert.equal((await fetch(authSrv.base + "/api/diagnostics", { headers: { "X-Forwarded-For": "198.51.100.22" } })).status, 401);
 });
 
 test("METRICS_TOKEN 仅授权指标端点，不能调用控制面 API", async () => {
   const metricsSrv = await startServer({
     AUTH_TOKEN: "test-secret",
     METRICS_TOKEN: "metrics-scrape-token-123456",
+    TRUST_PROXY: "1",
   });
   try {
     const metrics = await fetch(metricsSrv.base + "/metrics", {
@@ -229,7 +315,10 @@ test("METRICS_TOKEN 仅授权指标端点，不能调用控制面 API", async ()
     assert.equal(metrics.status, 200);
     assert.match(await metrics.text(), /agent_http_inflight_requests|agent_process_uptime_seconds/);
     const diagnostics = await fetch(metricsSrv.base + "/api/diagnostics", {
-      headers: { Authorization: "Bearer metrics-scrape-token-123456" },
+      headers: {
+        "X-Forwarded-For": "198.51.100.23",
+        Authorization: "Bearer metrics-scrape-token-123456",
+      },
     });
     assert.equal(diagnostics.status, 401);
   } finally {
