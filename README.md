@@ -285,6 +285,7 @@ npm run desktop         # 启动桌面端；自动处理端口冲突与退出清
 npm run audit:prod      # 检查生产依赖高危漏洞
 npm run data:check      # 校验配置、journal、checkpoint 与备份
 npm run version:check   # 校验产品版本、构建身份与文档是否漂移
+npm run skills:check    # 校验 AGENTS 常驻预算与项目级 Skill 分层
 ```
 
 提交前至少执行：
@@ -300,6 +301,7 @@ npm run build:client
 | 文档 | 内容 |
 |---|---|
 | [Agent Wiki](docs/agent-wiki.md) | 模块职责、调用链、架构约束与踩坑记录 |
+| [工程规范](docs/engineering-standards.md) | 常驻红线、领域 Skill、深度契约与自动门禁的分层索引 |
 | [版本规范](docs/versioning.md) | SemVer、构建标识、tag、镜像标签与发布流程 |
 | [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
 | [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
@@ -309,7 +311,7 @@ npm run build:client
 
 ## 贡献
 
-1. 修改前阅读 [AGENTS.md](AGENTS.md) 中的架构与提交约束。
+1. 修改前阅读 [AGENTS.md](AGENTS.md) 与 [工程规范](docs/engineering-standards.md)，按任务加载 `.agents/skills/agentatlas-*`。
 2. 一个提交只处理一个主题，提交信息保持单行中文格式。
 3. 新功能同步补充类型、审批边界、测试与用户文档。
 4. 不提交 `.env`、`.web-config.json`、`.setting/`、`data/` 或任何真实密钥。

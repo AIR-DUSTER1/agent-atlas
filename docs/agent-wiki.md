@@ -2579,3 +2579,28 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 
 **发布边界**：当前没有 Git tag；达到发布条件后才允许对 package 版本创建 `v<version>` 注解 tag。
 生产镜像可以有人类可读标签，但部署必须固定 digest。完整规范见 `docs/versioning.md`。
+
+
+### 3.56 工程规范分层与项目级 Skills（`.agents/skills/agentatlas-*`）
+
+**定位**：把每次任务都必须遵守的红线与只在特定领域出现的操作流程分开，降低常驻上下文负担，同时保留安全门禁。
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| L0 常驻宪法 | `AGENTS.md` | 技术栈、安全、架构、审批、数据、版本等不可变红线 |
+| L1 领域 Skill | `.agents/skills/agentatlas-*` | Agent Runtime、Service Contract、Frontend、Release Ops 的按需流程 |
+| L2 深度文档 | `docs/*.md` | 协议、运维、记忆、部署与版本细则 |
+| L3 自动门禁 | `tests/**`、CI | 可由 typecheck、测试和 smoke 自动拒绝的规则 |
+
+四个项目 Skill：
+
+| Skill | 触发范围 | 关键边界 |
+|---|---|---|
+| `agentatlas-agent-runtime` | LangGraph、Profile、工具、审批、路由、子代理、记忆 | 禁止跨 Profile 工具与记忆泄漏；高风险 HITL |
+| `agentatlas-service-contract` | HTTP、SSE、配置、持久化、认证、可观测性 | 零框架路由、`task_usage`、迁移 fail-closed、日志脱敏 |
+| `agentatlas-frontend` | Web UI、HTML、CSS、设置页、可访问性、构建 | 原生 TS、无 UI 框架、vendor wrapper、安全渲染 |
+| `agentatlas-release-ops` | 版本、Docker、部署、备份、生产质量门 | 单一版本源、不可变 digest、未授权不发布 |
+
+**防漂移**：`npm run skills:check` 校验 Skill 数量、命名、frontmatter、UI 元数据、大小、权威文档链接、AGENTS 路由和常驻预算。`tests/unit/project-skills.test.ts` 再把该检查纳入全量测试。
+
+**为什么不把所有规范都做成 Skill**：审批、路径安全、密钥、依赖方向和数据迁移等红线如果只在按需 Skill 中加载，未命中任务时就会失效。因此采用“极少 L0 + 精确 L1 + 深度 L2 + 自动 L3”，而不是把所有规则从 `AGENTS.md` 搬空。
