@@ -16,7 +16,8 @@ export const BUILD_INFO_RELATIVE_PATH = join("src", "server", "public", "build-i
 
 export const BUILD_CHANNELS = ["dev", "alpha", "beta", "rc", "stable"] as const;
 export type BuildChannel = (typeof BUILD_CHANNELS)[number];
-export type ReleaseStage = Exclude<BuildChannel, "dev">;
+export type PrereleaseStage = "alpha" | "beta" | "rc";
+export type ReleaseStage = PrereleaseStage | "stable";
 
 export interface BuildInfo {
   version: string;
@@ -27,17 +28,31 @@ export interface BuildInfo {
   buildId: string;
 }
 
+export interface ParsedReleaseVersion {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: { stage: PrereleaseStage; sequence: number } | null;
+  releaseStage: ReleaseStage;
+}
+
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const COMMIT_PATTERN = /^(?:[0-9a-f]{7,64}|unknown)$/i;
 
 /** 当前规范只允许 alpha / beta / rc + 数字作为预发布段，避免出现不可比较的渠道名。 */
-export function parseReleaseVersion(version: string): { version: string; releaseStage: ReleaseStage } {
+export function parseReleaseVersion(version: string): ParsedReleaseVersion {
   const normalized = version.trim();
   const match = SEMVER_PATTERN.exec(normalized);
   if (!match) throw new Error(`版本号 ${JSON.stringify(version)} 不是 SemVer 2.0 格式`);
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
   const prerelease = match[4];
-  if (!prerelease) return { version: normalized, releaseStage: "stable" };
+  if (!prerelease) {
+    return { version: normalized, major, minor, patch, prerelease: null, releaseStage: "stable" };
+  }
   const parts = prerelease.split(".");
   const stage = parts[0];
   if (stage !== "alpha" && stage !== "beta" && stage !== "rc") {
@@ -46,7 +61,72 @@ export function parseReleaseVersion(version: string): { version: string; release
   if (parts.length !== 2 || !/^(0|[1-9]\d*)$/.test(parts[1] ?? "")) {
     throw new Error("预发布版本必须使用 alpha.N、beta.N 或 rc.N，N 为无前导零整数");
   }
-  return { version: normalized, releaseStage: stage };
+  const sequence = Number(parts[1]);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new Error("预发布版本序号 N 必须是安全的正整数");
+  }
+  return {
+    version: normalized,
+    major,
+    minor,
+    patch,
+    prerelease: { stage, sequence },
+    releaseStage: stage,
+  };
+}
+
+const STAGE_ORDER: Record<PrereleaseStage, number> = { alpha: 0, beta: 1, rc: 2 };
+
+/** 按 SemVer 2.0 比较产品版本；构建元数据不参与排序。 */
+export function compareReleaseVersions(leftVersion: string, rightVersion: string): number {
+  const left = parseReleaseVersion(leftVersion);
+  const right = parseReleaseVersion(rightVersion);
+  for (const key of ["major", "minor", "patch"] as const) {
+    if (left[key] !== right[key]) return left[key] - right[key];
+  }
+  if (!left.prerelease && !right.prerelease) return 0;
+  if (!left.prerelease) return 1;
+  if (!right.prerelease) return -1;
+  if (left.prerelease.stage !== right.prerelease.stage) {
+    return STAGE_ORDER[left.prerelease.stage] - STAGE_ORDER[right.prerelease.stage];
+  }
+  return left.prerelease.sequence - right.prerelease.sequence;
+}
+
+function sameCoreVersion(left: ParsedReleaseVersion, right: ParsedReleaseVersion): boolean {
+  return left.major === right.major && left.minor === right.minor && left.patch === right.patch;
+}
+
+/**
+ * main 合并版本门禁：
+ * - main 只接收 beta / rc / stable，alpha 留在开发分支；
+ * - 版本必须严格高于 main 基线；
+ * - 同一 core 的 beta/rc 序号每次只能递增 1，避免跳号或复用。
+ */
+export function collectMainMergeVersionIssues(baseVersion: string, nextVersion: string): string[] {
+  const issues: string[] = [];
+  const base = parseReleaseVersion(baseVersion);
+  const next = parseReleaseVersion(nextVersion);
+  if (next.releaseStage === "alpha") {
+    issues.push("main 分支不接受 alpha 版本；请先推进到 beta.N 再合并");
+  }
+  if (compareReleaseVersions(next.version, base.version) <= 0) {
+    issues.push(`main 合并必须提升产品版本：基线 ${base.version}，当前 ${next.version}`);
+  }
+  if (
+    sameCoreVersion(base, next) &&
+    base.prerelease &&
+    next.prerelease &&
+    base.prerelease.stage === next.prerelease.stage &&
+    (base.prerelease.stage === "beta" || base.prerelease.stage === "rc") &&
+    next.prerelease.sequence !== base.prerelease.sequence + 1
+  ) {
+    issues.push(
+      `同一 ${base.prerelease.stage} 线路每次 main 合并只能递增 1：` +
+      `${base.version} → ${base.prerelease.stage}.${base.prerelease.sequence + 1}`,
+    );
+  }
+  return issues;
 }
 
 function normalizeChannel(value: string | undefined): BuildChannel {
@@ -205,12 +285,16 @@ export async function collectVersioningIssues(root = PROJECT_ROOT): Promise<stri
   if (!readme.includes(`version-${badgeVersion}-`)) issues.push(`README.md 版本徽章未同步到 ${version}`);
 
   for (const relative of [
+    "docs/agent-wiki.md",
     "docs/agentatlas-roadmap.md",
     "docs/readiness-snapshot.md",
     "docs/production-checklist.md",
     "docs/deployment.md",
     "docs/self-hosting.md",
     "docs/upgrade-rollback.md",
+    "docs/postgres-multitenant.md",
+    "docs/support.md",
+    "docs/versioning.md",
   ]) {
     const text = await readFile(join(root, relative), "utf8");
     if (!text.includes(version)) issues.push(`${relative} 未标记当前版本 ${version}`);

@@ -9,7 +9,7 @@
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="LangGraph.js" src="https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0--beta.1-F59E0B">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.17-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -287,13 +287,15 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 ## 版本与发布
 
-当前为 `0.7.0-beta.1` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
+当前为 `0.9.0-beta.17` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
 
 ```text
-0.7.0-beta.1 · 816ba5c
+0.9.0-beta.17 · 816ba5c
 ```
 
-- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.7.0-beta.1` 形式。
+- 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
+- `0.7.x` 是同一功能线的小功能点/修复；`0.x.0` 是新的大功能组，可能包含破坏性调整；`x.0.0` 才是正式主版本。
+- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.17` 形式。
 - `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
 - 生产镜像使用不可变 digest，不使用 `latest`。
 - 完整规则见 [版本规范](docs/versioning.md)。
@@ -310,6 +312,7 @@ npm run desktop         # 启动桌面端；自动处理端口冲突与退出清
 npm run audit:prod      # 检查生产依赖高危漏洞
 npm run data:check      # 校验配置、journal、checkpoint 与备份
 npm run version:check   # 校验产品版本、构建身份与文档是否漂移
+npm run version:main-guard # main 合并前校验 beta/rc 递增与 alpha 隔离（需 VERSION_BASE_REF）
 npm run skills:check    # 校验 AGENTS 常驻预算与项目级 Skill 分层
 ```
 

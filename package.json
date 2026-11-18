@@ -1,6 +1,6 @@
 {
   "name": "agentatlas",
-  "version": "0.7.0-beta.1",
+  "version": "0.9.0-beta.17",
   "description": "可扩展的 agentatlas：LangGraph.js + TypeScript（CLI + Web + Desktop）",
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "web": "tsx src/server/index.ts",
     "readiness": "tsx scripts/production-readiness.ts",
     "version:check": "tsx scripts/check-version.ts",
+    "version:main-guard": "tsx scripts/main-version-guard.ts",
     "skills:check": "tsx scripts/check-project-skills.ts",
     "backup": "tsx scripts/data-cli.ts backup",
     "restore": "tsx scripts/data-cli.ts restore",

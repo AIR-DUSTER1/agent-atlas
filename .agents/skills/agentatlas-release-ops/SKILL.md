@@ -14,6 +14,8 @@ description: "准备 agentatlas 版本发布、Docker 镜像、部署、升级�
 ## 发布红线
 
 - `package.json.version` 是唯一产品版本源；产品版本、buildId、API 版本和 schema 版本分开。
+- 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
+- `0.x.y` 是同一功能线的小功能点/修复，`0.x.0` 是新的大功能组且可能破坏兼容性；1.0 之后才按标准主版本升级。
 - 发布 tag 只能是 `v<package.version>`，且只指向通过完整质量门的提交。
 - 生产镜像必须固定 digest；禁止 `latest` 和浮动渠道标签。
 - `IMAGE_VERSION`、OCI version、健康探针、`/api/version` 与页面 meta 必须一致。
@@ -26,6 +28,7 @@ description: "准备 agentatlas 版本发布、Docker 镜像、部署、升级�
 ```bash
 npm run skills:check
 npm run version:check
+VERSION_BASE_REF=origin/main npm run version:main-guard
 npm run typecheck
 npm run build:client
 npm run build:desktop

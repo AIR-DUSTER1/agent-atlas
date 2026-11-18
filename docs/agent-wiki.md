@@ -2568,13 +2568,13 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 | 构建工具 | `src/versioning.ts` | 读取 package、Git commit、构建时间和渠道，生成 `build-info.json` 与 HTML meta |
 | 服务端读取 | `src/server/build-info.ts` | 探针、诊断、日志和 `/api/version` 共享同一对象 |
 | 浏览器读取 | `src/client/core/build-info.ts` | 只读 HTML meta，不再手工维护前端日期版本 |
-| 发布守门 | `scripts/check-version.ts` | 校验 package、lock、README、部署文档与已生成构建身份 |
+| 发布守门 | `scripts/check-version.ts` + `scripts/main-version-guard.ts` | 校验 package、lock、文档与构建身份；main 合并必须递增 beta/rc，alpha 隔离在 dev |
 
 构建身份示例：
 
 ```json
 {
-  "version": "0.7.0-beta.1",
+  "version": "0.9.0-beta.17",
   "channel": "dev",
   "releaseStage": "beta",
   "commit": "816ba5c3",
@@ -2585,6 +2585,11 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 
 **为什么构建号不能混进产品版本**：产品版本用于表达功能与兼容性，构建号用于定位一次具体产物。
 如果把日期、CI 序号和产品版本拼成一个字段，桌面更新、Docker 标签、错误聚合与文档都会产生第二套排序规则。
+
+**main 合并边界**：每次合并到 `main` 都必须提升产品版本；beta 小步合并使用
+`0.7.0-beta.N → 0.7.0-beta.N+1`，不能复用或跳号。`0.7.x` 是同一功能线的小功能点/修复，
+`0.x.0` 是新的大功能组且可能破坏兼容性，`1.0.0` 之后才按标准 SemVer 主版本升级。
+`alpha.N` 只用于 `dev`/内部测试，不能直接进入 `main`。
 
 **发布边界**：当前没有 Git tag；达到发布条件后才允许对 package 版本创建 `v<version>` 注解 tag。
 生产镜像可以有人类可读标签，但部署必须固定 digest。完整规范见 `docs/versioning.md`。

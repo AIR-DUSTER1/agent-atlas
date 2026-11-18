@@ -35,7 +35,7 @@
 | Agent 与工具 | Profile allowlist；高风险 HITL；错误模型可读；记忆 scope 隔离 | `docs/agent-orchestration.md`、`docs/memory-slot.md` | `tool-isolation.test.ts`、`permission.test.ts`、architecture 测试 |
 | HTTP / SSE | 零框架路由；事件四处同步；每轮 `task_usage`；认证与同源防线 | `AGENTS.md`、`docs/agent-orchestration.md` | `server.test.ts`、`stream.test.ts`、`security/http.test.ts` |
 | 前端与 UI | 原生 TS、HTML include、CSS 分层、XSS 安全、可访问性、动态降级 | 本文 §5、`AGENTS.md` | `ui-styles.test.ts`、`a11y.test.ts`、E2E |
-| 版本与发布 | SemVer、package 单一来源、buildId、不可变 digest、发布质量门 | `docs/versioning.md` | `versioning.test.ts`、`release-check.test.ts`、镜像 smoke |
+| 版本与发布 | SemVer、pre-1.0 beta/alpha 阶段、main 合并递增、package 单一来源、buildId、不可变 digest、发布质量门 | `docs/versioning.md` | `versioning.test.ts`、`release-check.test.ts`、`version:main-guard`、镜像 smoke |
 | 文档同步 | README 用户视角；wiki 模块与踩坑；内部计划只进 `.plans/` | `AGENTS.md`、`docs/agent-wiki.md` | 评审 + 技能校验 |
 | 提交规范 | 单行、`type: `、中文主题、一个提交一个主题、不混合无关变更 | 本文 §7 | 提交前自查 |
 | 平台约束 | Windows PowerShell 编码、后台进程、端口、`.cmd` 启动与清理规则 | 本文 §8、`docs/troubleshooting.md` | 平台专项测试、人工验证 |

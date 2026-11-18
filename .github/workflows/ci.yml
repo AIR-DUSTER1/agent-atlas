@@ -23,6 +23,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # main 合并门禁需要读取基线提交中的 package.json。
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -34,6 +37,12 @@ jobs:
 
       - name: Version specification consistency
         run: npm run version:check
+
+      - name: Main merge version advance
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000')
+        env:
+          VERSION_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: npm run version:main-guard
 
       - name: Project skill layering
         run: npm run skills:check

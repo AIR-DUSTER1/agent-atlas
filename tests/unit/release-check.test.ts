@@ -17,6 +17,7 @@ import {
   collectProductionReleaseChecks,
   failedReleaseChecks,
 } from "../../src/server/release-check.js";
+import { parseReleaseVersion } from "../../src/versioning.js";
 
 const PRODUCTION_ENV: NodeJS.ProcessEnv = {
   PRODUCTION: "1",
@@ -112,7 +113,7 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.equal(pkg.version, "0.7.0-beta.1");
+  assert.doesNotThrow(() => parseReleaseVersion(pkg.version));
   assert.ok(pkg.dependencies.tsx);
   assert.ok(!pkg.dependencies.electron);
   assert.ok(!pkg.dependencies.typescript);
@@ -169,4 +170,8 @@ test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
   }
   assert.ok(refs.some((item) => item.ref === "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"));
   assert.doesNotMatch(workflow, /aquasecurity\/trivy-action@0\.28\.0/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /name: Main merge version advance/);
+  assert.match(workflow, /VERSION_BASE_REF:.*github\.event\.pull_request\.base\.sha/);
+  assert.match(workflow, /npm run version:main-guard/);
 });
