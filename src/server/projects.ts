@@ -1,18 +1,9 @@
 /**
  * ============================================================
- * projects.ts — 项目文件夹管理（本地 / 云端）
+ * projects.ts — 用户隔离的项目文件夹管理（本地 / 云端）
  * ============================================================
- * 参考 ZCode 的「项目 ▾」：会话按所属项目文件夹分组，新建对话归属当前项目。
- * 项目文件夹分两类，UI 用不同样式区分：
- *
- *   - local（💻 本地）：服务器磁盘上的目录，由用户显式添加。
- *     不再提供内置 agentatlas 项目；未归属会话使用内部 default 标识。
- *   - cloud（☁️ 云端）：一个 Git 仓库地址（https://… .git）。
- *     添加时自动 `git clone --depth 1` 到本地缓存（.setting/cloud/<名称>），
- *     之后浏览 / 附加文件与本地项目完全一致；「刷新」= git pull。
- *
- * 持久化：.web-config.json 的 { projects, activeProjectId } 字段
- * （与 providers 同文件，各自读改写）。
+ * 文件模式把 ownerId 一并写入 .web-config.json；PostgreSQL 模式落到 projects 表。
+ * 每次目录授权都绑定当前 owner，成员只能浏览自己添加的项目，不能复用管理员路径。
  */
 import { promises as fsp } from "node:fs";
 import { execFile } from "node:child_process";
@@ -20,7 +11,9 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { resolve, basename, join } from "node:path";
 import { PROJECT_ROOT, authorizeRoot, unauthorizeRoot } from "./files.js";
-import { SETTINGS_FILE, mergeConfig, readConfig } from "./config-store.js";
+import { readConfig, mergeConfig } from "./config-store.js";
+import { isPostgresBackend, withOwnerTransaction } from "./persistence/postgres.js";
+import { runWithTenantContext, tenantContextOrLocal } from "./tenant-context.js";
 
 const run = promisify(execFile);
 const CLOUD_DIR = join(PROJECT_ROOT, ".setting", "cloud");
@@ -28,94 +21,161 @@ const MAX_PROJECTS = 12;
 
 export interface Project {
   id: string;
+  ownerId: string;
   name: string;
   type: "local" | "cloud";
-  /** 可浏览的根目录（cloud = 本地 clone 缓存目录） */
   path: string;
-  /** cloud 类型的仓库地址 */
   url?: string;
-  /** 历史内置项目标记，仅用于兼容旧配置 */
   builtin?: boolean;
 }
 
-let projects: Project[] = [];
-let activeProjectId = "default";
+const projectsByOwner = new Map<string, Project[]>();
+const activeByOwner = new Map<string, string>();
+let fileLoaded = false;
 
-// ---------------------------------------------------------------------------
-// 持久化
-// ---------------------------------------------------------------------------
-async function persist(): Promise<void> {
-  // merge 写入：只覆盖 projects/activeProjectId，不碰同文件的 providers / externalAgents 等键
-  await mergeConfig({ projects, activeProjectId });
+function currentOwnerId(): string {
+  return tenantContextOrLocal().ownerId;
+}
+
+function ownerProjects(ownerId = currentOwnerId()): Project[] {
+  let list = projectsByOwner.get(ownerId);
+  if (!list) {
+    list = [];
+    projectsByOwner.set(ownerId, list);
+  }
+  return list;
+}
+
+function activeProjectId(ownerId = currentOwnerId()): string {
+  return activeByOwner.get(ownerId) ?? "default";
+}
+
+async function persist(ownerId = currentOwnerId()): Promise<void> {
+  if (isPostgresBackend()) {
+    const list = ownerProjects(ownerId);
+    await withOwnerTransaction(ownerId, async (client) => {
+      await client.query("DELETE FROM projects WHERE owner_id = $1 AND id <> 'default'", [ownerId]);
+      for (const project of list) {
+        await client.query(
+          `INSERT INTO projects(owner_id, id, name, type, path, url, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (owner_id, id) DO UPDATE SET
+             name = EXCLUDED.name, type = EXCLUDED.type, path = EXCLUDED.path,
+             url = EXCLUDED.url, updated_at = EXCLUDED.updated_at`,
+          [ownerId, project.id, project.name, project.type, project.path, project.url ?? null,
+            Date.now(), Date.now()],
+        );
+      }
+      await client.query(
+        `INSERT INTO user_settings(owner_id, settings, updated_at)
+         VALUES ($1, jsonb_build_object('activeProjectId', $2), now())
+         ON CONFLICT (owner_id) DO UPDATE SET
+           settings = jsonb_set(user_settings.settings, '{activeProjectId}', to_jsonb($2::text), true),
+           updated_at = now()`,
+        [ownerId, activeProjectId(ownerId)],
+      );
+    });
+    return;
+  }
+
+  const projects = [...projectsByOwner.values()].flat();
+  const activeProjects = Object.fromEntries(activeByOwner);
+  await mergeConfig({ projects, activeProjects });
+}
+
+async function authorizeProject(project: Project): Promise<void> {
+  await runWithTenantContext({ ownerId: project.ownerId, deviceId: "project", role: "admin" }, async () => {
+    authorizeRoot(project.path, project.name);
+  });
 }
 
 export async function loadProjects(): Promise<void> {
+  if (isPostgresBackend()) return;
+  if (fileLoaded) return;
+  fileLoaded = true;
   const saved = await readConfig();
-
-  const savedList = (Array.isArray(saved?.projects)
-    ? (saved!.projects as Array<Partial<Project>>)
-    : []
-  ).filter((p): p is Project =>
-    Boolean(p && p.id && typeof p.path === "string" && (p.type === "local" || p.type === "cloud"))
-  );
-
-  projects = [];
-  for (const p of savedList) {
-    if (p.id === "default") continue;
-    // 磁盘目录仍在才恢复（云端 clone 缓存可能被手动删除）
-    const exists = await fsp.stat(p.path).then((s) => s.isDirectory()).catch(() => false);
+  const savedList = Array.isArray(saved.projects) ? saved.projects as Array<Partial<Project>> : [];
+  const fallbackOwner = "local";
+  for (const item of savedList) {
+    if (!item || !item.id || typeof item.path !== "string" || (item.type !== "local" && item.type !== "cloud")) continue;
+    if (item.id === "default") continue;
+    const exists = await fsp.stat(item.path).then((s) => s.isDirectory()).catch(() => false);
     if (!exists) continue;
-    projects.push({
-      id: p.id!,
-      name: p.name || "未命名项目",
-      type: p.type!,
-      path: resolve(p.path),
-      url: typeof p.url === "string" ? p.url : undefined,
-    });
-    authorizeRoot(p.path, p.name || "未命名项目");
+    const ownerId = typeof item.ownerId === "string" && item.ownerId ? item.ownerId : fallbackOwner;
+    const project: Project = {
+      id: item.id,
+      ownerId,
+      name: item.name || "未命名项目",
+      type: item.type,
+      path: resolve(item.path),
+      ...(typeof item.url === "string" ? { url: item.url } : {}),
+    };
+    ownerProjects(ownerId).push(project);
+    await authorizeProject(project);
   }
-  activeProjectId =
-    typeof saved?.activeProjectId === "string" && projects.some((p) => p.id === saved!.activeProjectId)
-      ? (saved!.activeProjectId as string)
-      : "default";
+  const activeProjects = saved.activeProjects && typeof saved.activeProjects === "object"
+    ? saved.activeProjects as Record<string, unknown>
+    : {};
+  for (const [ownerId, id] of Object.entries(activeProjects)) {
+    if (typeof id === "string" && ownerProjects(ownerId).some((project) => project.id === id)) {
+      activeByOwner.set(ownerId, id);
+    }
+  }
+  if (typeof saved.activeProjectId === "string" && ownerProjects(fallbackOwner).some((project) => project.id === saved.activeProjectId)) {
+    activeByOwner.set(fallbackOwner, saved.activeProjectId);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// 查询 / 切换
-// ---------------------------------------------------------------------------
+/** PostgreSQL 模式按 owner 懒加载，不把全库项目列表读进进程。 */
+export async function ensureProjectsLoaded(ownerId = currentOwnerId()): Promise<void> {
+  if (!isPostgresBackend() || projectsByOwner.has(ownerId)) return;
+  const rows = await withOwnerTransaction(ownerId, (client) => client.query<{
+    id: string; name: string; type: "local" | "cloud"; path: string; url: string | null;
+  }>("SELECT id, name, type, path, url FROM projects WHERE owner_id = $1 ORDER BY updated_at DESC", [ownerId]));
+  const list: Project[] = [];
+  for (const row of rows.rows) {
+    const project: Project = {
+      id: row.id, ownerId, name: row.name, type: row.type, path: resolve(row.path),
+      ...(row.url ? { url: row.url } : {}),
+    };
+    list.push(project);
+    await authorizeProject(project);
+  }
+  projectsByOwner.set(ownerId, list);
+  const settings = await withOwnerTransaction(ownerId, (client) => client.query<{ settings: { activeProjectId?: unknown } }>(
+    "SELECT settings FROM user_settings WHERE owner_id = $1", [ownerId],
+  ));
+  const active = settings.rows[0]?.settings?.activeProjectId;
+  if (typeof active === "string" && list.some((project) => project.id === active)) activeByOwner.set(ownerId, active);
+}
+
 export function listProjects(): Project[] {
-  return projects;
+  return ownerProjects();
 }
 
 export function getActiveProjectId(): string {
-  return activeProjectId;
+  return activeProjectId();
 }
 
 export function getProject(id: string): Project | undefined {
-  return projects.find((p) => p.id === id);
+  return ownerProjects().find((project) => project.id === id);
 }
 
 export function setActiveProject(id: string): void {
-  if (!projects.some((p) => p.id === id)) throw new Error("项目不存在");
-  activeProjectId = id;
+  if (!ownerProjects().some((project) => project.id === id)) throw new Error("项目不存在");
+  activeByOwner.set(currentOwnerId(), id);
   void persist().catch(() => {});
 }
 
-// ---------------------------------------------------------------------------
-// 添加（本地路径 / 云端 Git 仓库）
-// ---------------------------------------------------------------------------
 function slugFromUrl(url: string): string {
   const tail = url.replace(/\.git$/, "").split(/[/:]/).filter(Boolean).pop() ?? "repo";
   return tail.replace(/[^\w.-]+/g, "-").slice(0, 48) || "repo";
 }
 
-export async function addProject(input: {
-  name?: string;
-  type?: string;
-  path?: string;
-  url?: string;
-}): Promise<Project> {
-  if (projects.length >= MAX_PROJECTS) throw new Error(`项目数量已达上限（${MAX_PROJECTS} 个）`);
+export async function addProject(input: { name?: string; type?: string; path?: string; url?: string }): Promise<Project> {
+  const ownerId = currentOwnerId();
+  const list = ownerProjects(ownerId);
+  if (list.length >= MAX_PROJECTS) throw new Error(`项目数量已达上限（${MAX_PROJECTS} 个）`);
   const type = input.type === "cloud" ? "cloud" : "local";
 
   if (type === "local") {
@@ -123,61 +183,58 @@ export async function addProject(input: {
     const path = resolve(input.path.trim());
     const st = await fsp.stat(path).catch(() => { throw new Error("路径不存在"); });
     if (!st.isDirectory()) throw new Error("该路径不是文件夹");
-    if (projects.some((p) => resolve(p.path) === path)) throw new Error("该文件夹已添加过");
+    if (list.some((project) => resolve(project.path) === path)) throw new Error("该文件夹已添加过");
     const name = input.name?.trim() || basename(path) || path;
-    const project: Project = { id: randomUUID(), name, type: "local", path };
-    projects.push(project);
+    const project: Project = { id: randomUUID(), ownerId, name, type: "local", path };
+    list.push(project);
     authorizeRoot(path, name);
-    await persist();
+    await persist(ownerId);
     return project;
   }
 
-  // ── 云端：git clone --depth 1 到本地缓存 ──
   const url = input.url?.trim() ?? "";
   if (!/^(https?:\/\/\S+|git@[\w.-]+:\S+)$/.test(url)) {
     throw new Error("请填写合法的 Git 仓库地址（https://…/xxx.git 或 git@…）");
   }
   const name = input.name?.trim() || slugFromUrl(url);
-  if (projects.some((p) => p.url === url)) throw new Error("该仓库已添加过");
-  await fsp.mkdir(CLOUD_DIR, { recursive: true });
-  const target = join(CLOUD_DIR, `${name}-${randomUUID().slice(0, 6)}`);
+  if (list.some((project) => project.url === url)) throw new Error("该仓库已添加过");
+  const ownerCloudDir = join(CLOUD_DIR, ownerId.replace(/[^A-Za-z0-9_-]/g, "_"));
+  await fsp.mkdir(ownerCloudDir, { recursive: true });
+  const target = join(ownerCloudDir, `${name}-${randomUUID().slice(0, 6)}`);
   try {
     await run("git", ["clone", "--depth", "1", url, target], { timeout: 120_000 });
   } catch (err) {
     await fsp.rm(target, { recursive: true, force: true }).catch(() => {});
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`git clone 失败（确认已安装 git、有网络与仓库权限）：${msg.slice(0, 160)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`git clone 失败（确认已安装 git、有网络与仓库权限）：${message.slice(0, 160)}`);
   }
-  const project: Project = { id: randomUUID(), name, type: "cloud", path: target, url };
-  projects.push(project);
+  const project: Project = { id: randomUUID(), ownerId, name, type: "cloud", path: target, url };
+  list.push(project);
   authorizeRoot(target, name);
-  await persist();
+  await persist(ownerId);
   return project;
 }
 
-/** 云端项目：git pull 刷新缓存 */
 export async function refreshCloudProject(id: string): Promise<Project> {
-  const p = getProjectChecked(id);
-  if (p.type !== "cloud") throw new Error("只有云端项目支持刷新（本地目录即最新）");
-  await run("git", ["-C", p.path, "pull", "--ff-only"], { timeout: 120_000 });
-  return p;
+  const project = getProjectChecked(id);
+  if (project.type !== "cloud") throw new Error("只有云端项目支持刷新（本地目录即最新）");
+  await run("git", ["-C", project.path, "pull", "--ff-only"], { timeout: 120_000 });
+  return project;
 }
 
-/** 删除项目：云端同时清理 clone 缓存；其会话由调用方迁移到未归属（default） */
 export async function deleteProject(id: string): Promise<void> {
-  const p = getProjectChecked(id);
-  if (p.builtin) throw new Error("内置项目（本仓库）不可删除");
-  unauthorizeRoot(p.path);
-  if (p.type === "cloud") {
-    await fsp.rm(p.path, { recursive: true, force: true }).catch(() => {});
-  }
-  projects = projects.filter((x) => x.id !== id);
-  if (activeProjectId === id) activeProjectId = "default";
-  await persist();
+  const ownerId = currentOwnerId();
+  const project = getProjectChecked(id);
+  if (project.builtin) throw new Error("内置项目（本仓库）不可删除");
+  unauthorizeRoot(project.path);
+  if (project.type === "cloud") await fsp.rm(project.path, { recursive: true, force: true }).catch(() => {});
+  projectsByOwner.set(ownerId, ownerProjects(ownerId).filter((item) => item.id !== id));
+  if (activeProjectId(ownerId) === id) activeByOwner.set(ownerId, "default");
+  await persist(ownerId);
 }
 
 function getProjectChecked(id: string): Project {
-  const p = projects.find((x) => x.id === id);
-  if (!p) throw new Error("项目不存在");
-  return p;
+  const project = getProject(id);
+  if (!project) throw new Error("项目不存在");
+  return project;
 }

@@ -15,6 +15,7 @@ import { SETTINGS_FILE } from "./config-store.js";
 import { journalPath } from "./session-store.js";
 import { lifecycle } from "./lifecycle.js";
 import { BUILD_INFO, RUNTIME_VERSION } from "./build-info.js";
+import { databaseHealth, isPostgresBackend } from "./persistence/postgres.js";
 
 /** 本地 fs 检查上限：网络盘/杀毒软件卡住时，探针最多等这么久 */
 const READY_CHECK_TIMEOUT_MS = 1_500;
@@ -73,7 +74,7 @@ export interface ReadinessSnapshot {
   buildId: string;
   uptimeSeconds: number;
   shuttingDown: boolean;
-  checks: { configStore: boolean; sessionStore: boolean };
+  checks: { configStore: boolean; sessionStore: boolean; database: boolean };
 }
 
 /** 探针与诊断接口共用同一份就绪判断，避免两套语义漂移。 */
@@ -81,10 +82,11 @@ export async function readinessSnapshot(): Promise<ReadinessSnapshot> {
   const shuttingDown = lifecycle.isShuttingDown();
   const checks = {
     configStore: await isDirWritable(dirname(SETTINGS_FILE)),
-    sessionStore: await isDirWritable(dirname(journalPath())),
+    sessionStore: isPostgresBackend() ? true : await isDirWritable(dirname(journalPath())),
+    database: (await databaseHealth()).ok,
   };
   return {
-    ok: !shuttingDown && checks.configStore && checks.sessionStore,
+    ok: !shuttingDown && checks.configStore && checks.sessionStore && checks.database,
     version: RUNTIME_VERSION,
     channel: BUILD_INFO.channel,
     releaseStage: BUILD_INFO.releaseStage,

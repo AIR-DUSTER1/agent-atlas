@@ -74,6 +74,6 @@ export function createWorkflowGraph(
   return graph.compile({
     // 默认挂共享持久检查点（重启续命，见 src/checkpoint.ts）；
     // 子 Agent / 单测可传自建 MemorySaver 保持一次性内存态。
-    checkpointer: options?.checkpointer ?? getCheckpointSaver(),
+    checkpointer: options?.checkpointer ?? getCheckpointSaver(options?.ownerId),
   });
 }

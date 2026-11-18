@@ -12,6 +12,8 @@
     "backup": "tsx scripts/data-cli.ts backup",
     "restore": "tsx scripts/data-cli.ts restore",
     "data:check": "tsx scripts/data-cli.ts check",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "user:create": "tsx scripts/create-user.ts",
     "desktop": "electron desktop/build/main.js",
     "demo:1": "tsx src/cli.ts 1",
     "demo:2": "tsx src/cli.ts 2",
@@ -34,7 +36,8 @@
     "memory:bench": "tsx scripts/memory-benchmark.ts",
     "pree2e": "npm run build:client",
     "coverage:security": " c8 --include=src/server/security/**/*.ts --check-coverage --lines 90 --functions 85 --branches 80 node --import tsx --test tests/unit/auth-session.test.ts",
-    "coverage:persistence": " c8 --include=src/server/persistence/**/*.ts --check-coverage --lines 90 --functions 80 --branches 80 node --import tsx --test tests/unit/persistence-migrations.test.ts",
+    "coverage:persistence": " c8 --include=src/server/persistence/migrations.ts --include=src/server/persistence/ndjson-health.ts --check-coverage --lines 90 --functions 80 --branches 80 node --import tsx --test tests/unit/persistence-migrations.test.ts",
+    "test:postgres": "tsx --test --test-concurrency=1 tests/integration/postgres.test.ts",
     "coverage:routes": " c8 --include=src/server/routes/auth.ts --check-coverage --lines 80 --functions 75 --branches 65 node --import tsx tests/coverage/auth-routes.ts"
   },
   "keywords": [
@@ -52,6 +55,7 @@
     "@langchain/langgraph": "^1.4.9",
     "@langchain/openai": "^1.5.6",
     "dotenv": "^17.4.2",
+    "pg": "^8.23.1",
     "playwright-core": "1.64.1",
     "tsx": "4.23.15",
     "zod": "4.6.7"
@@ -59,6 +63,7 @@
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
     "c8": "^12.0.0",
     "chart.js": "^4.6.1",
     "dompurify": "^3.4.17",

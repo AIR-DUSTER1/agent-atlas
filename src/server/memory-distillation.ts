@@ -84,6 +84,7 @@ async function completeWithCurrentModel(input: {
 
 export interface DistillTurnInput {
   sessionId: string;
+  ownerId: string;
   turnId: string;
   profileId: MemoryProfileId;
   userText: string;
@@ -112,7 +113,7 @@ export async function distillTurn(input: DistillTurnInput, deps: DistillDependen
   if (await memorySlot.providerId() !== "local") {
     return { proposed: 0, saved: 0, activated: 0, skipped: "provider-unsupported" };
   }
-  const scope = memoryScope(input.profileId);
+  const scope = memoryScope(input.profileId, input.ownerId);
   const key = `${input.profileId}:${scope.userId}`;
   const recent = pruneHourly(key, now);
   if (recent.length >= config.hourlyLimit) return { proposed: 0, saved: 0, activated: 0, skipped: "rate-limit" };

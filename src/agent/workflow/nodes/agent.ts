@@ -47,7 +47,7 @@ export function createAgentNode(runtime: WorkflowRuntime) {
       permissionNote: permissionModeNote(config?.configurable?.permission_mode),
       personalizationContext: config?.configurable?.personalization_context,
       memoryNote: (await memorySlot.note({
-        scope: memoryScope(runtime.profile.id),
+        scope: memoryScope(runtime.profile.id, runtime.options.ownerId),
         query: lastUserText,
       })) ?? undefined,
       workflowPlanNote: runtime.planningEnabled ? workflowPlanPrompt(state.workflowPlan) : undefined,

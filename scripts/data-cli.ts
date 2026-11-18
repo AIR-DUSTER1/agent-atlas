@@ -14,6 +14,7 @@ import { CONFIG_SCHEMA_VERSION, SETTINGS_FILE } from "../src/server/config-store
 import { checkpointFilePath, CHECKPOINT_SCHEMA_VERSION } from "../src/checkpoint.js";
 import { JOURNAL_SCHEMA_VERSION, journalPath } from "../src/server/session-store.js";
 import { inspectNdjson } from "../src/server/persistence/ndjson-health.js";
+import { databaseHealth, isPostgresBackend } from "../src/server/persistence/postgres.js";
 
 function argValue(name: string): string | null {
   const index = process.argv.indexOf(name);
@@ -70,21 +71,27 @@ async function check(): Promise<void> {
     else failures.push(`配置 JSON 无法读取：${(err as Error).message}`);
   }
 
-  const journal = await inspectNdjson(journalPath(), {
-    currentVersion: JOURNAL_SCHEMA_VERSION,
-    markerKey: "ev",
-    repair: false,
-  });
-  console.log(`${journal.report.badLines ? "FAIL" : "PASS"} journal：${journal.report.validLines}/${journal.report.totalLines} 行有效，版本 ${journal.report.schemaVersion}`);
-  if (journal.report.badLines) failures.push(`journal 有 ${journal.report.badLines} 行损坏（启动时会隔离到 .corrupt）`);
+  if (isPostgresBackend()) {
+    const health = await databaseHealth();
+    console.log(`${health.ok ? "PASS" : "FAIL"} PostgreSQL：${health.latencyMs}ms${health.message ? `（${health.message}）` : ""}`);
+    if (!health.ok) failures.push(`PostgreSQL 不可用：${health.message || "unknown"}`);
+  } else {
+    const journal = await inspectNdjson(journalPath(), {
+      currentVersion: JOURNAL_SCHEMA_VERSION,
+      markerKey: "ev",
+      repair: false,
+    });
+    console.log(`${journal.report.badLines ? "FAIL" : "PASS"} journal：${journal.report.validLines}/${journal.report.totalLines} 行有效，版本 ${journal.report.schemaVersion}`);
+    if (journal.report.badLines) failures.push(`journal 有 ${journal.report.badLines} 行损坏（启动时会隔离到 .corrupt）`);
 
-  const checkpoint = await inspectNdjson(checkpointFilePath(), {
-    currentVersion: CHECKPOINT_SCHEMA_VERSION,
-    markerKey: "type",
-    repair: false,
-  });
-  console.log(`${checkpoint.report.badLines ? "FAIL" : "PASS"} checkpoint：${checkpoint.report.validLines}/${checkpoint.report.totalLines} 行有效，版本 ${checkpoint.report.schemaVersion}`);
-  if (checkpoint.report.badLines) failures.push(`checkpoint 有 ${checkpoint.report.badLines} 行损坏`);
+    const checkpoint = await inspectNdjson(checkpointFilePath(), {
+      currentVersion: CHECKPOINT_SCHEMA_VERSION,
+      markerKey: "type",
+      repair: false,
+    });
+    console.log(`${checkpoint.report.badLines ? "FAIL" : "PASS"} checkpoint：${checkpoint.report.validLines}/${checkpoint.report.totalLines} 行有效，版本 ${checkpoint.report.schemaVersion}`);
+    if (checkpoint.report.badLines) failures.push(`checkpoint 有 ${checkpoint.report.badLines} 行损坏`);
+  }
 
   try {
     const { memoryStoreDir } = await import("../src/memory-store.js");

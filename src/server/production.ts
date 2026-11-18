@@ -80,6 +80,22 @@ export function productionEnvironmentChecks(env: NodeJS.ProcessEnv = process.env
   const dataKeyError = validateDataKey(nonEmpty(env.DATA_KEY));
   add("data-key", dataKeyError === null, dataKeyError ?? "DATA_KEY 已配置");
 
+  if (nonEmpty(env.STATE_BACKEND).toLowerCase() === "postgres") {
+    const databaseUrl = nonEmpty(env.DATABASE_URL);
+    add(
+      "database-url",
+      Boolean(databaseUrl) && !isPlaceholder(databaseUrl),
+      databaseUrl ? "DATABASE_URL 已配置" : "STATE_BACKEND=postgres 时必须配置 DATABASE_URL",
+      "data"
+    );
+    const adminUrl = nonEmpty(env.DATABASE_ADMIN_URL);
+    add(
+      "database-admin-url",
+      Boolean(adminUrl),
+      adminUrl ? "DATABASE_ADMIN_URL 已配置" : "生产 PostgreSQL 迁移必须配置 DATABASE_ADMIN_URL（不要使用运行时低权限角色）",
+      "data"
+    );
+  }
   const metricsToken = nonEmpty(env.METRICS_TOKEN);
   if (metricsToken) {
     add(

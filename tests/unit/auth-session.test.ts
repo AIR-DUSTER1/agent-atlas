@@ -1,5 +1,9 @@
 /** auth-session.test.ts — 会话 Cookie、注销重放与失败限流 */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import {
@@ -10,7 +14,9 @@ import {
 import { FailureRateLimiter, clientIp } from "../../src/server/security/rate-limit.js";
 import {
   deviceCookie, ensureDeviceIdentity, ensureDeviceSession, hasAuthorizedDeviceSession,
-  isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken,
+  isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken, deviceFromRequest, ownerIdentityForRequest,
+  deviceIdentityForRequest, isAdminRequest, adoptBearerIdentity, requireOwnerIdentity, requireDeviceIdentity,
+  renewDeviceCookie, enrollDeviceIdentity, clearDeviceCookieOnResponse, deviceTtlDays,
 } from "../../src/server/security/device.js";
 
 test("HMAC 会话可校验；篡改与过期均失败", () => {
@@ -82,10 +88,12 @@ function fakeRequest(options: {
   cookie?: string;
   forwarded?: string | string[];
   remote?: string;
+  authorization?: string;
 } = {}): IncomingMessage {
   const headers: Record<string, string | string[]> = {};
   if (options.cookie) headers.cookie = options.cookie;
   if (options.forwarded) headers["x-forwarded-for"] = options.forwarded;
+  if (options.authorization) headers.authorization = options.authorization;
   return {
     headers,
     socket: { remoteAddress: options.remote ?? "127.0.0.1" },
@@ -277,4 +285,70 @@ test("认证关闭时远端设备自动获得签名设备 Cookie", () => {
   } finally {
     delete process.env.SESSION_SECRET;
   }
+});
+
+test("设备 Cookie 解析、owner 映射、Bearer 与续期写入完整路径", () => {
+  process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
+  process.env.AUTH_TOKEN = "device-route-token-at-least-32-chars";
+  try {
+    const issued = issueDeviceIdentity(Date.now(), "device-owner-a", { ownerId: "owner-a", role: "member" });
+    const cookie = deviceCookie(issued.token).split(";")[0];
+    const req = fakeRequest({ cookie, remote: "198.51.100.20" });
+    const res = fakeResponse();
+    assert.equal(deviceFromRequest(req)?.did, "device-owner-a");
+    assert.equal(ensureDeviceIdentity(req, res), "device-owner-a");
+    assert.deepEqual(ownerIdentityForRequest(req), { ownerId: "owner-a", deviceId: "device-owner-a", role: "member" });
+    assert.equal(deviceIdentityForRequest(req), "device-owner-a");
+    assert.equal(isAdminRequest(req), false);
+    assert.deepEqual(requireOwnerIdentity(req, res), { ownerId: "owner-a", deviceId: "device-owner-a", role: "member" });
+    assert.equal(requireDeviceIdentity(req, res), "owner-a");
+
+    const bearer = fakeRequest({ authorization: "Bearer legacy-bearer-token" });
+    const bearerRes = fakeResponse();
+    assert.equal(adoptBearerIdentity(bearer, bearerRes), `api-${createHash("sha256").update("legacy-bearer-token").digest("hex").slice(0, 32)}`);
+    renewDeviceCookie(bearerRes, "device-renewed");
+    renewDeviceCookie(bearerRes, "device-renewed");
+    assert.match(String(bearerRes.getHeader("set-cookie")), /lg_agent_device=/);
+  } finally {
+    delete process.env.SESSION_SECRET;
+    delete process.env.AUTH_TOKEN;
+  }
+});
+
+test("设备 TTL 边界与敏感文件权限收紧可重复执行", async () => {
+  process.env.DEVICE_TTL_DAYS = "9999";
+  try {
+    assert.equal(deviceTtlDays(), 365);
+  } finally {
+    delete process.env.DEVICE_TTL_DAYS;
+  }
+  process.env.DEVICE_TTL_DAYS = "0";
+  try {
+    assert.equal(deviceTtlDays(), 180);
+  } finally {
+    delete process.env.DEVICE_TTL_DAYS;
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "agent-permissions-"));
+  const file = join(dir, "secret.txt");
+  try {
+    await writeFile(file, "secret", "utf8");
+    const { secureFilePermissions } = await import("../../src/server/security/file-permissions.js");
+    await secureFilePermissions(file);
+    await secureFilePermissions(file);
+    await secureFilePermissions(dir, true);
+    await secureFilePermissions(join(dir, "missing.txt"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("设备注册与注销 Cookie 清理使用可验证的设备身份", () => {
+  const res = fakeResponse();
+  const deviceId = enrollDeviceIdentity(res);
+  assert.ok(deviceId);
+  const cookie = String(res.getHeader("set-cookie"));
+  assert.match(cookie, /lg_agent_device=/);
+  clearDeviceCookieOnResponse(res);
+  assert.match(String(res.getHeader("set-cookie")), /Max-Age=0/);
 });

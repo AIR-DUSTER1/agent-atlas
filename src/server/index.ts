@@ -45,9 +45,9 @@
 import { createServer } from "node:http";
 import { config } from "../config.js";
 import { PRODUCT_NAME } from "../product.js";
-import { bumpConfigVersion, getSessionByThreadForDevice, restoreSessions } from "./sessions.js";
+import { bumpConfigVersion, getSessionByThreadForOwner, restoreSessions, ensureOwnerSessions } from "./sessions.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
-import { loadProjects } from "./projects.js";
+import { ensureProjectsLoaded, loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
 import { loadRag } from "./rag.js";
 import { isRagConfigured } from "./rag.js";
@@ -60,7 +60,11 @@ import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes
 import { configureRoutingBreaker, configureRoutingVectorFinder } from "../routing/state.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
-import { adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, requireDeviceIdentity } from "./security/device.js";
+import { adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, requireDeviceIdentity, isAdminRequest } from "./security/device.js";
+import { ownerIdentityForRequest } from "./security/device.js";
+import { initializePostgres, closePostgres, isPostgresBackend } from "./persistence/postgres.js";
+import { ensureBootstrapAdmin } from "./persistence/accounts.js";
+import { enterTenantContext, localTenantContext } from "./tenant-context.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
@@ -187,6 +191,8 @@ try {
 
 // 启动顺序：版本迁移 → 设置/扩展加载 → 生产门禁 → journal 回放。
 try {
+  await initializePostgres();
+  await ensureBootstrapAdmin();
   await runPersistenceMigrations();
   await loadSettings();
   await loadSubagentSettings();
@@ -247,6 +253,29 @@ const EXPOSED_NOAUTH_ERR =
   "服务当前以非本机地址开放且未配置认证（AUTH_TOKEN），已拒绝该操作。" +
   "请设置环境变量 AUTH_TOKEN 后携带 Bearer token 访问，或改用 HOST=127.0.0.1 仅本机使用";
 
+function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
+  if (method === "GET" || method === "HEAD") {
+    return pathname === "/api/models"
+      || pathname.startsWith("/api/memory/config")
+      || pathname.startsWith("/api/backup")
+      || pathname.startsWith("/api/diagnostics");
+  }
+  return pathname === "/api/models"
+    || pathname === "/api/fs/open-remote"
+    || pathname === "/api/projects/pick-directory"
+    || pathname.startsWith("/api/config/")
+    || pathname.startsWith("/api/plugins/")
+    || pathname.startsWith("/api/subagents/")
+    || pathname.startsWith("/api/routing/")
+    || pathname.startsWith("/api/memory/config")
+    || pathname.startsWith("/api/memory/test")
+    || pathname.startsWith("/api/memory/embedding")
+    || pathname.startsWith("/api/memory/reindex")
+    || pathname.startsWith("/api/rag/")
+    || pathname.startsWith("/api/external-agents/")
+    || pathname.startsWith("/api/backup")
+    || pathname.startsWith("/api/diagnostics");
+}
 const server = createServer(async (req, res) => {
   const requestId = newRequestId();
   res.setHeader("X-Request-Id", requestId);
@@ -331,6 +360,27 @@ const server = createServer(async (req, res) => {
     // 否则创建会话后下一条脚本请求会被设备隔离误拒绝。
     if (pathname.startsWith("/api/")) adoptBearerIdentity(req, res);
 
+    // 认证通过后建立租户上下文；数据库 RLS、文件授权和记忆 scope 都从这里取 owner。
+    if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
+      const identity = ownerIdentityForRequest(req);
+      if (isPostgresBackend() && !identity) {
+        respondUnauthorized(req, res);
+        return;
+      }
+      const context = identity
+        ? { ownerId: identity.ownerId, deviceId: identity.deviceId, role: identity.role }
+        : localTenantContext();
+      enterTenantContext(context);
+      if (isPostgresBackend()) await ensureOwnerSessions(context.ownerId);
+      if (isPostgresBackend()) await ensureProjectsLoaded(context.ownerId);
+    }
+
+    // 多用户模式：全局供应商、插件、MCP、技能、备份等控制面只允许管理员修改。
+    if (isPostgresBackend() && isAdminOnlyApi(pathname, req.method) && !isAdminRequest(req)) {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "该配置仅管理员可操作", code: "admin_required" }));
+      return;
+    }
     // Phase 0 止血：非 loopback 绑定且未启用认证 → 所有写请求全部拒绝。
     // 用「方法级」而非接口枚举：新增路由默认落在防线内侧，不会因漏单位置绕过。
     // GET（只读信息）不受限：config/sessions 等只含掩码/元信息，无副作用。
@@ -574,9 +624,9 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "浏览器会话 id 格式非法" }));
         return;
       }
-      const deviceId = requireDeviceIdentity(req, res);
-      if (!deviceId) return;
-      if (!getSessionByThreadForDevice(browserSessionId, deviceId)) {
+      const ownerId = requireDeviceIdentity(req, res);
+      if (!ownerId) return;
+      if (!getSessionByThreadForOwner(browserSessionId, ownerId)) {
         res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: "Browser Use 会话不存在或不属于当前设备" }));
         return;
@@ -667,6 +717,7 @@ function handleSignal(signal: string): void {
       stopMemoryMaintenance();
       await closeAllBrowserSessions();
       await disconnectAll(); // 持久检查点的在途追加也等落盘（F0）
+      await closePostgres();
     },
     // stdout 接管道时 process.exit 可能截断最后一行日志：等写入回调后再退，
     // 并留一个 1s 的兜底定时器（不 hold 事件循环）

@@ -8,6 +8,9 @@ import { listProjects, getActiveProjectId, setActiveProject, addProject, deleteP
 import { moveSessions } from "../sessions.js";
 import { writeAudit } from "../audit.js";
 import { DirectoryPickerBusyError, pickDirectory } from "../directory-picker.js";
+import { tenantContextOrLocal } from "../tenant-context.js";
+import { isPostgresBackend } from "../persistence/postgres.js";
+import { isAdminRequest } from "../security/device.js";
 
 export async function handleListProjects(res: import("node:http").ServerResponse): Promise<void> {
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -40,6 +43,9 @@ export async function handlePickProjectDirectory(
 export async function handleAddProject(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
   const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; type?: string; path?: string; url?: string };
   try {
+    if (isPostgresBackend() && body.type !== "cloud" && !isAdminRequest(req)) {
+      throw new Error("多用户模式下只有管理员可以添加服务器本地目录；普通用户请使用本地文件上传或云端 Git 项目");
+    }
     const project = await addProject(body);
     // 授权本地目录 / 云端仓库属于安全边界动作：只记 id 与类型，URL 可能含凭据
     writeAudit("project.authorized", { projectId: project.id, type: project.type });
@@ -64,7 +70,7 @@ export async function handleSetActiveProject(res: import("node:http").ServerResp
 export async function handleDeleteProject(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, id: string): Promise<void> {
   try {
     await deleteProject(id);
-    const moved = moveSessions(id, "default");
+    const moved = moveSessions(id, "default", tenantContextOrLocal().ownerId);
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, movedSessions: moved, projects: listProjects(), activeProjectId: getActiveProjectId() }));
   } catch (err) {

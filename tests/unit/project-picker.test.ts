@@ -63,7 +63,7 @@ test("Electron 与浏览器两条目录选择链路都已接线", async () => {
   assert.match(apiClient, /class ApiError/);
   assert.match(apiClient, /data\.code/);
   assert.doesNotMatch(serverProjects, /name:\s*"learn-agent"/);
-  assert.match(serverProjects, /projects = \[\];/);
+  assert.match(serverProjects, /projectsByOwner/);
   assert.match(projects, /其会话会归入「未归属」/);
   assert.match(route, /pickDirectory\(\)/);
   assert.match(route, /writeHead\(409/);

@@ -19,6 +19,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     agentProfileId: "general",
     demo: null,
     agentId: null,
+    ownerId: "local",
     deviceId: "local",
     projectId: "default",
     title: "测试",

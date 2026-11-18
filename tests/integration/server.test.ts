@@ -81,7 +81,7 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(ready.status, 200);
   assert.equal(ready.body.ok, true);
   assert.equal(ready.body.shuttingDown, false);
-  assert.deepEqual(ready.body.checks, { configStore: true, sessionStore: true });
+  assert.deepEqual(ready.body.checks, { configStore: true, sessionStore: true, database: true });
   assert.equal(ready.body.version, health.body.version);
   assert.equal(ready.body.buildId, health.body.buildId);
 

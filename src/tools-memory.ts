@@ -21,12 +21,12 @@ const MEMORY_RECALL_DESCRIPTION =
   "按关键词查询当前 Agent 专属的跨会话长期记忆。" +
   "何时用：需要确认用户以前是否提出过偏好、约定或项目事实时。例：query=\"回答风格\"。";
 
-export function createMemoryTools(profileId: MemoryProfileId) {
+export function createMemoryTools(profileId: MemoryProfileId, userId = "local") {
   const memorySave = tool(
     async ({ key, content }) => {
       try {
         const entry = await memorySlot.save({
-          scope: memoryScope(profileId),
+          scope: memoryScope(profileId, userId),
           key,
           content,
           source: "agent",
@@ -50,7 +50,7 @@ export function createMemoryTools(profileId: MemoryProfileId) {
 
   const memoryRecall = tool(
     async ({ query }) => {
-      const result = await memorySlot.search({ scope: memoryScope(profileId), text: query, limit: 10 });
+      const result = await memorySlot.search({ scope: memoryScope(profileId, userId), text: query, limit: 10 });
       if (result.degraded && !result.records.length) return `长期记忆暂时不可用：${result.message || "Provider 降级"}`;
       const hits = result.records;
       const degradedNote = result.degraded ? `（语义召回降级，以下为词法结果：${result.message || "Provider 降级"}）\n` : "";

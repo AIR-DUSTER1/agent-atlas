@@ -34,6 +34,8 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { log } from "./server/logging.js";
 import { ensureNdjsonSchemaHeader, inspectNdjson, latestNdjsonHealth, type NdjsonHealthReport } from "./server/persistence/ndjson-health.js";
 import { sanitizeCheckpointMessage, sanitizeSerializedCheckpoint } from "./agent/checkpoint-sanitize.js";
+import { PostgresPersistentSaver } from "./server/persistence/postgres-checkpoint.js";
+import { isPostgresBackend } from "./server/persistence/postgres.js";
 
 /** 触发 compact 的文件大小上限（字节）；每线程只留最近 KEEP_PER_THREAD 个检查点 */
 const CHECKPOINT_MAX_BYTES = 24_000_000;
@@ -448,8 +450,19 @@ export class PersistentSaver extends MemorySaver {
 // ---------------------------------------------------------------------------
 
 let saverSingleton: PersistentSaver | null = null;
+const postgresSavers = new Map<string, PostgresPersistentSaver>();
 
-export function getCheckpointSaver(): PersistentSaver {
+export type CheckpointSaver = PersistentSaver | PostgresPersistentSaver;
+
+export function getCheckpointSaver(ownerId?: string): CheckpointSaver {
+  if (isPostgresBackend()) {
+    if (!ownerId) throw new Error("PostgreSQL 检查点必须提供 ownerId");
+    const existing = postgresSavers.get(ownerId);
+    if (existing) return existing;
+    const created = new PostgresPersistentSaver(ownerId);
+    postgresSavers.set(ownerId, created);
+    return created;
+  }
   if (!saverSingleton) {
     saverSingleton = new PersistentSaver(process.env.CHECKPOINT_FILE || DEFAULT_FILE);
   }
@@ -457,8 +470,8 @@ export function getCheckpointSaver(): PersistentSaver {
 }
 
 /** 启动路径：取单例并完成磁盘回放（幂等，可安全重复调用） */
-export async function ensureCheckpointsLoaded(): Promise<PersistentSaver> {
-  const saver = getCheckpointSaver();
+export async function ensureCheckpointsLoaded(ownerId?: string): Promise<CheckpointSaver> {
+  const saver = getCheckpointSaver(ownerId);
   await saver.loadFromDisk();
   return saver;
 }
@@ -466,10 +479,12 @@ export async function ensureCheckpointsLoaded(): Promise<PersistentSaver> {
 /** 优雅退出前等待检查点日志写完（index.ts 关停序列里与 flushJournal 并列） */
 export async function flushCheckpointLog(): Promise<void> {
   await saverSingleton?.flush();
+  await Promise.all([...postgresSavers.values()].map((saver) => saver.flush()));
 }
 
 /** 当前检查点日志的实际路径（备份/恢复枚举用；env 钩子重绑后随之变化） */
 export function checkpointFilePath(): string {
+  if (isPostgresBackend()) return "";
   if (saverSingleton) return saverSingleton.filePathOf();
   return process.env.CHECKPOINT_FILE || DEFAULT_FILE;
 }
@@ -477,6 +492,7 @@ export function checkpointFilePath(): string {
 /** 测试专用：丢弃单例以便下一个用例换 CHECKPOINT_FILE 重建 */
 export function resetCheckpointSaver(): void {
   saverSingleton = null;
+  postgresSavers.clear();
 }
 
 /** 最近一次 checkpoint 回放的健康报告（诊断用）。 */

@@ -21,6 +21,7 @@ import { promises as fsp } from "node:fs";
 import { join, resolve, basename, dirname, sep, relative, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { tenantContextOrLocal } from "./tenant-context.js";
 
 const PROJECT_ROOT = resolve(join(dirname(fileURLToPath(import.meta.url)), "..", ".."));
 export { PROJECT_ROOT };
@@ -58,8 +59,8 @@ function isSearchableFile(name: string): boolean {
   return /^(dockerfile|makefile|license|readme)$/i.test(name);
 }
 
-/** 已授权的可浏览根：绝对路径 → 显示名 */
-const authorizedRoots = new Map<string, string>([[PROJECT_ROOT, "项目根"]]);
+/** 每个 owner 独立维护可浏览根，禁止一个用户看到另一个用户的目录授权。 */
+const authorizedRoots = new Map<string, Map<string, string>>();
 
 // ---------------------------------------------------------------------------
 // 路径授权
@@ -71,29 +72,45 @@ function samePrefix(child: string, root: string): boolean {
   return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep);
 }
 
+function ownerRoots(ownerId: string, role: "admin" | "member"): Map<string, string> {
+  let roots = authorizedRoots.get(ownerId);
+  if (!roots) {
+    roots = new Map<string, string>();
+    authorizedRoots.set(ownerId, roots);
+  }
+  if (role === "admin" && !roots.size) roots.set(PROJECT_ROOT, "项目根");
+  return roots;
+}
+
+function currentOwnerRoots(): Map<string, string> {
+  const context = tenantContextOrLocal();
+  return ownerRoots(context.ownerId, context.role);
+}
+
 function assertAuthorized(absPath: string): void {
-  for (const root of authorizedRoots.keys()) {
+  for (const root of currentOwnerRoots().keys()) {
     if (samePrefix(absPath, root)) return;
   }
-  throw new Error("路径未授权：只能浏览项目根或已添加的远程文件夹");
+  throw new Error("路径未授权：只能浏览当前用户已添加的项目根或远程文件夹");
 }
 export { assertAuthorized };
 
 export function listRoots(): Array<{ path: string; name: string }> {
-  return [...authorizedRoots.entries()].map(([path, name]) => ({ path, name }));
+  return [...currentOwnerRoots().entries()].map(([path, name]) => ({ path, name }));
 }
 
 /** 注册一个可浏览根（项目管理/云端文件夹用）；返回是否为新授权 */
 export function authorizeRoot(path: string, name: string): boolean {
   const p = resolve(path);
-  if (authorizedRoots.has(p)) return false;
-  authorizedRoots.set(p, name);
+  const roots = currentOwnerRoots();
+  if (roots.has(p)) return false;
+  roots.set(p, name);
   return true;
 }
 
 /** 撤销一个可浏览根（删除项目时） */
 export function unauthorizeRoot(path: string): void {
-  authorizedRoots.delete(resolve(path));
+  currentOwnerRoots().delete(resolve(path));
 }
 
 /** 授权一个服务器上的文件夹作为可浏览根（「远程文件夹」功能） */
@@ -102,9 +119,10 @@ export async function openRemoteRoot(rawPath: string): Promise<{ path: string; n
   if (!p) throw new Error("路径不能为空");
   const st = await fsp.stat(p).catch(() => { throw new Error("路径不存在"); });
   if (!st.isDirectory()) throw new Error("该路径不是文件夹");
-  if (!authorizedRoots.has(p)) {
-    if (authorizedRoots.size >= 12) throw new Error("已授权文件夹数量达上限（12 个）");
-    authorizedRoots.set(p, basename(p) || p);
+  const roots = currentOwnerRoots();
+  if (!roots.has(p)) {
+    if (roots.size >= 12) throw new Error("已授权文件夹数量达上限（12 个）");
+    roots.set(p, basename(p) || p);
   }
   return { path: p, name: basename(p) || p };
 }
@@ -141,7 +159,7 @@ export async function listDir(rawPath?: string): Promise<{
   }
   entries.sort((a, b) => (a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name.localeCompare(b.name)));
 
-  const rootOf = [...authorizedRoots.keys()].find((r) => samePrefix(target, r));
+  const rootOf = [...currentOwnerRoots().keys()].find((r) => samePrefix(target, r));
   const parent = rootOf && target !== rootOf ? dirname(target) : null;
   return {
     path: target,
@@ -223,7 +241,7 @@ export async function searchFiles(queryRaw: string): Promise<{
     }
   }
 
-  for (const [root, rootName] of authorizedRoots) {
+  for (const [root, rootName] of currentOwnerRoots()) {
     await walk(root, rootName, root, 0);
     if (truncated || (!query && candidates.length >= MAX_SEARCH_RESULTS)) break;
   }
@@ -282,6 +300,7 @@ export interface StoredUpload {
   content: string;
   size: number;
   at: number;
+  ownerId: string;
 }
 
 const uploads = new Map<string, StoredUpload>();
@@ -306,9 +325,11 @@ export function storeUpload(name: string, content: string, image = false): { id:
     }
   }
   const id = randomUUID();
-  uploads.set(id, { name, kind, content, size: content.length, at: Date.now() });
-  while (uploads.size > MAX_UPLOAD_FILES) {
-    const oldest = [...uploads.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+  const ownerId = tenantContextOrLocal().ownerId;
+  uploads.set(id, { name, kind, content, size: content.length, at: Date.now(), ownerId });
+  const owned = [...uploads.entries()].filter(([, item]) => item.ownerId === ownerId);
+  while (owned.length > MAX_UPLOAD_FILES) {
+    const oldest = owned.shift();
     if (!oldest) break;
     uploads.delete(oldest[0]);
   }
@@ -316,7 +337,8 @@ export function storeUpload(name: string, content: string, image = false): { id:
 }
 
 export function getUpload(id: string): StoredUpload | undefined {
-  return uploads.get(id);
+  const item = uploads.get(id);
+  return item?.ownerId === tenantContextOrLocal().ownerId ? item : undefined;
 }
 
 // ---------------------------------------------------------------------------

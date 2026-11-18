@@ -30,6 +30,7 @@ export { MAX_INJECT_MEMORIES, MEMORY_PROMPT_CHAR_BUDGET };
 
 export interface MemoryPromptOptions {
   profileId?: MemoryProfileId;
+  userId?: string;
   query?: string;
   limit?: number;
   charBudget?: number;
@@ -40,21 +41,21 @@ export interface MemorySaveOptions {
   allowPII?: boolean;
 }
 
-function profileScope(profileId: MemoryProfileId | undefined): MemoryScope {
-  return memoryScope(profileId ?? DEFAULT_MEMORY_PROFILE);
+function profileScope(profileId: MemoryProfileId | undefined, userId?: string): MemoryScope {
+  return memoryScope(profileId ?? DEFAULT_MEMORY_PROFILE, userId);
 }
 
-export async function loadMemories(profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE): Promise<number> {
+export async function loadMemories(profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE, userId?: string): Promise<number> {
   await ensureLocalStoreLoaded();
-  return (await getLocalMemoryProvider().list(profileScope(profileId))).length;
+  return (await getLocalMemoryProvider().list(profileScope(profileId, userId))).length;
 }
 
 /** 同步视图只用于已加载的本地文件；跨 Provider 列表请用 listMemoriesAsync。 */
 export function listMemories(
   profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE,
-  options: { includeHistory?: boolean } = {}
+  options: { includeHistory?: boolean; userId?: string } = {}
 ): MemoryRecord[] {
-  const scope = profileScope(profileId);
+  const scope = profileScope(profileId, options.userId);
   return loadedLocalRecords()
     .filter((item) => sameMemoryScope(item.scope, scope))
     .filter((item) => options.includeHistory || item.status === "active")
@@ -63,9 +64,9 @@ export function listMemories(
 
 export async function listMemoriesAsync(
   profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE,
-  options: { includeHistory?: boolean } = {}
+  options: { includeHistory?: boolean; userId?: string } = {}
 ): Promise<MemoryRecord[]> {
-  return memorySlot.list(profileScope(profileId), options);
+  return memorySlot.list(profileScope(profileId, options.userId), options);
 }
 
 export async function saveMemory(
@@ -73,10 +74,10 @@ export async function saveMemory(
   content: string,
   source: MemorySource,
   profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE,
-  options: MemorySaveOptions = {}
+  options: MemorySaveOptions & { userId?: string } = {}
 ): Promise<MemoryRecord> {
   return memorySlot.save({
-    scope: profileScope(profileId),
+    scope: profileScope(profileId, options.userId),
     key,
     content,
     source,
@@ -87,19 +88,21 @@ export async function saveMemory(
 
 export async function deleteMemory(
   id: string,
-  profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE
+  profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE,
+  userId?: string,
 ): Promise<boolean> {
-  return memorySlot.delete(id, profileScope(profileId));
+  return memorySlot.delete(id, profileScope(profileId, userId));
 }
 
 export async function searchMemories(
   query: string,
   limit = 10,
-  profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE
+  profileId: MemoryProfileId = DEFAULT_MEMORY_PROFILE,
+  userId?: string,
 ): Promise<MemoryRecord[]> {
   const result = await memorySlot.search({
     text: query,
-    scope: profileScope(profileId),
+    scope: profileScope(profileId, userId),
     limit,
   });
   return result.records;
@@ -107,7 +110,7 @@ export async function searchMemories(
 
 export async function memoryNoteForPrompt(options: MemoryPromptOptions = {}): Promise<string | null> {
   const noteOptions: MemoryNoteOptions = {
-    scope: profileScope(options.profileId),
+    scope: profileScope(options.profileId, options.userId),
     query: options.query ?? "",
     ...(options.limit !== undefined ? { limit: options.limit } : {}),
     ...(options.charBudget !== undefined ? { charBudget: options.charBudget } : {}),

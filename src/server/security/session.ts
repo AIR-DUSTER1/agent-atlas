@@ -19,11 +19,14 @@ const SESSION_VERSION = 1;
 const BOOT_NONCE = randomBytes(16).toString("base64url");
 const revokedSessions = new Map<string, number>();
 
-interface SessionPayload {
+export interface SessionPayload {
   v: 1;
   sid: string;
   iat: number;
   exp: number;
+  /** PostgreSQL 多用户模式写入；文件模式为空。 */
+  ownerId?: string;
+  role?: "admin" | "member";
 }
 
 function envValue(name: string): string {
@@ -72,9 +75,20 @@ export function sessionFromRequest(req: IncomingMessage): string | null {
 }
 
 /** 签发新会话；注入 now 便于测试过期与时钟偏移。 */
-export function issueSession(now = Date.now(), sid: string = randomUUID()): { token: string; payload: SessionPayload } {
+export function issueSession(
+  now = Date.now(),
+  sid: string = randomUUID(),
+  owner?: { ownerId: string; role: "admin" | "member" },
+): { token: string; payload: SessionPayload } {
   const ttlMs = sessionTtlHours() * 60 * 60 * 1000;
-  const payload: SessionPayload = { v: SESSION_VERSION, sid, iat: now, exp: now + ttlMs };
+  const payload: SessionPayload = {
+    v: SESSION_VERSION,
+    sid,
+    iat: now,
+    exp: now + ttlMs,
+    ...(owner?.ownerId ? { ownerId: owner.ownerId } : {}),
+    ...(owner?.role ? { role: owner.role } : {}),
+  };
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return { token: `${data}.${sign(data)}`, payload };
 }
@@ -93,6 +107,8 @@ export function verifySessionToken(token: string, now = Date.now()): SessionPayl
   }
   if (
     !payload || payload.v !== SESSION_VERSION || typeof payload.sid !== "string" || !payload.sid ||
+    (payload.ownerId !== undefined && typeof payload.ownerId !== "string") ||
+    (payload.role !== undefined && payload.role !== "admin" && payload.role !== "member") ||
     typeof payload.iat !== "number" || typeof payload.exp !== "number" ||
     payload.exp <= now || payload.iat > now + 60_000 || revokedSessions.has(payload.sid)
   ) return null;
