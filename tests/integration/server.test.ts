@@ -105,10 +105,38 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(cfg.body.map.provider, "amap");
   assert.match(cfg.body.map.tileUrl, /autonavi\.com/);
   assert.equal(cfg.body.map.projection, "web-mercator");
-  const activeProvider = cfg.body.providers.find((provider: { active: boolean }) => provider.active);
-  const activeModel = activeProvider?.models.find((model: { active: boolean }) => model.active);
-  assert.equal(activeModel?.contextWindow, 200_000);
-  assert.equal(activeModel?.contextWindowSource, "default");
+  assert.deepEqual(cfg.body.providers, []);
+  assert.equal(cfg.body.activeProviderId, null);
+  assert.equal(cfg.body.activeModelId, null);
+  assert.equal(cfg.body.model, "");
+  assert.equal(cfg.body.contextWindow, 200_000);
+  assert.equal(cfg.body.contextBudget.contextWindow, 200_000);
+});
+
+test("有 API_KEY 时仍从 .env 播种默认供应商", async () => {
+  const seeded = await startServer({
+    API_KEY: "test-only-env-key",
+    BASE_URL: "http://127.0.0.1:9/v1",
+    MODEL: "env-model",
+  });
+  try {
+    const response = await fetch(seeded.base + "/api/config");
+    assert.equal(response.status, 200);
+    const cfg = await response.json() as {
+      mock: boolean;
+      model: string;
+      activeProviderId: string | null;
+      providers: Array<{ name: string; model: string }>;
+    };
+    assert.equal(cfg.mock, false);
+    assert.equal(cfg.model, "env-model");
+    assert.ok(cfg.activeProviderId);
+    assert.equal(cfg.providers.length, 1);
+    assert.equal(cfg.providers[0].name, "默认供应商（.env）");
+    assert.equal(cfg.providers[0].model, "env-model");
+  } finally {
+    await seeded.stop();
+  }
 });
 
 test("Excel 对比清单通过同源认证接口下载，文件名与 XLSX 类型正确", async () => {
@@ -182,7 +210,7 @@ test("同供应商切换模型会重建配置且保留会话历史", async () =>
   const first = await json("/api/config/activate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ providerId: provider.id, modelId: modelA.id }),
+    body: JSON.stringify({ providerId: provider.id, modelId: modelB.id }),
   });
   assert.equal(first.status, 200);
   assert.equal(first.body.activeChanged, true, "切到新组合必须 bump 配置版本");
@@ -199,7 +227,7 @@ test("同供应商切换模型会重建配置且保留会话历史", async () =>
   const switched = await json("/api/config/activate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ providerId: provider.id, modelId: modelB.id }),
+    body: JSON.stringify({ providerId: provider.id, modelId: modelA.id }),
   });
   assert.equal(switched.status, 200);
   assert.equal(switched.body.activeChanged, true, "同供应商换模型也必须让旧会话下次发消息时重建图");
@@ -207,7 +235,7 @@ test("同供应商切换模型会重建配置且保留会话历史", async () =>
   const repeated = await json("/api/config/activate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ providerId: provider.id, modelId: modelB.id }),
+    body: JSON.stringify({ providerId: provider.id, modelId: modelA.id }),
   });
   assert.equal(repeated.body.activeChanged, false, "重复选择同一组合不应无谓重建");
 

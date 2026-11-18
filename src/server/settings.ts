@@ -297,8 +297,14 @@ export async function loadSettings(): Promise<void> {
   seedFromEnv();
 }
 
-/** 无文件：从 .env 播种一个内存供应商（任何修改后才会写入文件） */
+/** 无文件：只有 .env 提供了可用 API Key 才播种供应商；否则保持空配置并进入 mock。 */
 function seedFromEnv(): void {
+  providers = [];
+  activeId = null;
+  if (!config.apiKey.trim()) {
+    config.reasoning = { ...DEFAULT_REASONING };
+    return;
+  }
   const model: ModelEntry = {
     id: randomUUID(),
     name: config.model,

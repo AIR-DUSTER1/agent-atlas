@@ -9,7 +9,8 @@ import { config } from "../../config.js";
 import {
   listProviders, getActiveId, getActiveModelId, addProvider, updateProvider, deleteProvider,
   activate, addModel, updateModel, deleteModel, setReasoning, listDialects, getReasoningState,
-  maskKey, fetchGatewayModelList, getContextWindowForActive, refreshModelInfo,
+  maskKey, fetchGatewayModelList, getContextWindowForActive, getActiveModelLabel, refreshModelInfo,
+  DEFAULT_CONTEXT_WINDOW,
 } from "../settings.js";
 import { bumpConfigVersion } from "../sessions.js";
 import { DEMOS } from "../sessions.js";
@@ -26,8 +27,9 @@ export async function handleGetApiConfig(res: import("node:http").ServerResponse
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({
     mock: !config.apiKey,
-    model: config.model,
-    baseURL: config.baseURL,
+    // 没有启用供应商时不要回传 .env 的模型默认值，避免前端伪造“默认供应商”。
+    model: getActiveModelLabel(),
+    baseURL: getActiveId() ? config.baseURL : "",
     protocol: config.protocol,
     hasKey: Boolean(config.apiKey),
     keyMasked: maskKey(config.apiKey),
@@ -37,7 +39,7 @@ export async function handleGetApiConfig(res: import("node:http").ServerResponse
     // 当前启用模型的思考等级（方言 + 档位 + 该方言的全部档位），前端顶栏/设置页据此渲染
     reasoning: getReasoningState(),
     dialects: listDialects(),
-    contextWindow: getContextWindowForActive() ?? null,
+    contextWindow: getContextWindowForActive() ?? DEFAULT_CONTEXT_WINDOW,
     contextBudget: createContextWindowBudget(getContextWindowForActive()),
     map: config.map,
     demos: DEMOS,

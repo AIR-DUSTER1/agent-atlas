@@ -92,7 +92,7 @@ ReAct 工具循环 + 多轮记忆 + 高风险审批 + 结果反思 + 📎 文件
         ├── parent-watchdog.ts # 桌面端父进程消失后自动退出（§3.14）
         ├── logging.ts    # 结构化日志（stdout JSON + 密钥打码 + LOG_LEVEL）
         ├── stream.ts     # LangGraph 原始流事件 → 前端友好事件（token/工具卡/审批）的翻译层
-        ├── mock.ts       # 未配置 API_KEY 时的模拟模型（事件协议与真实图一致）
+        ├── mock.ts       # 无可用供应商/API_KEY 时的模拟模型（事件协议与真实图一致）
         ├── sessions.ts   # 内存会话存储（每会话一张图 + 绑定 thread_id）
         ├── settings.ts   # 多供应商管理（增/删/改/切换 + context_length 缓存）
         ├── projects.ts   # 项目文件夹（本地目录 / 云端 Git 仓库 clone + 会话分组）
@@ -546,10 +546,10 @@ Human-in-the-loop 审批按钮、多会话侧栏。**零前端框架、零打包
   配置分三层：`.env` < `.web-config.json`（保存的供应商列表 + activeId，gitignore）< 运行中内存。
   切换/修改启用中的供应商 → 配置版本号 +1，**已有会话在下次发消息时自动重建图**
   （Demo 2/3 的记忆随之重置）；Key 只回传掩码，编辑时留空 = 保持不变；
-  旧版单供应商配置文件会自动迁移；首次启动无文件时从 `.env` 播种一个默认档案；
+  旧版单供应商配置文件会自动迁移；首次启动无文件且 `.env` 有 API Key 时才播种默认档案，否则供应商列表为空；
 - **模型在建图时创建**：各 agent 图文件的 `createChatModel()` 都在 `createXxxGraph()` 工厂内
   调用（而非模块加载时），这是「改配置能对新会话生效」的前提；
-- **模拟模式 `mock.ts`**：未配置 `API_KEY` 时自动接管「模型决策」（脚本编排，工具结果仍真实执行），
+- **模拟模式 `mock.ts`**：未配置可用供应商或 `API_KEY` 时自动接管「模型决策」（脚本编排，工具结果仍真实执行），
   事件协议与真实图完全一致 —— 没有Key 也能完整体验 UI 的大部分交互；
   但 mock 不经过 `workflow.ts`，不会产生需求澄清，也不能恢复澄清；
 - **用量与容量条 `stream.ts` / `settings.ts`**：网关返回的 `usage`

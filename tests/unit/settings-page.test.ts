@@ -78,7 +78,9 @@ test("模型与供应商采用左栏选择、右栏模型详情", async () => {
   assert.match(app, /function selectProvider\(providerId: string \| null\): void/);
   assert.match(app, /function renderProviderDetail\(\): void/);
   assert.match(app, /provider-nav-item/);
+  assert.match(app, /当前为模拟模式；前往设置添加供应商后可切换模型/);
   assert.doesNotMatch(app, /row\.querySelector\("\.p-use"\)/);
+  assert.doesNotMatch(html, /「启用」的供应商 \+ 它当前的模型决定聊天用哪个模型/);
 });
 
 test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创建态覆盖", async () => {

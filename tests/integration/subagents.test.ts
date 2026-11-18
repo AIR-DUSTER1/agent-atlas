@@ -65,9 +65,23 @@ test("子代理默认目录、创建、编辑启停与删除", async () => {
 
 test("子代理固定模型引用有效，失效引用与坏输入被拒绝", async () => {
   const config = await json("/api/config");
-  const provider = config.body.providers?.[0];
+  let provider = config.body.providers?.[0];
+  if (!provider) {
+    // 默认 no-env 模式没有供应商；固定模型 API 需要一个真实可引用的本地档案。
+    const added = await json("/api/config/providers", {
+      method: "POST",
+      ...body({
+        name: "测试供应商",
+        baseURL: "http://127.0.0.1:9/v1",
+        apiKey: "",
+        model: "test-model",
+      }),
+    });
+    assert.equal(added.status, 200);
+    provider = added.body.provider;
+  }
   const model = provider?.models?.[0];
-  assert.ok(provider && model, "测试环境应有默认供应商与模型");
+  assert.ok(provider && model, "测试环境应有可引用的供应商与模型");
 
   const created = await json("/api/subagents", {
     method: "POST",

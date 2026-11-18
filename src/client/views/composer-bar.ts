@@ -65,8 +65,9 @@ export function applyConfigState(cfg: AppConfig): void {
   const active = (cfg.providers || []).find((p) => p.active);
   const activeModel = (active?.models || []).find((m) => m.active);
   const modelLabel = activeModel?.displayName || cfg.model;
+  const mockLabel = activeModel?.displayName ? `模拟模式 · ${activeModel.displayName}` : "模拟模式";
   const sideText = $("side-model-text");
-  if (sideText) sideText.textContent = mock ? `模拟模式 · ${cfg.model}` : `${active ? active.name + " · " : ""}${modelLabel}`;
+  if (sideText) sideText.textContent = mock ? mockLabel : `${active ? active.name + " · " : ""}${modelLabel}`;
   renderComposerBar();
   updateContextBar();
 }
@@ -77,7 +78,8 @@ export function renderComposerBar(): void {
   if (!cfg || !$("cm-model")) return;
   const m = activeModelEntryOf();
   const modelText = document.querySelector("#cm-model .cm-text");
-  if (modelText) modelText.textContent = cfg.mock ? `模拟模式 · ${cfg.model}` : (m?.displayName || cfg.model);
+  const mockLabel = m?.displayName ? `模拟模式 · ${m.displayName}` : "模拟模式";
+  if (modelText) modelText.textContent = cfg.mock ? mockLabel : (m?.displayName || cfg.model);
   const r = cfg.reasoning || {};
   const levels = visibleQuickReasoningLevels(r.levels);
   // 没有可切换档位时不显示入口：点开只有「无需设置」，属于死路菜单
@@ -116,6 +118,13 @@ export function renderModelMenu(menu: HTMLElement): void {
   const cfg = state.config;
   if (!cfg) return;
   menu.innerHTML = "";
+  if (!(cfg.providers || []).length) {
+    const empty = document.createElement("div");
+    empty.className = "cm-desc";
+    empty.textContent = "当前为模拟模式；前往设置添加供应商后可切换模型。";
+    menu.appendChild(empty);
+    return;
+  }
   for (const p of cfg.providers || []) {
     const sec = document.createElement("div");
     sec.className = "cm-sec";
