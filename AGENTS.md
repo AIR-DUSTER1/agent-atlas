@@ -1,339 +1,187 @@
-# AGENTS.md — 项目规范（面向人类与 AI 助手的统一约束）
+# AGENTS.md — agentatlas 常驻工程宪法
 
-> 本文件是本仓库**所有代码生成 / 修改工作的最高约定**。目标是：内容一致性高、
-> 质量门明确、维护心智负担最低。开工前先读完本文件；与本文件冲突的历史代码，
-> 新代码以本文件为准（旧代码按「最小改动」原则不必返工）。
+> 本文件是 L0 常驻红线，只放所有任务都必须遵守、且违反后会造成安全、数据、架构或交付事故的规则。
+> 任务操作步骤放在 `.agents/skills/agentatlas-*`，长篇契约和命令手册放在 `docs/`，可自动判断的规则放在 `tests/`。
+> 完整分层索引见 `docs/engineering-standards.md`；与本文件冲突时，以本文件为准。
 
----
+## 1. 项目定位与产品边界
 
-## 1. 项目定位一句话
+agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台，包含 Web、CLI、Electron 和单实例自托管部署。
 
-agentatlas：LangGraph.js（TypeScript）+ 零框架实现的 Agent 工具集：`node:http` + SSE 后端、
-TypeScript 前端（tsc 编译，无打包器）、多供应商模型配置、外加 Electron 桌面端壳
-与「外部 RAG 知识库」HTTP 客户端。**保留学习示例，同时作为可正常使用的本地产品维护**。
+- 未交付能力不得在 README「当前能力」中冒充已完成。
+- 通用、房产、求职 Agent 必须保持 Profile、工具 allowlist、审批与记忆 scope 隔离。
+- 当前生产边界是单实例、一个 `/data` 写者；不得暗示已支持多实例或集群高可用。
 
-后续能力路线：Hook、独立电脑操作 Agent、岗位获取 Agent、简历投递 Agent。规划与实现边界见
-`docs/agentatlas-roadmap.md`；未完成能力不得在 README「当前能力」中冒充已交付。
+## 2. 规范分层与 Skill 路由
 
-## 2. 技术栈红线（不许随意突破）
+| 任务 | 使用 Skill | 权威文档 |
+|---|---|---|
+| LangGraph、Profile、工具、审批、路由、子代理、记忆 | `$agentatlas-agent-runtime` | `docs/agent-orchestration.md`、`docs/memory-slot.md` |
+| HTTP、SSE、配置、持久化、认证、可观测性 | `$agentatlas-service-contract` | `docs/agent-orchestration.md`、`docs/security-and-tls.md` |
+| Web UI、HTML、CSS、设置页、可访问性、浏览器构建 | `$agentatlas-frontend` | `docs/engineering-standards.md` |
+| 版本、Docker、部署、备份恢复、生产发布 | `$agentatlas-release-ops` | `docs/versioning.md`、`docs/deployment.md` |
+
+规则：
+
+- 本文件始终生效；Skill 只补充任务流程，不得覆盖 L0 红线。
+- 一个任务跨越多个领域时可以组合 Skill，但不得复制出第三套规则。
+- 新增规则先分类：常驻红线、领域 Skill、深度文档或自动测试；禁止把长篇流程继续塞回本文件。
+
+## 3. 技术栈红线
 
 | 约束 | 说明 |
 |---|---|
-| TS 配置 | `strict` + `NodeNext` + `noEmit`；ESM 导入**必须带 `.js` 后缀**（`import x from "./foo.js"`） |
-| 运行时依赖 | 服务端白名单：`@langchain/core` `@langchain/langgraph` `@langchain/openai` `@langchain/anthropic` `@langchain/google-genai` `dotenv` `zod` `playwright-core`（仅 Browser Use 动态导入，驱动系统 Chrome/Edge，不下载浏览器）；electron 仅 devDependency |
-| 前端依赖 | `src/client/` 可引入 npm 库（图表 / 图标 / 语法高亮 / Markdown 等），但须在 §2.1 登记版本、许可证与产物体积；**禁止引入 UI 框架**（React/Vue/Svelte）与需要打包器的构建链（Vite/Webpack/Tailwind CLI） |
-| 前端 TypeScript | 前端源码是 `.ts`（`src/client/`），**必须有类型**，禁止无类型 JS；`npm run build:client` 编译到 `src/server/public/`（构建产物 gitignore） |
-| 单一职责 | 文件按职责拆分，不设行数硬指标：一个文件只做一件事、能被一句话说清即可；超过 ~500 行时先问「是不是混了两件事」 |
-| 样式分层 | 禁止恢复单文件 `style.css`；CSS 按 token / reset / layout / surface / responsive / ui 职责拆分，业务文件不覆盖主题原始色 |
-| 可访问性 | 图标按钮必须有 `aria-label`/`title`；表单控件必须有 label 或 `aria-label`；正文与弱化文字对比度 ≥ 4.5:1；流式区使用 live region |
-| 可选前端能力 | 图表 / Markdown / 高亮必须动态加载并具备降级路径，不得进入 `main.ts` 启动闭包 |
-| HTTP 后端零框架 | 不引入 Express/Fastify 等；路由照 §4 模式写顺序 `if` 分支 |
-| 直跑 TS | `tsx` 直跑，不做编译产物；新增脚本能被 `tsx` 直接执行 |
+| TypeScript | `strict` + `NodeNext` + `noEmit`；服务端 ESM import 必须带 `.js` 后缀 |
+| 后端 | `node:http` + SSE，零 Express/Fastify 等 Web 框架 |
+| 前端 | 原生 TypeScript，禁止 React/Vue/Svelte、Vite/Webpack/Tailwind CLI 和 UI 框架 |
+| 前端依赖 | 必须登记版本、许可证和体积，只能经 `src/client/vendor/*` wrapper 使用 |
+| 服务端依赖 | 遵守运行时白名单；新增依赖前先证明标准库/现有依赖不可行 |
+| 执行方式 | TS 使用 `tsx` 直跑；新增脚本必须能被 `tsx` 直接执行 |
+| 可选前端能力 | 图表、Markdown、高亮必须动态加载且有降级路径，不得进入首屏启动闭包 |
+| 可访问性 | 图标按钮和表单必须有可访问名称；正文对比度 ≥ 4.5:1；流式区使用 live region |
 
-新增依赖前先问：标准库 / 现有依赖能否解决？不能时在方案里单独说明理由，并登记到下表。
+详细依赖登记和体积见 `docs/engineering-standards.md`。
 
-### 2.1 前端依赖登记表
+## 4. 架构与目录边界
 
-只允许「浏览器可直接加载的 ESM、无 Node 内置依赖、许可证宽松」的库。新增一行时必须实测
-`esbuild --bundle --minify` 后的 raw/gzip 体积，避免悄悄把首屏拖垮。
-「状态」列区分「已安装」与「已定选型、尚未落地」——未落地的不算进 `package.json`。
-
-| 依赖 | 用途 | 许可证 | 体积（min / gzip） | 状态 |
-|---|---|---|---|---|
-| `chart.js` 4.6.1 | 统计页柱状 / 折线 / 环形图 | MIT | 201 KB / 69 KB（按需注册控制器） | 已安装 |
-| `lucide` 1.61.0 | 线性图标（按图标具名导入，勿整包） | ISC | 70 个图标 23 KB / 4 KB | 已安装 |
-| `marked` 18.1.1 | Markdown 解析（必须与 DOMPurify 同批引入） | MIT | 45 KB / 14 KB | 已安装 |
-| `dompurify` 3.4.17 | 渲染前 HTML 净化，守住注入防线 | MPL-2.0 OR Apache-2.0 | 30 KB / 12 KB | 已安装 |
-| `highlight.js` 11.12.0 | 代码块语法高亮（按语言子包导入） | BSD-3-Clause | 67 KB / 22 KB（10 种语言） | 已安装 |
-
-引入方式：不引 Vite/Webpack。用 esbuild（已是 `tsx` 的传递依赖）把每个库打成**自包含**
-ESM 放 `public/vendor/`；`tsc` 照旧从 `node_modules` 读类型；浏览器用 `<script type="importmap">`
-把裸名映射到 `/vendor/<name>.js`。因此应用代码写标准 `import { Chart } from "chart.js"`，
-既类型安全又无需打包整个前端。新增 vendor 库要同时更新 `scripts/build-vendor.ts` 的入口清单
-与 `src/server/static.ts` 的目录白名单。
-
-## 3. 目录职责（放错位置 = 架构破坏）
-
-```
-src/
-  config.ts        # 全局运行时配置（.env 播种，可被内存覆盖；勿在别处直接读 process.env）
-  product.ts       # 产品名与对外客户端身份常量（UA / MCP clientInfo 统一来源）
-  versioning.ts    # 产品版本、构建标识与仓库一致性权威工具；package.json 是唯一版本源
-  llm.ts           # 唯一的模型工厂：多协议差异全部收拢于此，graph 代码不感知协议
-  reasoning-passthrough.ts # 思考型网关的 reasoning_content 回传（在 llm.ts 的 fetch 边界补字段）
-  tools.ts         # 基础工具（calculator / 时间 / 天气 / send_email），zod 声明参数
-  tools-dev.ts     # 编程开发工具（terminal / read_file / write_file / list_dir / grep_search）
-  tools-rag.ts     # 知识检索工具 retrieve_docs（只调 server/rag.ts，不直接碰网络细节）
-  tools-web.ts     # 网页抓取工具 browser_fetch（纯 HTTP + 剥标签；内网默认拒，防 SSRF）
-  tools-browser.ts # Browser Use 工具（真实浏览器会话；点击/输入等写操作必须审批）
-  url-guard.ts     # browser_fetch 与 Browser Use 共用的 HTTP(S)/WebSocket 地址防线
-  skills.ts        # 技能库：扫描 .setting/skills/*.md，按关键词命中注入
-  plugin-state.ts  # 内置插件运行时启停状态（agent 层只读，不直接碰 server）
-  memory-store.ts  # 跨会话长期记忆（每轮动态注入 system 注记）
-  tools-*.ts       # 新增同类工具集按 tools-<主题>.ts 命名，一个文件一个主题
-  agent/           # LangGraph 图定义与 profile；workflow.ts 是公共门面，具体节点在 workflow/ 下
-  agent/workflow/  # types/state/prompts/parsing/runtime/nodes/edges/graph 分层，禁止把节点重新塞回 workflow.ts
-  cli.ts           # CLI 入口；server/ 不 import cli，cli 可 import 一切
-  server/          # HTTP/SSE 服务端：一个模块一个职责，单文件命名（rag.ts / files.ts / sessions.ts …）
-                   #   mcp.ts = MCP 客户端（JSON-RPC over stdio）；commands.ts = 自定义命令
-                   #   plugin-settings.ts = 内置插件启停持久化；routes/plugins.ts = 启停 API
-                   #   browser-use.ts = 无头 Chrome/Edge 会话池；routes/browser-use.ts = 画面/状态 API
-  client/          # 前端源码（TypeScript，唯一真相）
-    main.ts        #   入口：初始化与全部 DOM 事件绑定
-    core/          #   状态 / DOM / API / 构建身份（state.ts 是唯一可变状态源）
-    ui/            #   无业务 DOM 原语（h/button/input/dialog/menu/toast…）
-    styles/        #   tokens、chat-*.css、settings-*.css 等按功能拆分的 CSS
-    modules/       #   纯函数与协议类型（format / chat-flow / types…）
-    vendor/        #   第三方库唯一隔离层；业务只能 import wrapper，不能直接 import npm 前端库
-    render/        #   渲染层（parts 部件 / messages 块）
-    stream/        #   SSE 消费与一轮对话生命周期
-    composer/      #   输入框 / 命令与 @ 文件菜单
-    views/         #   各业务视图（会话/项目/设置/RAG/房产/Browser Use…；settings-plugins.ts = 插件目录与开关）
-    actions/       #   审批、压缩等动作
-    index.html     #   仅保留 head、内联 CSP 脚本、build-info 注入点与 include 清单
-    pages/         #   构建期 HTML 片段：sidebar/workspace/settings/overlays
-  server/public/   # ★ 前端构建产物（npm run build:client 生成，gitignore，勿手改）
-desktop/           # Electron 桌面端源码（TypeScript）
-  main.ts          #   主进程：子进程托管 Web 服务 + 窗口（编成 ESM .js 运行）
-  preload.ts       #   渲染进程桥（sandbox 下只支持 CJS，构建时编成 preload.cjs）
-  build/           #   ★ 构建产物（npm run build:desktop 生成，gitignore，勿手改）
-docs/              # 公开文档（agent-wiki.md 等），只放用户可读内容
-.plans/            # 开发过程内部文档：架构计划 / 阶段清单 / 攻面分析 / 私有交接。
-                   # gitignore 挡住、**永不提交**（本仓库已公开，攻面细节 = 给攻击者的地图）
+```text
+src/agent/**      LangGraph、Profile、审批、路由；禁止 import server/client
+src/memory/**     记忆领域；禁止 import server/client
+src/routing/**    路由决策领域；禁止 import server/client
+src/server/**     HTTP/SSE/持久化/运维；routes 不得直接操作 fs
+src/client/**     前端；只能通过 /api/* 与服务端通信
+src/client/vendor 第三方库唯一隔离层
+src/versioning.ts 产品版本、构建标识与发布一致性权威工具
+desktop/**        Electron 主进程与 preload
+docs/**           用户与 operator 的深度契约
+.plans/**         内部计划，gitignore，永不提交
 ```
 
-- 文档先分流再落笔：给用户/operator 看的 → `README.md` / `docs/`；给自己/AI 的工作过程文档
-  → `.plans/`。`docs/` 与 `.plans/` 是双向禁令：内部文档不得进 `docs/`，用户文档不藏 `.plans/`。
+必须保持：
 
-- `src/agent/*` 只依赖 `src/` 顶层与 `@langchain/*`，**禁止 import `server/*`**（图要在 CLI 下可独立运行）。
-- `src/server/*` 可以 import `src/` 顶层；互相之间通过导出函数协作，不做隐式单例外的全局状态。
-- 前端 `src/client/**` 只能与 `/api/*` 通信，不 import 服务端代码（类型也不允许）。
-- 业务前端源码不得直接 import npm 前端库；只允许 `src/client/vendor/*` wrapper 接触第三方 API。
-- 通用消息渲染不得 import 房产 / 租房实现；业务专属工具卡通过渲染增强注册表注入。
-- `src/agent/workflow.ts` 只允许作为稳定 re-export 门面；节点实现必须落到 `src/agent/workflow/nodes/`，图接线落到 `workflow/graph.ts`。
-- `src/client/index.html` 只允许保留根壳、构建身份注入点与 include 清单；页面结构落到 `src/client/pages/`，构建脚本负责合成产物。
-- `package.json.version` 是唯一产品版本源；禁止手工维护前端日期版本，构建脚本负责生成 `build-info.json` 与 HTML meta。
+- `src/agent/workflow.ts` 只做稳定 re-export 门面；节点在 `workflow/nodes/`，图接线在 `workflow/graph.ts`。
+- `src/client/index.html` 只保留根壳、CSP、build-info 注入点和 include 清单；页面片段在 `pages/`。
+- `src/client/core/state.ts` 是前端唯一可变状态源；不能让多个模块各存状态副本。
+- 通用消息渲染不得 import 房产/求职实现；业务专属卡通过增强注册表注入。
+- 单文件只做一件事；超过约 500 行时先判断是否混合了多个职责。
 
-## 4. 代码风格（全仓库统一）
+## 5. 代码风格
 
-1. **注释**：一律中文；解释「为什么」而不是「是什么」。
-   模块头部必须有 banner 注释：两行说完职责 + 设计立场（关键约束、契约、坑）。
-   踩过的坑写成注释（含现象、原因、对策），这是本仓库最重要的资产。
-2. **命名**：文件/模块小写（`config-store.ts` 这类复合词用连字符）；导出函数动词开头；
-   类型 `PascalCase`；常量全大写 + 下划线；避免缩写（`msg` 可，`m` 不可）。
-3. **校验**：请求体/参数解析用 zod（工具侧）或手写类型守卫 + 中文错误（路由侧）；
-   错误信息面向用户，中文、说清「缺什么/怎么改」。
-4. **异步**：`async/await` 风格；网络调用一律 `AbortSignal.timeout(ms)`；
-   后台不需要阻塞主流程的任务 fire-and-forget 时必须自吞异常（`void fn()` 且 fn 内 try/catch）。
-5. **常量即上限**：任何截断/限量（字符数、条数、超时）定义成模块顶部 `UPPER_SNAKE` 常量并注释含义。
-6. **不写无意义注释**、不加花哨 emoji 装饰代码、不为一致性而一致性重构。
+1. 注释统一中文，解释为什么、契约和踩过的坑；模块头必须有职责 banner。
+2. 文件名小写连字符；函数动词开头；类型 PascalCase；常量全大写。
+3. 请求和工具参数必须校验，错误信息中文且说明缺什么、怎么改。
+4. 网络调用必须带 `AbortSignal.timeout(ms)`；后台 fire-and-forget 必须自行捕获异常。
+5. 截断、条数、超时、递归等限制定义成模块顶部有注释的 `UPPER_SNAKE` 常量。
+6. 不写无意义注释、装饰性 emoji、注释掉的代码块或静默吞错。
 
-## 5. 关键横切约定（违反即出 bug 的地方）
+## 6. 横切红线
 
-### 5.1 配置与持久化（.web-config.json）
-- 分层：`.env` < `.web-config.json` < 运行中内存。多模块**共用同一个 JSON 文件**
-  （providers / projects / externalAgents / rag 并存）。
-- **写入只能走 `config-store.ts` 的 `mergeConfig({ key: value })`**，只合并自己键；
-  服务端运行时修改后必须 `await persist()`；**禁止整文件覆写**。
-- API Key 一律不回传明文：对外只给 `maskKey`；「编辑时留空 = 保持不变，空串 = 清除」。
-  承载 Key 的文件（`.env`、`.web-config.json`）已 gitignore，不得移除。
+### 6.1 配置与密钥
 
-### 5.2 路径与内容安全（files.ts 为唯一权威）
-- 任何文件读取/浏览/入库必须经 `assertAuthorized`（授权前缀校验，win32 忽略大小写）；
-  用户输入路径永远先 `resolve` 再校验，**不得信任前端传来的路径文本**。
-- 文本处理三件套必须同时做：二进制检测（前几 KB 含 `\0` 即拒）、超长截断（常量声明）、
-  `SKIPPED_DIRS` / 敏感文件跳过（dotfiles、`*lock*`、密钥类）。
-- 列目录最大条数、单文件字符上限等全部走 files.ts 既有常量语义，不要新造一套。
+- 配置优先级：`.env < .web-config.json < 运行中内存`。
+- 写入只能走 `config-store.ts` 的 `mergeConfig`；运行时修改后必须 `await persist()`。
+- API Key 只回传掩码；编辑留空表示保持，空串表示清除。
+- `.env`、`.web-config.json`、`.setting/`、`data/` 和任何真实密钥永不入库。
 
-### 5.3 事件协议（server ↔ 前端）
-- 新增事件类型：`server/events.ts` 加变体（注释写清对应哪块 UI）→
-  产出端在 `server/stream.ts`（或 mock.ts / external.ts）吐出 →
-  前端 `stream/events.ts` 的 `handleEvent` switch 加 case（尾部 never 断言会强制穷尽）
-  → `modules/types-api.ts` 的 `AgentEvent` 联合加变体 → 空数据/半途错误测试回放路径。
-- SSE 帧即 `data: {json}\n\n`；一帧一事件；`done` 由 streamToClient 兜底补发，不要手写。
-- 每轮结束必须发 `task_usage`（累计口径，位于最后一条 `usage` 之后、`done` 之前）：
-  它是下游统计的唯一权威来源；`usage` 是「每次模型调用一条」，不能替代。
-- 无头模式（`/api/chat` 的 `headless:true`）下澄清自动采用首个候选假设继续，
-  并发出 `clarification_note`；新增会 `interrupt()` 的节点必须同样处理该分支，
-  否则无人应答的批量调用会挂到超时。
+### 6.2 文件与网络安全
 
-### 5.4 高风险操作审批（hitl.ts 为唯一登记处）
-- 新的「执行后改世界」的工具（执行命令 / 写文件 / 发送外部消息…）必须在
-  `hitl.ts` 的 `APPROVAL_TOOLS` 登记（含描述文案）；只读类工具（读/列/搜/检索）不登记、直接执行。
-- 工具执行失败**不要 throw 穿透图**：返回「模型可读的中文错误文本」或 JSON `{error}`，让模型转述。
+- 文件访问只走 `files.ts`：先 `resolve`，再 `assertAuthorized`，再处理二进制、超长截断和敏感路径。
+- 外部 URL 必须经过统一 SSRF 防线；不得信任前端传来的路径、域名或协议。
+- 日志不得记录 prompt、对话正文、Cookie、Authorization、Key 或未脱敏的用户资料。
+- 用户内容不得直接拼进 `innerHTML`；使用 `textContent`、`h()` 或 DOMPurify 安全路径。
 
-### 5.4.1 思考型网关（DeepSeek 等）
-- 多轮请求要求历史 assistant 带 `reasoning_content`，而 `@langchain/openai` 出站会丢弃它。
-  **补字段只允许在 `reasoning-passthrough.ts` + `llm.ts` 的 fetch 边界做**，
-  不要在别处重复实现（消息装配层只需调 `rememberHistoryReasoning` 登记）。
-- 只对 `protocol === "openai"` 生效；响应侧不用旁路——入站转换器已把思考存进
-  `additional_kwargs`，从历史重建即可（服务重启后自愈）。
-- 新增会中断重试流程的兜底逻辑时，保持「400 点名该字段 → 关闭回传重试一次」这条路径。
+### 6.3 HTTP 与 SSE
 
-### 5.5 扩展机制分层（改这些位置前先想清楚层次）
+- 新路由必须在 `index.ts` 的顺序分发中接入，保持 `readBody -> await 业务 -> writeHead`。
+- async 业务在路由中必须 `await`；`JSON.stringify(Promise)` 会静默得到 `{}`，不能把 Promise 当数据返回。
+- 新 SSE 事件必须同步：`server/events.ts`、产出端、`client/stream/events.ts`、`client/modules/types-api.ts`。
+- 每轮结束必须发送 `task_usage`，位置在最后一条 `usage` 后、`done` 前；`usage` 不可替代任务累计。
+- 会 `interrupt()` 的新节点必须处理无头模式，否则无人应答的批处理会挂起。
 
-| 机制 | 是什么 | 是否执行代码 | 风险 |
-|---|---|---|---|
-| 技能 `.setting/skills/*.md` | 按关键词注入的**文档** | ❌ 永不执行 | 只影响提示词 |
-| 自定义命令 `.setting/commands.json` | 输入框里的**提示词模板** | ❌ 只填文本 | 只影响提示词 |
-| MCP server（`server/mcp.ts`） | 外部**程序**（子进程） | ✅ 会跑第三方代码 | 工具默认全登记审批；只接受可信来源 |
+### 6.4 Agent、工具与审批
 
-Hook 为后续规划项，不属于当前运行时。落地时按“可执行代码”治理：默认关闭、按事件授权、超时/递归/输出上限、关键副作用审批与审计；不得把 Hook 混同为技能文档或命令模板。
+- 每个工具必须属于明确的 Profile allowlist；不得恢复跨领域全局工具表。
+- 执行命令、写文件、安装、发消息、浏览器写操作、电脑控制等改世界动作必须在 `agent/hitl.ts` 登记审批。
+- 工具失败返回模型可读的中文文本或 `{ error }`，不要 throw 穿透图。
+- 子代理工具集只能缩小，不能扩大主 Agent 的授权。
+- 记忆按 Profile scope 隔离；子代理不直接写长期记忆；敏感内容默认拒绝。
 
-新增扩展能力时先判断它属于哪一层：能做成文档/模板的就不要做成程序。
+### 6.5 思考型网关
 
-### 5.6 JSON 序列化陷阱（已踩两次的坑）
-- async 导出函数（如 `getRagPublic`）在路由里**必须 await**；
-  `JSON.stringify(promise)` 静默得到 `{}`，导致前端数据「凭空消失」。
-- 前端 `innerHTML` 模板搭骨架 + `textContent` 填正文（天然防注入）；
-  用户可见内容不拼进模板字符串。
+- DeepSeek 等思考网关的 `reasoning_content` 回传只能在 `reasoning-passthrough.ts` 与 `llm.ts` 的 fetch 边界实现。
+- 只对 `protocol === "openai"` 生效；其他层只登记历史 reasoning，不重复实现透明回传。
 
-## 6. 增改检查单（做完自查）
+### 6.6 扩展机制
 
-新增 HTTP 接口：
-1. 业务写成 `src/server/<模块>.ts` 导出 async 函数（内部 throw 中文错误）；
-2. `index.ts` 在**兜底 404 之前**插 `if (pathname === ... && method)`：
-   `readBody` → try 里 `await 业务` 再 `writeHead(200)`；catch 转 400 JSON；
-   注意「先 await 业务，再 writeHead」顺序，失败才可能正常回 4xx；
-3. GET /api/* 已统一 no-store，无需重复设置；新增版本相关逻辑必须复用 `src/versioning.ts` 与构建期 `build-info.json`。
+| 机制 | 是否执行代码 | 风险边界 |
+|---|---|---|
+| `.setting/skills/*.md` | 否 | 只影响提示词 |
+| `.setting/commands.json` | 否 | 只填提示词模板 |
+| MCP Server | 是 | 第三方代码，工具默认登记审批 |
+| Hook | 规划中 | 落地时默认关闭、授权、超时、递归和审计 |
 
-新增工具：schema 用 zod + `describe` 中文；`description` 写清「何时用/何时不用」；
-在相关 graph 的 `tools` 数组绑定；高风险则 §5.4 登记；依赖网络/外部服务的能力放 server 层。
+能做成文档或模板的扩展，不得升级成可执行代码。
 
-新增 LangGraph 图/节点：State 尽量复用 `MessagesAnnotation`；子图复用现有节点函数
-（如 `approvalToolsNode`）；`stream.ts` 翻译层能吃下新节点的流事件再合并。
+### 6.7 版本与发布
 
-新增供应商协议：只改 `llm.ts` + `config.ts` 的 `Protocol` + settings 的下拉/探测端点。
+- `package.json.version` 是唯一产品版本源；前端、健康探针、镜像和文档必须使用同一 build-info。
+- 不得手工维护前端日期版本；API 版本与数据 schema 版本独立于产品版本。
+- 未经用户明确授权，不 push、不创建/移动 tag、不推送镜像、不修改生产环境。
+- 生产镜像固定 digest；禁止 `latest`；发布规则见 `docs/versioning.md`。
 
-配置新增字段：先想清楚放内存 `config`、`.web-config.json`（mergeConfig 新键）还是
-session 级；持久化字段的**读取处要兼容字段缺失**（旧配置文件没有它）。
+## 7. 交付协议
 
-## 7. 质量门（交付前必须全绿）
+### 7.1 质量门
 
 ```bash
-npm run version:check        # 产品版本、锁文件、文档与构建身份一致性
-npm run typecheck            # 后端 + 前端 + 桌面端三套 tsconfig，零报错
-npm run build:client         # 前端构建门：编译 + 自检 main.js / index.html / styles / vendor 产物
-npm run build:desktop        # 桌面端构建门：编译 + 自检 main.js / preload.cjs 产物
-npm test                     # 单测 / 集成 / 安全三档（mock 模式，不耗真实配额）
+npm run skills:check
+npm run version:check
+npm run typecheck
+npm run build:client
+npm run build:desktop
+npm test
 ```
 
-桌面端源码已是 TypeScript，`typecheck` 已含 `tsconfig.desktop.json`，因此不再需要
-`node --check` 手查语法；`build:desktop` 在编译之外还会确认两个产物真的生成
-（缺 `preload.cjs` 桌面端会白屏且 preload 失效 —— CI 同步做这一步）。
+前端、部署或发布相关改动按 Skill 指引补充 E2E、审计、数据检查与镜像 smoke。存在阻断项时必须如实报告，不能用静态检查冒充运行验证。
 
-涉及服务端逻辑 / 新接口时，用**最小手动验证**：启动服务（`$env:PORT=3456` 起临时端口）
-+ curl/Invoke-RestMethod 打一遍成功与失败路径；外部依赖（RAG、网关）用「本地 mock
-小脚本」模拟（参考 Temp 目录 mock-rag.cjs 模式）。**验证严禁消耗用户真实 API 配额**：
-不配置 Key 走 mock 模式，或临时覆盖环境变量，或只测不调模型的部分。
+### 7.2 文档同步
 
-前端有改动时：确认 `npm run build:client` 生成了新的 buildId，页面左下角/控制台与 `/api/version` 一致，并测一遍
-主题切换、发送、停止、弹窗开关（Esc / 点遮罩）不回归。
+- 用户可见能力或使用方式变化：更新 `README.md`。
+- 模块职责、调用链或踩坑变化：更新 `docs/agent-wiki.md`。
+- 深度契约变化：更新对应 `docs/*.md`。
+- 开发计划、攻面分析和交接：只写 `.plans/`，永不提交。
+- 未完成能力不得写成已交付。
 
-## 8. 平台与环境坑（Windows / PowerShell 5.1 着重看）
+### 7.3 提交规范
 
-- **PowerShell 5.1 默认 GBK 无 BOM**：脚本文件含中文必须 UTF-8 BOM，或干脆全英文，
-  否则解析即炸（本仓库测试脚本曾因此规律性失败两次）。
-- **后台进程孤儿**：Shell 工具里 Start-Process / Start-Job 起的服务在命令结束会被杀，
-  但 Electron/npx 链可能存活 → 下一轮测试端口被旧进程占用（EADDRINUSE 静默打到旧状态 brilliantly 表现为「数据翻倍」）。
-  规则：每轮测试**换端口**，结束后按 `CommandLine` 匹配清理 node 孤儿。
-- Windows 上用 `spawn` 启动 `.cmd`（npx）必须 `shell: true`；杀进程树用 `taskkill /pid X /T /F`（desktop/main.ts 已示范）。
-- curl.exe 在 PS5.1 里的 JSON 引号极易坏，改用 `Invoke-RestMethod`。
-- Web 服务端口固定 3000、桌面端 3123，测试用 3456+，不抢用户日常进程。
-
-## 9. 文档同步（不是可选项）
-
-- 每次交付**必须同步**更新：`README.md`（用户视角：功能怎么用） +
-  `docs/agent-wiki.md`（模块视角：§3 加模块小节、§7 加/更新踩坑表）。
-- **开发计划 / 攻面分析 / 阶段交接 → 只写 `.plans/`，永不进 git**（§3 目录职责）。
-  需要向用户公开的结论（如「新增了认证」）提炼到 README / wiki 的功能说明层面，
-  不带弱点清单、攻击路径、内部提交号对照表。
-- 新增外部契约（对外 HTTP/RAG 形状）要在 README 用表格写全请求/响应示例。
-- 提交信息按 §10 的类型前缀单行格式生成；类型、空格、中文主题和禁止多行规则均不得省略。
-
-## 10. 提交规范
-
-### 10.1 强制格式
-
-整个提交信息**只能有一行**，不换行，不分标题和正文：
+整个提交信息只能一行：
 
 ```text
-<type>: <主题概括>，<具体变更1>，<具体变更2>，<具体变更3>
+<type>: <中文主题概括>，<具体变更1>，<具体变更2>
 ```
 
-- 类型后必须使用**半角冒号 + 一个空格**：`feat: `，不得写成 `feat：` 或 `feat:`。
-- 主题使用中文，简明描述“做了什么”，并优先点明受影响的页面、模块或能力。
-- 一个提交只表达一个主题，不混入不相关变更。
-- 提交信息末尾不加句号或其他收尾标点。
-- 允许在同一行用中文逗号补充 1–3 个具体变更，但不得拆成多行或重复概括。
+- 类型后使用半角冒号加一个空格。
+- 一个提交只表达一个主题；中文主题末尾不加句号。
+- `refactor` 仅用于 5 个以上文件且改变架构/目录/技术方案；其余使用 `fix`。
+- 禁止多行、正文式展开、空行分隔、序号列表和重复主题。
+- 提交前清点 `git status` 与 `git diff`，不得包含密钥、临时文件、`.plans/`、构建产物或无关改动。
 
-### 10.2 类型
+详细类型表和示例见 `docs/engineering-standards.md` §7。
 
-| 类型 | 用途 | 示例 |
-|---|---|---|
-| `feat` | 新功能 | `feat: 通知中心添加空状态显示和分页条件渲染` |
-| `fix` | 修复缺陷、小改动、补漏、调整 | `fix: 修复角色编辑弹窗标题显示和表单初始化问题` |
-| `refactor` | 大规模重构（多文件、改变代码结构） | `refactor: 将全局状态管理从 Vuex 迁移到 Pinia` |
-| `style` | 样式调整 | `style: 调整图纸表格内边距和操作按钮间距` |
-| `i18n` | 国际化相关 | `i18n: 将通知相关国际化文本提取到独立文件` |
-| `chore` | 构建、依赖、工具、仓库规范 | `chore: 添加 sortablejs 依赖` |
+## 8. 平台约束
 
-### 10.3 `fix` 与 `refactor` 边界
+- Windows PowerShell 5.1 的含中文脚本必须使用 UTF-8 BOM，或改为全英文。
+- Windows 启动 `.cmd` 必须 `shell: true`；终止进程树使用 `taskkill /pid <pid> /T /F`。
+- 后台服务测试每轮更换端口，结束后清理 node 孤儿和临时数据。
+- 递归删除或移动前必须确认解析后的绝对路径位于目标工作区或明确临时目录。
+- Web 端口 3000、桌面 3123，自动化使用 3456+，不得抢占用户日常进程。
 
-必须使用 `fix` 的场景：
+## 9. 规范治理
 
-- 修复 bug、补漏或调整配置；
-- 移除/添加单个配置项；
-- 调整样式、间距或布局细节；
-- 补充缺失逻辑，例如 `nextTick`、事件监听；
-- 修改单个或少量文件的局部代码；
-- 补充类型定义、修复 TypeScript 类型错误。
+新增或修改规范时：
 
-只有**同时满足**以下条件才允许使用 `refactor`：
-
-- 涉及 **5 个及以上文件**的结构调整；
-- 改变整体架构或设计模式；
-- 替换技术方案；
-- 重新组织目录结构。
-
-不满足上述全部条件的改动一律使用 `fix`，不得滥用 `refactor`。
-
-### 10.4 严格禁止
-
-- 禁止多行提交信息；
-- 禁止空行分隔标题和正文；
-- 禁止序号列表；
-- 禁止先写概括、再写一行展开描述的重复主题格式。
-
-正确示例：
-
-```text
-fix: 修复 BasicTable 组件类型定义缺失问题，补充 flexHeight 和 rowClassName 属性，为 useDataSource 添加参数类型接口，修复 checkedRowKeys 的 Set 泛型类型不兼容
-```
-
-错误示例：
-
-```text
-fix: 修复 BasicTable 组件类型定义
-
-fix: 补充 flexHeight、rowClassName、size 等缺失属性到 BasicTableProps 接口，为 useDataSource 函数添加 DataSourceContext 参数类型，修复 checkedRowKeys 的 Set 泛型与 string[] | number[] 不兼容问题
-```
-
-### 10.5 仓库检查
-
-- 只改 `git status` 里本任务相关文件；`.env`、`.web-config.json`、`.plans/` 永不入库。
-- **提交前清点**：`git status --short` 里不得出现 `.plans/`、临时测试脚本、
-  含真实 Key/内网地址的文件；`git ls-files | grep -i plan` 应为空。
-- 提交前自查 `git diff`：不得遗留调试用 `console.log`、临时脚本或注释掉的代码块。
-- 大改动拆逻辑相邻的小提交；提交前必须通过 §7 全部质量门。
-
-## 11. 版本与发布
-
-- 产品版本使用 SemVer 2.0：`MAJOR.MINOR.PATCH[-alpha.N|beta.N|rc.N]`；当前基线为 `0.7.0-beta.1`。
-- `package.json.version` 是唯一产品版本源；`package-lock.json`、README 徽章和发布文档必须一致。
-- 构建标识独立于产品版本，包含 `channel / commit / builtAt / buildId`，由 `npm run build:client` 自动生成。
-- API 契约版本与 config / journal / checkpoint / memory schema 版本不得跟随产品版本自动变化。
-- 普通开发提交不递增版本；只有形成发布基线时才更新版本。
-- 当前阶段不创建 tag；发布时只允许对通过全部质量门的提交创建 `v<package.version>` 注解 tag。
-- 生产镜像使用不可变 digest，禁止 `latest`；镜像版本标签必须与 package 版本一致。
-- 完整规范见 `docs/versioning.md`；版本漂移必须运行 `npm run version:check` 修复后才能交付。
+1. 判断是否属于 L0、L1、L2 或 L3。
+2. 能由测试稳定判断的，写测试，不只写文档。
+3. 只在权威位置维护一次，其他地方链接引用。
+4. 修改领域流程时同步对应 `agentatlas-*` Skill。
+5. 修改 Skill 后运行 `npm run skills:check`，并确认描述能准确路由、不会吸引无关任务。

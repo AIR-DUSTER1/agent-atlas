@@ -149,11 +149,12 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(productionCompose, /no-new-privileges:true/);
 
   const dockerignore = await readFile(".dockerignore", "utf8");
-  for (const pattern of [".env", ".web-config.json*", ".setting", "data", "*.log"]) {
+  for (const pattern of [".env", ".web-config.json*", ".setting", ".agents", "data", "*.log"]) {
     assert.ok(dockerignore.includes(pattern), `.dockerignore 缺少 ${pattern}`);
   }
   assert.equal(new Set(REQUIRED_RUNTIME_ASSETS).size, REQUIRED_RUNTIME_ASSETS.length);
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes("node_modules/electron"));
+  assert.ok(FORBIDDEN_RUNTIME_PATHS.includes(".agents"));
 });
 test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");

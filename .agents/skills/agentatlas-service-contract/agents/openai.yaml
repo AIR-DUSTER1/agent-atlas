@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentatlas Service Contract"
+  short_description: "HTTP、SSE、持久化、认证与可观测性服务契约变更"
+  default_prompt: "Use $agentatlas-service-contract to implement and verify the requested service contract change."

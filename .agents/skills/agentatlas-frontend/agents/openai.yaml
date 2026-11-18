@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentatlas Frontend"
+  short_description: "原生TypeScript、HTML、CSS、可访问性与浏览器构建变更"
+  default_prompt: "Use $agentatlas-frontend to implement and verify the requested Web UI change."

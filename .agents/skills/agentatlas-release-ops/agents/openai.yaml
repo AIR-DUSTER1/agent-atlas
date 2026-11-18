@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentatlas Release Ops"
+  short_description: "版本、Docker镜像、部署、备份和生产发布质量门"
+  default_prompt: "Use $agentatlas-release-ops to prepare and verify the requested release or deployment change."

@@ -75,6 +75,8 @@ export const REQUIRED_RUNTIME_ASSETS = [
 /** 运行镜像只允许生产依赖；这些路径出现即说明 Docker 分层或依赖分类回退了。 */
 export const FORBIDDEN_RUNTIME_PATHS = [
   "node_modules/electron",
+  ".agents",
+  "AGENTS.md",
   "node_modules/typescript",
   "tests",
   "docs",

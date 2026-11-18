@@ -35,6 +35,9 @@ jobs:
       - name: Version specification consistency
         run: npm run version:check
 
+      - name: Project skill layering
+        run: npm run skills:check
+
       - name: Typecheck (server + client + desktop)
         run: npm run typecheck
 

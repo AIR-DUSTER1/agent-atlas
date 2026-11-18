@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentatlas Agent Runtime"
+  short_description: "LangGraph工作流、工具、审批、路由与记忆变更"
+  default_prompt: "Use $agentatlas-agent-runtime to implement and verify the requested agent runtime change."

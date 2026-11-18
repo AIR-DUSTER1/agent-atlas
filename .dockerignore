@@ -12,6 +12,7 @@ desktop/build
 .git
 .gitignore
 .github
+.agents
 .plans
 AGENTS.md
 docs
