@@ -59,7 +59,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 
 - Node.js 24 推荐
 - npm 11+
-- 可选：Docker 24+、Chrome / Edge
+- 可选：Docker 24+、Chrome / Edge（桌面端；Docker 生产镜像已内置无头浏览器）
 
 ### 本地启动
 
@@ -225,9 +225,10 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 | `MODEL_REQUEST_RETRIES` | 可重试模型错误的自动重试次数，默认 10 |
 | `MODEL_CONCURRENCY_PER_PROVIDER` | 每个供应商同时进行的模型轮数上限，默认 5（1–50） |
 | `MODEL_QUEUE_WAIT_MS` | 并发占满时的排队等待上限，默认 10000 毫秒；超过回 429 + `Retry-After` |
-| `BROWSER_USE_EXECUTABLE_PATH` | 指定 Browser Use 使用的 Chrome / Edge；未设置时自动探测 |
+| `BROWSER_USE_EXECUTABLE_PATH` | 指定浏览器路径；桌面端未设置时自动探测，生产镜像默认指向内置 Chrome Headless Shell |
+| `BROWSER_USE_CONTAINER` | 仅隔离容器内设为 `1`，追加 `--no-sandbox` / `--disable-gpu`；桌面端不要设置 |
 | `MEMORY_STORE_DIR` | 长期记忆 v3 目录；默认 `.setting/memory-store`，测试与容器可覆盖 |
-| `JOB_BROWSER_HEADLESS` | 求职采集默认打开可见窗口；设为 `1` 改为无头执行 |
+| `JOB_BROWSER_HEADLESS` | 求职采集无头模式；显式 `1` / `0` 覆盖，Linux 无显示服务器时自动无头 |
 | `MAP_PROVIDER` | 结论地图提供方：`amap` / `tencent` / `baidu` / `osm` / `custom`，默认 `amap` |
 | `AMAP_WEB_SERVICE_KEY` | 高德 Web 服务 Key；仅服务端静态地图代理使用，不下发浏览器，失败自动回退原生瓦片 |
 | `TENCENT_MAP_KEY` | 腾讯位置服务 WebService Key；仅服务端静态图代理使用，按服务器出口 IP 设置白名单 |
@@ -244,6 +245,12 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 ```powershell
 $env:AUTH_TOKEN = "replace-with-a-long-random-token"
 docker compose up -d --build
+```
+
+生产镜像默认内置 Chrome Headless Shell，镜像 smoke 会在只读容器内验证两个隔离 BrowserContext、Cookie 隔离、持久化上下文和真实截图。本次 Docker Desktop 验收为 `docker images` 897 MB / rootfs 630.7 MiB；预算门禁默认 700 MiB。明确不使用 Browser Use 时可构建无浏览器瘦镜像：
+
+```bash
+docker build --target minimal -t agentatlas:minimal .
 ```
 
 正式部署、TLS、密钥生成、监控和回滚流程参见：
@@ -306,6 +313,7 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 npm run typecheck       # 后端、前端与桌面端三套 TypeScript 检查
 npm test                # 单元、集成、安全、故障与负载测试
 npm run e2e             # Playwright 浏览器主流程
+npm run browser:smoke   # 当前环境 Chrome 的多上下文、Cookie 隔离与持久化 smoke
 npm run build:client    # 构建前端浏览器产物
 npm run build:desktop   # 构建 Electron 主进程、启动原语与 preload
 npm run desktop         # 启动桌面端；自动处理端口冲突与退出清理

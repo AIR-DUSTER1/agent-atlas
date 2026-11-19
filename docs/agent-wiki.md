@@ -815,7 +815,8 @@ npm test        # tsx --test --test-concurrency=1 tests/...（串行，避免多
 | `server/audit.ts` | 审计增强 | 新增 `AUDIT_FILE` 测试钩子与 `flushAudit()`；认证失败记 `auth_rejected`（只记 requestId/method/path，不带 token）；配置变更（`config.*`）、HITL 决定（`hitl.decided`）、项目授权（`project.authorized`）也落审计，均不带 Key/URL/工具参数 |
 | `server/session-store.ts` | journal 增强 | 写入任务进 `pendingWrites`，`flushJournal()` 循环等到清空（flush 期间新产生的写入也能等到） |
 | `server/index.ts` | 入口接线 | 每请求 `X-Request-Id`；handler `finally` 统一记 `http_request`（静态 debug、API info，避免 SSE abort 时 `res.close` 抢跑）；关闭中非探针请求回 503；`SIGINT/SIGTERM/SIGBREAK` → lifecycle；`EADDRINUSE` 中文提示 + 退出码 1 |
-| `Dockerfile` / compose | 单实例部署 | `node:24.14.0` 固定 digest；builder / production-deps / runtime 三层；非 root `node`；`/data` 统一数据卷；生产 compose 只读根文件系统、`cap_drop: ALL`、`no-new-privileges`、固定 digest、`init: true`、`stop_grace_period: 15s`、内置 healthcheck |
+| `server/browser-runtime.ts` | 浏览器运行时 | 统一解析 `BROWSER_USE_EXECUTABLE_PATH` 与系统浏览器路径；仅 `BROWSER_USE_CONTAINER=1` 时追加 `--no-sandbox` / `--disable-gpu`，Browser Use 与求职采集共用 |
+| `Dockerfile` / compose | 单实例部署 | `node:24.14.0` 固定 digest；builder / production-deps / browser / runtime-base / runtime 分层；`browser` 按 `playwright-core/browsers.json` 下载并校验 Chrome Headless Shell，`runtime` 只装最小库；`minimal` target 不含浏览器；生产 compose 只读根文件系统、`cap_drop: ALL`、`no-new-privileges`、固定 digest、`init: true`、`pids_limit: 512`、256 MiB `/tmp`、内置 healthcheck |
 | `docs/deployment.md` | 运维入口 | 快速自托管、上线 checklist、TLS、备份恢复、升级回滚、监控、runbook、故障排查与支持边界 |
 
 **SSE 退出帧**：`AgentEvent` 新增 `{type:"shutdown", message}`；`routes/chat.ts` 把
@@ -1683,7 +1684,7 @@ console.log(result.messages.at(-1).content);
 | `keRiskControl.js` 连接 `127.0.0.1:31234` 等 WebSocket 失败 | 贝壳官方风控脚本会探测本机风控组件；普通浏览器没有这些本地服务时失败是预期噪声，与登录失败无因果关系 |
 | 官方登录页扫码后仍返回 `errno=400 invalid request` / 凭证获取失败 | 属于贝壳后台凭证发放或账号授权状态问题。更新 CLI、清理浏览器 Cookie、更换网络只能作为排查，不能由 agentatlas 重置后台凭证；持续失败时保留扫码截图与时间，到贝壳官方 issue / 支持渠道申请后台重置 |
 | 贝壳 CLI 甩 `-32001`           | 官方 `CLI_UPGRADE_REQUIRED`：agentatlas 不再自动下载执行新版本（Phase 1），请在「找房工具」面板手动点「安装 CLI」显式确认后重试   |
-| Browser Use 显示「未找到 Chrome / Edge」 | 服务端只驱动系统浏览器、不自动下载；安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH` 指向可执行文件。生产容器需自行安装/挂载浏览器 |
+| Browser Use 显示「未找到 Chrome / Edge」 | 桌面端安装 Chrome/Edge 后重新打开插件页，或设置 `BROWSER_USE_EXECUTABLE_PATH`。生产默认镜像已内置 `/opt/chrome-headless-shell/chrome-headless-shell`；先检查该文件与 `/api/browser/status`，自定义镜像需自行安装或挂载浏览器 |
 | Browser Use 工具返回内网地址被拒 | 默认防 SSRF；只有用户明确要求访问本机/局域网服务时才在 `browser_open` 中设 `allowLocalhost=true`。子资源请求同样受限制 |
 | 右侧 Browser Use 面板空白 | 先确认插件已启用、当前会话仍存在且浏览器未被空闲回收；`/api/browser/status` 看 activeSessions，404 时让 Agent 重新 `browser_open` |
 | 房产会话地图空白 / 点位缺              | 先看详情是否已有 `小区经纬度`：旧版本只把它留在原始文本里，随后 `house_map` 又让 Nominatim 猜中文地址，因而常返回 0 个点。现在 `estate-result.ts` 直接归一 `location`，最终结论表立即出图；`house_map` 也接受 `lat/lng`，不再二次 geocode。预览底图按 `MAP_PROVIDER` 选择高德、腾讯、百度、OSM 或自定义原生瓦片，避免 OSM iframe 在国内网络连接重置；只有地址确实无坐标时才列「未定位」 |
@@ -2074,7 +2075,7 @@ HTML 脚本文本归一化为 LF，再做 hash；构建脚本必须使用 `\r\n?
 
 **生产启动顺序**：读生产环境 → 配置迁移 → 设置/扩展加载 → 真实模型与目录门禁 → journal 回放 → HTTP 监听。任何硬门失败只输出结构化错误并退出 1，不进入半可用状态。
 
-**发布镜像顺序**：builder 安装完整依赖并执行 typecheck + client build → production-deps 执行 `npm ci --omit=dev` → runtime 只复制源码、静态产物、生产依赖和 `scripts/data-cli.ts`。运行层不包含 Electron、TypeScript、tests、docs、`.env` 或本地数据。
+**发布镜像顺序**：builder 安装完整依赖并执行 typecheck + client build → production-deps 执行 `npm ci --omit=dev` → browser 按 Playwright 声明版本下载并校验 Chrome Headless Shell → runtime-base 复制源码、静态产物和生产依赖 → runtime 安装最小浏览器库。运行层不包含 Electron、TypeScript、tests、docs、`.env` 或本地数据；`minimal` target 可跳过浏览器层。
 
 
 ## 长任务预算与工作台账
@@ -2463,7 +2464,7 @@ Browser Use 是通用 Agent 的显式插件，默认关闭。它与 `browser_fet
 | 画面层 | `views/browser-use.ts` + `browser-use.css` | 工具结果自动打开右侧面板；只轮询认证 API 的 PNG 截图与状态；截图不写 localStorage，切换会话时隐藏，返回原会话恢复 |
 | 服务端 API | `/api/browser/status`、`/api/browser/sessions/:id`、`/screenshot`、关闭 POST | 全部走现有认证与同源边界；截图 `no-store`，会话 id 只允许字母数字下划线连字符 |
 
-**浏览器进程边界**：`playwright-core` 动态导入，只驱动系统 Chrome / Edge / Chromium，不下载浏览器。Windows 自动探测 Chrome、Edge，macOS/Linux 探测常见安装路径；容器环境可设置 `BROWSER_USE_EXECUTABLE_PATH`。浏览器不可用时插件可以保持启用，但工具会返回明确的安装提示。
+**浏览器进程边界**：`playwright-core` 动态导入。桌面端只驱动系统 Chrome / Edge / Chromium，并自动探测；生产镜像内置与 `playwright-core` 对应版本一致的 Chrome Headless Shell，构建时通过 SHA-256 校验。容器镜像设置 `BROWSER_USE_CONTAINER=1` 后才关闭 sandbox/GPU，桌面端保持系统 sandbox。浏览器不可用时插件可以保持启用，但工具会返回明确安装提示。
 
 **为什么不直接把 iframe 当浏览器**：跨域 iframe 无法被 Agent 读取或点击，且登录流程没有稳定的 DOM 访问；服务端 BrowserContext + 认证截图既能在 Web 模式工作，也能在 Electron 内保持同一套行为。当前面板面向「观察 + AI 操作」，不是用户手动远程控制浏览器。
 

@@ -25,8 +25,10 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."
 /** 缺任意一项都会造成登录页白屏、图表失效或 CSP import map 断裂。 */
 export const REQUIRED_RUNTIME_ASSETS = [
   "src/server/index.ts",
+  "src/server/browser-runtime.ts",
   "src/agent/general.ts",
   "scripts/data-cli.ts",
+  "scripts/browser-smoke.ts",
   "src/server/public/index.html",
   "src/server/public/main.js",
   "src/server/public/build-info.json",
@@ -102,6 +104,15 @@ function result(id: string, ok: boolean, message: string, category: ReadinessChe
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
     return true;
   } catch {
     return false;
@@ -184,6 +195,19 @@ export async function collectProductionReleaseChecks(
     checks.push(result("tsx-runtime", true, "tsx 与 playwright-core 运行时可解析", "deployment"));
   } catch {
     checks.push(result("tsx-runtime", false, "node_modules 中缺少 tsx 或 playwright-core 运行时", "deployment"));
+  }
+
+  const browserExecutable = env.BROWSER_USE_EXECUTABLE_PATH?.trim();
+  if (browserExecutable) {
+    const available = await isExecutable(browserExecutable);
+    checks.push(result(
+      "browser-executable",
+      available,
+      available ? "BROWSER_USE_EXECUTABLE_PATH 指向的浏览器可执行" : "BROWSER_USE_EXECUTABLE_PATH 指向的浏览器不存在或不可执行",
+      "deployment"
+    ));
+  } else {
+    checks.push(result("browser-executable", true, "未固定浏览器路径，Browser Use 将在启动时自动探测", "deployment"));
   }
 
   const missingAssets: string[] = [];

@@ -7,7 +7,7 @@
 import { promises as fsp } from "node:fs";
 import { join } from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
-import { browserDisplayName, findBrowserExecutable } from "./browser-use.js";
+import { browserDisplayName, browserLaunchArgs, findBrowserExecutable } from "./browser-runtime.js";
 import { parseNativeCard, parseZhilianRecords, readZhilianVueRecords } from "./job-cards.js";
 import { inferCardCandidates, normalizeSelector, readCandidateCards, readCardsFromSelector, type RawJobCard } from "./job-dom.js";
 import { loadJobSelectorRuntime, type JobSelectorRuntime } from "./job-selectors.js";
@@ -27,8 +27,13 @@ const COOL_DELAY_MS = 7_000;
 const PLATFORM_GAP_MS = 4_000;
 const DETAIL_TEXT_LIMIT = 20_000;
 const LOGIN_TIMEOUT_MS = 4 * 60_000 + 30_000;
-/** 默认使用可见浏览器，便于用户在站点弹出安全验证时完成一次人工确认。 */
-export const JOB_HEADLESS = process.env.JOB_BROWSER_HEADLESS === "1";
+/** 桌面端默认可见；无显示服务器的 Linux/容器自动转无头，避免直接启动失败。 */
+export const JOB_HEADLESS = (() => {
+  const configured = process.env.JOB_BROWSER_HEADLESS?.trim();
+  if (configured === "1") return true;
+  if (configured === "0") return false;
+  return process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
+})();
 
 let operationQueue: Promise<unknown> = Promise.resolve();
 let lastNavigationAt = 0;
@@ -92,11 +97,7 @@ export async function withPersistentBrowser<T>(
       locale: "zh-CN",
       viewport: { width: 1400, height: 900 },
       acceptDownloads: false,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-first-run",
-        "--no-default-browser-check",
-      ],
+      args: browserLaunchArgs(["--disable-blink-features=AutomationControlled"]),
     });
     try {
       return await action(context);

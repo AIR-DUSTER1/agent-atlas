@@ -74,7 +74,7 @@ async function main(): Promise<void> {
 
   must(["version"]);
   console.log(`构建镜像 ${image} ...`);
-  must(baseTagArgs, { inherit: true, timeout: 20 * 60_000 });
+  must(baseTagArgs, { inherit: true, timeout: 30 * 60_000 });
 
   const labels = JSON.parse(must([
     "image", "inspect", "--format", "{{json .Config.Labels}}", image,
@@ -83,7 +83,19 @@ async function main(): Promise<void> {
     throw new Error(`镜像版本标签 ${labels["org.opencontainers.image.version"] || "(missing)"} 与 package.json ${version} 不一致`);
   }
   const imageId = must(["image", "inspect", "--format", "{{.Id}}", image]).stdout;
-  const imageSize = Number(must(["image", "inspect", "--format", "{{.Size}}", image]).stdout);
+  const imageDisplaySize = must(["image", "ls", image, "--format", "{{.Size}}"]).stdout;
+  const rootfsKb = Number(must([
+    "run", "--rm", "--user", "root", "--entrypoint", "sh", image,
+    "-lc", "du -sx / | cut -f1",
+  ], { timeout: 60_000 }).stdout);
+  const rootfsMiB = rootfsKb / 1024;
+  const maxImageMb = Number(process.env.SMOKE_MAX_IMAGE_MB || "700");
+  if (!Number.isFinite(rootfsMiB) || rootfsMiB <= 0) throw new Error(`无法读取镜像 rootfs 大小：${rootfsKb}`);
+  if (!Number.isFinite(maxImageMb) || maxImageMb <= 0) throw new Error(`SMOKE_MAX_IMAGE_MB 非法：${process.env.SMOKE_MAX_IMAGE_MB}`);
+  if (rootfsMiB > maxImageMb) {
+    throw new Error(`镜像 rootfs ${rootfsMiB.toFixed(1)} MiB 超过预算 ${maxImageMb} MiB（docker images: ${imageDisplaySize}）`);
+  }
+  console.log(`镜像大小 ${imageDisplaySize} / rootfs ${rootfsMiB.toFixed(1)} MiB（预算 ${maxImageMb} MiB），ID ${imageId}`);
 
   must([
     "run", "--rm", "--entrypoint", "node", image, "-e",
@@ -107,6 +119,17 @@ async function main(): Promise<void> {
     image,
     "node", "--import", "tsx", "scripts/data-cli.ts", "check",
   ]);
+  const browserSmoke = must([
+    "run", "--rm",
+    "--read-only",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--tmpfs", "/tmp:size=256m,mode=1777",
+    "-e", "HOME=/tmp",
+    image,
+    "node", "--import", "tsx", "scripts/browser-smoke.ts",
+  ], { timeout: 120_000 });
+  console.log(`浏览器 smoke：${browserSmoke.stdout}`);
 
   let containerCreated = false;
   try {
@@ -185,7 +208,8 @@ async function main(): Promise<void> {
       ok: true,
       image,
       imageId,
-      imageSize,
+      imageDisplaySize,
+      rootfsMiB: Number(rootfsMiB.toFixed(1)),
       labels,
       checks: {
         healthz: health.status,

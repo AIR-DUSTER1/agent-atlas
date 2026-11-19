@@ -84,6 +84,28 @@ test("生产发布自检：完整运行面通过", async () => {
   }
 });
 
+test("生产发布自检：固定浏览器路径存在才通过", async () => {
+  const root = await makeRuntimeFixture();
+  try {
+    const present = await collectProductionReleaseChecks({
+      root,
+      env: { ...envFor(root), BROWSER_USE_EXECUTABLE_PATH: process.execPath },
+      platform: "linux",
+      processUid: 1000,
+    });
+    assert.ok(present.some((check) => check.id === "browser-executable" && check.ok));
+    const missing = await collectProductionReleaseChecks({
+      root,
+      env: { ...envFor(root), BROWSER_USE_EXECUTABLE_PATH: join(root, "missing-browser") },
+      platform: "linux",
+      processUid: 1000,
+    });
+    assert.ok(failedReleaseChecks(missing).some((check) => check.id === "browser-executable"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("生产发布自检：缺产物、开发文件、root 与弱环境均 fail-closed", async () => {
   const root = await makeRuntimeFixture();
   try {
@@ -124,7 +146,13 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   const dockerfile = await readFile("Dockerfile", "utf8");
   assert.match(dockerfile, /AS builder/);
   assert.match(dockerfile, /AS production-deps/);
+  assert.match(dockerfile, /AS runtime-base/);
   assert.match(dockerfile, /AS runtime/);
+  assert.match(dockerfile, /AS minimal/);
+  assert.match(dockerfile, /chromium-headless-shell/);
+  assert.match(dockerfile, /CHROME_HEADLESS_SHELL_SHA256=[0-9a-f]{64}/);
+  assert.match(dockerfile, /BROWSER_USE_EXECUTABLE_PATH=\/opt\/chrome-headless-shell\/chrome-headless-shell/);
+  assert.match(dockerfile, /BROWSER_USE_CONTAINER=1/);
   const runtime = dockerfile.slice(dockerfile.indexOf("AS runtime"));
   assert.doesNotMatch(runtime, /COPY[^\n]*(tests|docs|desktop|src\/client)/);
   assert.match(runtime, /USER node/);
@@ -148,6 +176,8 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(productionCompose, /read_only: true/);
   assert.match(productionCompose, /cap_drop:/);
   assert.match(productionCompose, /no-new-privileges:true/);
+  assert.match(productionCompose, /shm_size: 256mb/);
+  assert.match(productionCompose, /pids_limit: 512/);
 
   const dockerignore = await readFile(".dockerignore", "utf8");
   for (const pattern of [".env", ".web-config.json*", ".setting", ".agents", "data", "*.log"]) {

@@ -11,6 +11,7 @@ import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { browserOpenTool, browserTools } from "../../src/tools-browser.js";
 import { normalizeBrowserSessionId } from "../../src/server/browser-use.js";
+import { browserDisplayName, browserLaunchArgs, findBrowserExecutable, resetBrowserRuntimeForTests } from "../../src/server/browser-runtime.js";
 import { assertAllowedHttpUrl, assertAllowedWebSocketUrl, isPrivateHost } from "../../src/url-guard.js";
 import { generalProfileWithPlugins } from "../../src/agent/general.js";
 import { resetPluginStateForTests, setPluginEnabledState } from "../../src/plugin-state.js";
@@ -18,8 +19,47 @@ import { buildDelegationCatalog } from "../../src/delegation-catalog.js";
 import { createWorkflowGraph, type WorkflowChatModel } from "../../src/agent/workflow.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
 
-beforeEach(() => resetPluginStateForTests());
-afterEach(() => resetPluginStateForTests());
+beforeEach(() => {
+  resetPluginStateForTests();
+  resetBrowserRuntimeForTests();
+});
+afterEach(() => {
+  resetPluginStateForTests();
+  resetBrowserRuntimeForTests();
+});
+
+test("浏览器运行时仅在显式容器模式关闭沙箱并禁用 GPU", () => {
+  const previous = process.env.BROWSER_USE_CONTAINER;
+  try {
+    delete process.env.BROWSER_USE_CONTAINER;
+    const hostArgs = browserLaunchArgs(["--disable-blink-features=AutomationControlled"]);
+    assert.ok(hostArgs.includes("--disable-dev-shm-usage"));
+    assert.ok(hostArgs.includes("--disable-blink-features=AutomationControlled"));
+    assert.ok(!hostArgs.includes("--no-sandbox"));
+    assert.ok(!hostArgs.includes("--disable-gpu"));
+    process.env.BROWSER_USE_CONTAINER = "1";
+    const containerArgs = browserLaunchArgs();
+    assert.ok(containerArgs.includes("--no-sandbox"));
+    assert.ok(containerArgs.includes("--disable-gpu"));
+  } finally {
+    if (previous === undefined) delete process.env.BROWSER_USE_CONTAINER;
+    else process.env.BROWSER_USE_CONTAINER = previous;
+  }
+});
+
+test("浏览器路径环境变量优先且 headless shell 名称可识别", () => {
+  const previous = process.env.BROWSER_USE_EXECUTABLE_PATH;
+  try {
+    process.env.BROWSER_USE_EXECUTABLE_PATH = process.execPath;
+    resetBrowserRuntimeForTests();
+    assert.equal(findBrowserExecutable(), process.execPath);
+    assert.equal(browserDisplayName("/opt/playwright/chrome-headless-shell"), "Chrome Headless Shell");
+  } finally {
+    if (previous === undefined) delete process.env.BROWSER_USE_EXECUTABLE_PATH;
+    else process.env.BROWSER_USE_EXECUTABLE_PATH = previous;
+    resetBrowserRuntimeForTests();
+  }
+});
 
 test("Browser Use 会话 id 严格限制字符集与长度", () => {
   assert.equal(normalizeBrowserSessionId("session_01-ab"), "session_01-ab");

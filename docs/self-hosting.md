@@ -5,7 +5,7 @@
 - Docker 24+（Compose v2）；已在 Docker 28.5.1 / Compose v2.40 验收。
 - 一个可用的模型网关（OpenAI 兼容、OpenAI Responses、Anthropic 或 Gemini 协议）。
 - 一个域名和 TLS 证书，或先在本机 loopback 验证。
-- 至少 1GB 可用内存；建议 2GB 以上并配置磁盘告警。
+- 至少 2GB 可用内存；启用多并发 Browser Use 时建议 3GB 以上，并配置磁盘告警。
 
 ## 2. 准备生产环境文件
 
@@ -31,7 +31,7 @@ cp production.env.example production.env
 | `METRICS_TOKEN` | Prometheus 只读令牌，至少 16 位 |
 | `BASE_URL` / `API_KEY` / `MODEL` | 首次启动至少一套可用模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
-| `BROWSER_USE_EXECUTABLE_PATH` | 可选；启用 Browser Use 时指向容器内 Chrome / Edge / Chromium 可执行文件 |
+| `BROWSER_USE_EXECUTABLE_PATH` | 默认镜像已内置 Chrome Headless Shell，通常无需填写；仅在自定义镜像时覆盖 |
 
 生成随机值（Windows PowerShell、Linux bash 均可）：
 
@@ -52,6 +52,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```bash
 docker compose build
 ```
+
+默认镜像内置与 `playwright-core` 对应的 Chrome Headless Shell。构建阶段从镜像源下载并由固定 SHA-256 校验，官方地址作为兜底；可用 `CHROME_HEADLESS_SHELL_BASE_URL` 指定可信镜像。本次验收镜像显示大小 897 MB、rootfs 630.7 MiB，`image:smoke` 默认要求 rootfs 不超过 700 MiB。当前内置浏览器只支持 `linux/amd64`；明确不使用 Browser Use 时可构建 `--target minimal` 瘦镜像。
 
 生产发布应在 CI / 发布机完成：
 
@@ -105,7 +107,7 @@ docker run --rm \
   node --import tsx src/server/index.ts --check-production
 ```
 
-它会验证：生产环境变量、tsx 运行时、前端产物、`/data` 可写、非 root，以及运行层没有 Electron、TypeScript、tests、docs 或本地密钥。
+它会验证：生产环境变量、tsx 运行时、前端产物、内置浏览器路径、`/data` 可写、非 root，以及运行层没有 Electron、TypeScript、tests、docs 或本地密钥。完整镜像验收运行 `npm run image:smoke`。
 
 ## 6. 数据目录与权限
 
@@ -115,7 +117,7 @@ docker run --rm \
 宿主目录（默认 ./data）  →  容器 /data
 ```
 
-根文件系统为只读，只有 `/data` 和临时 `/tmp` 可写。必须保证宿主机目录仅由受信任管理员与服务用户访问。
+根文件系统为只读，只有 `/data` 和 256 MiB 临时 `/tmp` 可写。必须保证宿主机目录仅由受信任管理员与服务用户访问。
 
 ## 6.1 PostgreSQL 多用户模式
 
@@ -152,3 +154,4 @@ docker compose ... exec -T agent \
 - [ ] 创建一轮 mock 或受控真实对话，刷新页面后历史恢复。
 - [ ] 备份成功，manifest 校验通过。
 - [ ] 反向代理下 SSE 不缓冲，停止按钮可中断。
+- [ ] Browser Use 能打开公网页面并返回截图；求职采集在容器内使用内置无头浏览器。招聘平台扫码登录仍需先在可见浏览器完成并持久化 profile，或后续通过 Browser Use 登录桥接。

@@ -32,11 +32,15 @@ services:
       BACKUP_DIR: /data/backups
       BACKUP_KEEP_LATEST: ${BACKUP_KEEP_LATEST:-7}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+      BROWSER_USE_CONTAINER: "1"
+      JOB_BROWSER_HEADLESS: "1"
     volumes:
       - ${AGENT_DATA_DIR:-./data}:/data
     read_only: true
     tmpfs:
-      - /tmp:size=64m,mode=1777
+      - /tmp:size=256m,mode=1777
+    shm_size: 256mb
+    pids_limit: 512
     cap_drop:
       - ALL
     security_opt:
@@ -52,7 +56,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 1g
+          memory: 2g
     logging:
       driver: json-file
       options:

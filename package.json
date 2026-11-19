@@ -33,6 +33,7 @@
     "audit:prod": "tsx scripts/audit-production.ts",
     "sbom": "tsx scripts/write-sbom.ts",
     "image:smoke": "tsx scripts/docker-smoke.ts",
+    "browser:smoke": "tsx scripts/browser-smoke.ts",
     "e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "memory:bench": "tsx scripts/memory-benchmark.ts",
     "pree2e": "npm run build:client",

@@ -55,7 +55,8 @@
 - [ ] **P1** CPU / 内存限制已设置；容器重启策略为 `unless-stopped`。
 - [ ] **P1** `stop_grace_period` 大于应用 10 秒排空超时。
 - [ ] **P1** 根文件系统只读、`cap_drop: ALL`、`no-new-privileges`。
-- [ ] **P1** 启用 Browser Use 时已安装 Chrome / Edge 或挂载浏览器，设置 `BROWSER_USE_EXECUTABLE_PATH`，并限制容器内存/进程数避免无头浏览器挤占主服务。
+- [ ] **P1** 默认镜像内置 Chrome Headless Shell；已确认 `BROWSER_USE_EXECUTABLE_PATH` 可执行，并设置内存、`pids_limit: 512` 和 256 MiB `/tmp`。
+- [ ] **P1** 默认镜像 rootfs 不超过 700 MiB；明确关闭 Browser Use 时才使用 `--target minimal`。
 - [ ] **P1** 启用 Browser Use 时已配置出站网络策略；应用默认拒绝私网，仍需在网络层阻断云元数据、管理网段和不需要的内网目标。
 - [ ] **P1** 标准备份、恢复、升级和回滚步骤由非开发者演练通过。
 
@@ -67,6 +68,6 @@
 - [ ] **P0** `npm run e2e` 通过。
 - [ ] **P0** `npm run coverage:security && npm run coverage:persistence && npm run coverage:routes` 通过。
 - [ ] **P0** `npm run audit:prod` 无 high/critical。
-- [ ] **P0** `npm run image:smoke` 通过并保存 `artifacts/image-smoke.json`。
+- [ ] **P0** `npm run image:smoke` 通过并保存 `artifacts/image-smoke.json`；其中包含只读容器内的双 BrowserContext、Cookie 隔离、持久化上下文与截图验收。
 - [ ] **P0** SBOM 已归档并记录 SHA-256。
 - [ ] **P1** `npm run build:client` 与 `npm run build:desktop` 通过；生产交付以镜像为准。

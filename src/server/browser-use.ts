@@ -7,11 +7,16 @@
  * 安全边界：仅 http/https；默认拒绝私网；所有文档与子资源请求逐跳走 URL guard；
  * 浏览器上下文隔离、禁止下载与持久化，截图只保存在内存并通过认证 API 返回。
  */
-import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
 import { assertAllowedHttpUrl, assertAllowedWebSocketUrl } from "../url-guard.js";
 import { writeAudit } from "./audit.js";
+import {
+  browserDisplayName,
+  browserLaunchArgs,
+  findBrowserExecutable,
+  resetBrowserRuntimeForTests,
+} from "./browser-runtime.js";
 import { log } from "./logging.js";
 
 const MAX_SESSIONS = 3;
@@ -88,53 +93,6 @@ let sharedBrowser: Browser | null = null;
 let launching: Promise<Browser> | null = null;
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 const sessions = new Map<string, BrowserSession>();
-let executableCache: string | null | undefined;
-
-function executableCandidates(): string[] {
-  const explicit = process.env.BROWSER_USE_EXECUTABLE_PATH?.trim();
-  const candidates = explicit ? [explicit] : [];
-  if (process.platform === "win32") {
-    for (const root of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]) {
-      if (!root) continue;
-      candidates.push(
-        join(root, "Google", "Chrome", "Application", "chrome.exe"),
-        join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
-        join(root, "Chromium", "Application", "chrome.exe"),
-      );
-    }
-  } else if (process.platform === "darwin") {
-    candidates.push(
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    );
-  } else {
-    candidates.push(
-      "/usr/bin/google-chrome",
-      "/usr/bin/google-chrome-stable",
-      "/usr/bin/chromium",
-      "/usr/bin/chromium-browser",
-      "/usr/bin/microsoft-edge",
-    );
-  }
-  return [...new Set(candidates)];
-}
-
-export function findBrowserExecutable(): string | null {
-  if (executableCache) return executableCache;
-  const found = executableCandidates().find((candidate) => existsSync(candidate)) ?? null;
-  // 只缓存成功结果：用户安装浏览器后无需重启服务即可重新检测到。
-  if (found) executableCache = found;
-  return found;
-}
-
-export function browserDisplayName(executable: string): string {
-  const name = basename(executable).toLowerCase();
-  if (name.includes("msedge")) return "Microsoft Edge";
-  if (name.includes("chrome")) return "Google Chrome";
-  if (name.includes("chromium")) return "Chromium";
-  return "Chromium";
-}
 
 export function getBrowserUsePublicStatus(): BrowserUsePublicStatus {
   const executable = findBrowserExecutable();
@@ -169,7 +127,7 @@ async function getBrowser(): Promise<Browser> {
     const browser = await chromium.launch({
       executablePath,
       headless: true,
-      args: ["--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check"],
+      args: browserLaunchArgs(),
     });
     browser.on("disconnected", () => {
       if (sharedBrowser === browser) sharedBrowser = null;
@@ -573,5 +531,5 @@ function startSweeper(): void {
 // 导出内部清理状态供单测隔离使用；生产路径只用 closeAllBrowserSessions。
 export async function resetBrowserUseForTests(): Promise<void> {
   await closeAllBrowserSessions();
-  executableCache = undefined;
+  resetBrowserRuntimeForTests();
 }

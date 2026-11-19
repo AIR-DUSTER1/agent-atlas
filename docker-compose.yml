@@ -38,6 +38,8 @@ services:
       BACKUP_DIR: /data/backups
     volumes:
       - ${AGENT_DATA_DIR:-./data}:/data
+    shm_size: 256mb
+    pids_limit: 512
     stop_grace_period: 15s
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -49,7 +51,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 1g
+          memory: 2g
     logging:
       driver: json-file
       options:
