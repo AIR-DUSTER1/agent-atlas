@@ -346,6 +346,7 @@ npm run build:client
 | [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
 | [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
 | [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |
+| [评测基线与能力缺口](docs/evaluation-baseline.md) | 三套评测集实测分数、过度探索问题与改进优先级 |
 | [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
 | [支持边界](docs/support.md) | 支持范围、安全报告与维护责任 |
 

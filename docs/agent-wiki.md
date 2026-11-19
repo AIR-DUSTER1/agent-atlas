@@ -2623,3 +2623,57 @@ agent(final answer) ──review(pass)──▶ workflow_plan(completed)
 **防漂移**：`npm run skills:check` 校验 Skill 数量、命名、frontmatter、UI 元数据、大小、权威文档链接、AGENTS 路由和常驻预算。`tests/unit/project-skills.test.ts` 再把该检查纳入全量测试。
 
 **为什么不把所有规范都做成 Skill**：审批、路径安全、密钥、依赖方向和数据迁移等红线如果只在按需 Skill 中加载，未命中任务时就会失效。因此采用“极少 L0 + 精确 L1 + 深度 L2 + 自动 L3”，而不是把所有规则从 `AGENTS.md` 搬空。
+
+## 评测基线与「过度探索」退化（0.9.0-beta.17）
+
+> 完整数据见 [`evaluation-baseline.md`](evaluation-baseline.md)。这里只记工程视角的结论与坑。
+
+**测法**：同一 Judge、同一评测集、同一模型（opencode / `deepseek-v4.1-flash`），
+把 agentatlas 走完整 SSE 链路（`external_http` + `learn_agent_sse`）
+与裸模型直连做对照，三套集共 34 题。
+
+**结果**：Prompt 4.77、RAG 3.05、Tool 2.81，均低于裸模型的 4.96 / 4.14 / 3.77。
+差距集中在幻觉分（Tool 集 2.30 vs 4.90），安全性两边都高 —— 不是越界，是**输出可信度**。
+
+### 坑 1：提示词鼓励用工具，依赖缺失时会「过度探索」
+
+Tool 集首题实测：**32 次工具调用、325 秒、50 万输入 token**，最终仍无法作答，
+输出大段「我做了什么（以下都是只读查询）」的核查清单。裸模型 0 次调用、6.4 秒。
+
+RAG 集 12 题里 9 题同构：`retrieve_docs` 返回「未配置外部 RAG 服务」后，
+Agent 退化为 `grep_search` / `list_dir` 搜本地项目，平均 170 秒。
+
+**为什么被判幻觉**：无效尝试被写成尽职证明，Judge 视为「无依据陈述」。
+提示词里「优先用工具而不是凭记忆编造」在依赖可用时是对的，
+**依赖不可用时缺少止损条件**，Agent 只能继续换工具重试。
+
+### 坑 2：模型会把「打算调用」写成「已经调用」
+
+Prompt 集水池注水题，回答称「已调用计算器验证」，但轨迹里 `calculator` 返回 `null`。
+提示词鼓励工具反而诱发了虚假调用声明。
+
+### 坑 3：评测集与能力边界不匹配，分数不可直接当质量指标
+
+Tool 集 10 题中 9 题期望 `sql_query`（7）或 `knowledge_search`（1），
+代码库里**都不存在**；唯一存在的 `calculator` 那题拿了 5.0。
+
+RAG 集每题 `reference_context` 含标准答案，但该字段只喂 Judge，
+**从未注入被测 Agent、也没预灌知识库** —— 测的是「面对空知识库的表现」。
+
+### 坑 4：对照实验的口径坑（最贵的一次）
+
+此前一版对比报告把三个分数标为「agent-atlas」，实际 `agent_version` 指向
+`type=prompt` 的裸模型 agent。**判定方法**：看 `agent_version.config` 有没有
+SSE 接入字段（`protocol` / `session_body`），以及 `case_result.intermediate`
+里有几条 `tool_call` —— 裸模型每题只有一条 `llm_call`。
+
+**教训**：结论落地前必须回查「被测对象到底是谁」，不能只看报告标签。
+
+### 待办
+
+| 优先级 | 改进 |
+|---|---|
+| P0 | 提示词加「工具不可用即止损」硬规则，禁止罗列无效核查、禁止声称未发生的调用 |
+| P1 | 补 `sql_query` 结构化查询（接外部库 + 审批登记），覆盖 Tool 集 7/10 题 |
+| P2 | 精简常驻工具（24 个中 4 个为演示项），按场景分组装配 |
+| P3 | RAG 评测协议改为「预灌知识库后测」，或把该类题标为环境缺口 |
