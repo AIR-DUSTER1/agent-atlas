@@ -11,12 +11,13 @@
 | 项目 | 结果 |
 |---|---|
 | TypeScript typecheck | 通过（后端 + 前端 + 桌面端） |
-| Node 单元 / 集成 / 安全 / 故障 / 负载测试 | 650 / 650 通过 |
+| Node 单元 / 集成 / 安全 / 故障 / 负载测试 | 654 / 654 通过 |
 | Playwright 浏览器主流程 | 36 / 36 通过 |
 | 关键模块覆盖率门禁 | 通过 |
 | 生产依赖 high / critical 审计 | 0 个阻断项 |
 | Docker 多阶段镜像 smoke | 健康、版本接口、登录、指标、注销和优雅停止通过；只读容器内 Chrome Headless Shell 双 BrowserContext、Cookie 隔离、持久化上下文与截图通过 |
 | 镜像体积预算 | 默认镜像 Docker Desktop 显示 897 MB、rootfs 630.7 MiB；`minimal` target 489 MB 且确认不含浏览器；默认门禁上限 700 MiB |
+| 贝壳 CLI Linux 接入 | 容器内按官方 manifest 安装 `linux/amd64` v0.2.28，SHA-256、tar 解压、0755 权限与 `beike --version` 通过 |
 | 版本身份检查 | package、lock、README、部署文档与 build-info 一致 |
 | 数据检查 | 配置、journal、checkpoint 和备份校验通过 |
 | 镜像标签切换演练 | 同一数据卷上 prev → next → prev 可启动 |
@@ -49,4 +50,4 @@
 | Skill Creator 校验 | 4 / 4 通过 |
 | 项目分层校验 | `npm run skills:check` 通过 |
 | 分层回归测试 | `project-skills.test.ts` 与架构、版本测试共 32 / 32 通过 |
-| 全量回归 | 650 / 650 通过 |
+| 全量回归 | 654 / 654 通过 |

@@ -153,6 +153,8 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(dockerfile, /CHROME_HEADLESS_SHELL_SHA256=[0-9a-f]{64}/);
   assert.match(dockerfile, /BROWSER_USE_EXECUTABLE_PATH=\/opt\/chrome-headless-shell\/chrome-headless-shell/);
   assert.match(dockerfile, /BROWSER_USE_CONTAINER=1/);
+  assert.match(dockerfile, /BEIKE_INSTALL_DIR=\/data\/tools\/beike/);
+  assert.match(dockerfile, /BEIKE_USER_HOME=\/data\/beike-home/);
   const runtime = dockerfile.slice(dockerfile.indexOf("AS runtime"));
   assert.doesNotMatch(runtime, /COPY[^\n]*(tests|docs|desktop|src\/client)/);
   assert.match(runtime, /USER node/);

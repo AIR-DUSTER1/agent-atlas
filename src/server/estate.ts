@@ -4,10 +4,10 @@
  * ============================================================
  * 设计定位：房源检索 / 详情 / 户型图 / 板块评测 / 行情等 C 端找房数据
  * 全部委托给贝壳官方的 `beike` CLI（LianjiaTech/beike-ai-platform，
- * 输出单行 JSON，支持 win32-x64）。本模块是 CLI 的子进程客户端：
+ * 输出单行 JSON，支持 Windows / Linux / macOS 的 x64 与 arm64）。本模块是 CLI 的子进程客户端：
  *   - 检测（PATH / .setting/beike 自装目录）— version 探测
- *   - 安装（GitHub release 下载 tar.gz → Windows 自带 tar.exe 解压 →
- *     定位 beike.exe → 校验 sha256 → 写入 .web-config.json 的 estate 键）
+ *   - 安装（按官方 manifest 选择当前平台 tar.gz → 系统 tar 解压 →
+ *     定位 beike 可执行文件 → 校验 sha256 → 写入 .web-config.json 的 estate 键）
  *   - 鉴权（beike auth <KEY> --save；Key 由 CLI 保存到 ~/.beike，
  *     agentatlas **不落盘不回显**——遵循贝壳官方技能的凭证规范）
  *   - 登录态失效时展示官方登录链接并熔断后续查询，绝不让模型反复撞同一个 401
@@ -22,9 +22,9 @@
  *   无 C 端找房检索接口且授权需企业渠道，本期不接入（用户已确认）。
  */
 import { runControlled } from "./subprocess.js";
-import { promises as fsp, createReadStream, statSync } from "node:fs";
+import { promises as fsp, createReadStream, existsSync, statSync, type Dirent } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { join, dirname, relative } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
@@ -47,8 +47,25 @@ const BEIKE_BREAKER_COOLDOWN_MS = 60_000;
 // 常量（限量即上限）
 // ---------------------------------------------------------------------------
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-/** CLI 自装目录：项目根/.setting/beike（与 external.ts 的 .setting 惯例一致） */
-export const BEIKE_DIR = join(MODULE_DIR, "..", "..", ".setting", "beike");
+
+/** 自装目录默认为项目内 .setting/beike；容器应覆盖到 /data 等持久化可写目录。 */
+export function resolveBeikeInstallDir(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.BEIKE_INSTALL_DIR?.trim();
+  return configured ? resolve(configured) : resolve(MODULE_DIR, "..", "..", ".setting", "beike");
+}
+
+/** CLI 使用的用户 HOME；Key 固定落在 <HOME>/.beike/BEIKE_MCP_API_KEY。 */
+export function resolveBeikeUserHome(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.BEIKE_USER_HOME?.trim();
+  return configured ? resolve(configured) : homedir();
+}
+
+export function resolveBeikeCredentialFile(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveBeikeUserHome(env), ".beike", "BEIKE_MCP_API_KEY");
+}
+
+export const BEIKE_DIR = resolveBeikeInstallDir();
+const BEIKE_CLI_PATH = process.env.BEIKE_CLI_PATH?.trim() || "";
 const BEIKE_MANIFEST_URL =
   "https://raw.githubusercontent.com/LianjiaTech/beike-ai-platform/master/cli/releases/manifest.json";
 const BEIKE_SOURCE_MAX_LENGTH = 40;
@@ -68,7 +85,7 @@ const BEIKE_KEY_URL = `https://building.ke.com/?action=get-key&source=${BEIKE_LO
 const BEIKE_MCP_URL = "https://building.ke.com/mcp";
 const BEIKE_LOGIN_HOST_ALLOW = new Set(["building.ke.com"]);
 /** 贝壳 CLI 的凭证存储文件；只读 stat 指纹用于判断用户是否已换 Key。 */
-const BEIKE_CRED_FILE = join(homedir(), ".beike", "BEIKE_MCP_API_KEY");
+const BEIKE_CRED_FILE = resolveBeikeCredentialFile();
 
 /** 让 beike CLI 的 agent 探测命中 workbuddy → 请求头 User-Agent 变成
  * beike-cli/<版本> (workbuddy; windows/x86_64)。服务端按 UA 识别调用方身份，
@@ -87,6 +104,7 @@ const BEIKE_AGENT_DETECT_HIGHER_KEYS = [
 const BEIKE_RUN_TIMEOUT_MS = 90_000;      // 单条 beike 子进程最长执行时间
 const BEIKE_ANALYZE_TIMEOUT_MS = 20_000;  // 每轮需求上报的兜底退出时间
 const BEIKE_INSTALL_TIMEOUT_MS = 600_000; // 整个安装流程（下载 ~32MB + 解压）
+const BEIKE_EXTRACT_TIMEOUT_MS = 120_000; // tar 解压的独立超时
 const MANIFEST_TIMEOUT_MS = 30_000;
 const KEY_AUTH_TIMEOUT_MS = 30_000;
 
@@ -158,13 +176,16 @@ export interface BeikeStatus {
 
 /** 组装 beike 子进程环境：来源标识 + UA 身份锁定（导出供测试）。
  * 探测表按优先级命中，宿主的 CODEX_* 与 CLAUDE_* 键必须先删，workbuddy 才能生效。 */
-export function buildBeikeChildEnv(): NodeJS.ProcessEnv {
-  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+export function buildBeikeChildEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = { ...baseEnv };
   for (const probe of BEIKE_AGENT_DETECT_HIGHER_KEYS) delete childEnv[probe];
   // 登录链接、CLI 上报与鉴权必须使用同一个来源标识，避免 Key 与调用方身份错配。
   childEnv.BEIKE_SOURCE = BEIKE_LOGIN_SOURCE;
   // WORKBUDDY_SESSION_ID 是 CLI agent 探测表的 workbuddy 键：存在且无更高优先级键时，UA 标为 workbuddy。
   childEnv.WORKBUDDY_SESSION_ID = BEIKE_UA_SESSION_ID;
+  // CLI 按 HOME/USERPROFILE 定位 ~/.beike；容器必须把这里固定到持久化数据卷。
+  childEnv.HOME = resolveBeikeUserHome(baseEnv);
+  if (process.platform === "win32") childEnv.USERPROFILE = childEnv.HOME;
   return childEnv;
 }
 
@@ -358,16 +379,63 @@ async function activateBeikeLoginGate(): Promise<BeikeLoginGate> {
   return gate;
 }
 
-/** 探测可用的 beike 二进制：配置路径优先，其次 PATH 里的 beike */
-async function resolveBeikeBin(): Promise<{ path: string; version: string } | null> {
-  const candidates: string[] = [];
-  if (saved.beikeCliPath) candidates.push(saved.beikeCliPath);
-  candidates.push("beike");
-  for (const bin of candidates) {
-    const r = await runBeikeRaw(bin, ["--version"], 15_000);
+/** 官方 manifest 使用 windows/linux/darwin + amd64/arm64 命名，需与 Node 平台值解耦。 */
+export interface BeikeManifestTarget {
+  os: "windows" | "linux" | "darwin";
+  arch: "amd64" | "arm64";
+}
+
+export function beikeManifestTarget(platform: NodeJS.Platform, arch: string): BeikeManifestTarget {
+  const os = platform === "win32" ? "windows" : platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : null;
+  const normalizedArch = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null;
+  if (!os || !normalizedArch) throw new Error(`暂不支持平台 ${platform}/${arch}`);
+  return { os, arch: normalizedArch };
+}
+
+/** 使用固定系统 tar，避免 PATH 被替换后执行同名程序。 */
+export function beikeTarCommand(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  fileExists: (path: string) => boolean = existsSync,
+): string {
+  if (platform === "win32") return join(env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+  return ["/usr/bin/tar", "/bin/tar"].find(fileExists) ?? "/usr/bin/tar";
+}
+
+/** 在安装目录中定位官方可执行文件；Windows 找 beike*.exe，Unix 找 beike*。 */
+export async function findBeikeExecutable(root: string, platform: NodeJS.Platform = process.platform): Promise<string | null> {
+  let entries: Dirent<string>[] = [];
+  try {
+    entries = await fsp.readdir(root, { recursive: true, withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const files = entries.filter((entry) => entry.isFile());
+  const preferred = platform === "win32" ? "beike.exe" : "beike";
+  const exact = files.find((entry) => entry.name.toLowerCase() === preferred);
+  const fallback = files.find((entry) => platform === "win32"
+    ? /^beike.*\.exe$/i.test(entry.name)
+    : /^beike(?:[-_.].*)?$/i.test(entry.name));
+  const hit = exact ?? fallback;
+  return hit ? join(hit.parentPath, hit.name) : null;
+}
+
+/** 探测顺序：显式环境变量 → 已保存路径 → 自装目录 → PATH。 */
+async function resolveBeikeBin(): Promise<{ path: string; version: string; source: "env" | "managed" | "path" } | null> {
+  const managed = await findBeikeExecutable(BEIKE_DIR);
+  const candidates: Array<{ path: string; source: "env" | "managed" | "path" }> = [];
+  if (BEIKE_CLI_PATH) candidates.push({ path: BEIKE_CLI_PATH, source: "env" });
+  if (saved.beikeCliPath) candidates.push({ path: saved.beikeCliPath, source: "managed" });
+  if (managed) candidates.push({ path: managed, source: "managed" });
+  candidates.push({ path: "beike", source: "path" });
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.path)) continue;
+    seen.add(candidate.path);
+    const r = await runBeikeRaw(candidate.path, ["--version"], 15_000);
     if (r.code === 0 && r.stdout.trim()) {
       const version = r.stdout.trim().split(/\r?\n/)[0].replace(/^beike\s*/i, "").trim();
-      return { path: bin, version };
+      return { ...candidate, version };
     }
   }
   return null;
@@ -381,9 +449,9 @@ export async function getEstatePublic(): Promise<BeikeStatus> {
     installed: Boolean(found),
     version: found?.version || saved.beikeVersion || "",
     path: found
-      ? (saved.beikeCliPath && found.path === saved.beikeCliPath ? "（自装目录）" : "PATH")
+      ? (found.source === "env" ? "环境变量 BEIKE_CLI_PATH" : found.source === "managed" ? "（自装目录）" : "PATH")
       : "",
-    hasOverride: Boolean(saved.beikeCliPath),
+    hasOverride: Boolean(BEIKE_CLI_PATH || saved.beikeCliPath),
     platform: process.platform,
     keyUrl: BEIKE_KEY_URL,
     loginRequired: Boolean(currentBeikeLoginGate()),
@@ -413,7 +481,7 @@ function unavailableJSON(err: unknown): BeikeUnavailable {
 }
 
 // ---------------------------------------------------------------------------
-// 安装：GitHub release 下载 + sha256 校验 + Windows tar.exe 解压 + 写配置
+// 安装：官方 manifest 选择平台 + GitHub release 下载 + sha256 校验 + 系统 tar 解压 + 写配置
 // ---------------------------------------------------------------------------
 interface ManifestBinaries {
   latest: string;
@@ -455,7 +523,7 @@ async function fetchTrustedRelease(url: string): Promise<Response> {
  */
 let installInFlight: Promise<BeikeStatus> | null = null;
 
-/** 下载安装 beike CLI（仅 win32 自动化；其它平台提示用官方 install.sh）。 */
+/** 下载安装 beike CLI：使用官方 manifest 自动覆盖 Windows / Linux / macOS。 */
 export async function installBeike(): Promise<BeikeStatus> {
   if (installInFlight) return installInFlight;
   installInFlight = doInstallBeike().finally(() => { installInFlight = null; });
@@ -464,59 +532,59 @@ export async function installBeike(): Promise<BeikeStatus> {
 
 async function doInstallBeike(): Promise<BeikeStatus> {
   await ensureLoaded();
-  const os = process.platform;
-  const arch = os === "win32" ? "x64" : process.arch;
-  if (os !== "win32" && os !== "linux" && os !== "darwin") {
-    throw new Error(`暂不支持平台 ${os}，请手动安装贝壳 CLI`);
-  }
-  // Windows 自动化依赖系统自带 tar.exe 解 .tar.gz；linux/mac 引导 install.sh（官方脚本）
-  if (os === "win32") {
-    // 官方 manifest 使用自己的平台命名：Windows/x64 对应 windows/amd64。
-    const bin = await pickLatestBinary("windows", "amd64");
-    if (!bin) throw new Error("未找到可用的官方二进制");
-    await fsp.mkdir(BEIKE_DIR, { recursive: true });
-    // 先写 .part 临时名再 rename：防响应中断留下「看似可用」的半份压缩包
-    const archive = join(BEIKE_DIR, "beike-cli.tar.gz.part");
-    log("info", "estate_cli_download", { version: bin.version, url: bin.url });
+  const target = beikeManifestTarget(process.platform, process.arch);
+  const bin = await pickLatestBinary(target.os, target.arch);
+  if (!bin) throw new Error("未找到可用的官方二进制");
+  await fsp.mkdir(BEIKE_DIR, { recursive: true });
+
+  const archive = join(BEIKE_DIR, `.beike-cli-${randomUUID()}.tar.gz.part`);
+  const extractDir = join(BEIKE_DIR, `.install-${target.os}-${target.arch}-${bin.version}-${randomUUID().slice(0, 8)}`);
+  const previousPath = saved.beikeCliPath;
+  const previousVersion = saved.beikeVersion;
+  let installed = false;
+  try {
+    log("info", "estate_cli_download", { version: bin.version, os: target.os, arch: target.arch, url: bin.url });
     const res = await fetchTrustedRelease(bin.url);
     if (!res.ok) throw new Error(`下载贝壳 CLI 失败：HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    // sha256 校验：manifest 里给的是十六进制摘要，下载必须完全一致才落盘解压
+    // sha256 校验：manifest 里给的是十六进制摘要，下载必须完全一致才落盘解压。
     const digest = createHash("sha256").update(buf).digest("hex");
     if (digest.toLowerCase() !== bin.sha256.toLowerCase()) {
       throw new Error(`下载文件校验失败（sha256 不符），可能被网络劫持：${digest}`);
     }
     await fsp.writeFile(archive, buf);
-    // Windows 10+ 自带 tar.exe（bsdtar），支持 .tar.gz；用绝对路径避免 PATH 被换
-    const sysTar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
-    const tar = await runBeikeRaw(sysTar, ["-xzf", archive, "-C", BEIKE_DIR], 120_000);
+    await fsp.mkdir(extractDir, { recursive: true });
+    const tar = await runBeikeRaw(
+      beikeTarCommand(),
+      ["-xzf", archive, "-C", extractDir],
+      BEIKE_EXTRACT_TIMEOUT_MS,
+    );
     if (tar.code !== 0) throw new Error(`解压失败：${(tar.stderr || tar.stdout).slice(0, 300)}`);
-    await fsp.rm(archive, { force: true });
-    // 定位解压出来的 beike 可执行文件：优先 beike.exe，其次任意 beike*.exe
-    const entries = await fsp.readdir(BEIKE_DIR, { recursive: true, withFileTypes: true });
-    let exe = entries.find((e) => e.isFile() && /^beike\.exe$/i.test(e.name));
-    if (!exe) exe = entries.find((e) => e.isFile() && /^beike.*\.(exe)$/i.test(e.name));
-    if (!exe) throw new Error(`解压完成但没找到 beike 可执行文件（${BEIKE_DIR}）`);
-    const exePath = join(BEIKE_DIR, relative(BEIKE_DIR, join(exe.parentPath, exe.name)));
-    saved.beikeCliPath = exePath;
+    const executable = await findBeikeExecutable(extractDir);
+    if (!executable) throw new Error(`解压完成但没找到 beike 可执行文件（${target.os}/${target.arch}）`);
+    if (process.platform !== "win32") await fsp.chmod(executable, 0o755);
+    saved.beikeCliPath = executable;
     saved.beikeVersion = bin.version;
     await persistEstate();
-    // T1-6 审计：安装动作记录下载 URL / 版本 / 摘要，事后可追责与对账
+    installed = true;
+    // T1-6 审计：安装动作记录下载 URL / 版本 / 摘要，事后可追责与对账。
     writeAudit("beike.install", { url: bin.url, version: bin.version, sha256: bin.sha256, explicit: true });
-  } else {
-    throw new Error(
-      `本平台请用贝壳官方脚本安装：curl -fsSL ${BEIKE_MANIFEST_URL.replace(
-        "/manifest.json",
-        ""
-      )} 未提供 install.sh 的直链，请参考贝壳官方文档安装；安装后无需再配置（PATH 会被自动探测）`
-    );
+  } finally {
+    await fsp.rm(archive, { force: true }).catch(() => {});
+    if (!installed) {
+      saved.beikeCliPath = previousPath;
+      saved.beikeVersion = previousVersion;
+      await fsp.rm(extractDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
+
   const found = await resolveBeikeBin();
-  if (!found) throw new Error("安装完成但 beike --version 探测失败，请检查后重试");
+  if (!found) throw new Error("安装完成但 beike --version 探测失败，请检查解压目录与可执行权限");
   saved.beikeVersion = found.version;
   await persistEstate();
   return getEstatePublic();
 }
+
 
 // ---------------------------------------------------------------------------
 // 鉴权：Key 不再进 argv（T1-3），直接写官方凭证文件 + doctor 免费校验

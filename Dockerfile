@@ -84,7 +84,9 @@ ENV NODE_ENV=production \
     MEMORY_STORE_DIR=/data/memory-store \
     SKILLS_DIR=/data/skills \
     AUDIT_FILE=/data/audit.ndjson \
-    BACKUP_DIR=/data/backups
+    BACKUP_DIR=/data/backups \
+    BEIKE_INSTALL_DIR=/data/tools/beike \
+    BEIKE_USER_HOME=/data/beike-home
 
 COPY --from=production-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/package.json /app/tsconfig.json ./

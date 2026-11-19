@@ -7,7 +7,7 @@
  * 设计立场：
  *  - 所有外链与图片都过 safeHref / safeImageSrc 白名单（工具结果来自外部服务，不可信）；
  *  - 结论地图由原生瓦片渲染，这里只保留安全外链与工具结果；
- *  - 安装动作只对 Windows 开放（CLI 是 win32-x64 二进制），其它平台按钮禁用。
+ *  - 安装动作使用官方 manifest，覆盖 Windows / Linux / macOS 的 x64 与 arm64 官方二进制。
  */
 
 import { $ } from "../core/dom.js";
@@ -49,7 +49,7 @@ function renderEstatePanel(): void {
   if (st.installed) {
     setEstateStatus(`✓ 已安装贝壳 CLI${st.version ? " " + st.version : ""}${st.viaPATH ? "（来自系统 PATH）" : st.path ? "：" + st.path : ""}`, "ok");
   } else {
-    setEstateStatus(st.error ? `✗ ${st.error}` : "未检测到贝壳 CLI：点下方按钮自动安装（仅支持 Windows，约 32MB）", "err");
+    setEstateStatus(st.error ? `✗ ${st.error}` : "未检测到贝壳 CLI：点下方按钮下载当前平台的官方二进制（约 32MB）", "err");
   }
   const keyEl = $("estate-key") as HTMLInputElement | null;
   if (keyEl) keyEl.value = "";
@@ -82,7 +82,7 @@ export async function installBeikeCli(): Promise<void> {
     renderEstatePanel();
   } catch (err) {
     setEstateStatus(`✗ 安装失败：${(err as Error).message}`, "err");
-    if (s2) s2.textContent = "安装失败，可按官方文档手动安装后重试";
+    if (s2) s2.textContent = "安装失败，请检查安装目录写入权限，或设置 BEIKE_CLI_PATH 指向已安装的官方二进制";
   } finally {
     if (btn) btn.disabled = false;
   }

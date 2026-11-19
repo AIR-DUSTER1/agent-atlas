@@ -707,17 +707,21 @@ Header: Authorization: Bearer <key>（可留空）
 | 文件 | 职责 | 关键设计 |
 |---|---|---|
 | `server/estate-result.ts` | 富结果归一化 | 从贝壳 search 文本块提取结构化候选（id / 户型 / 面积 / 价格 / 小区 / VR 标记，租房与买房字段都兼容）；从 detail / material 的文本块中提取 `楼栋经纬度` / `小区经纬度`、`小区名称`、别名与 https 图片 URL（楼栋可用时优先，隐私隐藏时退回小区中心点），输出稳定 `location{lat,lng,embedUrl,links}` / `images[]` 契约；坐标按国内常见的「经度,纬度」解析并校验范围，原始 `data` 仍保留给模型，归一字段只用于可靠渲染 |
-| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 透传宿主真实来源（缺省 unknown））→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com/?action=get-key&source=${BEIKE_LOGIN_SOURCE}` 登录链接；手动入口只在系统默认浏览器打开一次，不执行会自行开页签的 `beike login`，不自动点击、不代扫、不后台换票；回调页由贝壳官方自身处理，用户点击页面 Key 右侧“复制”后回填剪贴板，服务端拒绝 `****` 掩码；`saveBeikeKey` 先跑 doctor，若 doctor 误报则按 CLI 同款请求头调用官方 `/mcp` 的 `tools/list` 做业务复验（`initialize` 不校验业务权限，不能作为放行依据）；凭证文件指纹变化或新 Key 通过校验后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
+| `server/estate.ts` | CLI 客户端 | `runBeikeThrottled`（全局并发 1、相邻启动 ≥1.5s，覆盖 analyze / 业务查询）→ `runBeikeRaw`（spawn，90s 超时，BEIKE_SOURCE 透传宿主真实来源（缺省 workbuddy））→ `parseBeikeJson`（优先整体 JSON.parse，坏了取最外层大括号）→ `BeikeOutcome{ok,action,data?,raw?,error?,stopAgent?}`；`invalid cli request` / 401 等认证失败会触发登录门禁，只准备静态 `building.ke.com/?action=get-key&source=${BEIKE_LOGIN_SOURCE}` 登录链接；手动入口只在系统默认浏览器打开一次，不执行会自行开页签的 `beike login`，不自动点击、不代扫、不后台换票；回调页由贝壳官方自身处理，用户点击页面 Key 右侧“复制”后回填剪贴板，服务端拒绝 `****` 掩码；`saveBeikeKey` 先跑 doctor，若 doctor 误报则按 CLI 同款请求头调用官方 `/mcp` 的 `tools/list` 做业务复验（`initialize` 不校验业务权限，不能作为放行依据）；凭证文件指纹变化或新 Key 通过校验后自动解禁；连续 2 次认证/业务失败熔断 60 秒；`CLI_UPGRADE_REQUIRED/-32001` **不自动重装**（人工确认 → 面板点「安装 CLI」）；Nominatim geocode 串行队列 ≥1.1s + 内存缓存（遵守 1 req/s） |
 | `tools-estate.ts` | 工具 schema | 8 个 zod 工具（`house_search/export/lookup/market/map/agents/appoint/contact`），`extractListings` 松散键名映射（贝壳返回字段不保证稳定）；`house_search` 新增 `near/radiusKm` 结构化参数，先把「左岸风度附近3公里内」拼成稳定查询，再返回 search 文本归一后的候选池（最多 50 条给模型筛选）；单次结果超过 12 套会自动生成 Excel，跨多次搜索汇总超过 12 套时由 `house_export` 写入 13–100 套完整对比清单；`house_lookup(detail/material)` 直接返回归一化后的 `location/images`；`house_map` 接受可选的 `lat/lng`，优先复用贝壳精确坐标而不是重新 geocode；登录失效返回 `{authRequired,loginUrl,loginOpened,stopAgent}`，`workflow.ts` 收到 `stopAgent:true` 后不再回模型重试，而是进入 `stopNotice` 节点生成确定的登录/处理指引；工具卡自动展开并显示「需要登录」 |
 | `server/estate-workbook.ts` + `server/xlsx-lite.ts` | Excel 交付 | 结论表只展示 12 套，超出部分写入 `.setting/estate-exports/<uuid>.xlsx`；`xlsx-lite` 用标准库生成单 sheet OOXML + store ZIP，支持筛选、冻结表头、自动换行与 VR/详情外链；`GET /api/estate/exports/:uuid` 受会话认证保护，路径只接受 UUID，中文下载名走 RFC 5987；内部 houseId 不写进用户可见列 |
 | `agent/estate.ts` | 图 | 与 `general.ts` 共用 `workflow.ts`（需求理解 / 澄清 / ReAct / 反思），只换工具与系统提示词 —— 顾问式找房流程（搜索门槛 / near+radiusKm 半径保留 / 少于 3 条时同半径补查变体 / 租房与买房分开 / 地图与材料作为默认交付 / 精确坐标复用 / 分间面积缺失时标待核实 / 禁编造 ID / 高风险复述 / 口径声明）；结论表最多 12 套，超过时强制生成 Excel；前端把地图、户型图和下载入口聚合为最终结论附件，挂到最后一条回答下方；工具卡与 tools 分组保持折叠，只保留执行轨迹 |
 
-**关键常量**（city 名尽量存表）：`ESTATE_RECOMMENDATION_LIMIT=12`、Excel 导出上限 `100` 套、`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_MCP_URL=https://building.ke.com/mcp`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `~/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录只访问 HTTPS + `building.ke.com` 精确 host；一次点击只打开一次系统浏览器，不做自动点击、轮询或代填登录票据。
+**关键常量**（city 名尽量存表）：`ESTATE_RECOMMENDATION_LIMIT=12`、Excel 导出上限 `100` 套、`BEIKE_CLI_CONCURRENCY=1`、`BEIKE_CLI_MIN_INTERVAL_MS=1_500`、`BEIKE_BREAKER_FAILURES=2`、`BEIKE_BREAKER_COOLDOWN_MS=60_000`、`BEIKE_RUN_TIMEOUT_MS=90_000`、`BEIKE_MCP_URL=https://building.ke.com/mcp`、`GEOCODE_MIN_INTERVAL_MS=1_100`（1 req/s 限流留余量）、`GEOCODE_MAX_ITEMS=6`、`MAX_RESULT_CHARS=26_000`。贝壳 Key 的保存（Phase 1 重写）：agentatlas 直接写官方凭证文件 `<BEIKE_USER_HOME>/.beike/BEIKE_MCP_API_KEY`（0o600），再跑 `beike doctor`（免费、只探 /mcp 工具清单不耗模型配额）判定「Key 有效」，新 Key 先暂存并跑 doctor，失败时恢复旧凭证，回显一律经 `redactSecret` 首尾保留 4 位掩码 —— **Key 不再进 argv**（进程列表可被同机其它用户读到）。登录只访问 HTTPS + `building.ke.com` 精确 host；一次点击只打开一次系统浏览器，不做自动点击、轮询或代填登录票据。
 
 **子进程边界（T1-4）**：`runBeikeRaw` 已改走 `subprocess.ts runControlled` —— stdout 头部
-4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/x64` 映射为官方 manifest 的 `windows/amd64`，并逐跳校验 GitHub Release 重定向；只信任 HTTPS host 白名单，下载
-缓冲溢出即拒，校验 sha256 后经 `.part` 临时名原子改名，tar 用 `%WINDIR%\System32\tar.exe`
-绝对路径；安装动作写审计（URL/version/sha256）。
+4MB、stderr 尾部 64KB、超时/中止树杀；安装链路（T1-6）把 Node `win32/linux/darwin` 与
+`x64/arm64` 映射为官方 manifest 的 `windows/linux/darwin` 与 `amd64/arm64`，并逐跳校验
+GitHub Release 重定向；只信任 HTTPS host 白名单，下载缓冲溢出即拒，校验 sha256 后解压到
+版本化临时目录。Windows 使用 `%WINDIR%\System32\tar.exe`，Linux/macOS 使用 `/usr/bin/tar`；
+Unix 二进制安装后强制 `0755`。`BEIKE_INSTALL_DIR` 可覆盖自装目录，`BEIKE_USER_HOME` 固定 CLI
+的 `HOME`，`BEIKE_CLI_PATH` 可接管已授权/已挂载二进制；Docker 默认安装目录为
+`/data/tools/beike`、凭证 HOME 为 `/data/beike-home`。安装动作写审计（URL/version/sha256）。
 
 **高风险操作**：`house_appoint`（预约带看）、`house_contact`（加微信）已登记 hitl.ts 的
 `APPROVAL_TOOLS` —— 它们会把真实请求发给贝壳侧的真实经纪人，必须人工批准后执行。

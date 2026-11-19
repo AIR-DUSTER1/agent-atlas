@@ -4,9 +4,24 @@
  * 守：CLI exit 0 但 JSON 顶层 ok:false/error 时，必须识别为业务失败。
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { assertTrustedInstallUrl, beikeBusinessError, buildBeikeChildEnv, isBeikeAuthFailure, normalizeBeikeSource, probeBeikeMcpKey } from "../../src/server/estate.js";
+import {
+  assertTrustedInstallUrl,
+  beikeBusinessError,
+  beikeManifestTarget,
+  beikeTarCommand,
+  buildBeikeChildEnv,
+  findBeikeExecutable,
+  isBeikeAuthFailure,
+  normalizeBeikeSource,
+  probeBeikeMcpKey,
+  resolveBeikeCredentialFile,
+  resolveBeikeInstallDir,
+  resolveBeikeUserHome,
+} from "../../src/server/estate.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../src/config.js";
 import { buildStaticMapUrl, parseStaticMapQuery } from "../../src/server/map-static.js";
@@ -142,18 +157,66 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.match(client, /navigator\.clipboard.*readText/);
   assert.match(client, /pasteEstateKeyFromClipboard/);
   assert.match(client, /从剪贴板读取/);
-  assert.match(html, /id="estate-key-link"[^>]+source=unknown/);
+  assert.match(html, /id="estate-key-link"[^>]+source=workbuddy/);
   assert.match(html, /estate-key-paste/);
   assert.match(html, /页面显示的是掩码/);
   assert.match(source, /检测到的是页面掩码/);
   assert.doesNotMatch(html, /登录窗口由 agentatlas 托管|estate-login-recover/);
 });
 
-test("Windows 安装器使用官方 manifest 的 windows 平台键", async () => {
-  const source = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
-  assert.match(source, /pickLatestBinary\("windows", "amd64"\)/);
-  assert.doesNotMatch(source, /pickLatestBinary\("win32", "x64"\)/);
-  assert.doesNotMatch(source, /pickLatestBinary\("windows", "x64"\)/);
+test("贝壳安装器把 Node 平台映射为官方 manifest 的 os/arch", () => {
+  assert.deepEqual(beikeManifestTarget("win32", "x64"), { os: "windows", arch: "amd64" });
+  assert.deepEqual(beikeManifestTarget("linux", "x64"), { os: "linux", arch: "amd64" });
+  assert.deepEqual(beikeManifestTarget("linux", "arm64"), { os: "linux", arch: "arm64" });
+  assert.deepEqual(beikeManifestTarget("darwin", "arm64"), { os: "darwin", arch: "arm64" });
+  assert.throws(() => beikeManifestTarget("aix", "x64"), /暂不支持平台/);
+  assert.throws(() => beikeManifestTarget("linux", "ia32"), /暂不支持平台/);
+});
+
+test("贝壳安装目录、CLI HOME 与 tar 命令可跨平台覆盖", () => {
+  const installDir = resolveBeikeInstallDir({ BEIKE_INSTALL_DIR: "/data/tools/beike" });
+  assert.equal(installDir, resolveBeikeInstallDir({ BEIKE_INSTALL_DIR: " /data/tools/beike " }));
+  assert.match(installDir, /data[\\/]tools[\\/]beike$/);
+  assert.equal(resolveBeikeUserHome({ BEIKE_USER_HOME: "/data/beike-home" }), resolveBeikeInstallDir({ BEIKE_INSTALL_DIR: "/data/beike-home" }));
+  assert.match(resolveBeikeCredentialFile({ BEIKE_USER_HOME: "/data/beike-home" }), /data[\\/]beike-home[\\/]\.beike[\\/]BEIKE_MCP_API_KEY$/);
+  assert.equal(beikeTarCommand("linux", {}, (path) => path === "/bin/tar"), "/bin/tar");
+  assert.equal(beikeTarCommand("darwin", {}, () => false), "/usr/bin/tar");
+  assert.equal(beikeTarCommand("win32", { SystemRoot: "C:\\Windows" }), join("C:\\Windows", "System32", "tar.exe"));
+});
+
+test("贝壳子进程 HOME 指向持久化目录，确保容器内 Key 不落到只读根文件系统", () => {
+  const home = resolveBeikeUserHome({ BEIKE_USER_HOME: "/data/beike-home" });
+  const env = buildBeikeChildEnv({ ...process.env, BEIKE_USER_HOME: "/data/beike-home" });
+  assert.equal(env.HOME, home);
+  assert.equal(env.BEIKE_SOURCE, "workbuddy");
+  assert.equal(env.WORKBUDDY_SESSION_ID, "estate-workbench");
+});
+
+test("自装目录可在嵌套路径中找到 Unix beike 与 Windows beike.exe", async () => {
+  const root = await mkdtemp(join(tmpdir(), "beike-executable-"));
+  try {
+    const nested = join(root, "linux-amd64-v1");
+    await mkdir(nested, { recursive: true });
+    const unixBinary = join(nested, "beike");
+    await writeFile(unixBinary, "fixture", "utf8");
+    assert.equal(await findBeikeExecutable(root, "linux"), unixBinary);
+    const windowsBinary = join(nested, "beike.exe");
+    await writeFile(windowsBinary, "fixture", "utf8");
+    assert.equal(await findBeikeExecutable(root, "win32"), windowsBinary);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("房产面板不再限定 Windows，并提示 Linux/macOS 与 BEIKE_CLI_PATH", async () => {
+  const [client, html] = await Promise.all([
+    readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/pages/overlays/estate.html", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(client, /仅支持 Windows/);
+  assert.match(client, /当前平台的官方二进制/);
+  assert.match(html, /Linux \/ macOS/);
+  assert.match(html, /BEIKE_CLI_PATH/);
 });
 
 test("保存 Key 的失败原因完整展示，不回退成未知错误", async () => {

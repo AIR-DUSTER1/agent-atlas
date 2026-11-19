@@ -119,6 +119,8 @@ docker run --rm \
 
 根文件系统为只读，只有 `/data` 和 256 MiB 临时 `/tmp` 可写。必须保证宿主机目录仅由受信任管理员与服务用户访问。
 
+贝壳 CLI 默认安装到 `/data/tools/beike`，凭证 HOME 为 `/data/beike-home`，因此容器升级或重启后仍保留。生产环境也可挂载用户已授权的官方 Linux 二进制，并设置 `BEIKE_CLI_PATH`；不要将商业授权的 CLI 二进制打进公共镜像。
+
 ## 6.1 PostgreSQL 多用户模式
 
 默认 `STATE_BACKEND=file`。生产多用户请启用：

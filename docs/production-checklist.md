@@ -58,6 +58,7 @@
 - [ ] **P1** 默认镜像内置 Chrome Headless Shell；已确认 `BROWSER_USE_EXECUTABLE_PATH` 可执行，并设置内存、`pids_limit: 512` 和 256 MiB `/tmp`。
 - [ ] **P1** 默认镜像 rootfs 不超过 700 MiB；明确关闭 Browser Use 时才使用 `--target minimal`。
 - [ ] **P1** 启用 Browser Use 时已配置出站网络策略；应用默认拒绝私网，仍需在网络层阻断云元数据、管理网段和不需要的内网目标。
+- [ ] **P1** 启用贝壳插件时确认 `BEIKE_INSTALL_DIR` 与 `BEIKE_USER_HOME` 位于持久化 `/data`，或 `BEIKE_CLI_PATH` 指向挂载的已授权 Linux 二进制。
 - [ ] **P1** 标准备份、恢复、升级和回滚步骤由非开发者演练通过。
 
 ## 质量门
