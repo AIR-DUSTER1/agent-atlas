@@ -285,6 +285,7 @@ export async function collectVersioningIssues(root = PROJECT_ROOT): Promise<stri
   if (!readme.includes(`version-${badgeVersion}-`)) issues.push(`README.md 版本徽章未同步到 ${version}`);
 
   for (const relative of [
+    "docs/product-wiki.md",
     "docs/production-checklist.md",
     "docs/deployment.md",
     "docs/self-hosting.md",

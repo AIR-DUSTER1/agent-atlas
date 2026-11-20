@@ -340,6 +340,7 @@ npm run build:client
 
 | 文档 | 内容 |
 |---|---|
+| [功能 Wiki](docs/product-wiki.md) | 当前版本功能地图、操作路径、扩展能力与能力边界 |
 | [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |
 | [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
 | [快速自托管](docs/self-hosting.md) | 准备生产环境、启动、自检与数据目录 |
