@@ -36,6 +36,10 @@
               <span class="sn-icon"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i></span>
               <span class="sn-copy"><strong>路由决策</strong><small>按请求自动挑子代理</small></span>
             </button>
+            <button type="button" class="settings-nav-item" data-settings-view="tracing" role="tab" aria-selected="false" aria-controls="settings-view-tracing">
+              <span class="sn-icon"><i class="ui-icon" data-icon="Activity" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>链路追踪</strong><small>LangSmith 可选上报与脱敏</small></span>
+            </button>
           </div>
           <div class="settings-nav-group" data-settings-group="extensions">
             <div class="settings-nav-group-title">扩展</div>
@@ -71,6 +75,7 @@
         <!-- @include ./plugins.html -->
         <!-- @include ./subagents.html -->
         <!-- @include ./routing.html -->
+        <!-- @include ./tracing.html -->
         <!-- @include ./memories.html -->
         <!-- @include ./commands.html -->
         <!-- @include ./skills.html -->

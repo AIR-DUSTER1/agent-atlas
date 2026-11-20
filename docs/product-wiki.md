@@ -545,6 +545,20 @@ API Key 在界面和 API 中只返回掩码；真实 Key 不会出现在日志�
 
 生产前必须配置 `DATA_KEY`、认证、HTTPS、Cookie Secure 和备份策略。
 
+### 14.4 LangSmith 链路追踪
+
+LangSmith 是默认关闭的可选观测能力。开启后，主 Agent 的节点、工具和模型调用会通过 LangChain callback 异步上报到 LangSmith，形成单轮任务的执行瀑布图。
+
+- 配置入口：设置 → 链路追踪
+- 默认状态：关闭
+- Key：只回显掩码，编辑留空保持，显式勾选清除才删除
+- 元数据：`agent_id=agentatlas`、`agent_environment=local`，并附带 sessionId / profileId
+- 脱敏：手机号、身份证、银行卡和常见凭据在 Client 上报边界替换
+- endpoint：必须使用公网 HTTPS 地址，拒绝 userinfo、loopback 和私有 IP 字面量
+- 失败降级：缺少 Key、endpoint 非法或网络失败不会中断主对话
+
+开启即允许对话内容发送到 LangSmith；该能力不替代本地 journal、审计、指标和 `task_usage`。详细说明见 [LangSmith 链路追踪](langsmith-tracing.md)。
+
 ## 15. 部署与运维
 
 ### 15.1 单实例 Docker

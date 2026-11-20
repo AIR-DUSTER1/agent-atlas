@@ -77,6 +77,13 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
       PORT: String(port),
       API_KEY: "",              // mock 模式：不碰真实模型
       AMAP_WEB_SERVICE_KEY: "", // 不继承用户地图 Key，避免测试触网或泄露
+      // 测试不继承开发者 .env 中的 LangSmith 配置，避免 trace 出网或改变默认形态。
+      TRACE_BACKEND: "off",
+      LANGSMITH_TRACING: "false",
+      LANGSMITH_API_KEY: "",
+      LANGSMITH_ENDPOINT: "https://api.smith.langchain.com",
+      LANGSMITH_AGENT_ID: "agentatlas",
+      LANGSMITH_AGENT_ENVIRONMENT: "local",
       AMAP_KEY: "",
       TENCENT_MAP_KEY: "",
       BAIDU_MAP_AK: "",

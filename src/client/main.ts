@@ -45,6 +45,7 @@ import {
 import { currentlySelectedProvider, renderProviderList } from "./views/model-panel.js";
 import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
+import { bindTracingSettings } from "./views/settings-tracing.js";
 import { loadPluginState } from "./views/settings-plugins.js";
 import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { refreshBackups } from "./views/settings-backup.js";
@@ -216,6 +217,7 @@ async function init(): Promise<void> {
   on("side-model", "click", () => openSettings("models"));
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
+  bindTracingSettings();
   bindMcpSettings();
   bindSubagentSettings();
   bindCommandSettings();

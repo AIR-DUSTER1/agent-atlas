@@ -46,6 +46,7 @@ import { createServer } from "node:http";
 import { config } from "../config.js";
 import { PRODUCT_NAME } from "../product.js";
 import { bumpConfigVersion, getSessionByThreadForOwner, restoreSessions, ensureOwnerSessions } from "./sessions.js";
+import { loadTraceSettings } from "./trace-settings.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
 import { ensureProjectsLoaded, loadProjects } from "./projects.js";
 import { loadExternalAgents } from "./external.js";
@@ -57,6 +58,7 @@ import { loadSubagentSettings } from "./subagent-settings.js";
 import { configureRoutingVectorProbe, loadRoutingSettings } from "./routing-settings.js";
 import { createRagVectorFinder, syncRoutingIndex } from "./routing-vector.js";
 import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
+import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
 import { configureRoutingBreaker, configureRoutingVectorFinder } from "../routing/state.js";
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
@@ -195,6 +197,7 @@ try {
   await ensureBootstrapAdmin();
   await runPersistenceMigrations();
   await loadSettings();
+  await loadTraceSettings();
   await loadSubagentSettings();
   await assertProductionRuntimeReady({
     apiKey: config.apiKey,
@@ -258,6 +261,7 @@ function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
     return pathname === "/api/models"
       || pathname.startsWith("/api/memory/config")
       || pathname.startsWith("/api/backup")
+      || pathname === "/api/tracing"
       || pathname.startsWith("/api/diagnostics");
   }
   return pathname === "/api/models"
@@ -274,6 +278,7 @@ function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
     || pathname.startsWith("/api/rag/")
     || pathname.startsWith("/api/external-agents/")
     || pathname.startsWith("/api/backup")
+    || pathname === "/api/tracing"
     || pathname.startsWith("/api/diagnostics");
 }
 const server = createServer(async (req, res) => {
@@ -428,6 +433,10 @@ const server = createServer(async (req, res) => {
     if (providerMatch && req.method === "DELETE") { await handleDeleteProvider(res, req, providerMatch[1]); return; }
     if (pathname === "/api/config/activate" && req.method === "POST") { await handleActivate(res, req); return; }
     if (pathname === "/api/models" && req.method === "POST") { await handleModels(res, req); return; }
+
+    // LangSmith 追踪设置（只保存配置；真正上报发生在 runGraphEvents 的 callback 注入点）
+    if (pathname === "/api/tracing" && req.method === "GET") { handleGetTracing(res); return; }
+    if (pathname === "/api/tracing" && req.method === "PUT") { await handleSaveTracing(res, req); return; }
 
     // 内置插件启停（RAG / 找房数据源 / Computer Use）
     if (pathname === "/api/plugins" && req.method === "GET") { handleListPlugins(res); return; }

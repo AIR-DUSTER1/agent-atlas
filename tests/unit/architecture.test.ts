@@ -43,7 +43,8 @@ async function violations(dir: string, forbidden: RegExp): Promise<string[]> {
   for (const file of await listTs(dir)) {
     const rel = relative(ROOT, file).replaceAll("\\", "/");
     for (const spec of importsOf(await readFile(file, "utf8"))) {
-      if (forbidden.test(spec)) found.push(`${rel} -> ${spec}`);
+      // 只检查本地模块边界；`langsmith/client` 等第三方子路径不应被误判为 src/client。
+      if (spec.startsWith(".") && forbidden.test(spec)) found.push(`${rel} -> ${spec}`);
     }
   }
   return found;

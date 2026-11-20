@@ -27,12 +27,17 @@ import type { PermissionMode } from "../agent/permission.js";
 import type { AgentProfileId } from "../agent/profile.js";
 import { log } from "./logging.js";
 import { getActiveModelLabel } from "./settings.js";
+import { getTraceSettings } from "./trace-settings.js";
+import { buildTraceMetadata, createTraceCallbacks } from "../agent/trace.js";
 import { AGENT_RECURSION_LIMIT, config } from "../config.js";
 import { incCounter } from "./observability/metrics.js";
 import { WORKFLOW_PLAN_TOOL_NAME, type WorkflowPlanSnapshot } from "../workflow-plan.js";
 
 /** 这些节点会调用模型，但产出是内部 JSON，不属于用户可见回答，必须过滤。 */
 const INTERNAL_LLM_NODES = new Set(["analyze", "clarify", "review", "tools", "planProgress", "route", "routeAsk", "dispatch"]);
+
+/** 同一条 trace 配置错误只告警一次，避免每轮对话刷日志。 */
+let lastTraceWarning = "";
 
 /**
  * 连续模式的超步保险丝：一个回炉周期 ≈ 3-6 超步（agent/tools/review 各算一次），
@@ -384,6 +389,34 @@ export async function* runGraphEvents(
 ): AsyncGenerator<AgentEvent> {
   // 本轮用量事件的模型标注：一次流一次取值（轮中途切模型不影响进行中的流）
   const usageModel = getActiveModelLabel() || undefined;
+  // 追踪只覆盖真实 Web Agent 会话；demo 没有 profileId 时不产生 LangSmith 上报。
+  const traceSettings = options.agentProfileId ? getTraceSettings() : null;
+  const trace = traceSettings ? await createTraceCallbacks(traceSettings) : { callbacks: [] };
+  if (trace.warning) {
+    if (trace.warning !== lastTraceWarning) {
+      log("warn", "trace_disabled", { reason: trace.warning });
+      lastTraceWarning = trace.warning;
+    }
+  } else {
+    lastTraceWarning = "";
+  }
+  const traceMetadata = trace.callbacks.length && options.agentProfileId && traceSettings
+    ? buildTraceMetadata(
+      options.threadId,
+      options.agentProfileId,
+      traceSettings.agentId,
+      traceSettings.agentEnvironment,
+    )
+    : null;
+  if (trace.callbacks.length && traceSettings) {
+    log("debug", "trace_callback_injected", {
+      project: traceSettings.project,
+      agentId: traceSettings.agentId,
+      agentEnvironment: traceSettings.agentEnvironment,
+      profileId: options.agentProfileId,
+      sessionId: options.threadId,
+    });
+  }
   const stream = await graph.stream(input, {
     streamMode: ["messages", "updates"],
     // 业务层不限制任务时长 / 调用次数；图运行用 1000 超步兜底，避免正常长任务触发默认 25 步上限。
@@ -401,6 +434,8 @@ export async function* runGraphEvents(
       ...(options.continuous ? { continuous: true } : {}),
     },
     signal: options.signal,
+    ...(trace.callbacks.length ? { callbacks: trace.callbacks } : {}),
+    ...(traceMetadata ? { metadata: traceMetadata } : {}),
   });
 
   const streamedIds = new Set<string>();          // messages 模式已流式输出过的正文消息 id

@@ -34,7 +34,7 @@ test("设置页包含返回按钮、全部分区与集中面板", async () => {
   const html = await readClientIndexHtml();
   assert.match(html, /id="settings-page"/);
   assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('class="settings-nav-item active"'));
-  for (const view of ["models", "plugins", "subagents", "memories", "stats"]) {
+  for (const view of ["models", "plugins", "subagents", "tracing", "memories", "stats"]) {
     assert.match(html, new RegExp(`data-settings-panel="${view}"`));
   }
   assert.doesNotMatch(html, /id="(settings|memories|stats)-mask"/);
@@ -59,6 +59,23 @@ test("设置页大标题不再重复展示说明文案", async () => {
   assert.doesNotMatch(settingsPage, /<p class="settings-sub">/);
   assert.doesNotMatch(settingsPage, /模型、插件、子代理、长期记忆与使用统计集中管理/);
 });
+test("链路追踪设置页支持安全 opt-in、Key 掩码和保存契约", async () => {
+  const html = await readClientIndexHtml();
+  const source = await readClientFiles(["views/settings-tracing.ts", "views/settings.ts", "main.ts"]);
+  for (const id of [
+    "settings-view-tracing", "tracing-enabled", "tracing-backend", "tracing-project",
+    "tracing-endpoint", "tracing-agent-id", "tracing-agent-environment", "tracing-api-key", "tracing-clear-key", "tracing-anonymize",
+    "tracing-warning", "tracing-status", "tracing-save-btn",
+  ]) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /data-settings-view="tracing"/);
+  assert.match(html, /开启即表示允许对话内容发送到 LangSmith/);
+  assert.match(source, /\/api\/tracing/);
+  assert.match(source, /method: "PUT"/);
+  assert.match(source, /bindTracingSettings/);
+  assert.match(source, /tracing-clear-key/);
+  assert.doesNotMatch(source, /innerHTML/);
+});
+
 test("前端通过独立页面函数切换分区并统一关闭", async () => {
     const app = await readClientSource();
   assert.match(app, /function openSettings\(view = "models"/);

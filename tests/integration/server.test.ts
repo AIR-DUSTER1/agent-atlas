@@ -113,6 +113,56 @@ test("healthz / readyz 与 config 形状（mock 模式）", async () => {
   assert.equal(cfg.body.contextBudget.contextWindow, 200_000);
 });
 
+test("LangSmith 追踪配置 API 默认关闭、Key 只回掩码并可清除", async () => {
+  const initial = await json("/api/tracing");
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.backend, "off");
+  assert.equal(initial.body.hasApiKey, false);
+  assert.equal(initial.body.effective, false);
+  assert.equal(initial.body.endpoint, "https://api.smith.langchain.com");
+  assert.equal(initial.body.agentId, "agentatlas");
+  assert.equal(initial.body.agentEnvironment, "local");
+
+  const saved = await json("/api/tracing", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      backend: "langsmith",
+      apiKey: "lsv2-integration-secret",
+      project: "agentatlas-integration",
+      endpoint: "https://api.smith.langchain.com",
+      agentId: "agentatlas",
+      agentEnvironment: "local",
+      anonymize: true,
+    }),
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.backend, "langsmith");
+  assert.equal(saved.body.hasApiKey, true);
+  assert.equal(saved.body.effective, true);
+  assert.notEqual(saved.body.keyMasked, "lsv2-integration-secret");
+
+  const reread = await json("/api/tracing");
+  assert.equal(reread.body.keyMasked, saved.body.keyMasked);
+
+  const cleared = await json("/api/tracing", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backend: "off", apiKey: "" }),
+  });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.backend, "off");
+  assert.equal(cleared.body.hasApiKey, false);
+
+  const invalid = await json("/api/tracing", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backend: "langsmith", endpoint: "http://127.0.0.1:3000" }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.body.error, /https|内网/);
+});
+
 test("有 API_KEY 时仍从 .env 播种默认供应商", async () => {
   const seeded = await startServer({
     API_KEY: "test-only-env-key",

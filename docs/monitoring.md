@@ -19,7 +19,11 @@
 - 长期记忆：`memory_save_total`、`memory_recall_hit_total`、`memory_injected_total`、`memory_provider_latency_milliseconds`、`memory_provider_degraded_total`、`memory_sensitive_blocked_total`、`memory_provider_health`、`memory_distillation_candidate_total`、`memory_distillation_auto_saved_total`、`memory_lifecycle_maintenance_failed_total`；
 - 进程：uptime、RSS、heap、event loop lag。
 
-## 2. Prometheus 抓取
+## 2. LangSmith 链路追踪（可选）
+
+需要查看单轮任务的节点、工具和模型调用瀑布图时，可以在设置页显式开启 [LangSmith 链路追踪](langsmith-tracing.md)。该能力默认关闭，开启后对话内容会出网；trace 只作为旁路观测，不替代 Prometheus、审计、journal 或 `task_usage`。
+
+## 3. Prometheus 抓取
 
 ```yaml
 scrape_configs:
@@ -35,7 +39,7 @@ scrape_configs:
 
 `METRICS_TOKEN` 只授权 `/metrics`，不是控制面凭据。轮换后同步更新 secret 文件。
 
-## 3. 建议告警
+## 4. 建议告警
 
 | 告警 | 条件示例 | 处置 |
 |---|---|---|
@@ -51,7 +55,7 @@ scrape_configs:
 | 记忆检索降级 | `increase(memory_provider_degraded_total[10m]) > 0` | 查 HTTP 记忆 `/health`、认证与超时；聊天可继续，不应触发 ready 摘流 |
 | 记忆敏感拦截异常升高 | `increase(memory_sensitive_blocked_total[1h]) > 20` | 查用户 / Skill 提示是否诱导保存 secret；不要记录正文 |
 
-## 4. 日志
+## 5. 日志
 
 stdout 为一行一个 JSON：
 
@@ -67,7 +71,7 @@ stdout 为一行一个 JSON：
 - 生产 `LOG_LEVEL=info`，排障临时 `debug` 后及时恢复；
 - 容器日志轮转由 compose 的 `max-size` / `max-file` 控制。
 
-## 5. 审计
+## 6. 审计
 
 审计与普通日志分离，记录登录失败、外部 Agent、贝壳安装、审批与安全边界动作。达到阈值后轮转并生成 SHA-256 清单。
 
@@ -76,6 +80,6 @@ stdout 为一行一个 JSON：
 - `data:check` 同时检查备份审计，不替代外部合规留存；
 - 发现写入失败时按 runbook 处置，不要静默删除。
 
-## 6. 客户端错误
+## 7. 客户端错误
 
 前端只上报错误摘要、版本、视图名，不上报 stack、对话、附件或密钥。突发客户端错误应关联最近一次前端发布的 `version`、`buildId` 与 `commit`。

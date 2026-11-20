@@ -447,6 +447,21 @@ export interface RoutingSettings {
   decideTimeoutMs: number;
 }
 
+export type TraceBackend = "off" | "langsmith";
+
+export interface TraceSettingsSnapshot {
+  backend: TraceBackend;
+  project: string;
+  endpoint: string;
+  anonymize: boolean;
+  agentId: string;
+  agentEnvironment: string;
+  hasApiKey: boolean;
+  keyMasked: string;
+  effective: boolean;
+  warning: string | null;
+}
+
 export interface RoutingSnapshot {
   settings: RoutingSettings;
   hasSystemoneKey: boolean;

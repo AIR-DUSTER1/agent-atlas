@@ -43,7 +43,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
 | 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆；上下文条精简展示占比、请求量、缓存与输出均速 |
-| 安全与运维 | 高风险审批、审计日志、设备静默认证、按设备隔离会话、配置加密、用量统计、备份恢复与 Prometheus 指标 |
+| 安全与运维 | 高风险审批、审计日志、设备静默认证、按设备隔离会话、配置加密、用量统计、备份恢复、Prometheus 指标与可选 LangSmith 链路追踪 |
 
 ## 界面预览
 
@@ -341,6 +341,7 @@ npm run build:client
 | 文档 | 内容 |
 |---|---|
 | [功能 Wiki](docs/product-wiki.md) | 当前版本功能地图、操作路径、扩展能力与能力边界 |
+| [LangSmith 链路追踪](docs/langsmith-tracing.md) | 可选追踪配置、数据流向、脱敏范围与关闭方式 |
 | [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |
 | [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
 | [快速自托管](docs/self-hosting.md) | 准备生产环境、启动、自检与数据目录 |

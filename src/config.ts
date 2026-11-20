@@ -14,6 +14,13 @@
 import "dotenv/config";
 import { DEFAULT_REASONING, type ReasoningSetting } from "./reasoning.js";
 
+// LangSmith 标准环境开关会被 @langchain/core 自动安装成全局 tracer；本项目需要按
+// 当前会话配置显式注入 callback，因此先捕获标准开关，再关闭自动 tracer，避免双上报。
+const LANGSMITH_TRACING_ENV = process.env.LANGSMITH_TRACING;
+for (const key of ["LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING", "LANGCHAIN_TRACING_V2"]) {
+  if (process.env[key]?.trim().toLowerCase() === "true") process.env[key] = "false";
+}
+
 /** LangGraph 超步上限：既给长任务留足执行空间，也保留失控循环的最终防线。 */
 export const AGENT_RECURSION_LIMIT = 1_000;
 
@@ -189,6 +196,31 @@ export function resolveMapStaticServiceConfig(env: Record<string, string | undef
   };
 }
 
+/** LangSmith 是可选出网追踪后端；默认关闭，避免本地对话在用户不知情时离开主机。 */
+export type TraceBackend = "off" | "langsmith";
+
+export interface TraceRuntimeConfig {
+  backend: TraceBackend;
+  apiKey: string;
+  project: string;
+  endpoint: string;
+  anonymize: boolean;
+  /** LangSmith trace metadata 中的 agent_id；默认 agentatlas。 */
+  agentId: string;
+  /** LangSmith trace metadata 中的 agent_environment；本地默认为 local。 */
+  agentEnvironment: string;
+}
+
+function resolveTraceBackend(raw: string | undefined, langsmithTracing?: string): TraceBackend {
+  const explicit = (raw ?? "").trim().toLowerCase();
+  if (explicit === "off") return "off";
+  if (explicit === "langsmith") return "langsmith";
+  const automatic = (langsmithTracing ?? "").trim().toLowerCase();
+  return automatic === "true" || automatic === "1" || automatic === "yes" || automatic === "on"
+    ? "langsmith"
+    : "off";
+}
+
 export const config = {
   /** 兼容 OpenAI 格式的 API 地址（例如 https://tokenrhythm.studio/v1） */
   baseURL: process.env.BASE_URL ?? "https://tokenrhythm.studio/v1",
@@ -227,6 +259,16 @@ export const config = {
   map: resolveMapRuntimeConfig(process.env),
   /** 高德静态地图代理的服务端 Key；不属于公开前端配置。 */
   mapStatic: resolveMapStaticServiceConfig(process.env),
+  /** LangSmith 追踪的 .env 默认值；.web-config.json 与运行中设置可覆盖。 */
+  trace: {
+    backend: resolveTraceBackend(process.env.TRACE_BACKEND, LANGSMITH_TRACING_ENV),
+    apiKey: process.env.LANGSMITH_API_KEY ?? "",
+    project: (process.env.LANGSMITH_PROJECT ?? "agentatlas").trim() || "agentatlas",
+    endpoint: (process.env.LANGSMITH_ENDPOINT ?? "https://api.smith.langchain.com").trim(),
+    anonymize: (process.env.LANGSMITH_ANONYMIZE ?? "true").trim().toLowerCase() !== "false",
+    agentId: (process.env.LANGSMITH_AGENT_ID ?? "agentatlas").trim() || "agentatlas",
+    agentEnvironment: (process.env.LANGSMITH_AGENT_ENVIRONMENT ?? "local").trim() || "local",
+  } satisfies TraceRuntimeConfig,
 } as {
   baseURL: string;
   apiKey: string;
@@ -237,6 +279,7 @@ export const config = {
   modelRequestRetries: number;
   map: MapRuntimeConfig;
   mapStatic: MapStaticServiceConfig;
+  trace: TraceRuntimeConfig;
 };
 
 export type Protocol = "openai" | "openai-responses" | "anthropic" | "gemini";

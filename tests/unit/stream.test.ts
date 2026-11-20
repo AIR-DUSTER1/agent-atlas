@@ -5,6 +5,7 @@ import { AGENT_RECURSION_LIMIT } from "../../src/config.js";
 import { runGraphEvents } from "../../src/server/stream.js";
 import type { AgentEvent } from "../../src/server/events.js";
 import { WORKFLOW_PLAN_TOOL_NAME, type WorkflowPlanSnapshot } from "../../src/workflow-plan.js";
+import { getTraceSettings, replaceTraceSettingsForTest } from "../../src/server/trace-settings.js";
 
 test("stream：长任务递归保护固定为 1000", async () => {
   let seenOptions: Record<string, unknown> | undefined;
@@ -55,6 +56,56 @@ test("stream：个性化上下文经 configurable 传入图", async () => {
     (seenOptions?.configurable as Record<string, unknown>)?.personalization_context,
     "称呼我为老王；回答先给结论。",
   );
+});
+
+test("stream：仅在主 Agent 且追踪开启时注入 callback 与内部 metadata", async () => {
+  const original = getTraceSettings();
+  try {
+    replaceTraceSettingsForTest({
+      backend: "langsmith",
+      apiKey: "lsv2-test-key",
+      project: "agentatlas-test",
+      endpoint: "https://api.smith.langchain.com",
+      anonymize: true,
+      agentId: "agentatlas",
+      agentEnvironment: "local",
+    });
+    let enabledOptions: Record<string, unknown> | undefined;
+    const enabledGraph = {
+      stream: async (_input: unknown, options: Record<string, unknown>) => {
+        enabledOptions = options;
+        return (async function* () {})();
+      },
+    };
+    for await (const _event of runGraphEvents(enabledGraph, {}, {
+      threadId: "trace-enabled-test",
+      agentProfileId: "general",
+    })) { /* 只校验运行参数。 */ }
+    assert.equal((enabledOptions?.callbacks as unknown[] | undefined)?.length, 1);
+    assert.deepEqual(enabledOptions?.metadata, {
+      sessionId: "trace-enabled-test",
+      profileId: "general",
+      agent_id: "agentatlas",
+      agent_environment: "local",
+    });
+
+    replaceTraceSettingsForTest({ ...original, backend: "off", apiKey: "" });
+    let disabledOptions: Record<string, unknown> | undefined;
+    const disabledGraph = {
+      stream: async (_input: unknown, options: Record<string, unknown>) => {
+        disabledOptions = options;
+        return (async function* () {})();
+      },
+    };
+    for await (const _event of runGraphEvents(disabledGraph, {}, {
+      threadId: "trace-disabled-test",
+      agentProfileId: "general",
+    })) { /* 关闭态不应注入。 */ }
+    assert.equal(disabledOptions?.callbacks, undefined);
+    assert.equal(disabledOptions?.metadata, undefined);
+  } finally {
+    replaceTraceSettingsForTest(original);
+  }
 });
 
 test("stream：过滤内部模型节点，保留可见回答与澄清 interrupt", async () => {

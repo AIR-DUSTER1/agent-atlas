@@ -46,6 +46,14 @@ test("递归加密 apiKey 与 MCP env，其他普通字段保持可读", () => {
   assert.equal(hasPlaintextSecrets(sealed), false);
 });
 
+test("LangSmith tracing.apiKey 走同一敏感字段加密链", () => {
+  const source = { tracing: { backend: "langsmith", apiKey: "lsv2-trace-secret", endpoint: "https://api.smith.langchain.com" } };
+  const sealed = sealSensitiveConfig(source, { DATA_KEY: KEY });
+  assert.doesNotMatch(JSON.stringify(sealed), /lsv2-trace-secret/);
+  const restored = unsealSensitiveConfig(sealed, { DATA_KEY: KEY }) as typeof source;
+  assert.equal(restored.tracing.apiKey, "lsv2-trace-secret");
+});
+
 test("无 DATA_KEY 的开发模式不做破坏性变换", () => {
   const source = { providers: [{ apiKey: "sk-dev" }] };
   assert.deepEqual(sealSensitiveConfig(source, {}), source);

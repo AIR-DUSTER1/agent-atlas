@@ -24,13 +24,14 @@ import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
 import { refreshPluginPanel } from "./settings-plugins.js";
+import { refreshTracing } from "./settings-tracing.js";
 import { refreshSubagents } from "./settings-subagents.js";
 import { refreshRouting, bindRoutingSettings } from "./settings-routing.js";
 import { refreshStats } from "./stats/index.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "memories", "commands", "skills", "mcp", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "tracing", "memories", "commands", "skills", "mcp", "stats"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -60,6 +61,8 @@ export function showSettingsView(view: string): void {
     void refreshPluginPanel().catch((err) => setPluginPanelError(err));
   } else if (next === "subagents") {
     void refreshSubagents().catch((err) => setSubagentPanelError(err));
+  } else if (next === "tracing") {
+    void refreshTracing().catch((err) => setTracingPanelError(err));
   } else if (next === "routing") {
     void refreshRouting().catch((err) => setRoutingPanelError(err));
   } else if (next === "memories") {
@@ -88,6 +91,13 @@ function filterSettingsNav(query: string): void {
     const visible = [...group.querySelectorAll<HTMLElement>(".settings-nav-item")].some((button) => !button.classList.contains("hidden"));
     group.classList.toggle("hidden", !visible);
   }
+}
+
+function setTracingPanelError(err: unknown): void {
+  const el = $("tracing-status");
+  if (!el) return;
+  el.textContent = "✗ " + (err instanceof Error ? err.message : String(err));
+  el.className = "settings-status err";
 }
 
 function setPluginPanelError(err: unknown): void {

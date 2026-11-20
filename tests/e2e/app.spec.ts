@@ -70,6 +70,15 @@ test("静默会话、设置分区、供应商弹窗与设备隔离提示", async
     await expect(computerSwitch).toBeDisabled();
     await expect(page.locator('[data-plugin-id="computer"]')).toContainText("仅支持 Windows");
   }
+
+  await page.locator('[data-settings-view="tracing"]').click();
+  await expect(page.locator("#tracing-panel")).toBeVisible();
+  await expect(page.locator("#tracing-backend")).toHaveValue("off");
+  await expect(page.locator("#tracing-enabled")).not.toBeChecked();
+  await page.locator("#tracing-backend").selectOption("langsmith");
+  await expect(page.locator("#tracing-enabled")).toBeChecked();
+  await expect(page.locator("#tracing-warning")).toContainText("保存后开始向 LangSmith 上报");
+  await page.locator("#tracing-backend").selectOption("off");
   await page.locator("#settings-back-btn").click();
   await expect(page.locator("#settings-page")).toBeHidden();
 
