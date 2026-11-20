@@ -16,7 +16,6 @@
 | [监控与告警](monitoring.md) | Prometheus、日志、审计、诊断、建议告警 |
 | [故障排查](troubleshooting.md) | 常见启动、认证、SSE、配置与容器问题 |
 | [运维 Runbook](runbook.md) | 磁盘满、配置损坏、外部依赖故障等现场处置 |
-| [版本规范](versioning.md) | SemVer、构建标识、tag、镜像标签与发布流程 |
 | [支持策略](support.md) | 版本生命周期、兼容承诺、已知限制、安全报告 |
 
 ## 生产运行拓扑（文件后端）

@@ -176,7 +176,7 @@ src/
   client/styles/   chat-*.css / settings-*.css 按功能分层
 
 desktop/          Electron 主进程与 preload
-docs/             架构、部署、记忆、安全与运维文档
+docs/             功能介绍、部署、记忆、安全与运维文档
 tests/            单元、集成、安全、E2E、故障与负载测试
 scripts/          构建、检查、备份与发布辅助脚本
 ```
@@ -301,7 +301,7 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 当前为 `0.9.0-beta.17` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
 
 ```text
-0.9.0-beta.17 · 816ba5c
+0.9.0-beta.17 · af96bee
 ```
 
 - 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
@@ -309,7 +309,7 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 - 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.17` 形式。
 - `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
 - 生产镜像使用不可变 digest，不使用 `latest`。
-- 完整规则见 [版本规范](docs/versioning.md)。
+- 版本规则由 `npm run version:check` 与 `npm run version:main-guard` 执行；开发规范维护在 `.plans/development-docs/versioning.md`（不提交）。
 
 ## 开发与测试
 
@@ -340,19 +340,22 @@ npm run build:client
 
 | 文档 | 内容 |
 |---|---|
-| [Agent Wiki](docs/agent-wiki.md) | 模块职责、调用链、架构约束与踩坑记录 |
-| [工程规范](docs/engineering-standards.md) | 常驻红线、领域 Skill、深度契约与自动门禁的分层索引 |
-| [版本规范](docs/versioning.md) | SemVer、构建标识、tag、镜像标签与发布流程 |
-| [能力路线](docs/agentatlas-roadmap.md) | Hook、电脑操作、岗位获取与简历投递规划 |
-| [请求编排](docs/agent-orchestration.md) | Agent、子代理与路由编排设计 |
 | [记忆与个性化](docs/memory-slot.md) | 个性化默认上下文、本地 / HTTP Provider、作用域与故障排查 |
-| [评测基线与能力缺口](docs/evaluation-baseline.md) | 三套评测集实测分数、过度探索问题与改进优先级 |
 | [部署与运维](docs/deployment.md) | 自托管、监控、升级与运行手册 |
+| [快速自托管](docs/self-hosting.md) | 准备生产环境、启动、自检与数据目录 |
+| [安全与 TLS](docs/security-and-tls.md) | 设备身份、反向代理、TLS 与数据边界 |
+| [备份与恢复](docs/backup-restore.md) | 备份、校验、恢复与灾难恢复顺序 |
+| [监控与告警](docs/monitoring.md) | 探针、Prometheus、日志与审计 |
+| [故障排查](docs/troubleshooting.md) | 启动、登录、SSE、配置与数据问题 |
+| [升级与回滚](docs/upgrade-rollback.md) | 发布约定、升级步骤与回滚决策 |
+| [PostgreSQL 多用户](docs/postgres-multitenant.md) | ownerId、RLS、角色、备份与验收 |
+| [生产检查单](docs/production-checklist.md) | 上线前安全、数据、资源与质量门 |
+| [运行手册](docs/runbook.md) | 磁盘、配置、MCP、认证与 SSE 故障处置 |
 | [支持边界](docs/support.md) | 支持范围、安全报告与维护责任 |
 
 ## 贡献
 
-1. 修改前阅读 [AGENTS.md](AGENTS.md) 与 [工程规范](docs/engineering-standards.md)，按任务加载 `.agents/skills/agentatlas-*`。
+1. 修改前阅读 [AGENTS.md](AGENTS.md)，按任务加载 `.agents/skills/agentatlas-*`；开发设计、评测和工程规范维护在本地 `.plans/development-docs/`，不提交。
 2. 一个提交只处理一个主题，提交信息保持单行中文格式。
 3. 新功能同步补充类型、审批边界、测试与用户文档。
 4. 不提交 `.env`、`.web-config.json`、`.setting/`、`data/` 或任何真实密钥。

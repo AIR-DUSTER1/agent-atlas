@@ -7,7 +7,7 @@ description: "修改 agentatlas 的 HTTP 路由、SSE 事件、配置持久化�
 
 ## 开始前
 
-1. 阅读项目根目录 `AGENTS.md` 与 `docs/agent-orchestration.md`。
+1. 阅读项目根目录 `AGENTS.md` 与 `.plans/development-docs/agent-orchestration.md`。
 2. 涉及登录、TLS、Cookie、CORS 或代理时读取 `docs/security-and-tls.md`。
 3. 涉及备份、迁移、指标或故障处置时读取对应部署文档，不凭记忆设计。
 
@@ -42,6 +42,6 @@ node --import tsx --test --test-concurrency=1 tests/integration/server.test.ts t
 
 ## 收尾
 
-- 更新 README 的外部契约和 `docs/agent-wiki.md`。
+- 更新 README 的外部契约和 `.plans/development-docs/agent-wiki.md`。
 - 新接口必须在临时端口做成功与失败路径手测，不消耗真实模型配额。
 - 任何新增例外必须有测试和书面理由，不得静默加入放行列表。

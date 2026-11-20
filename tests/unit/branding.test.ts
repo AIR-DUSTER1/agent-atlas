@@ -51,9 +51,9 @@ test("旧品牌 agent-tools 不再回流到公开入口", async () => {
     "src/client/index.html",
     "desktop/main.ts",
     "Dockerfile",
-    "docs/agentatlas-roadmap.md",
+    "docs/memory-slot.md",
   ];
   const sources = await Promise.all(files.map((file) => read(file)));
   assert.doesNotMatch(sources.join("\n"), /agent-tools/i);
-  assert.match(sources[7] ?? "", /# agentatlas 能力路线/);
+  assert.match(sources[7] ?? "", /# 记忆与个性化/);
 });

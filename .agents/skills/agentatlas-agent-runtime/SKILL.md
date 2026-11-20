@@ -8,7 +8,7 @@ description: "修改 agentatlas 的 LangGraph 工作流、Agent Profile、工具
 ## 开始前
 
 1. 阅读项目根目录 `AGENTS.md` 的常驻红线。
-2. 按任务读取 `docs/agent-orchestration.md`；涉及长期记忆时再读 `docs/memory-slot.md`。
+2. 按任务读取 `.plans/development-docs/agent-orchestration.md`；涉及长期记忆时再读 `docs/memory-slot.md`。
 3. 先确定受影响的 Profile：`general`、`estate`、`job`，以及它的工具 allowlist、审批表和记忆 scope。
 
 ## 不可破坏的边界
@@ -47,6 +47,6 @@ node --import tsx --test --test-concurrency=1 tests/unit/tool-isolation.test.ts 
 
 ## 收尾
 
-- 更新 `README.md` 和 `docs/agent-wiki.md`。
+- 更新 `README.md` 和 `.plans/development-docs/agent-wiki.md`。
 - 若改变架构边界，更新 `tests/unit/architecture.test.ts`，不要用例外清单绕过。
 - 提交信息遵循单行中文规范，不混入无关重构。

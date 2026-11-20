@@ -1,8 +1,8 @@
 # AGENTS.md — agentatlas 常驻工程宪法
 
 > 本文件是 L0 常驻红线，只放所有任务都必须遵守、且违反后会造成安全、数据、架构或交付事故的规则。
-> 任务操作步骤放在 `.agents/skills/agentatlas-*`，长篇契约和命令手册放在 `docs/`，可自动判断的规则放在 `tests/`。
-> 完整分层索引见 `docs/engineering-standards.md`；与本文件冲突时，以本文件为准。
+> 任务操作步骤放在 `.agents/skills/agentatlas-*`；用户/运维契约放 `docs/`，开发设计、评测、计划和工程规范放 `.plans/development-docs/`。
+> 开发规范索引见 `.plans/development-docs/engineering-standards.md`；与本文件冲突时，以本文件为准。
 
 ## 1. 项目定位与产品边界
 
@@ -16,16 +16,16 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 
 | 任务 | 使用 Skill | 权威文档 |
 |---|---|---|
-| LangGraph、Profile、工具、审批、路由、子代理、记忆 | `$agentatlas-agent-runtime` | `docs/agent-orchestration.md`、`docs/memory-slot.md` |
-| HTTP、SSE、配置、持久化、认证、可观测性 | `$agentatlas-service-contract` | `docs/agent-orchestration.md`、`docs/security-and-tls.md` |
-| Web UI、HTML、CSS、设置页、可访问性、浏览器构建 | `$agentatlas-frontend` | `docs/engineering-standards.md` |
-| 版本、Docker、部署、备份恢复、生产发布 | `$agentatlas-release-ops` | `docs/versioning.md`、`docs/deployment.md` |
+| LangGraph、Profile、工具、审批、路由、子代理、记忆 | `$agentatlas-agent-runtime` | `.plans/development-docs/agent-orchestration.md`、`docs/memory-slot.md` |
+| HTTP、SSE、配置、持久化、认证、可观测性 | `$agentatlas-service-contract` | `.plans/development-docs/agent-orchestration.md`、`docs/security-and-tls.md` |
+| Web UI、HTML、CSS、设置页、可访问性、浏览器构建 | `$agentatlas-frontend` | `.plans/development-docs/engineering-standards.md` |
+| 版本、Docker、部署、备份恢复、生产发布 | `$agentatlas-release-ops` | `.plans/development-docs/versioning.md`、`docs/deployment.md` |
 
 规则：
 
 - 本文件始终生效；Skill 只补充任务流程，不得覆盖 L0 红线。
 - 一个任务跨越多个领域时可以组合 Skill，但不得复制出第三套规则。
-- 新增规则先分类：常驻红线、领域 Skill、深度文档或自动测试；禁止把长篇流程继续塞回本文件。
+- 新增规则先分类：常驻红线、领域 Skill、用户/运维契约、开发计划或自动测试；禁止把长篇流程继续塞回本文件。
 
 ## 3. 技术栈红线
 
@@ -40,7 +40,7 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 | 可选前端能力 | 图表、Markdown、高亮必须动态加载且有降级路径，不得进入首屏启动闭包 |
 | 可访问性 | 图标按钮和表单必须有可访问名称；正文对比度 ≥ 4.5:1；流式区使用 live region |
 
-详细依赖登记和体积见 `docs/engineering-standards.md`。
+详细依赖登记和体积见 `.plans/development-docs/engineering-standards.md`。
 
 ## 4. 架构与目录边界
 
@@ -53,8 +53,8 @@ src/client/**     前端；只能通过 /api/* 与服务端通信
 src/client/vendor 第三方库唯一隔离层
 src/versioning.ts 产品版本、构建标识与发布一致性权威工具
 desktop/**        Electron 主进程与 preload
-docs/**           用户与 operator 的深度契约
-.plans/**         内部计划，gitignore，永不提交
+docs/**           功能介绍、部署、运维、安全等用户/operator 文档
+.plans/**         开发设计、规范、评测与计划；gitignore，永不提交
 ```
 
 必须保持：
@@ -127,7 +127,7 @@ docs/**           用户与 operator 的深度契约
 - `package.json.version` 是唯一产品版本源；前端、健康探针、镜像和文档必须使用同一 build-info。
 - 不得手工维护前端日期版本；API 版本与数据 schema 版本独立于产品版本。
 - 未经用户明确授权，不 push、不创建/移动 tag、不推送镜像、不修改生产环境。
-- 生产镜像固定 digest；禁止 `latest`；发布规则见 `docs/versioning.md`。
+- 生产镜像固定 digest；禁止 `latest`；发布规则见 `.plans/development-docs/versioning.md`。
 
 ## 7. 交付协议
 
@@ -147,9 +147,9 @@ npm test
 ### 7.2 文档同步
 
 - 用户可见能力或使用方式变化：更新 `README.md`。
-- 模块职责、调用链或踩坑变化：更新 `docs/agent-wiki.md`。
-- 深度契约变化：更新对应 `docs/*.md`。
-- 开发计划、攻面分析和交接：只写 `.plans/`，永不提交。
+- 模块职责、调用链、评测或踩坑变化：更新 `.plans/development-docs/agent-wiki.md`，不得写进 `docs/`。
+- 用户可见功能或运维契约变化：更新对应 `docs/*.md`；开发设计、评测和工程规范只写 `.plans/development-docs/`。
+- 开发计划、攻面分析、评测和交接：只写 `.plans/`，永不提交。
 - 未完成能力不得写成已交付。
 
 ### 7.3 提交规范
@@ -166,7 +166,7 @@ npm test
 - 禁止多行、正文式展开、空行分隔、序号列表和重复主题。
 - 提交前清点 `git status` 与 `git diff`，不得包含密钥、临时文件、`.plans/`、构建产物或无关改动。
 
-详细类型表和示例见 `docs/engineering-standards.md` §7。
+详细类型表和示例见 `.plans/development-docs/engineering-standards.md` §7。
 
 ## 8. 平台约束
 

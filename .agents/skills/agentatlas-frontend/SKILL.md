@@ -7,7 +7,7 @@ description: "修改 agentatlas Web 前端、HTML 片段、CSS、设置页、可
 
 ## 开始前
 
-1. 阅读项目根目录 `AGENTS.md` 和 `docs/engineering-standards.md`。
+1. 阅读项目根目录 `AGENTS.md` 和 `.plans/development-docs/engineering-standards.md`。
 2. 确认改动属于 `src/client/**`、`src/client/pages/**` 或 `src/client/styles/**`。
 3. 先找同页面/同组件基线，复用 `core/state.ts`、`core/dom.ts`、`ui/*`、`render/*` 与现有 API 层。
 
@@ -43,6 +43,6 @@ node --import tsx --test --test-concurrency=1 tests/unit/client-architecture.tes
 
 ## 收尾
 
-- 更新 README 的用户操作说明和 `docs/agent-wiki.md`。
+- 更新 README 的用户操作说明和 `.plans/development-docs/agent-wiki.md`。
 - 检查构建产物的 build-info、CSP hash、样式清单与静态白名单。
 - 不提交 `src/server/public/`、截图、测试报告或临时浏览器数据。

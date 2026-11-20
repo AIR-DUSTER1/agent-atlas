@@ -7,7 +7,7 @@ description: "准备 agentatlas 版本发布、Docker 镜像、部署、升级�
 
 ## 开始前
 
-1. 阅读 `AGENTS.md`、`docs/versioning.md`、`docs/deployment.md` 和 `docs/production-checklist.md`。
+1. 阅读 `AGENTS.md`、`.plans/development-docs/versioning.md`、`docs/deployment.md` 和 `docs/production-checklist.md`。
 2. 明确操作类型：仅验证、构建镜像、生成发布候选、部署、升级、回滚或恢复数据。
 3. 未得到用户明确授权时，不 push、不创建或移动 tag、不推送镜像、不改生产环境。
 
@@ -45,5 +45,5 @@ npm run image:smoke
 
 - 记录版本、buildId、commit、镜像标签与 digest。
 - 记录真实执行过的命令和结果，不只引用文档。
-- 版本或部署行为变化时更新 `docs/versioning.md`、部署文档和 `docs/readiness-snapshot.md`。
+- 版本或部署行为变化时更新 `.plans/development-docs/versioning.md`、部署文档和 `.plans/development-docs/readiness-snapshot.md`。
 - 若只完成代码改动而未发布，明确说明“未 push、未 tag、未部署”。

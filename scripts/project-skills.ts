@@ -16,10 +16,10 @@ export const SKILL_MAX_BYTES = 8_000;
 export const SKILL_MAX_LINES = 120;
 
 export const EXPECTED_SKILLS = {
-  "agentatlas-agent-runtime": "docs/agent-orchestration.md",
+  "agentatlas-agent-runtime": ".plans/development-docs/agent-orchestration.md",
   "agentatlas-service-contract": "docs/security-and-tls.md",
-  "agentatlas-frontend": "docs/engineering-standards.md",
-  "agentatlas-release-ops": "docs/versioning.md",
+  "agentatlas-frontend": ".plans/development-docs/engineering-standards.md",
+  "agentatlas-release-ops": ".plans/development-docs/versioning.md",
 } as const;
 
 export interface SkillStat {
@@ -78,16 +78,17 @@ export async function validateProjectSkills(root = PROJECT_ROOT): Promise<Projec
     "src/client/vendor",
     "src/agent/workflow.ts",
     "package.json.version",
-    "docs/engineering-standards.md",
+    ".plans/development-docs/engineering-standards.md",
   ]) {
     if (!agents.includes(marker)) issues.push(`AGENTS.md 缺少常驻红线标记：${marker}`);
   }
 
-  const standardsPath = join(root, "docs", "engineering-standards.md");
-  const standards = (await readRequired(standardsPath, issues)) ?? "";
+  // 开发规范是本地 `.plans/` 文档，不要求随公开仓库分发；存在时再校验 Skill 登记。
+  const standardsPath = join(root, ".plans", "development-docs", "engineering-standards.md");
+  const standards = await readFile(standardsPath, "utf8").catch(() => "");
   for (const name of Object.keys(EXPECTED_SKILLS)) {
     if (!agents.includes(name)) issues.push(`AGENTS.md 未路由 Skill：${name}`);
-    if (!standards.includes(name)) issues.push(`engineering-standards.md 未登记 Skill：${name}`);
+    if (standards && !standards.includes(name)) issues.push(`engineering-standards.md 未登记 Skill：${name}`);
   }
 
   const entries = await readdir(join(root, ".agents", "skills"), { withFileTypes: true }).catch(() => []);

@@ -106,6 +106,24 @@ test("架构例外清单为空；新增例外必须先修改本测试并完成�
   const exceptions: Array<{ file: string; reason: string }> = [];
   assert.deepEqual(exceptions, []);
 });
+
+test("docs 目录只发布用户/运维文档，开发文档必须进入 .plans/development-docs", async () => {
+  const developmentDocs = new Set([
+    "agent-orchestration-vs-zcode.md",
+    "agent-orchestration.md",
+    "agent-wiki.md",
+    "agentatlas-roadmap.md",
+    "engineering-standards.md",
+    "evaluation-baseline.md",
+    "readiness-snapshot.md",
+    "versioning.md",
+  ]);
+  const docs = await readdir(join(ROOT, "docs"), { withFileTypes: true });
+  const leaked = docs
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && developmentDocs.has(entry.name))
+    .map((entry) => entry.name);
+  assert.deepEqual(leaked, []);
+});
 test("Agent 与工具只依赖 Memory Slot，不直接触碰具体 Provider/旧存储", async () => {
   const workflow = await readWorkflowSources();
   const tools = await readFile(join(SRC, "tools-memory.ts"), "utf8");

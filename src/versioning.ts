@@ -285,16 +285,12 @@ export async function collectVersioningIssues(root = PROJECT_ROOT): Promise<stri
   if (!readme.includes(`version-${badgeVersion}-`)) issues.push(`README.md 版本徽章未同步到 ${version}`);
 
   for (const relative of [
-    "docs/agent-wiki.md",
-    "docs/agentatlas-roadmap.md",
-    "docs/readiness-snapshot.md",
     "docs/production-checklist.md",
     "docs/deployment.md",
     "docs/self-hosting.md",
     "docs/upgrade-rollback.md",
     "docs/postgres-multitenant.md",
     "docs/support.md",
-    "docs/versioning.md",
   ]) {
     const text = await readFile(join(root, relative), "utf8");
     if (!text.includes(version)) issues.push(`${relative} 未标记当前版本 ${version}`);
