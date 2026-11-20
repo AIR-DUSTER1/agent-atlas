@@ -280,7 +280,8 @@ test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
 test("多个会话可并行生成，切换会话不弹等待框", async ({ page }) => {
   await login(page);
   await page.route("**/api/chat", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // 保持两个模拟流存活，避免快速模型响应导致停止按钮在切换会话前就消失。
+    await new Promise((resolve) => setTimeout(resolve, 60_000));
     await route.continue();
   });
 
