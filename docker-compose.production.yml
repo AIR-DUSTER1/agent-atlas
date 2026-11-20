@@ -41,22 +41,19 @@ services:
       - /tmp:size=256m,mode=1777
     shm_size: 256mb
     pids_limit: 512
+    cpus: 2.0
+    mem_limit: 2g
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "node", "-e", "Promise.all([fetch('http://127.0.0.1:3000/healthz'),fetch('http://127.0.0.1:3000/readyz')]).then(rs=>process.exit(rs.every(r=>r.ok)?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "Promise.all([fetch('http://127.0.0.1:3000/healthz').then(r=>r.ok?0:r.status),fetch('http://127.0.0.1:3000/readyz').then(r=>r.ok?0:r.status)]).then(rs=>{const bad=rs.filter(s=>s!==0);if(bad.length){console.error('healthcheck HTTP '+bad.join(','));process.exit(1)}process.exit(0)}).catch(e=>{console.error('healthcheck '+e?.message);process.exit(1)})"]
       interval: 30s
       timeout: 4s
       start_period: 30s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2g
     logging:
       driver: json-file
       options:

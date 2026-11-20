@@ -40,18 +40,15 @@ services:
       - ${AGENT_DATA_DIR:-./data}:/data
     shm_size: 256mb
     pids_limit: 512
+    cpus: 2.0
+    mem_limit: 2g
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok){console.error('healthz HTTP '+r.status);process.exit(1)}process.exit(0)}).catch(e=>{console.error('healthz '+e?.message);process.exit(1)})"]
       interval: 30s
       timeout: 3s
       start_period: 20s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2g
     logging:
       driver: json-file
       options:

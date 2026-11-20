@@ -161,15 +161,22 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.match(runtime, /CHECKPOINT_FILE=\/data\/checkpoints\.ndjson/);
   assert.match(runtime, /MEMORIES_FILE=\/data\/memories\.json/);
   assert.match(runtime, /MEMORY_STORE_DIR=\/data\/memory-store/);
-  assert.match(runtime, /scripts\/data-cli\.ts/);
-  // 运行层只选择性复制 src/ 子目录；任何新增的顶层运行目录都必须显式进入镜像。
-  for (const entry of await readdir("src", { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name === "client") continue;
-    assert.match(
-      runtime,
-      new RegExp(`COPY[^\\n]*\\/app\\/src\\/${entry.name} \\.\\/src\\/${entry.name}`),
-      `Docker runtime 未复制 src/${entry.name}`,
-    );
+  // 允许两种运行面策略：精确清单复制，或整体复制 src/scripts 后在运行层删除 client。
+  const copiesWholeSource = /COPY[^\n]*\/app\/src \.\/src/.test(runtime);
+  const copiesWholeScripts = /COPY[^\n]*\/app\/scripts \.\/scripts/.test(runtime);
+  if (copiesWholeSource) {
+    assert.match(runtime, /rm -rf src\/client/, "整体复制策略必须移除前端源码");
+    assert.ok(copiesWholeScripts, "整体复制 src 时必须同时复制 scripts");
+  } else {
+    assert.match(runtime, /scripts\/data-cli\.ts/);
+    for (const entry of await readdir("src", { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "client") continue;
+      assert.match(
+        runtime,
+        new RegExp(`COPY[^\\n]*\\/app\\/src\\/${entry.name} \\.\\/src\\/${entry.name}`),
+        `Docker runtime 未复制 src/${entry.name}`,
+      );
+    }
   }
 
   const productionCompose = await readFile("docker-compose.production.yml", "utf8");

@@ -13,8 +13,10 @@ ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 ARG RELEASE_CHANNEL=dev
 WORKDIR /app
+# npm 缓存指向 /tmp 并在层内清理，避免残留在镜像层的 $HOME/.npm
+ENV npm_config_cache=/tmp/npm-cache
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts && rm -rf /tmp/npm-cache
 COPY tsconfig.json tsconfig.client.json tsconfig.desktop.json ./
 COPY src ./src
 COPY scripts ./scripts
@@ -26,8 +28,10 @@ RUN npm run typecheck \
 
 FROM ${NODE_IMAGE} AS production-deps
 WORKDIR /app
+# 同 builder：npm 缓存指向 /tmp 并在层内清理，node_modules 是层内唯一保留物
+ENV npm_config_cache=/tmp/npm-cache
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && rm -rf /tmp/npm-cache
 
 # 浏览器版本从 playwright-core/browsers.json 读取；升级 Playwright 后若校验和不匹配，
 # 构建会失败并提示更新 CHROME_HEADLESS_SHELL_SHA256，避免静默漂移。
@@ -35,20 +39,29 @@ FROM ${NODE_IMAGE} AS browser
 ARG CHROME_HEADLESS_SHELL_BASE_URL=https://cdn.npmmirror.com/binaries/chrome-for-testing
 ARG CHROME_HEADLESS_SHELL_FALLBACK_URL=https://storage.googleapis.com/chrome-for-testing-public
 ARG CHROME_HEADLESS_SHELL_SHA256=c3e50596aef52c58f8fda3c6b3411c33d34c88b177b3ed1c2243359fd3b8ba20
+# BuildKit 自动注入的目标镜像平台；下载路径 linux64 只对应 linux/amd64。dpkg 校验
+# 保留双保险：防 TARGETPLATFORM 为空的非 BuildKit 环境绕过平台检查。
+ARG TARGETPLATFORM
 WORKDIR /tmp/browser
 COPY --from=production-deps /app/node_modules/playwright-core/browsers.json ./browsers.json
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+# 不用断点续传：部分 CDN 对 302 跳转后的 Range 请求行为不一致，续传易得到损坏的
+# zip；每次重试都先删除旧文件全新下载，SHA256 校验兜底防篡改与截断。
 RUN set -eu; \
-    test "$(dpkg --print-architecture)" = "amd64" || { echo "Chrome Headless Shell 当前只支持 linux/amd64" >&2; exit 1; }; \
+    if [ -n "${TARGETPLATFORM:-}" ] && [ "$TARGETPLATFORM" != "linux/amd64" ]; then \
+      echo "Chrome Headless Shell 仅支持 linux/amd64，当前目标平台：$TARGETPLATFORM" >&2; exit 1; \
+    fi; \
+    test "$(dpkg --print-architecture)" = "amd64" || { echo "构建容器架构为 $(dpkg --print-architecture)，无法产出 linux/amd64 的 Chrome Headless Shell" >&2; exit 1; }; \
     version="$(node -e "const b=require('./browsers.json').browsers.find(v=>v.name==='chromium-headless-shell');process.stdout.write(b.browserVersion)")"; \
     path="${version}/linux64/chrome-headless-shell-linux64.zip"; \
     download_ok=0; \
     for base in "$CHROME_HEADLESS_SHELL_BASE_URL" "$CHROME_HEADLESS_SHELL_FALLBACK_URL"; do \
       test -n "$base" || continue; \
       for attempt in 1 2 3; do \
-        if curl -fL --continue-at - --connect-timeout 20 --max-time 300 "$base/$path" -o chrome-headless-shell.zip; then download_ok=1; break 2; fi; \
+        rm -f chrome-headless-shell.zip; \
+        if curl -fL --connect-timeout 20 --max-time 300 "$base/$path" -o chrome-headless-shell.zip; then download_ok=1; break 2; fi; \
         sleep 3; \
       done; \
     done; \
@@ -90,24 +103,25 @@ ENV NODE_ENV=production \
 
 COPY --from=production-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/package.json /app/tsconfig.json ./
-COPY --from=builder --chown=node:node /app/src/*.ts ./src/
-COPY --from=builder --chown=node:node /app/src/agent ./src/agent
-COPY --from=builder --chown=node:node /app/src/memory ./src/memory
-COPY --from=builder --chown=node:node /app/src/routing ./src/routing
-COPY --from=builder --chown=node:node /app/src/server ./src/server
-COPY --from=builder --chown=node:node /app/scripts/data-cli.ts ./scripts/data-cli.ts
-COPY --from=builder --chown=node:node /app/scripts/db-migrate.ts ./scripts/db-migrate.ts
-COPY --from=builder --chown=node:node /app/scripts/create-user.ts ./scripts/create-user.ts
-COPY --from=builder --chown=node:node /app/scripts/browser-smoke.ts ./scripts/browser-smoke.ts
-RUN mkdir -p /data && chown node:node /data
+# 整体复制 src 与 scripts：新增顶层目录或脚本自动带入，杜绝硬编码清单漏 COPY
+# 导致「构建成功、运行时模块找不到」；多带几 MB 源码换来零维护。
+COPY --from=builder --chown=node:node /app/src ./src
+COPY --from=builder --chown=node:node /app/scripts ./scripts
+# src/client 前端源码不进生产镜像（产物已构建到 src/server/public），构建期删除防误引用。
+RUN mkdir -p /data && chown node:node /data && rm -rf src/client
 
 USER node
 EXPOSE 3000
 VOLUME ["/data"]
+# SIGTERM 由应用注册排空（见 lifecycle）；docker stop 的等待时长无法在镜像内设置，
+# 由 compose 的 stop_grace_period: 15s 控制（开发与生产 compose 均已配置）。
 STOPSIGNAL SIGTERM
 
+# slim 基础镜像不带 curl，用 node 原生 fetch 探活（HOST 固定 0.0.0.0 为 IPv4 全接口，
+# 127.0.0.1 必达，不依赖 tsx 运行环境）；失败时把 HTTP 状态码/异常写入 stderr，
+# docker inspect 的健康日志可直接排障。
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>{if(!r.ok){console.error('healthz HTTP '+r.status);process.exit(1)}process.exit(0)}).catch(e=>{console.error('healthz '+e?.message);process.exit(1)})"
 
 # 直接以 node 为 PID 1；应用自身注册 SIGTERM 并通过 lifecycle 完成排空。
 CMD ["node", "--import", "tsx", "src/server/index.ts"]
@@ -116,6 +130,8 @@ CMD ["node", "--import", "tsx", "src/server/index.ts"]
 FROM runtime-base AS minimal
 
 # 默认生产镜像：只安装 Headless Shell 所需库，不引入完整 Chromium、Xvfb、X 字体栈和 Mesa DRI。
+# apt 刻意不锁包版本：Debian point release 后旧版本包会从镜像源下架，锁死版本反而会在
+# 安全更新后构建失败；可复现性由基础镜像 digest 与浏览器 SHA256 兜底。
 FROM runtime-base AS runtime
 USER root
 RUN apt-get update \
@@ -143,11 +159,21 @@ RUN apt-get update \
       libxkbcommon0 \
       libxrandr2 \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/*
+# 浏览器目录保持 root:root 只读（二进制 755 可执行）：Playwright 启动时以 --user-data-dir
+# 指向 /tmp 下的临时 profile，运行不写安装目录；node 用户不可篡改浏览器二进制，降低进程
+# 被入侵后替换二进制实现持久化的风险。
 COPY --from=browser /opt/chrome-headless-shell /opt/chrome-headless-shell
-RUN set -eu; \
-    /opt/chrome-headless-shell/chrome-headless-shell --version; \
-    ln -s /opt/chrome-headless-shell/chrome-headless-shell /usr/local/bin/chromium
+RUN ln -s /opt/chrome-headless-shell/chrome-headless-shell /usr/local/bin/chromium
 ENV BROWSER_USE_EXECUTABLE_PATH=/opt/chrome-headless-shell/chrome-headless-shell \
     BROWSER_USE_CONTAINER=1 \
     JOB_BROWSER_HEADLESS=1
 USER node
+# 以 node 用户做真实启动 smoke：root 能跑不代表 node 能跑（动态库、权限位差异必须在
+# 构建期暴露），完整拉起一次 about:blank 验证二进制加载、临时目录写入与渲染链路。
+RUN set -eu; \
+    /opt/chrome-headless-shell/chrome-headless-shell --version; \
+    profile="$(mktemp -d)"; \
+    /opt/chrome-headless-shell/chrome-headless-shell \
+      --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+      --user-data-dir="$profile" --dump-dom about:blank > /dev/null; \
+    rm -rf "$profile"
