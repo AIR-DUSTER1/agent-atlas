@@ -20,6 +20,10 @@ export const EXPECTED_SKILLS = {
   "agentatlas-service-contract": "docs/security-and-tls.md",
   "agentatlas-frontend": ".plans/development-docs/engineering-standards.md",
   "agentatlas-release-ops": ".plans/development-docs/versioning.md",
+  // 组件库使用规范：由官方 antdv for-agents 页面 + 官方 Skill 派生，
+  // 补的是「在本项目里怎么用」（主题映射、DOM 契约、体积边界）。
+  // 权威文档仍指向工程规范（组件登记与前端细则都在 §3/§5）。
+  antdv: ".plans/development-docs/engineering-standards.md",
 } as const;
 
 export interface SkillStat {

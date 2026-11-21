@@ -19,6 +19,7 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 | LangGraph、Profile、工具、审批、路由、子代理、记忆 | `$agentatlas-agent-runtime` | `.plans/development-docs/agent-orchestration.md`、`docs/memory-slot.md` |
 | HTTP、SSE、配置、持久化、认证、可观测性 | `$agentatlas-service-contract` | `.plans/development-docs/agent-orchestration.md`、`docs/security-and-tls.md` |
 | Web UI、HTML、CSS、设置页、可访问性、浏览器构建 | `$agentatlas-frontend` | `.plans/development-docs/engineering-standards.md` |
+| antdv-next 组件选型、表单重构、组件 API 查询、主题 token | `$antdv` | `.plans/development-docs/engineering-standards.md` §5.1 |
 | 版本、Docker、部署、备份恢复、生产发布 | `$agentatlas-release-ops` | `.plans/development-docs/versioning.md`、`docs/deployment.md` |
 
 规则：
@@ -34,6 +35,7 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 | TypeScript | `strict` + `NodeNext` + `noEmit`；服务端 ESM import 必须带 `.js` 后缀 |
 | 后端 | Hono（`@hono/node-server`）+ `streamSSE`；新路由必须经 `zValidator` 声明 schema；横切一律走 middleware，禁止在 handler 内手写横切 |
 | 前端 | Vue 3 SFC + Pinia + antdv-next（限通用控件）；构建链 Vite；组件不得 import `src/server/**`；业务状态只能经 Pinia store，不得组件内私建副本 |
+| antdv-next | 只在 `views/*.vue` 里 import（`.ts` 禁用），模板包 `<AntdvProvider>`；写代码前先 `npx antdv info <C> --ver 1.5.2`；主题只改 `ui/antdv-theme.ts`；体积必须留在懒加载 chunk。细则见工程规范 §5.1 与 `$antdv` Skill |
 | 前端依赖 | 必须登记版本、许可证和体积；依赖清单由守门测试直接断言（过渡期仍经 `src/client/vendor/*` wrapper，M3 由 Vite 取代） |
 | 服务端依赖 | 遵守运行时白名单（Hono / `@hono/node-server` / `@hono/zod-validator` / 现有登记）；新增依赖前先证明标准库/现有依赖不可行 |
 | 执行方式 | TS 使用 `tsx` 直跑；新增脚本必须能被 `tsx` 直接执行 |
@@ -146,8 +148,12 @@ npm run build:client
 npm run build:desktop
 npm test
 npm run test:vue
-npx antdv lint ./src
+npx vitest run tests/vue/antdv-usage.test.ts   # antdv 退化 API 与首屏闭包断言
 ```
+
+> `npx antdv lint ./src` 已从质量门移除：该子命令在 `@antdv-next/cli@0.0.0-beta.1`
+> 里是空壳（只打印 `Parsed args` 后退出 0），永远绿等于假覆盖；职能由
+> `tests/unit/antdv-usage.test.ts` 与 `tests/vue/antdv-usage.test.ts` 接管。
 
 前端、部署或发布相关改动按 Skill 指引补充 E2E、审计、数据检查与镜像 smoke。存在阻断项时必须如实报告，不能用静态检查冒充运行验证。
 

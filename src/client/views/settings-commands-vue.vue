@@ -9,14 +9,21 @@
   - 命令只是提示词模板：模板与列表全部用插值文本渲染，无 HTML 注入面；
   - 编辑未保存时切换/关闭必须 uiConfirm 确认（legacy 对话框，e2e 依赖其选择器）；
   - 字段错误就地呈现（.ui-field-error + aria-invalid + aria-describedby 关联）。
+
+  antdv 接入说明：文本字段用 Input、模板用 Input.TextArea（仍是真实 <textarea>，
+  光标插入变量依赖的 selectionStart/setSelectionRange 照常工作）、
+  新建/保存/取消用 Button。字段错误仍自建 role=alert（FormItem help 无该语义）。
+  列表卡片与搜索框保留原结构：.command-card / #commands-search 是 e2e 锚点。
 -->
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, reactive, ref } from "vue";
 import { onMounted } from "vue";
+import { Button, Input } from "antdv-next";
 import type { UserCommandItem } from "../composer/menu.js";
 import { useCommandsStore, type CommandPayload } from "../stores/commands.js";
 import { cmdStatus, registerCommandsReset } from "./settings-commands.js";
 import { uiConfirm } from "../ui/dialog.js";
+import AntdvProvider from "../ui/antdv-provider.vue";
 
 /** 与后端 commands 校验一致的本地限制（超过先在本地拦截）。 */
 const MAX_TEMPLATE_CHARS = 8_000;
@@ -252,6 +259,7 @@ function onFormKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="commands-page-head">
     <div class="commands-page-copy">
       <h2 id="commands-title"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i> 自定义命令</h2>
@@ -380,12 +388,12 @@ function onFormKeydown(event: KeyboardEvent): void {
         <div class="command-form-grid">
           <label class="field">
             <span class="field-label">命令名 <em class="key-state">必填</em></span>
-            <input
+            <Input
               id="cmd-name"
-              v-model="form.name"
+              v-model:value="form.name"
               type="text"
               spellcheck="false"
-              maxlength="40"
+              :maxlength="40"
               autocomplete="off"
               aria-label="命令名"
               placeholder="例如 review"
@@ -404,12 +412,12 @@ function onFormKeydown(event: KeyboardEvent): void {
           </label>
           <label class="field">
             <span class="field-label">菜单显示名</span>
-            <input
+            <Input
               id="cmd-title"
-              v-model="form.title"
+              v-model:value="form.title"
               type="text"
               spellcheck="false"
-              maxlength="80"
+              :maxlength="80"
               autocomplete="off"
               aria-label="菜单显示名"
               placeholder="例如 审查改动（留空则显示命令名）"
@@ -419,12 +427,12 @@ function onFormKeydown(event: KeyboardEvent): void {
 
         <label class="field">
           <span class="field-label">一句话说明</span>
-          <input
+          <Input
             id="cmd-desc"
-            v-model="form.desc"
+            v-model:value="form.desc"
             type="text"
             spellcheck="false"
-            maxlength="200"
+            :maxlength="200"
             autocomplete="off"
             placeholder="告诉用户这条命令适合什么场景，例如：审查本次改动并指出风险"
           />
@@ -432,18 +440,18 @@ function onFormKeydown(event: KeyboardEvent): void {
 
         <label class="field command-template-field">
           <span class="field-label">提示词模板 <em class="key-state">必填</em></span>
-          <textarea
+          <Input.TextArea
             id="cmd-template"
-            v-model="form.template"
+            v-model:value="form.template"
             spellcheck="false"
-            maxlength="8000"
-            rows="9"
+            :maxlength="MAX_TEMPLATE_CHARS"
+            :rows="9"
             aria-label="命令模板"
             placeholder="例如：请审查以下改动并指出风险：&#10;{{selection}}"
             :aria-invalid="errors.template ? 'true' : undefined"
             :aria-describedby="errors.template ? 'cmd-template-vue-error' : undefined"
             @input="errors.template = ''"
-          ></textarea>
+          />
           <span
             v-if="errors.template"
             id="cmd-template-vue-error"
@@ -460,12 +468,13 @@ function onFormKeydown(event: KeyboardEvent): void {
         </div>
 
         <div class="command-editor-actions">
-          <button id="cmd-editor-cancel" type="button" class="ui-button ui-button-ghost" :disabled="saving" @click="closeEditor">取消</button>
-          <button id="cmd-save-btn" type="submit" class="ui-button ui-button-primary" :disabled="saving">
+          <Button id="cmd-editor-cancel" :disabled="saving" @click="closeEditor">取消</Button>
+          <Button id="cmd-save-btn" type="primary" html-type="submit" :loading="saving">
             {{ saving ? "保存中…" : (editorMode === "create" ? "创建命令" : "保存修改") }}
-          </button>
+          </Button>
         </div>
       </form>
     </section>
   </div>
+  </AntdvProvider>
 </template>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Antdv Next"
+  short_description: "用 antdv-next 组件库重构前端面板与表单"
+  default_prompt: "Use $antdv to implement and verify the requested antdv-next component change."
