@@ -161,3 +161,9 @@
   .scroll-bottom-btn { right: 16px; bottom: 160px; }
 }
 
+
+/* 打字指示器是无限循环动画：prefers-reduced-motion 下必须停掉，
+   否则前庭敏感用户会持续看到三个点在跳动（无法靠「减少一次」规避）。 */
+@media (prefers-reduced-motion: reduce) {
+  .typing i { animation: none; opacity: .6; }
+}

@@ -52,8 +52,9 @@ function collectRefs(): void {
   wrapRefs.clear();
   const root = document.getElementById("messages");
   if (!root) return;
-  // 块顺序与 store.blocks 一致：逐个容器按类型取
-  const els = [...root.children] as HTMLElement[];
+  // ⚠ 不能用 root.children：Vue 挂载会在容器内生成 <div data-v-app> 包装层，
+  // 块是它的子节点而不是 #messages 的直接子节点。用 querySelectorAll 跨层取。
+  const els = [...root.querySelectorAll<HTMLElement>("[data-block-key]")];
   for (const el of els) {
     const key = el.dataset.blockKey;
     if (!key) continue;
