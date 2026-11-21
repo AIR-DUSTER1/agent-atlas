@@ -59,7 +59,9 @@ export function showWelcomeState(mode: WelcomeMode = "default"): void {
   $("example-chips")?.classList.toggle("hidden", pickingAgent);
   welcomeEl.classList.remove("hidden");
   $("empty-session")?.classList.add("hidden");
-  messagesEl.innerHTML = "";
+  // #messages 由 Vue 管理：清空必须走 store，不能直接动 DOM（会摘掉挂载根）
+  void messagesEl;
+  void import("../stores/messages.js").then(({ useMessagesStore }) => useMessagesStore().clear()).catch(() => {});
   $("context-bar")?.classList.add("hidden");
   $("workflow-panel")?.classList.add("hidden");
   inputEl.disabled = true;

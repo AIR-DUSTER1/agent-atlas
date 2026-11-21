@@ -1,219 +1,150 @@
 /**
  * ============================================================
- * render/messages.ts — 一轮对话的「块」挂载与整体重放
+ * render/messages.ts — 消息流编排：块骨架由 Vue 渲染，parts 仍命令式（M4 4.6）
  * ============================================================
- * 用户正文、附件名、错误和服务端文案全部作为 textContent 子节点写入；
- * 只有受控 Markdown 边界允许生成 HTML。重放时清理所有旧 DOM 引用，防止
- * 增量更新写到已移除节点。用户消息与助手最终总结各自带独立复制操作。
+ * 分层：
+ *  - **块骨架**（user / notice / error / assistant 外壳、footer、复制按钮、用量）
+ *    由 message-list-vue.vue 声明式渲染，本文件不再 createElement 这些结构；
+ *  - **part 渲染**（text / thinking / tool / approval / clarification / route）
+ *    仍走 render/parts.ts 的增量路径：它们需要 partEls 引用表 + 55ms 节流，
+ *    改 v-for 会在 token 级别变贵。
+ *
+ * 本文件保留的职责：
+ *  1. mountBlock：向 core state 追加块 → 让 Vue 渲染骨架 → 等 DOM 就绪后把
+ *     已有 parts 逐个 mountPart 进去（历史回放与「先有 parts 再挂块」两种情形）；
+ *  2. updateTurnCaption / refreshAssistantCopy：把用量与「可复制总结」写回
+ *     store 视图（Vue 负责显示）；
+ *  3. renderAll：整体重放。
  */
-import { blockBodies, partEls, state, transcript, usageEls } from "../core/state.js";
+import {
+  blockBodies, partEls, state, transcript, usageEls,
+} from "../core/state.js";
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
 import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
-import { fmtPercent } from "../modules/format.js";
-import { assistantSummaryText } from "../modules/message-copy.js";
-import { writeClipboardText } from "../modules/clipboard.js";
-import { h } from "../ui/h.js";
-import { icon } from "../ui/icon.js";
-import { toast } from "../ui/toast.js";
-import type { AssistantBlock, ChatBlock, NoticeBlock } from "../modules/types.js";
+import { useMessagesStore } from "../stores/messages.js";
+import type { AssistantBlock, ChatBlock } from "../modules/types.js";
 
-const COPY_FEEDBACK_MS = 1_800;
+/* ---------------------------------------------------------------------------
+ * 块骨架挂载（Vue 渲染）→ parts 挂入
+ * ------------------------------------------------------------------------- */
 
-/** 助手回合底部操作区：用量与复制按钮共用一行，空回合不占高度。 */
-function syncAssistantFooter(ablock: AssistantBlock): void {
-  const footer = ablock._el?.querySelector<HTMLElement>(".assistant-footer");
-  if (!footer) return;
-  const hasUsage = Boolean(footer.querySelector(".usage-caption"));
-  const actions = footer.querySelector<HTMLElement>(".assistant-actions");
-  const hasActions = Boolean(actions && !actions.classList.contains("hidden"));
-  footer.classList.toggle("is-empty", !hasUsage && !hasActions);
-}
-
-/** 用量小字：↑ 输入 · ↓ 输出 · 缓存 N% */
-export function updateTurnCaption(ablock: AssistantBlock): void {
-  const usage = ablock._usage;
-  if (!usage) return;
-  const body = blockBodies.get(ablock);
-  if (!body) return;
-  let el = usageEls.get(ablock);
-  if (!el || !el.isConnected) {
-    el = h("div", { class: "usage-caption" });
-    const meta = body.parentElement?.querySelector<HTMLElement>(".assistant-footer-meta");
-    if (!meta) return;
-    meta.appendChild(el);
-    usageEls.set(ablock, el);
-  }
-  const cache = usage.lastCache > 0 && usage.lastInput > 0
-    ? ` · 缓存 ${fmtPercent((usage.lastCache / usage.lastInput) * 100)}`
-    : "";
-  el.textContent = `↑ ${usage.lastInput.toLocaleString("zh-CN")} · ↓ ${usage.lastOutput.toLocaleString("zh-CN")}${cache}`;
-  syncAssistantFooter(ablock);
-}
-
-function syncEmptySession(): void {
-  const empty = document.getElementById("empty-session");
-  if (!empty) return;
-  empty.classList.toggle("hidden", Boolean(state.currentId && transcript(state.currentId).length));
+/** 等 Vue 把 store 变更 patch 到 DOM（两帧：一次排期，一次落地）。 */
+async function nextDomFrame(): Promise<void> {
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 /**
- * 复制的视觉反馈留在原按钮，不额外弹 toast；只有空内容或复制失败才需要提示。
+ * 等某个块的容器出现在注册表里（最多 ~20 帧）。
+ * 单靠固定帧数在慢机器/大列表下会偶发拿不到；轮询让「Vue 渲染完成」成为
+ * 可等待的事实而不是猜测。
  */
-function createMessageCopyButton(
-  label: string,
-  copiedLabel: string,
-  getText: () => string,
-  emptyMessage: string,
-): HTMLButtonElement {
-  const button = h("button", {
-    type: "button",
-    class: "message-action",
-    title: label,
-    "aria-label": label,
-  }, icon("Copy", { size: 14 }));
-  let resetTimer: number | undefined;
-
-  const paint = (nextLabel: string, copied: boolean): void => {
-    button.classList.toggle("copied", copied);
-    button.title = nextLabel;
-    button.setAttribute("aria-label", nextLabel);
-    button.replaceChildren(icon(copied ? "Check" : "Copy", { size: 14 }));
-  };
-
-  button.addEventListener("click", () => {
-    void (async () => {
-      const text = getText();
-      if (!text.trim()) {
-        toast(emptyMessage);
-        return;
-      }
-      button.disabled = true;
-      try {
-        const ok = await writeClipboardText(text);
-        if (!ok) {
-          toast("复制失败，请手动选择文本", "error");
-          return;
-        }
-        paint(copiedLabel, true);
-        if (resetTimer !== undefined) window.clearTimeout(resetTimer);
-        resetTimer = window.setTimeout(() => paint(label, false), COPY_FEEDBACK_MS);
-      } finally {
-        button.disabled = false;
-      }
-    })();
-  });
-  return button;
+async function waitForWrap(block: ChatBlock): Promise<HTMLElement | null> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const wrap = wrapOf(block);
+    if (wrap) return wrap;
+    await nextDomFrame();
+  }
+  return wrapOf(block);
 }
 
-/** 助手正文流结束后刷新“复制总结”显隐；历史回放时也会走到这里。 */
-export function refreshAssistantCopy(ablock: AssistantBlock): void {
-  const actions = ablock._el?.querySelector<HTMLElement>(".assistant-actions");
-  if (!actions) return;
-  actions.classList.toggle("hidden", !assistantSummaryText(ablock));
-  syncAssistantFooter(ablock);
+/** 按块在 transcript 里的序号取 Vue 注册的容器。 */
+function wrapOf(block: ChatBlock): HTMLElement | null {
+  const sid = state.currentId;
+  if (!sid) return null;
+  const index = transcript(sid).indexOf(block);
+  if (index < 0) return null;
+  return window.__agentatlasBlockBodyRegistry?.wrap?.(`${block.t}-${index}`) ?? null;
 }
 
-/** 把一个 block 挂到消息流末尾。live=false 用于整段历史重放，不累计“新消息”。 */
-export function mountBlock(block: ChatBlock, live = true): void {
-  if (live) markNewMessage();
-  document.getElementById("empty-session")?.classList.add("hidden");
-
-  if (block.t === "user") {
-    const bubble = h("div", { class: "bubble" });
-    if (block.files?.length) {
-      const chips = h("div", { class: "f-chips" });
-      for (const file of block.files) {
-        chips.appendChild(h("span", { class: "f-chip" },
-          icon(file.image ? "Image" : "Paperclip", { size: 12 }),
-          h("span", { class: "fname" }, file.name),
-          h("span", { class: "fsrc" }, file.source),
-        ));
-      }
-      bubble.appendChild(chips);
-    }
-    bubble.appendChild(h("div", null, block.text));
-    const actions = h("div", { class: "message-actions user-actions" },
-      createMessageCopyButton("复制", "已复制", () => block.text, "这条消息没有可复制的文字"),
-    );
-    const content = h("div", { class: "msg-user-content" }, bubble,
-      h("div", { class: "user-message-footer" }, actions),
-    );
-    const wrap = h("div", { class: "msg-user" }, content);
-    messagesEl.appendChild(wrap);
-    block._el = wrap;
-    return;
-  }
-
-  if (block.t === "notice") {
-    const el = h("div", { class: "notice-block" + (block.loading ? " loading" : "") });
-    messagesEl.appendChild(el);
-    block._el = el;
-    renderNoticeBlock(block);
-    return;
-  }
-
-  if (block.t === "error") {
-    const el = h("div", { class: "error-block" }, icon("TriangleAlert", { size: 14 }), h("span", null, block.text));
-    messagesEl.appendChild(el);
-    block._el = el;
-    return;
-  }
-
-  // 切走后旧 typing 节点已脱离 DOM；切回来必须允许挂载新的指示器。
-  if (block._typing && !block._typing.isConnected) block._typing = null;
-  const avatar = h("div", { class: "avatar", "aria-hidden": "true" }, icon("Zap", { size: 15 }));
-  const body = h("div", { class: "assistant-body" });
-  const actions = h("div", { class: "message-actions assistant-actions hidden" },
-    createMessageCopyButton("复制总结", "总结已复制", () => assistantSummaryText(block), "当前回合还没有可复制的总结"),
-  );
-  const footer = h("div", { class: "assistant-footer is-empty" }, actions,
-    h("div", { class: "assistant-footer-meta" }),
-  );
-  const content = h("div", { class: "assistant-content" }, body, footer);
-  const wrap = h("div", { class: "msg-assistant" }, avatar, content);
-  messagesEl.appendChild(wrap);
-  block._el = wrap;
+/** 接管一个助手块：把已有 parts 挂进它的 .assistant-body。 */
+function hydrateAssistant(block: AssistantBlock, wrap: HTMLElement | null): void {
+  block._el = wrap ?? undefined;
+  const body = wrap?.querySelector<HTMLElement>(".assistant-body");
+  if (!body) return;
   blockBodies.set(block, body);
-
   for (const part of block.parts) mountPart(block, part);
   if (!block.parts.length) mountTyping(block);
   if (block._usage) updateTurnCaption(block);
   refreshAssistantCopy(block);
 }
 
-export function renderNoticeBlock(block: NoticeBlock): void {
-  const el = block._el;
-  if (!el) return;
-  el.classList.toggle("loading", Boolean(block.loading));
-  const children: Node[] = [
-    h("div", { class: "notice-title" }, block.title || "提示"),
-    h("div", { class: "notice-text" }, block.text || ""),
-  ];
-  if (block.summary) {
-    children.push(h("details", { class: "notice-details" },
-      h("summary", null, "查看压缩摘要"),
-      h("div", { class: "notice-details-body" },
-        h("pre", null, block.summary),
-        h("div", { class: "notice-details-actions" },
-          createMessageCopyButton("复制摘要", "摘要已复制", () => block.summary || "", "当前没有可复制的摘要"),
-        ),
-      ),
-    ));
-  }
-  el.replaceChildren(...children);
+/**
+ * 把块加入消息流：让 Vue 渲染骨架，助手块再挂 parts。
+ * live=false 用于整段历史重放（不累计「新消息」角标）。
+ */
+export function mountBlock(block: ChatBlock, live = true): void {
+  if (live) markNewMessage();
+  document.getElementById("empty-session")?.classList.add("hidden");
+  const store = useMessagesStore();
+  store.refresh();
+  if (block.t !== "assistant") return;
+  // 助手块需要等 Vue 渲染出 .assistant-body 后再挂 parts
+  void (async () => {
+    await nextDomFrame();
+    hydrateAssistant(block, await waitForWrap(block));
+    scrollBottom();
+  })();
 }
 
-/** 全量重绘当前会话（切换会话 / 回放补数据后） */
+/* ---------------------------------------------------------------------------
+ * 用量小字与复制按钮：只更新视图，DOM 由 Vue 负责
+ * ------------------------------------------------------------------------- */
+
+/** 用量小字（↑ 输入 · ↓ 输出 · 缓存 N%）。 */
+export function updateTurnCaption(ablock: AssistantBlock): void {
+  if (!ablock._usage) return;
+  useMessagesStore().refresh();
+}
+
+/** 助手正文流结束后刷新「复制总结」显隐（历史回放时也会走到这里）。 */
+export function refreshAssistantCopy(ablock: AssistantBlock): void {
+  void ablock;
+  useMessagesStore().refresh();
+}
+
+/** 提示块内容更新（压缩摘要等）：视图刷新即可，DOM 由 Vue 渲染。 */
+export function renderNoticeBlock(block: ChatBlock): void {
+  void block;
+  useMessagesStore().refresh();
+}
+
+/* ---------------------------------------------------------------------------
+ * 整体重放
+ * ------------------------------------------------------------------------- */
+
+/**
+ * 全量重绘当前会话（切换会话 / 回放补数据后）。
+ * 关键：清空 DOM 引用表，避免增量更新写到已移除节点。
+ */
 export function renderAll(): void {
   resetNewMessageCount();
-  messagesEl.replaceChildren();
+  // ⚠ #messages 是 message-list-vue 的挂载容器：外部绝不能 replaceChildren /
+  // innerHTML="" —— 那会把 Vue 的根 vnode 从 DOM 里摘掉，之后任何 patch 都会
+  // 在已分离节点上 insertBefore 并抛异常。清列表一律走 store.clear()。
+  void messagesEl;
   partEls.clear();
   blockBodies.clear();
   usageEls.clear();
   const sid = state.currentId;
+  const store = useMessagesStore();
+  store.clear();
   if (!sid) return;
-  for (const block of transcript(sid)) mountBlock(block, false);
-  scrollBottom(true);
-  syncEmptySession();
+  // 一次性编译全部块（Vue 一把渲染），再逐个助手块挂 parts
+  store.refresh();
+  void (async () => {
+    await nextDomFrame();
+    for (const block of transcript(sid)) {
+      if (block.t !== "assistant") continue;
+      hydrateAssistant(block, await waitForWrap(block));
+    }
+    scrollBottom(true);
+    syncEmptySession();
+  })();
+}
+
+function syncEmptySession(): void {
+  const empty = document.getElementById("empty-session");
+  if (!empty) return;
+  empty.classList.toggle("hidden", Boolean(state.currentId && transcript(state.currentId).length));
 }

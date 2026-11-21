@@ -45,19 +45,21 @@ test("流式正文和空白正文不可复制", async () => {
 });
 
 test("用户消息、助手总结与压缩摘要均接入复制按钮和降级剪贴板", async () => {
-  const messages = await readClientFiles(["render/messages.ts"]);
+  // M4 4.6：块骨架迁到 message-list-vue.vue，视图数据在 stores/messages.ts
+  const vue = await readClientFiles(["views/message-list-vue.vue", "stores/messages.ts"]);
   const turn = await readClientFiles(["stream/turn.ts"]);
   const code = await readClientFiles(["render/code-enhance.ts"]);
   const css = await readClientCss();
-  assert.match(messages, /class: "message-actions user-actions"/);
-  assert.match(messages, /class: "message-actions assistant-actions hidden"/);
-  assert.match(messages, /class: "user-message-footer"/);
-  assert.match(messages, /class: "assistant-footer is-empty"/);
-  assert.match(messages, /class: "assistant-footer-meta"/);
-  assert.match(messages, /createMessageCopyButton\("复制"/);
-  assert.match(messages, /createMessageCopyButton\("复制总结"/);
-  assert.match(messages, /createMessageCopyButton\("复制摘要"/);
-  assert.match(messages, /writeClipboardText/);
+  assert.match(vue, /class="message-actions user-actions"/);
+  assert.match(vue, /class="message-actions assistant-actions"/);
+  assert.match(vue, /"user-message-footer"/);
+  assert.match(vue, /assistant-footer/);
+  assert.match(vue, /assistant-footer-meta/);
+  // 三种复制按钮共用同一模板，文案在 label 表里区分
+  assert.match(vue, /label: "复制", copiedLabel: "已复制"/);
+  assert.match(vue, /label: "复制总结", copiedLabel: "总结已复制"/);
+  assert.match(vue, /label: "复制摘要", copiedLabel: "摘要已复制"/);
+  assert.match(vue, /writeClipboardText/);
   assert.match(turn, /refreshAssistantCopy\(ablock\)/);
   assert.match(code, /writeClipboardText\(code\.textContent/);
   assert.match(css, /\.msg-user-content\s*\{/);
@@ -67,6 +69,6 @@ test("用户消息、助手总结与压缩摘要均接入复制按钮和降级�
   assert.match(css, /\.assistant-footer\s*\{[^}]*min-height:\s*30px/s);
   assert.match(css, /\.message-action\s*\{[^}]*width:\s*30px/s);
   assert.match(css, /\.thinking-summary\s*\{[^}]*min-height:\s*24px/s);
-  assert.doesNotMatch(messages, /message-action-label/);
+  assert.doesNotMatch(vue, /message-action-label/);
   assert.match(css, /\.message-actions\.hidden\s*\{\s*display:\s*none/s);
 });

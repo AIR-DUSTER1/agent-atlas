@@ -101,6 +101,8 @@ async function init(): Promise<void> {
   void import("./apps/workflow-plan-vue.js").then((m) => m.mountWorkflowPlanVue()).catch(() => {});
   void import("./apps/attach-chips-vue.js").then((m) => m.mountAttachChipsVue()).catch(() => {});
   void import("./apps/context-meter-vue.js").then((m) => m.mountContextMeterVue()).catch(() => {});
+  // M4 4.6：消息流块骨架也启动即挂载（空清单 = 空列表；parts 由其后的 mountBlock 注入）
+  void import("./apps/message-list-vue.js").then((m) => m.mountMessageListVue()).catch(() => {});
   bindScrollToBottom();
   // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
   if (desktopBridge()?.isElectron) document.body.classList.add("in-desktop");
