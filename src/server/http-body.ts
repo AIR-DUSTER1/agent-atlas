@@ -52,6 +52,24 @@ export function readBody(req: IncomingMessage, maxBytes = BODY_MAX_BYTES): Promi
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// 解析上移缓存（框架迁移 M2）：路由层 jsonRaw 统一 readBody + JSON.parse，
+// handler 用 parsedJsonOf 取值 —— 双重解析消失，413 / SyntaxError 语义不变。
+// ---------------------------------------------------------------------------
+
+const parsedJsonCache = new WeakMap<IncomingMessage, unknown>();
+
+/** jsonRaw 中间件解析完成后缓存；同一请求只解析一次。 */
+export function cacheParsedJson(req: IncomingMessage, value: unknown): void {
+  parsedJsonCache.set(req, value);
+}
+
+/** handler 侧取路由层已解析的请求体；未经 jsonRaw 的路由返回 undefined。 */
+export function parsedJsonOf<T = Record<string, unknown>>(req: IncomingMessage): T | undefined {
+  return parsedJsonCache.get(req) as T | undefined;
+}
+
 /** 路由统一的失败响应：BodyTooLargeError → 413，资源繁忙 → 429，其余 400 + 中文错误 */
 export function respondBadRequest(res: ServerResponse, req: IncomingMessage, err: unknown): void {
   // 资源繁忙是「稍后可以再试」，不是客户端请求有错。回 400 会让调用方

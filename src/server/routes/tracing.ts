@@ -8,7 +8,7 @@
  * 该接口只改观测配置，不启动网络请求，也不把 API Key 回传浏览器。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { saveTraceSettings, traceSettingsSnapshot } from "../trace-settings.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -22,7 +22,7 @@ export function handleGetTracing(res: ServerResponse): void {
 
 export async function handleSaveTracing(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = parsedJsonOf<Record<string, unknown>>(req)!;
     sendJson(res, 200, await saveTraceSettings(body));
   } catch (err) {
     sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });

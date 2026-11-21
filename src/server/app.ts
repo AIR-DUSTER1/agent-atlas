@@ -12,7 +12,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Hono } from "hono";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import {
   assertFreshCredentials, assertPasswordChangeAllowed, handleAuthLogin, handleAuthLogout,
@@ -40,6 +40,12 @@ import { lifecycle } from "./lifecycle.js";
 import { BodyTooLargeError, respondBadRequest } from "./http-body.js";
 import { serveStatic } from "./static.js";
 import { dispatchApi } from "./dispatch.js";
+import {
+  handleActivate, handleAddModel, handleAddProvider, handleDeleteModel, handleDeleteProvider,
+  handleGetApiConfig, handleModels, handleSetReasoning, handleUpdateModel, handleUpdateProvider,
+} from "./routes/config.js";
+import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
+import { cacheParsedJson, readBody } from "./http-body.js";
 import { AUTH_ENABLED, EXPOSED_NOAUTH_ERR, LOOPBACK_HOST, PORT } from "./http-context.js";
 
 // 「响应已直写」标记统一在 already-sent.ts（M2 的 validation.ts 也要用）。
@@ -97,8 +103,11 @@ interface RequestLogState {
   errorStatus?: number;
 }
 
-export function createApp(): Hono<{ Bindings: HttpBindings; Variables: { requestLog: RequestLogState } }> {
-  const app = new Hono<{ Bindings: HttpBindings; Variables: { requestLog: RequestLogState } }>();
+type AppEnv = { Bindings: HttpBindings; Variables: { requestLog: RequestLogState } };
+type AppContext = Context<AppEnv>;
+
+export function createApp(): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
 
   // ── 1. 请求上下文：X-Request-Id、计时、错误映射、记账（最外层 try/catch/finally）──
   app.use("*", async (c, next) => {
@@ -338,6 +347,33 @@ export function createApp(): Hono<{ Bindings: HttpBindings; Variables: { request
     await handleClientError(c.env.incoming, c.env.outgoing, c.get("requestLog").requestId);
     return alreadySent();
   });
+
+  // ── 15c. M2 批次 3（模型配置域）：原生挂载；dispatch.ts 对应分支已摘除 ──
+  // jsonRaw：路由层统一 readBody + JSON.parse（413 / SyntaxError 语义不变，经 app.onError），
+  // handler 用 parsedJsonOf(req) 取解析值。服务层（settings-crud）仍是带测试的中文校验边界，
+  // 路由层不重复 schema，避免消息漂移；zod schema 化随服务层校验合并推进（agent-wiki M2 记录）。
+  const jsonRaw: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const rawBody = await readBody(c.env.incoming);
+    cacheParsedJson(c.env.incoming, JSON.parse(rawBody || "{}"));
+    await next();
+  };
+  // config 域 handler 的参数序是 (res, req[, id, mid])，与 raw() 的 (req, res) 相反，全部用 lambda 显式写。
+  const withBody = (fn: (c: AppContext) => Promise<void>) => async (c: AppContext) => {
+    await fn(c);
+    return alreadySent();
+  };
+  app.get("/api/config", withBody(async (c) => { await handleGetApiConfig(c.env.outgoing); }));
+  app.post("/api/config/providers", jsonRaw, withBody(async (c) => { await handleAddProvider(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/config/providers/:id", jsonRaw, withBody(async (c) => { await handleUpdateProvider(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.delete("/api/config/providers/:id", withBody(async (c) => { await handleDeleteProvider(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/config/providers/:id/models", jsonRaw, withBody(async (c) => { await handleAddModel(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/config/providers/:id/models/:mid", jsonRaw, withBody(async (c) => { await handleUpdateModel(c.env.outgoing, c.env.incoming, c.req.param("id") as string, c.req.param("mid") as string); }));
+  app.delete("/api/config/providers/:id/models/:mid", withBody(async (c) => { await handleDeleteModel(c.env.outgoing, c.env.incoming, c.req.param("id") as string, c.req.param("mid") as string); }));
+  app.post("/api/config/reasoning", jsonRaw, withBody(async (c) => { await handleSetReasoning(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/config/activate", jsonRaw, withBody(async (c) => { await handleActivate(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/models", jsonRaw, withBody(async (c) => { await handleModels(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/tracing", withBody(async (c) => { handleGetTracing(c.env.outgoing); }));
+  app.put("/api/tracing", jsonRaw, withBody(async (c) => { await handleSaveTracing(c.env.outgoing, c.env.incoming); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

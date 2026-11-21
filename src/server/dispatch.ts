@@ -13,18 +13,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { bumpConfigVersion, getSessionByThreadForUser } from "./sessions.js";
 import {
-  handleActivate,
-  handleAddModel,
-  handleAddProvider,
-  handleDeleteModel,
-  handleDeleteProvider,
-  handleGetApiConfig,
-  handleModels,
-  handleSetReasoning,
-  handleUpdateModel,
-  handleUpdateProvider,
-} from "./routes/config.js";
-import {
   handleAddExternalAgent,
   handleDeleteExternalAgent,
   handleListExternalAgents,
@@ -114,7 +102,6 @@ import {
   handleUpdateMemoryConfig,
 } from "./routes/memory.js";
 import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
-import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleStaticMap } from "./map-static.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
@@ -153,9 +140,6 @@ export async function refreshMcpTools(bumpVersion = false): Promise<void> {
 export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx: DispatchContext): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:0`);
   const pathname = url.pathname;
-    const modelsMatch = pathname.match(/^\/api\/config\/providers\/([\w-]+)\/models$/);
-    const modelMatch = pathname.match(/^\/api\/config\/providers\/([\w-]+)\/models\/([\w-]+)$/);
-    const providerMatch = pathname.match(/^\/api\/config\/providers\/([\w-]+)$/);
     const sessionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
     const transcriptMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/transcript$/);
     const compactMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/compact$/);
@@ -174,20 +158,8 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     if (pathname === "/api/map/static" && req.method === "GET") { await handleStaticMap(res, url); return; }
 
     // 供应商 / 模型 / 思考等级 / 网关探测
-    if (pathname === "/api/config" && req.method === "GET") { await handleGetApiConfig(res); return; }
-    if (pathname === "/api/config/providers" && req.method === "POST") { await handleAddProvider(res, req); return; }
-    if (modelsMatch && req.method === "POST") { await handleAddModel(res, req, modelsMatch[1]); return; }
-    if (modelMatch && req.method === "POST") { await handleUpdateModel(res, req, modelMatch[1], modelMatch[2]); return; }
-    if (modelMatch && req.method === "DELETE") { await handleDeleteModel(res, req, modelMatch[1], modelMatch[2]); return; }
-    if (pathname === "/api/config/reasoning" && req.method === "POST") { await handleSetReasoning(res, req); return; }
-    if (providerMatch && req.method === "POST") { await handleUpdateProvider(res, req, providerMatch[1]); return; }
-    if (providerMatch && req.method === "DELETE") { await handleDeleteProvider(res, req, providerMatch[1]); return; }
-    if (pathname === "/api/config/activate" && req.method === "POST") { await handleActivate(res, req); return; }
-    if (pathname === "/api/models" && req.method === "POST") { await handleModels(res, req); return; }
 
     // LangSmith 追踪设置（只保存配置；真正上报发生在 runGraphEvents 的 callback 注入点）
-    if (pathname === "/api/tracing" && req.method === "GET") { handleGetTracing(res); return; }
-    if (pathname === "/api/tracing" && req.method === "PUT") { await handleSaveTracing(res, req); return; }
 
     // 内置插件启停（RAG / 找房数据源 / Computer Use）
     if (pathname === "/api/plugins" && req.method === "GET") { handleListPlugins(res); return; }
