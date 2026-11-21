@@ -70,7 +70,12 @@ import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes
 import {
   handleCreateSubagent, handleDeleteSubagent, handleListSubagents, handleUpdateSubagent,
 } from "./routes/subagents.js";
-import { cacheParsedJson, readBody } from "./http-body.js";
+import {
+  handleAddProject, handleDeleteProject, handleListProjects, handlePickProjectDirectory,
+  handleRefreshProject, handleSetActiveProject,
+} from "./routes/projects.js";
+import { handleFsList, handleFsOpenRemote, handleFsRead, handleFsSearch, handleUpload } from "./routes/files.js";
+import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
   handleTestMemory, handleUpdateMemoryConfig,
@@ -385,11 +390,13 @@ export function createApp(): Hono<AppEnv> {
   // jsonRaw：路由层统一 readBody + JSON.parse（413 / SyntaxError 语义不变，经 app.onError），
   // handler 用 parsedJsonOf(req) 取解析值。服务层（settings-crud）仍是带测试的中文校验边界，
   // 路由层不重复 schema，避免消息漂移；zod schema 化随服务层校验合并推进（agent-wiki M2 记录）。
-  const jsonRaw: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const rawBody = await readBody(c.env.incoming);
+  const jsonRawFor = (maxBytes?: number): MiddlewareHandler<AppEnv> => async (c, next) => {
+    // 路由层统一 readBody + JSON.parse（413 / SyntaxError 语义不变，经 app.onError）
+    const rawBody = await readBody(c.env.incoming, maxBytes);
     cacheParsedJson(c.env.incoming, JSON.parse(rawBody || "{}"));
     await next();
   };
+  const jsonRaw = jsonRawFor();
   // config 域 handler 的参数序是 (res, req[, id, mid])，与 raw() 的 (req, res) 相反，全部用 lambda 显式写。
   const withBody = (fn: (c: AppContext) => Promise<void>) => async (c: AppContext) => {
     await fn(c);
@@ -481,6 +488,20 @@ export function createApp(): Hono<AppEnv> {
   app.get("/api/users/:id/tokens", withBody(async (c) => { await handleListUserTokens(c.env.outgoing, c.req.param("id") as string); }));
   app.post("/api/users/:id/tokens", jsonRaw, withBody(async (c) => { await handleCreateUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
   app.delete("/api/users/:id/tokens/:tokenId", withBody(async (c) => { await handleRevokeUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string, c.req.param("tokenId") as string); }));
+
+  // ── 15i. M2 批次 8（项目与文件）：原生挂载；dispatch 分支已摘除 ──
+  // upload 用放宽的 12MB 上限（jsonRawFor(12_000_000)），与平移前 readBody(req, 12MB) 一致。
+  app.get("/api/projects", withBody(async (c) => { await handleListProjects(c.env.outgoing); }));
+  app.post("/api/projects", jsonRaw, withBody(async (c) => { await handleAddProject(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/projects/pick-directory", withBody(async (c) => { await handlePickProjectDirectory(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/projects/active", jsonRaw, withBody(async (c) => { await handleSetActiveProject(c.env.outgoing, c.env.incoming); }));
+  app.delete("/api/projects/:id", withBody(async (c) => { await handleDeleteProject(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/projects/:id/refresh", withBody(async (c) => { await handleRefreshProject(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/fs/list", jsonRaw, withBody(async (c) => { await handleFsList(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/fs/search", jsonRaw, withBody(async (c) => { await handleFsSearch(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/fs/read", jsonRaw, withBody(async (c) => { await handleFsRead(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/fs/open-remote", jsonRaw, withBody(async (c) => { await handleFsOpenRemote(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/files/upload", jsonRawFor(12_000_000), withBody(async (c) => { await handleUpload(c.env.outgoing, c.env.incoming); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

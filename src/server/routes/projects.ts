@@ -3,7 +3,7 @@
  * ============================================================
  * 删除项目时同时把该项目下的会话挪回 default（moveSessions 动态 import 已收敛为顶层）。
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import { listProjects, getActiveProjectId, setActiveProject, addProject, deleteProject, refreshCloudProject } from "../projects.js";
 import { moveSessions } from "../sessions.js";
 import { writeAudit } from "../audit.js";
@@ -41,7 +41,7 @@ export async function handlePickProjectDirectory(
   }
 }
 export async function handleAddProject(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; type?: string; path?: string; url?: string };
+  const body = parsedJsonOf<{ name?: string; type?: string; path?: string; url?: string }>(req)!;
   try {
     if (isPostgresBackend() && body.type !== "cloud" && !isAdminRequest(req)) {
       throw new Error("多用户模式下只有管理员可以添加服务器本地目录；普通用户请使用本地文件上传或云端 Git 项目");
@@ -57,7 +57,7 @@ export async function handleAddProject(res: import("node:http").ServerResponse, 
 }
 
 export async function handleSetActiveProject(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { id?: string };
+  const body = parsedJsonOf<{ id?: string }>(req)!;
   try {
     setActiveProject(body.id ?? "");
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });

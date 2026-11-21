@@ -18,14 +18,6 @@ import {
   handleListExternalAgents,
   handleUpdateExternalAgent,
 } from "./routes/external.js";
-import {
-  handleAddProject,
-  handleDeleteProject,
-  handleListProjects,
-  handlePickProjectDirectory,
-  handleRefreshProject,
-  handleSetActiveProject,
-} from "./routes/projects.js";
 import { handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
@@ -44,7 +36,6 @@ import {
   handleSaveBeikeKey,
   handleStartBeikeLogin,
 } from "./routes/estate.js";
-import { handleFsList, handleFsOpenRemote, handleFsRead, handleFsSearch, handleUpload } from "./routes/files.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import { handleStaticMap } from "./map-static.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
@@ -84,8 +75,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
   const url = new URL(req.url ?? "/", `http://localhost:0`);
   const pathname = url.pathname;
     const extMatch = pathname.match(/^\/api\/external-agents\/([\w-]+)$/);
-    const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
-    const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
     // 用户 id 是 uuid；reset-password / tokens 子路径在各自分支用 endsWith 区分
 
@@ -108,20 +97,7 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     if (extMatch && req.method === "POST") { await handleUpdateExternalAgent(res, req, extMatch[1]); return; }
     if (extMatch && req.method === "DELETE") { await handleDeleteExternalAgent(res, req, extMatch[1]); return; }
 
-    // 项目文件夹
-    if (pathname === "/api/projects" && req.method === "GET") { await handleListProjects(res); return; }
-    if (pathname === "/api/projects" && req.method === "POST") { await handleAddProject(res, req); return; }
-    if (pathname === "/api/projects/pick-directory" && req.method === "POST") { await handlePickProjectDirectory(res, req); return; }
-    if (pathname === "/api/projects/active" && req.method === "POST") { await handleSetActiveProject(res, req); return; }
-    if (projectMatch && req.method === "DELETE") { await handleDeleteProject(res, req, projectMatch[1]); return; }
-    if (projectRefresh && req.method === "POST") { await handleRefreshProject(res, req, projectRefresh[1]); return; }
 
-    // 文件上下文
-    if (pathname === "/api/fs/list" && req.method === "POST") { await handleFsList(res, req); return; }
-    if (pathname === "/api/fs/search" && req.method === "POST") { await handleFsSearch(res, req); return; }
-    if (pathname === "/api/fs/read" && req.method === "POST") { await handleFsRead(res, req); return; }
-    if (pathname === "/api/fs/open-remote" && req.method === "POST") { await handleFsOpenRemote(res, req); return; }
-    if (pathname === "/api/files/upload" && req.method === "POST") { await handleUpload(res, req); return; }
 
     // 对话 / 审批
     if (pathname === "/api/chat" && req.method === "POST") {

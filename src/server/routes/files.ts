@@ -4,12 +4,12 @@
  * 授权与内容安全都收敛在 files.ts 内（assertAuthorized / 二进制检测 / SKIPPED_DIRS）；
  * 上传单独放宽请求体到 12MB（图片走 dataURL，体积比文本大）。
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import { listDir, searchFiles, readFileAuthorized, openRemoteRoot, storeUpload } from "../files.js";
 import { listProjects } from "../projects.js";
 
 export async function handleFsList(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { path?: string };
+  const body = parsedJsonOf<{ path?: string }>(req)!;
   try {
     const data = await listDir(body.path);
     // roots 拼上项目信息：前端据此区分 本地💻 / 云端☁️ 样式
@@ -26,7 +26,7 @@ export async function handleFsList(res: import("node:http").ServerResponse, req:
 }
 
 export async function handleFsSearch(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { query?: unknown };
+  const body = parsedJsonOf<{ query?: unknown }>(req)!;
   try {
     const data = await searchFiles(typeof body.query === "string" ? body.query : "");
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -37,7 +37,7 @@ export async function handleFsSearch(res: import("node:http").ServerResponse, re
 }
 
 export async function handleFsRead(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { path?: string };
+  const body = parsedJsonOf<{ path?: string }>(req)!;
   try {
     const data = await readFileAuthorized(body.path ?? "");
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -48,7 +48,7 @@ export async function handleFsRead(res: import("node:http").ServerResponse, req:
 }
 
 export async function handleFsOpenRemote(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { path?: string };
+  const body = parsedJsonOf<{ path?: string }>(req)!;
   try {
     const data = await openRemoteRoot(body.path ?? "");
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -60,9 +60,9 @@ export async function handleFsOpenRemote(res: import("node:http").ServerResponse
 
 export async function handleUpload(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
   // 图片走 dataURL，体积比文本大 → 单独放宽请求体上限
-  const body = JSON.parse((await readBody(req, 12_000_000)) || "{}") as {
+  const body = parsedJsonOf<{
     name?: unknown; content?: unknown; image?: unknown;
-  };
+  }>(req)!;
   try {
     if (typeof body.name !== "string" || typeof body.content !== "string") {
       throw new Error("参数不完整（name / content）");
