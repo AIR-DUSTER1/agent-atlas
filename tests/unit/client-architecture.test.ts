@@ -64,13 +64,31 @@ function importsOf(source: string): string[] {
   return specs;
 }
 
-test("业务源码只通过 client/vendor wrapper 使用 npm 前端库", async () => {
+// 框架迁移 M0：vendor 强制断言退役，改为「依赖清单守门」——
+// 业务源码 import 的 npm 包必须在登记表内（新增依赖先登记再 import）。
+const REGISTERED_CLIENT_PACKAGES = new Set([
+  "chart.js", "lucide", "marked", "dompurify", "highlight.js",
+  // M4 起引入（登记见 .plans/development-docs/engineering-standards.md §3）
+  "vue", "pinia", "antdv-next",
+]);
+
+test("业务源码 import 的 npm 前端包必须在登记表内", async () => {
   const violations: string[] = [];
   for (const file of await listTs(CLIENT)) {
     const rel = relative(CLIENT, file).replaceAll("\\", "/");
     if (rel.startsWith("vendor/")) continue;
-    for (const spec of importsOf(await readFile(file, "utf8"))) {
-      if (VENDOR_PACKAGES.has(spec)) violations.push(`${rel}: ${spec}`);
+    // 去掉注释再抓 import，避免 banner 里的示例路径误报
+    const source = (await readFile(file, "utf8"))
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n").map((line) => line.replace(/\/\/.*$/, "")).join("\n");
+    for (const spec of importsOf(source)) {
+      if (spec.startsWith(".") || spec.startsWith("#")) continue;
+      // NodeNext 下相对导入写 .js 后缀；types-only 双引号 import 也可能是本地路径
+      if (!spec.includes("/") && !spec.startsWith("@") && spec.endsWith(".js")) continue;
+      const pkg = spec.startsWith("@")
+        ? spec.split("/").slice(0, 2).join("/")
+        : spec.split("/")[0] ?? spec;
+      if (!REGISTERED_CLIENT_PACKAGES.has(pkg)) violations.push(`${rel}: ${spec}`);
     }
   }
   assert.deepEqual(violations, []);

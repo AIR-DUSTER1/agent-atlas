@@ -13,9 +13,10 @@ description: "修改 agentatlas Web 前端、HTML 片段、CSS、设置页、可
 
 ## 不可破坏的边界
 
-- 前端只使用原生 TypeScript；禁止 React/Vue/Svelte、Vite/Webpack/Tailwind CLI 和整体打包器。
+- 前端技术栈为 Vue 3 SFC + Pinia + antdv-next（限通用控件），构建链 Vite（M0 新红线；M1-M3 过渡期存量 h() 视图只修不扩，新增页面不得再手写 h() DOM）。
+- 组件不得 import `src/server/**`；业务状态只能经 store，不得在组件内私建副本（M4 起由 `framework-boundaries.test.ts` 断言）。
 - 业务代码只通过 `/api/*` 访问服务端；不得 import 服务端源码或类型实现。
-- npm 前端库只能经 `src/client/vendor/*` wrapper 接入；新增依赖必须先登记体积与许可证。
+- npm 前端库必须在工程规范 §3 登记体积与许可证；过渡期经 `src/client/vendor/*` wrapper 接入，M3 起 Vite 直打。
 - 页面结构放 `src/client/pages/`；`index.html` 只保留根壳、CSP、build-info 注入点和 include 清单。
 - CSS 按功能拆分并由入口显式加载；禁止恢复单体样式、循环 `@import` 或跨文件覆盖主题 token。
 - 用户内容走 `textContent`、`h()` 或 `DOMPurify` 安全路径；禁止把用户输入拼进 `innerHTML`。

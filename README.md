@@ -26,6 +26,7 @@
 ## 项目简介
 
 agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 Agent 工作台，提供 Web、CLI 和 Electron 三种入口。
+> **技术栈换轨公告（0.10 起）**：agentatlas 正按 `.plans/development-docs/framework-migration-plan.md` 渐进迁移到 **Hono（后端路由）+ Vue 3 + Pinia + antdv-next（前端）+ Vite（构建链）**。M0 规则解除已完成；迁移完成前对外行为、HTTP/SSE 契约与 0.9 完全等价。无框架原生实现（node:http + 原生 TS）的终态归档在 `legacy/v0.9-native` 分支（版本冻结 0.9.x，仅安全修复）。迁移进度如实更新：**M0 ✅ → M1 ⏳ → M2 ⏳ → M3 ⏳ → M4 ⏳ → M5 ⏳**。
 
 它面向需要长期使用、可审计、可扩展 Agent 能力的开发者与专业用户：既可以在不配置模型密钥的情况下体验完整交互，也可以接入 OpenAI、Anthropic、Gemini 兼容网关、外部 MCP Server、RAG 和 HTTP 记忆服务。
 

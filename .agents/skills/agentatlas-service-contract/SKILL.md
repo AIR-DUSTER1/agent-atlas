@@ -13,8 +13,8 @@ description: "修改 agentatlas 的 HTTP 路由、SSE 事件、配置持久化�
 
 ## 不可破坏的契约
 
-- 后端保持 `node:http` 零框架；路由写在既有顺序 `if` 分发中。
-- 新接口遵循：`readBody -> await 业务 -> writeHead -> end`，失败返回中文 4xx。
+- 后端路由层为 Hono（M0 新红线；M1 前过渡期保持 `node:http` 顺序分发，新路由仍落 `src/server/routes/*.ts` 并声明请求 schema）。
+- 新接口遵循：请求 schema 校验（终态 `zValidator`，过渡期 `readBody`）→ `await 业务` → 响应写出，失败返回中文 4xx。
 - 配置写入只走 `config-store.ts` 的 `mergeConfig` 与 `persist`；API Key 只回掩码。
 - 文件访问只走 `files.ts`：先 resolve，再 `assertAuthorized`，再做二进制、截断和敏感路径检查。
 - SSE 新事件必须同步 `server/events.ts`、事件产出端、`client/stream/events.ts` 与 `modules/types-api.ts`。
