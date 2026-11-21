@@ -197,6 +197,10 @@ async function init(): Promise<void> {
   on("sidebar-scrim", "click", () => setSidebarOpen(false));
 
   // 输入框上方：模型 / 思考等级 / 会话权限快捷切换
+  // M4 4.5：权限 chip 由 perm-chip-vue.vue 渲染；必须**在绑定前同步挂载**，
+  // 否则 on() 找不到 #cm-perm（异步 import 会晚于绑定）。挂载模块内部再
+  // 动态 import Vue 与 pinia，所以这里不把裸包名带进静态图。
+  await import("./apps/topbar-vue.js").then((m) => m.mountShellHeadsVue()).catch(() => {});
   on("cm-model", "click", (e) => {
     e.stopPropagation();
     toggleCmMenu("cm-model", "cm-model-menu", renderModelMenu);

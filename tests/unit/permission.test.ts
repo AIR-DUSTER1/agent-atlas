@@ -66,11 +66,17 @@ test("拒绝文案与权限注记面向模型可读", () => {
 });
 test("前端权限菜单包含自主模式，并展示 AI 风险判断理由", async () => {
   const root = new URL("../../src/client/", import.meta.url);
-    const app = await readClientSource();
+  const app = await readClientSource();
   const html = await readClientIndexHtml();
-  assert.match(app, /id: "autonomous", label: "自主"/);
-  assert.match(app, /高风险才申请人工审批/);
+  // M4 4.5：权限模式常量的权威位置是 modules/permission-modes.ts（无 pinia 依赖，
+  // legacy 桥与 Vue store 共用）；chip 文案由 perm-chip-vue.vue 渲染。
+  const modes = await readFile(new URL("modules/permission-modes.ts", root), "utf8");
+  const chip = await readFile(new URL("views/perm-chip-vue.vue", root), "utf8");
+  assert.match(modes, /id: "autonomous", label: "自主"/);
+  assert.match(modes, /高风险才申请人工审批/);
   assert.match(app, /approval-risk-reason/);
   assert.match(app, /req\.riskReason/);
-  assert.match(html, /只读 \/ 审批 \/ 自主 \/ 自动/);
+  // chip 的 title 文案来自 store.permTitle（「会话权限模式：…」）与静态 HTML 提示
+  assert.match(chip, /store\.permTitle/);
+  assert.match(html, /id="perm-chip-mount"/);
 });

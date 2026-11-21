@@ -1,13 +1,11 @@
       <div id="chat-scroll">
         <div id="welcome" class="welcome">
-          <div class="welcome-hero">
-            <div class="welcome-logo"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></div>
-            <h1 id="welcome-title">agentatlas</h1>
-            <p id="welcome-subtitle">可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认</p>
-          </div>
-          <div id="welcome-examples-label" class="examples-label">试试这些</div>
+          <!-- M4 批次 4.5：hero +「试试这些」由 welcome-head-vue.vue(section=hero) 渲染，
+               「选择 Agent 或内置示例」标签由 section=cards 的另一实例渲染。
+               拆两段挂载是为了保持 chips/cards 的原始 DOM 顺序。 -->
+          <div id="welcome-head-mount"></div>
           <div id="example-chips" class="example-chips"></div>
-          <div id="welcome-cards-label" class="examples-label">选择 Agent 或内置示例</div>
+          <div id="welcome-cards-mount"></div>
           <div id="demo-cards" class="demo-cards"></div>
         </div>
         <section id="empty-session" class="empty-session hidden" aria-labelledby="empty-session-title">

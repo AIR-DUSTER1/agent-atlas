@@ -35,8 +35,12 @@ test("Web、桌面端与容器入口使用同一产品名", async () => {
   const html = await readClientIndexHtml();
   const desktop = await read("desktop/main.ts");
   const dockerfile = await read("Dockerfile");
+  // M4 4.5：欢迎页 h1 迁入 welcome-head-vue.vue，产品名来自 modules/product.ts
+  const welcomeVue = await read("src/client/views/welcome-head-vue.vue");
+  const productTs = await read("src/client/modules/product.ts");
   assert.match(html, /<title>agentatlas<\/title>/);
-  assert.match(html, /<h1[^>]*>agentatlas<\/h1>/);
+  assert.match(productTs, /PRODUCT_NAME = "agentatlas"/);
+  assert.match(welcomeVue, /id="welcome-title"/);
   assert.match(desktop, /title: "agentatlas · 桌面版"/);
   assert.match(dockerfile, /org\.opencontainers\.image\.title="agentatlas"/);
   assert.doesNotMatch(`${html}\n${desktop}\n${dockerfile}`, /langgraph-agent-(demo|workbench)/);

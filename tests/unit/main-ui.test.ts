@@ -21,11 +21,13 @@ test("空会话提供三个快捷起步且不会自动发送", async () => {
 });
 
 test("顶栏面包屑与空状态切换已接线", async () => {
+  // M4 4.5：会话头 / 欢迎页文案迁入 Vue（stores/topbar.ts 派生 + 组件渲染）
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/navigation.ts"]);
-  assert.match(html, /id="breadcrumb-project"/);
-  assert.match(html, /data-icon="ChevronRight"/);
-  assert.match(source, /breadcrumb\.textContent = projectById\(session\.projectId\)/);
+  const source = await readClientFiles(["views/navigation.ts", "stores/topbar.ts", "views/topbar-vue.vue"]);
+  assert.match(html, /id="topbar-head-mount"/);
+  assert.match(source, /id="breadcrumb-project"/);
+  assert.match(source, /data-icon="ChevronRight"/);
+  assert.match(source, /breadcrumb = state\.projects\.find\(\(project\) => project\.id === session\.projectId\)\?\.name \?\? "未归属项目"/);
   assert.match(source, /classList\.toggle\("hidden", transcript\(session\.id\)\.length > 0\)/);
 });
 
@@ -87,13 +89,13 @@ test("消息流有回到底部按钮与未读累计", async () => {
 
 test("没有项目时首屏和新建对话直接进入 Agent 选择页", async () => {
   const main = await readClientFiles(["main.ts"]);
-  const navigation = await readClientFiles(["views/navigation.ts"]);
-  const html = await readClientIndexHtml();
+  // M4 4.5：欢迎态文案由 stores/topbar.ts 派生，welcome-head-vue.vue 渲染
+  const navigation = await readClientFiles(["views/navigation.ts", "stores/topbar.ts", "views/welcome-head-vue.vue"]);
   assert.match(main, /state\.projects\.length === 0/);
   assert.match(main, /showWelcomeState\("agent-picker"\)/);
   assert.match(navigation, /WelcomeMode = "default" \| "agent-picker"/);
   assert.match(navigation, /选择一个 Agent 开始新会话/);
   assert.match(navigation, /请选择 Agent 开始新会话/);
-  assert.match(html, /id="welcome-title"/);
-  assert.match(html, /id="welcome-cards-label"/);
+  assert.match(navigation, /id="welcome-title"/);
+  assert.match(navigation, /id="welcome-cards-label"/);
 });

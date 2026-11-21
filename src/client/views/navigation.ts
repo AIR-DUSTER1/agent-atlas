@@ -13,9 +13,8 @@ import { $, chatScroll, inputEl, messagesEl, sendBtn, setSidebarOpen, welcomeEl 
 import { api } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
-import { profileMetaForSession } from "../modules/agent-profile.js";
 import { isContinuationRecord, lastAssistantBlock } from "../modules/chat-flow.js";
-import { isAgentKind } from "../modules/session-kind.js";
+import { PERMISSION_MODES, type PermissionMode } from "../modules/permission-modes.js";
 import { renderAll } from "../render/messages.js";
 import { applyUsage, handleEvent } from "../stream/events.js";
 import { finalize, setStatus, syncComposerState } from "../stream/turn.js";
@@ -23,81 +22,41 @@ import { markInterruptsResolved, markLatestInterruptPending, renderSessions } fr
 import { closeComposerMenu } from "../composer/menu.js";
 import { updateContextBar } from "./composer-bar.js";
 import { renderWorkflowPlan } from "./workflow-plan.js";
-import { projectById } from "./projects.js";
-import { PROJECT_VIEW_NONE } from "../modules/project-view.js";
-import { PRODUCT_NAME } from "../modules/product.js";
 import type { AgentEvent, ChatBlock, PermissionModeId, Session } from "../modules/types.js";
 
-const DEMO_BADGE_TEXT: Record<number, string> = {
-  1: "示例 1 · 基础 ReAct", 2: "示例 2 · 对话记忆",
-  3: "示例 3 · 人工审批", 4: "示例 4 · 多 Agent",
-};
-
-/* ---------------------------------------------------------------------------
- * 会话权限模式：输入框上方 🛡 chip，随会话切换联动
- * 只读 = 改世界工具一律拒绝；审批 = 高风险先确认（默认）；
- * 自主 = AI 判断当前操作是否高风险；自动 = 全部直接执行。
- * ------------------------------------------------------------------------- */
-export interface PermissionMode {
-  id: PermissionModeId;
-  label: string;
-  desc: string;
-}
-
-export const PERMISSION_MODES: PermissionMode[] = [
-  { id: "readonly", label: "只读", desc: "只允许只读工具：写文件 / 执行命令 / 发消息 / 控制电脑一律拒绝" },
-  { id: "approve", label: "审批", desc: "高风险操作执行前弹审批卡片，人工批准才执行（默认）" },
-  { id: "autonomous", label: "自主", desc: "AI 判断当前操作风险：高风险才申请人工审批，低风险直接执行（评估失败按高风险）" },
-  { id: "auto", label: "自动", desc: "全部工具直接执行，不再逐项审批（信任当前会话时使用）" },
-];
+/** 权限模式常量与类型从纯数据模块转发（保持既有 import 路径）。 */
+export { PERMISSION_MODES, type PermissionMode } from "../modules/permission-modes.js";
 
 export type WelcomeMode = "default" | "agent-picker";
 
-/** 记住当前欢迎态，供插件启停后只刷新受影响的文案。 */
-let currentWelcomeMode: WelcomeMode = "default";
-
-function agentPickerSubtitle(): string {
-  const hasEstatePlugin = state.plugins?.enabled.estate !== false;
-  return `当前还没有添加项目。先选择${hasEstatePlugin ? "通用 Agent 或租房 / 房产 Agent" : "通用 Agent"}，直接开始即可；需要文件上下文时再到左上角添加项目。`;
+/** 顶部与欢迎页文案统一经 store 发布（core state 非响应式，靠 window 通知）。 */
+function publishTopbar(action: "welcome" | "session" | "plugin" | "perm", payload?: unknown): void {
+  void import("../stores/topbar.js")
+    .then(({ useTopbarStore, publishTopbar: publish }) => {
+      const store = useTopbarStore();
+      if (action === "welcome") store.applyWelcome(payload as WelcomeMode);
+      else if (action === "session") store.applySession(payload as Session);
+      else if (action === "plugin") store.refreshPluginCopy();
+      else store.applyPermission(payload as Session | undefined);
+      publish();
+    })
+    .catch(() => {});
+  void import("../apps/topbar-vue.js")
+    .then((m) => m.mountShellHeadsVue())
+    .catch(() => {});
 }
 
 /** 插件启停后刷新 Agent 选择页副标题；其他欢迎态不受影响。 */
 export function refreshWelcomePluginCopy(): void {
-  if (currentWelcomeMode !== "agent-picker") return;
-  const subtitle = $("welcome-subtitle");
-  if (subtitle) subtitle.textContent = agentPickerSubtitle();
+  publishTopbar("plugin");
 }
 
 /** 无项目时把欢迎页提升为明确的 Agent 选择页；普通欢迎态仍保留示例起步。 */
 export function showWelcomeState(mode: WelcomeMode = "default"): void {
   closeComposerMenu();
-  currentWelcomeMode = mode;
+  publishTopbar("welcome", mode);
   const pickingAgent = mode === "agent-picker";
-  const title = $("session-title");
-  if (title) title.textContent = pickingAgent ? "选择 Agent" : "选择会话";
-  const breadcrumb = $("breadcrumb-project");
-  if (breadcrumb) {
-    breadcrumb.textContent = pickingAgent
-      ? "新会话"
-      : state.projectView === PROJECT_VIEW_NONE
-        ? "不选择项目"
-        : projectById(state.projectView)?.name ?? PRODUCT_NAME;
-  }
-  const welcomeTitle = $("welcome-title");
-  if (welcomeTitle) {
-    welcomeTitle.textContent = pickingAgent ? "选择一个 Agent 开始新会话" : PRODUCT_NAME;
-  }
-  const welcomeSubtitle = $("welcome-subtitle");
-  if (welcomeSubtitle) {
-    welcomeSubtitle.textContent = pickingAgent
-      ? agentPickerSubtitle()
-      : "可扩展的 Agent 工具集：编程、文件、知识库与电脑操作统一入口，高风险动作先请求确认";
-  }
-  $("welcome-examples-label")?.classList.toggle("hidden", pickingAgent);
   $("example-chips")?.classList.toggle("hidden", pickingAgent);
-  const cardsLabel = $("welcome-cards-label");
-  if (cardsLabel) cardsLabel.textContent = pickingAgent ? "选择 Agent" : "选择 Agent 或内置示例";
-  $("demo-badge")?.classList.add("hidden");
   welcomeEl.classList.remove("hidden");
   $("empty-session")?.classList.add("hidden");
   messagesEl.innerHTML = "";
@@ -114,20 +73,8 @@ export function showWelcomeState(mode: WelcomeMode = "default"): void {
 export function showChatState(session: Session): void {
   welcomeEl.classList.add("hidden");
   $("empty-session")?.classList.toggle("hidden", transcript(session.id).length > 0);
-  const title = $("session-title");
-  if (title) title.textContent = session.title;
-  const breadcrumb = $("breadcrumb-project");
-  if (breadcrumb) breadcrumb.textContent = projectById(session.projectId)?.name ?? "未归属项目";
-  const badge = $("demo-badge");
-  if (badge) {
-    const profile = profileMetaForSession(session);
-    badge.textContent = session.kind === "demo"
-      ? (DEMO_BADGE_TEXT[session.demo || 0] || `示例 ${session.demo}`)
-      : session.kind === "external"
-        ? `🔌 外部 · ${state.externalAgents.find((a) => a.id === session.agentId)?.name ?? "Agent"}`
-        : profile ? `${profile.icon} ${profile.label}` : "未知 Agent";
-    badge.classList.remove("hidden");
-  }
+  // 标题 / 面包屑 / 示例徽标经 store 交给 Vue 顶栏组件（含目录匹配逻辑）
+  publishTopbar("session", session);
   // 历史会话（服务重启后仅存于本地）只读：发送必然 404，直接禁用输入
   const stale = Boolean(session.stale);
   inputEl.disabled = stale;
@@ -145,22 +92,13 @@ export function showChatState(session: Session): void {
 
 /** 权限 chip 只对有 Agent 执行力的会话显示（demo / external / 历史失效会话隐藏） */
 export function renderPermChip(session?: Session): void {
-  const group = $("perm-group");
+  // 可用性判定与文案由 store 统一派生（历史 bug：这里硬编码 agent||estate，
+  // 加求职 Agent 时漏改，导致求职会话根本没有权限入口）。
+  publishTopbar("perm", session);
   const chip = $("cm-perm");
-  if (!group || !chip) return;
-  const current = session || state.sessions.find((x) => x.id === state.currentId);
-  // 判定走 modules/session-kind 的共享谓词：之前这里硬编码 agent || estate，
-  // 加求职 Agent 时漏改，导致求职会话根本没有权限切换入口。
-  const available = Boolean(current) && !current?.stale && isAgentKind(current?.kind);
-  group.classList.toggle("hidden", !available);
-  if (!available) return;
-  const mode = PERMISSION_MODES.find((m) => m.id === (current?.permissionMode || "approve"));
-  const text = document.querySelector("#cm-perm .cm-text");
-  if (text) text.textContent = `权限·${mode?.label || "审批"}`;
-  chip.title = `会话权限模式：${mode?.label || "审批"} —— ${mode?.desc || ""}`;
-  // 弹出菜单开着时同步刷新勾选
   const menu = $("cm-perm-menu");
-  if (menu && !menu.classList.contains("hidden")) renderPermMenu(menu);
+  // 菜单开着时同步刷新勾选（菜单内容仍由本模块渲染，见 renderPermMenu）
+  if (chip && menu && !menu.classList.contains("hidden")) renderPermMenu(menu);
 }
 
 export function renderPermMenu(menu: HTMLElement): void {
