@@ -42,14 +42,20 @@ test("workflow 公共门面保持薄层，节点与职责文件不超过预算",
   }
 });
 
-test("HTML 入口保持薄壳，页面片段不超过预算", async () => {
+test("HTML 入口是唯一页面结构来源，体量受控且不再拆片段", async () => {
   const source = await readFile(join(CLIENT, "index.html"), "utf8");
-  assert.ok((source.split(/\r?\n/).length - 1) <= 120, "src/client/index.html 应只保留根壳与 include 清单");
-  assert.match(source, /@include pages\//);
-  assert.doesNotMatch(source, /id="settings-page"/, "设置页结构不能重新塞回入口");
-  for (const file of await filesUnder(join(CLIENT, "pages"), ".html")) {
-    assert.ok(await lineCount(file) <= MAX_PAGE_LINES, `页面片段超过 ${MAX_PAGE_LINES} 行：${relative(ROOT, file)}`);
-  }
+  // M4 4.5 收尾：pages/ 片段组装退役，入口本身承载全部静态骨架。
+  // 预算从 120 提到 420 是因为结构合并回来了；再涨说明又在往入口塞新面板 ——
+  // 新面板应做成 Vue 组件 + 挂载容器，而不是往入口堆标记。
+  assert.ok(
+    (source.split(/\r?\n/).length - 1) <= 420,
+    "src/client/index.html 静态骨架超预算，新面板请用 Vue 组件 + 挂载容器",
+  );
+  assert.doesNotMatch(source, /@include pages\//, "include 片段机制已退役");
+  assert.match(source, /id="settings-page"/, "设置页骨架应在入口内");
+  // pages/ 目录不允许回流（回流等于把入口拆成两处维护）
+  const pagesExists = await readdir(join(CLIENT, "pages")).then(() => true).catch(() => false);
+  assert.equal(pagesExists, false, "src/client/pages 已随 M4 4.5 退役");
 });
 
 test("拆分后的 chat/settings 样式文件不超过预算，入口不引用旧单体文件", async () => {

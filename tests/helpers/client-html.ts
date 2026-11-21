@@ -1,16 +1,17 @@
 /**
- * tests/helpers/client-html.ts — 读取构建期组合后的客户端入口
+ * tests/helpers/client-html.ts — 读取客户端入口 HTML
  * ============================================================
- * 源码入口只保留 include 清单；结构测试必须针对组合后的完整 HTML，
- * 否则会把“入口是否足够薄”和“页面结构是否存在”混成同一条脆弱断言。
+ * M4 4.5 收尾后 `src/client/index.html` 就是唯一入口（pages/ 片段组装已退役），
+ * 结构测试直接读它。保留本助手是为了不改动 60+ 处调用点，同时给「入口是否
+ * 被误拆回片段机制」留一个单点收口。
  */
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { composeHtml } from "../../scripts/compose-html.js";
 
 const CLIENT_ROOT = fileURLToPath(new URL("../../src/client/", import.meta.url));
 let cached: Promise<string> | undefined;
 
 export function readClientIndexHtml(): Promise<string> {
-  cached ??= composeHtml(`${CLIENT_ROOT}index.html`, CLIENT_ROOT);
+  cached ??= readFile(`${CLIENT_ROOT}index.html`, "utf8");
   return cached;
 }

@@ -1,7 +1,7 @@
 /**
  * scripts/build-client.ts — 前端构建（框架迁移 M3：Vite 接管，源码不动）
  * ============================================================
- * 流程：compose 片段组装 → 注入构建身份 → CSP hash 校验 → 写 index.vite.html
+ * 流程：读 index.html → 注入构建身份 → CSP hash 校验 → 写 index.vite.html
  * → vite build（把 main.ts 及其依赖、vendor wrapper 的 npm 包打进 assets/）→
  * 复制 styles → 写 build-info → 产物自检。
  *
@@ -12,13 +12,12 @@
  * 动态加载红线不受影响：wrapper 的 await import(...) 由 Vite 分割成独立 chunk，
  * 「图表 / Markdown / 高亮不进首屏启动闭包」的语义保持。
  */
-import { copyFile, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as viteBuild } from "vite";
 
 import { assertCspHashHtml } from "./csp-integrity.js";
-import { composeHtml } from "./compose-html.js";
 import { createBuildInfo, injectBuildInfoHtml, writeBuildInfo } from "../src/versioning.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -58,9 +57,10 @@ async function main(): Promise<void> {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
-  // 页面先组装并注入自动构建身份；CSP hash 必须针对最终 HTML 计算，否则片段迁移会白屏
+  // M4 4.5 收尾：pages/ 片段组装已退役，index.html 是唯一的 Vite 原生入口。
+  // 仍需注入构建身份并校验 CSP hash —— 改了内联脚本却忘更新 csp-hashes 会白屏。
   const buildInfo = await createBuildInfo({ root: ROOT });
-  const indexHtml = injectBuildInfoHtml(await composeHtml(join(SRC, "index.html"), SRC), buildInfo);
+  const indexHtml = injectBuildInfoHtml(await readFile(join(SRC, "index.html"), "utf8"), buildInfo);
   assertCspHashHtml(indexHtml);
   await writeFile(COMPOSED_ENTRY, indexHtml, "utf8");
 

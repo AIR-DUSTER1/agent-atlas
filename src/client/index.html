@@ -47,20 +47,315 @@
 <body>
   <div id="sidebar-scrim" class="hidden"></div>
   <div id="app">
-    <!-- 页面结构由 src/client/pages/ 在构建期组装，入口只保留根壳与 include 清单。 -->
-    <!-- @include pages/sidebar.html -->
-    <!-- @include pages/workspace/workspace.html -->
+        <!-- ============ 侧栏：会话管理（参考 ZCode 的会话列表） ============ -->
+    <aside id="sidebar">
+      <div class="side-header">
+        <div class="logo">
+          <span class="logo-mark"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></span>
+          <div class="logo-text">
+            <strong>agentatlas</strong>
+            <span>可扩展 Agent 工具集 · 内置学习示例</span>
+          </div>
+        </div>
+        <button id="new-chat-btn" title="新建对话（选择 Agent，归属当前项目）">＋ 新建对话</button>
+        <!-- M4 批次 4.4：项目切换器（按钮 + 菜单）由 project-switcher-vue.vue 渲染 -->
+        <div class="project-switch" id="project-switch"></div>
+
+        <div class="session-tools">
+          <label class="session-search">
+            <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
+            <input id="session-search" type="search" spellcheck="false" placeholder="搜索会话标题 / 内容" title="按标题或本浏览器缓存的消息内容实时过滤" />
+          </label>
+          <button id="cleanup-btn" class="ghost-btn small" title="批量清理创建超过 N 天的旧会话" aria-label="批量清理旧会话"><i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i></button>
+        </div>
+      </div>
+
+      <nav id="session-list" aria-label="会话列表"></nav>
+
+      <div class="side-footer">
+        <button id="settings-btn" class="side-settings-btn" title="打开设置页（模型 / 子代理 / 插件 / 记忆 / 统计）">
+          <span class="side-settings-icon"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i></span>
+          <span class="side-settings-copy">
+            <strong>设置</strong>
+            <small>模型 · 插件 · 统计</small>
+          </span>
+          <span class="side-settings-arrow">›</span>
+        </button>
+        <button id="side-model" class="side-model" title="当前模型：点击打开模型设置">
+          <span class="dot"></span>
+          <span id="side-model-text">加载中…</span>
+        </button>
+        <div id="side-foot-note" class="foot-note">当前模型 · 点击也可打开模型设置</div>
+      </div>
+    </aside>
+
+        <!-- ============ 主区：顶栏 + 消息流 + 输入框 ============ -->
+    <main id="main">
+            <header id="topbar">
+        <button id="sidebar-toggle" class="settings-btn" title="会话 / 项目列表">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <!-- M4 批次 4.5：会话标题 / 面包屑 / 示例徽标由 topbar-vue.vue 渲染 -->
+        <div id="topbar-head-mount" class="title-wrap"></div>
+        <div class="topbar-right">
+          <span id="mode-badge" class="badge mode-mock hidden" title="启用的供应商没有 API Key，模型决策由本地脚本模拟；工具结果是真实执行的">模拟模式</span>
+          <button id="theme-btn" class="settings-btn" title="切换浅色主题" aria-label="切换浅色主题"><i class="ui-icon" data-icon="Sun" aria-hidden="true"></i></button>
+          <span id="status-dot" class="status idle" title="空闲" role="status" aria-live="polite"></span>
+        </div>
+      </header>
+
+    <!-- ============ Browser Use：会话右侧实时浏览器画面 ============ -->
+      <!-- M4 批次 4.4：画面由 browser-dock-vue.vue 渲染，这里只保留挂载容器 -->
+      <div id="browser-dock-mount"></div>
+
+            <div id="chat-scroll">
+        <div id="welcome" class="welcome">
+          <!-- M4 批次 4.5：hero +「试试这些」由 welcome-head-vue.vue(section=hero) 渲染，
+               「选择 Agent 或内置示例」标签由 section=cards 的另一实例渲染。
+               拆两段挂载是为了保持 chips/cards 的原始 DOM 顺序。 -->
+          <div id="welcome-head-mount"></div>
+          <div id="example-chips" class="example-chips"></div>
+          <div id="welcome-cards-mount"></div>
+          <div id="demo-cards" class="demo-cards"></div>
+        </div>
+        <section id="empty-session" class="empty-session hidden" aria-labelledby="empty-session-title">
+          <div class="empty-session-icon"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i></div>
+          <h2 id="empty-session-title">开始一个新任务</h2>
+          <p>可以直接提问，也可以从一个明确动作开始。发送前可以附加文件、切换模型或调整权限。</p>
+          <div class="empty-suggestions">
+            <button type="button" data-empty-prompt="审查当前项目的改动，先指出高风险问题，再给出修复建议。">审查当前改动</button>
+            <button type="button" data-empty-prompt="读取我提供的网页或文件，提炼结论并列出证据。">读网页 / 文件</button>
+            <button type="button" data-empty-prompt="统计最近的模型调用和工具使用情况，指出异常和可优化项。">查看用量</button>
+          </div>
+        </section>        <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="对话消息"></div>
+      </div>
+
+            <footer id="composer">
+        <!-- 待发送附件 chips：M4 4.6 起由 attach-chips-vue.vue 渲染 -->
+        <div id="attach-chips-mount"></div>
+        <!-- Agent 自主执行流程：位于上下文条与输入控制之上；默认折叠，没有 workflow_plan 时完全隐藏 -->
+        <!-- M4 批次 4.6：执行流程面板由 Vue 组件渲染（workflow-plan-vue.vue） -->
+        <div id="workflow-plan-mount"></div>
+        <!-- 上下文容量条：M4 4.6 起由 context-meter-vue.vue 渲染 -->
+        <div id="context-meter-mount"></div>
+        <!-- 模型 / 思考等级 / 会话权限 快捷切换（ZCode 风格：输入框上方随手切） -->
+        <div id="composer-bar">
+          <div class="cm-group">
+            <button id="cm-model" class="cm-chip" type="button" title="切换模型">
+              <span class="cm-ic"><i class="ui-icon" data-icon="Zap" aria-hidden="true"></i></span><span class="cm-text"></span><i class="ui-icon cm-arr" data-icon="ChevronDown" aria-hidden="true"></i>
+            </button>
+            <div id="cm-model-menu" class="cm-menu hidden"></div>
+          </div>
+          <div class="cm-group">
+            <button id="cm-thinking" class="cm-chip" type="button" title="思考等级（按供应商方言适配）">
+              <span class="cm-ic"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i></span><span class="cm-text"></span><i class="ui-icon cm-arr" data-icon="ChevronDown" aria-hidden="true"></i>
+            </button>
+            <div id="cm-thinking-menu" class="cm-menu hidden"></div>
+          </div>
+          <!-- M4 批次 4.5：权限 chip（按钮 + 菜单容器）由 perm-chip-vue.vue 渲染 -->
+          <div id="perm-chip-mount"></div>
+          <div class="cm-spacer"></div>
+        </div>
+        <div id="input-box">
+          <button id="attach-btn" class="attach-btn" title="附加文件：项目文件 / 远程文件夹 / 本地上传">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button id="goal-chip" class="goal-chip hidden" type="button" title="连续任务模式：任务未完成会持续执行，直到完成、出错或手动停止；点击退出" aria-label="Goal 连续任务模式，点击退出">
+            <i class="ui-icon" data-icon="Target" aria-hidden="true"></i><span class="gi-text">Goal</span>
+          </button>
+          <textarea id="input" aria-label="给 Agent 发送消息" rows="1" placeholder="给 Agent 发送消息…（Enter 发送 / Shift+Enter 换行）" aria-autocomplete="list" aria-controls="composer-menu" aria-expanded="false" disabled></textarea>
+          <div id="composer-menu" class="composer-menu hidden" role="listbox" aria-label="输入辅助"></div>
+          <button id="send-btn" class="icon-btn" title="发送" disabled>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+          <button id="stop-btn" class="icon-btn hidden" title="停止生成">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+        </div>
+
+      </footer>
+
+    </main>
   </div>
 
-  <!-- @include pages/dialogs/agent-picker.html -->
-  <!-- @include pages/settings/settings.html -->
-  <!-- @include pages/dialogs/provider-form.html -->
-  <!-- @include pages/overlays/file-picker.html -->
-  <!-- @include pages/overlays/rag.html -->
-  <!-- @include pages/overlays/estate.html -->
-  <!-- @include pages/overlays/job.html -->
-  <!-- @include pages/overlays/dialog.html -->
+    <!-- ============ 新建对话弹窗：通用 Agent（默认）+ 内置示例 ============ -->
+  <div id="modal-mask" class="hidden">
+    <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">新建对话</h2>
+      <p class="settings-sub">默认使用通用 Agent（工具 + 记忆 + 审批）；也可从内置示例创建，观察特定图结构的运行方式</p>
+      <div id="modal-cards" class="demo-cards"></div>
+
+      <div class="field-label ext-head"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i> 外部 Agent <em class="key-state">第三方 Git 仓库接入 · 每条消息启动一次其启动命令</em></div>
+      <div id="external-cards" class="demo-cards"></div>
+      <button id="add-external-btn" class="ghost-btn small add-provider" type="button">＋ 接入外部 Agent（Git 地址）</button>
+
+      <button id="modal-close" class="ghost-btn">取消</button>
+    </div>
+  </div>
+
+    <!-- ============ 设置页：模型与供应商 / 长期记忆 / 使用统计 ============ -->
+  <section id="settings-page" class="settings-page hidden" aria-labelledby="settings-title">
+    <header class="settings-page-head">
+      <button id="settings-back-btn" class="settings-back-btn" type="button" title="返回 agentatlas（Esc）">
+        <span class="back-arrow"><i class="ui-icon" data-icon="ArrowLeft" aria-hidden="true"></i></span><span>返回</span>
+      </button>
+      <div class="settings-page-heading">
+        <h1 id="settings-title">设置</h1>
+      </div>
+      <button id="settings-logout-btn" class="settings-logout-btn hidden" type="button" title="退出当前访问会话">退出登录</button>
+    </header>
+
+    <div class="settings-page-body">
+      <!-- M4 批次 4.5：设置导航由 Vue 组件渲染（settings-nav-vue.vue），
+           静态骨架只保留挂载容器；data-settings-view / role=tab 契约由组件模板承接。 -->
+      <div id="settings-nav-mount"></div>
+      <div class="settings-page-content">
+
+                <section id="settings-view-models" class="settings-view" data-settings-panel="models" role="tabpanel">
+          <!-- M4 批次 4.3：供应商/模型面板由 Vue 组件渲染（models-panel-vue.vue），
+               静态骨架只保留挂载容器与备份分区（备份列表由 settings-backup-vue 挂载）。 -->
+          <div id="settings-modal" role="region" aria-labelledby="models-title">
+            <h2 id="models-title"><i class="ui-icon" data-icon="Settings" aria-hidden="true"></i> 模型与供应商</h2>
+
+      <!-- ---------- 备份与恢复（F9）：整机本地状态快照 ---------- -->
+      <div class="field-label backup-head">备份与恢复 <em class="key-state">含 API Key，请妥善保管备份目录</em></div>
+      <div class="key-row backup-actions">
+        <button id="backup-create-btn" type="button" class="ghost-btn small"><i class="ui-icon" data-icon="Database" aria-hidden="true"></i> 创建备份</button>
+        <span id="backup-list-hint" class="key-state">会话记录 / 检查点 / 长期记忆 / 供应商配置 / 审计日志</span>
+      </div>
+      <div id="backup-list" class="backup-list"></div>
+          </div>
+        </section>
+
+                <section id="settings-view-plugins" class="settings-view hidden" data-settings-panel="plugins" role="tabpanel" aria-labelledby="plugins-title">
+          <div id="plugins-panel" role="region" aria-labelledby="plugins-title">
+            <h2 id="plugins-title"><i class="ui-icon" data-icon="Plug" aria-hidden="true"></i> 插件</h2>
+            <div class="plugin-transport-guide">
+              <span><b>HTTP</b> 自定义 REST 契约</span>
+              <span><b>CLI</b> 本地子进程</span>
+              <span><b>内置</b> 应用本地能力</span>
+            </div>
+            <div id="plugin-list" class="plugin-list"></div>
+            <div id="plugin-status" class="settings-status" role="status" aria-live="polite"></div>
+            <p class="settings-note">开关只改变 Agent 可调用的插件工具，不会删除 RAG / CLI 的已有配置。</p>
+          </div>
+        </section>
+
+
+                <section id="settings-view-subagents" class="settings-view hidden" data-settings-panel="subagents" role="tabpanel" aria-labelledby="subagents-title">
+          <!-- M4 批次 4.2：子代理面板由 Vue 组件渲染（settings-subagents-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="subagents-panel" class="subagents-page" role="region" aria-labelledby="subagents-title"></div>
+        </section>
+
+                <section id="settings-view-routing" class="settings-view hidden" data-settings-panel="routing" role="tabpanel" aria-labelledby="routing-title">
+          <!-- M4 批次 4.2：路由面板由 Vue 组件渲染（settings-routing-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="routing-panel" class="routing-page" role="region" aria-labelledby="routing-title"></div>
+        </section>
+
+                <section id="settings-view-tracing" class="settings-view hidden" data-settings-panel="tracing" role="tabpanel" aria-labelledby="tracing-title">
+          <!-- M4 批次 4.2：追踪面板由 Vue 组件渲染（settings-tracing-vue.vue），
+               静态骨架只保留挂载容器；id/aria-label 契约由组件模板承接。 -->
+          <div id="tracing-panel" class="routing-page" role="region" aria-labelledby="tracing-title"></div>
+        </section>
+
+                <section id="settings-view-memories" class="settings-view hidden" data-settings-panel="memories" role="tabpanel" aria-labelledby="memories-title">
+          <!-- M4 批次 4.2：记忆面板由 Vue 组件渲染（settings-memories-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="memories-modal" class="memory-settings"></div>
+        </section>
+
+                <section id="settings-view-commands" class="settings-view hidden" data-settings-panel="commands" role="tabpanel" aria-labelledby="commands-title">
+          <!-- M4 批次 4.1：双栏管理页由 Vue 组件渲染（settings-commands-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="commands-modal" class="commands-page" role="region" aria-labelledby="commands-title"></div>
+        </section>
+
+                <section id="settings-view-skills" class="settings-view hidden" data-settings-panel="skills" role="tabpanel" aria-labelledby="skills-title">
+          <!-- M4 批次 4.2：技能面板由 Vue 组件渲染（settings-skills-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="skills-modal" class="skills-page" role="region" aria-labelledby="skills-title"></div>
+        </section>
+
+                <section id="settings-view-mcp" class="settings-view hidden" data-settings-panel="mcp" role="tabpanel" aria-labelledby="mcp-title">
+          <!-- M4 批次 4.2：MCP 面板（含编辑器弹窗）由 Vue 组件渲染（settings-mcp-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="mcp-page" class="mcp-page" role="region" aria-labelledby="mcp-title"></div>
+        </section>
+
+                <section id="settings-view-stats" class="settings-view hidden" data-settings-panel="stats" role="tabpanel" aria-labelledby="stats-title">
+          <!-- M4 批次 4.2：统计面板由 Vue 组件渲染（stats-panel-vue.vue），
+               静态骨架只保留挂载容器；id/aria 契约由组件模板承接。 -->
+          <div id="stats-modal" role="region" aria-labelledby="stats-title"></div>
+        </section>
+
+                <section id="settings-view-users" class="settings-view hidden" data-settings-panel="users" role="tabpanel" aria-labelledby="users-title">
+          <!-- M4 批次 4.2：账号与安全面板由 Vue 组件渲染（settings-users-vue.vue），
+               静态骨架只保留挂载容器；id/结构契约由组件模板承接。 -->
+          <div id="users-panel" class="routing-page" role="region" aria-labelledby="users-title"></div>
+        </section>
+
+      </div>
+    </div>
+  </section>
+
+    <!-- 供应商连接配置：独立弹窗，不占用右侧详情，也不会阻断左栏选中态 -->
+  <!-- M4 批次 4.3：弹窗内容由 Vue 组件渲染（provider-form-vue.vue），开关由 store 驱动 -->
+  <div id="provider-modal-mask" class="hidden"></div>
+
+    <!-- ============ 文件选择器：项目 / 远程文件夹 / 本地上传 ============ -->
+  <div id="fs-mask" class="hidden">
+    <div id="fs-modal" role="dialog" aria-modal="true" aria-labelledby="fs-title">
+      <h2 id="fs-title"><i class="ui-icon" data-icon="Paperclip" aria-hidden="true"></i> 附加文件</h2>
+      <div class="fs-toolbar">
+        <select id="fs-root" class="fs-root-select" title="选择位置"></select>
+        <button id="fs-up" class="ghost-btn small" title="上一级"><i class="ui-icon" data-icon="ArrowLeft" aria-hidden="true"></i> 上级</button>
+        <span id="fs-path" class="fs-path"></span>
+      </div>
+      <div class="fs-toolbar fs-toolbar-2">
+        <button id="fs-remote" class="ghost-btn small"><i class="ui-icon" data-icon="Globe" aria-hidden="true"></i> 打开远程文件夹</button>
+        <button id="fs-upload-btn" class="ghost-btn small" type="button"><i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传本地文件</button>
+        <button id="fs-upload-help" class="ghost-btn small" type="button" title="上传没反应？">?</button>
+        <input id="fs-upload-input" aria-label="选择要上传的文件" type="file" multiple
+               style="position:absolute;width:1px;height:1px;opacity:0.01;pointer-events:none;" />
+        <span class="fs-hint">云端部署可上传本机文件；也可以把文件直接<b>拖拽</b>到本窗口上传（部分自动化启动的浏览器会屏蔽系统选择框）</span>
+      </div>
+      <div id="fs-list" class="fs-list"></div>
+      <div class="fs-footer">
+        <div id="fs-selected" class="fs-selected">未选择文件</div>
+        <button id="fs-done" class="btn btn-approve">完成</button>
+      </div>
+    </div>
+  </div>
+
+
+    <!-- ============ 知识库面板：M4 4.4 起由 kb-panel-vue.vue 渲染，骨架保留挂载容器 ============ -->
+  <div id="kb-mask" class="hidden"></div>
+
+    <!-- ============ 房产数据源面板：M4 4.4 起由 estate-panel-vue.vue 渲染，骨架保留挂载容器 ============ -->
+  <div id="estate-mask" class="hidden"></div>
+
+    <!-- ============ 求职数据源面板：M4 4.4 起由 job-panel-vue.vue 渲染，骨架保留挂载容器 ============ -->
+  <div id="job-mask" class="hidden"></div>
+
+    <!-- ============ 通用弹窗：自研组件，替代原生 alert / prompt / confirm ============ -->
+  <div id="ui-dialog-mask" class="hidden">
+    <div id="ui-dialog" role="dialog" aria-modal="true" aria-labelledby="ui-dialog-title" tabindex="-1">
+      <h3 id="ui-dialog-title">提示</h3>
+      <div id="ui-dialog-msg"></div>
+      <div id="ui-dialog-input-row" class="hidden">
+        <input id="ui-dialog-input" aria-label="对话框输入内容" type="text" spellcheck="false" autocomplete="off" />
+      </div>
+      <div id="ui-dialog-actions">
+        <button id="ui-dialog-cancel" class="ghost-btn" type="button">取消</button>
+        <button id="ui-dialog-ok" class="btn btn-approve" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
 
   <script type="module" src="/main.ts"></script>
 </body>
 </html>
+
