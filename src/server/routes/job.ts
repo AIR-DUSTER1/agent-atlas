@@ -13,7 +13,7 @@
  *  - 所有错误转中文 400，前端直接展示。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { diagnoseJobs, doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
 import { bumpConfigVersion } from "../sessions.js";
 
@@ -44,7 +44,7 @@ export async function handleGetJob(res: ServerResponse): Promise<void> {
 
 export async function handleSaveJob(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = parsedJsonOf<Record<string, unknown>>(req)!;
     const status = await saveJobConfig(body);
     // 配置变了：已有会话下一条消息要重建图（工具集随插件开关走，路径变化也影响探测）
     bumpConfigVersion();
@@ -57,7 +57,7 @@ export async function handleSaveJob(res: ServerResponse, req: IncomingMessage): 
 
 export async function handleJobLogin(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as { platform?: unknown };
+    const body = parsedJsonOf<{ platform?: unknown }>(req)!;
     const platform = typeof body.platform === "string" ? body.platform.trim() : "";
     if (!JOB_PLATFORMS.includes(platform as JobPlatform)) {
       throw new Error(`未知平台「${platform}」：可选 ${JOB_PLATFORMS.join(" / ")}`);
@@ -72,7 +72,6 @@ export async function handleJobLogin(res: ServerResponse, req: IncomingMessage):
 }
 
 export async function handleJobDoctor(res: ServerResponse, req: IncomingMessage): Promise<void> {
-  await readBody(req).catch(() => "");
   try {
     sendJson(res, 200, await doctorJob());
   } catch (err) {
@@ -82,7 +81,7 @@ export async function handleJobDoctor(res: ServerResponse, req: IncomingMessage)
 
 export async function handleJobDiagnose(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const raw = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const raw = parsedJsonOf<Record<string, unknown>>(req)!;
     const platforms = Array.isArray(raw.platforms)
       ? raw.platforms.filter((item): item is JobPlatform => typeof item === "string" && JOB_PLATFORMS.includes(item as JobPlatform))
       : undefined;

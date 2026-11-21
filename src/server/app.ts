@@ -23,7 +23,7 @@ import { verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
 import {
   adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, isAdminRequest,
-  userIdentityForRequest,
+  requireDeviceIdentity, userIdentityForRequest,
 } from "./security/device.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { writeAudit } from "./audit.js";
@@ -33,7 +33,7 @@ import { handleClientError, handleDiagnostics, handleMetrics, handleVersion } fr
 import { handleStats } from "./routes/stats.js";
 import { isPostgresBackend } from "./persistence/postgres.js";
 import { ensureProjectsLoaded } from "./projects.js";
-import { ensureUserSessions } from "./sessions.js";
+import { ensureUserSessions, getSessionByThreadForUser } from "./sessions.js";
 import { enterUserContext, localUserContext } from "./user-context.js";
 import { incCounter, incGauge, metricPath, observeHistogram } from "./observability/metrics.js";
 import { lifecycle } from "./lifecycle.js";
@@ -79,6 +79,11 @@ import {
   handleClearRag, handleDeleteRagDoc, handleGetRag, handleIngest, handleRagSearch,
   handleSaveRagConfig, handleTestRag,
 } from "./routes/rag.js";
+import { handleEstateExport, handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
+import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import {
+  handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
+} from "./routes/browser-use.js";
 import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -515,6 +520,47 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/rag/search", jsonRaw, withBody(async (c) => { await handleRagSearch(c.env.outgoing, c.env.incoming); }));
   app.delete("/api/rag/docs/:id", withBody(async (c) => { await handleDeleteRagDoc(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.post("/api/rag/clear", jsonRaw, withBody(async (c) => { await handleClearRag(c.env.outgoing, c.env.incoming); }));
+
+  // ── 15k. M2 批次 9b（房产 / 求职 / Browser Use）：原生挂载；dispatch 分支已摘除 ──
+  // browser 会话守卫逐字平移：Hono param 已做 URI 解码（旧链路 decodeURIComponent 等价），
+  // 字符集与设备归属校验保留；失败直写原生 res。
+  const guardBrowserSession = (c: AppContext): string | Response => {
+    const sessionId = c.req.param("id") as string;
+    const res = c.env.outgoing;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "浏览器会话 id 格式非法" }));
+      return alreadySent();
+    }
+    const userId = requireDeviceIdentity(c.env.incoming, res);
+    if (!userId) return alreadySent();
+    if (!getSessionByThreadForUser(sessionId, userId)) {
+      res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "Browser Use 会话不存在或不属于当前设备" }));
+      return alreadySent();
+    }
+    return sessionId;
+  };
+  const guarded = (fn: (c: AppContext, sessionId: string) => Promise<void>) => async (c: AppContext) => {
+    const sessionId = guardBrowserSession(c);
+    if (typeof sessionId !== "string") return sessionId;
+    await fn(c, sessionId);
+    return alreadySent();
+  };
+  app.get("/api/estate", withBody(async (c) => { await handleGetEstate(c.env.outgoing); }));
+  app.get("/api/estate/exports/:exportId", withBody(async (c) => { await handleEstateExport(c.env.outgoing, c.req.param("exportId") as string); }));
+  app.post("/api/estate/install", jsonRaw, withBody(async (c) => { await handleInstallBeike(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/estate/login", jsonRaw, withBody(async (c) => { await handleStartBeikeLogin(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/estate/key", jsonRaw, withBody(async (c) => { await handleSaveBeikeKey(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/job", withBody(async (c) => { await handleGetJob(c.env.outgoing); }));
+  app.put("/api/job", jsonRaw, withBody(async (c) => { await handleSaveJob(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/job/login", jsonRaw, withBody(async (c) => { await handleJobLogin(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/job/doctor", jsonRaw, withBody(async (c) => { await handleJobDoctor(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/job/diagnose", jsonRaw, withBody(async (c) => { await handleJobDiagnose(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/browser/status", withBody(async (c) => { handleBrowserStatus(c.env.outgoing); }));
+  app.get("/api/browser/sessions/:id", guarded(async (c, sessionId) => { handleBrowserState(c.env.outgoing, sessionId); }));
+  app.get("/api/browser/sessions/:id/screenshot", guarded(async (c, sessionId) => { handleBrowserScreenshot(c.env.outgoing, sessionId); }));
+  app.post("/api/browser/sessions/:id", jsonRaw, guarded(async (c, sessionId) => { await handleBrowserClose(c.env.outgoing, c.env.incoming, sessionId); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

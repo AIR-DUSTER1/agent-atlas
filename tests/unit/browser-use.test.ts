@@ -140,7 +140,7 @@ test("右侧 Browser Use 面板、样式与工具卡增强已接线", async () =
   const html = await readClientIndexHtml();
   const main = await readFile("src/client/main.ts", "utf8");
   const view = await readFile("src/client/views/browser-use.ts", "utf8");
-  const serverIndex = await readFile("src/server/dispatch.ts", "utf8");
+  const serverIndex = await readFile("src/server/app.ts", "utf8");
   assert.match(html, /id="browser-dock"/);
   assert.match(html, /href="\/styles\/browser-use.css"/);
   assert.match(html, /id="browser-dock-screen"/);
@@ -149,5 +149,5 @@ test("右侧 Browser Use 面板、样式与工具卡增强已接线", async () =
   assert.match(main, /renderBrowserInToolCard/);
   assert.match(view, /state\.currentId !== sessionId/);
   assert.match(serverIndex, /\/api\/browser\/status/);
-  assert.match(serverIndex, /browserMatch/);
+  assert.match(serverIndex, /guardBrowserSession/);
 });

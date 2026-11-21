@@ -4,7 +4,7 @@
  * getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await 再回 200；
  * installBeike 是几十秒级的下载解压，失败回 500。
  */
-import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { getEstatePublic, installBeike, saveBeikeKey, startBeikeLogin } from "../estate.js";
 import { readEstateExport } from "../estate-workbook.js";
 
@@ -24,7 +24,6 @@ export async function handleGetEstate(res: import("node:http").ServerResponse): 
 }
 
 export async function handleInstallBeike(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  await readBody(req); // 消费掉可能为空的请求体，参数无关紧要
   try {
     const status = await installBeike(); // 下载 ~32MB + 解压，可能要几十秒
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -39,7 +38,7 @@ export async function handleInstallBeike(res: import("node:http").ServerResponse
 }
 
 export async function handleSaveBeikeKey(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { apiKey?: unknown };
+  const body = parsedJsonOf<{ apiKey?: unknown }>(req)!;
   try {
     if (typeof body.apiKey !== "string" || !body.apiKey.trim()) {
       throw new Error("apiKey 不能为空：登录贝壳获取页面显示的完整凭证后粘贴");
@@ -64,7 +63,6 @@ export async function handleStartBeikeLogin(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   try {
-    await readBody(req);
     sendJson(res, 200, await startBeikeLogin());
   } catch (err) {
     if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }

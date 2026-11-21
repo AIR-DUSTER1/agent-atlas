@@ -5,7 +5,6 @@
  * 用户页面内容。会话 id 严格校验，路径参数由 index.ts 解码后传入。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
 import {
   closeBrowserSession, getBrowserPageState, getBrowserScreenshot, getBrowserUsePublicStatus,
 } from "../browser-use.js";
@@ -54,7 +53,6 @@ export async function handleBrowserClose(
   rawSessionId: string,
 ): Promise<void> {
   try {
-    await readBody(req);
     sendJson(res, 200, { ok: await closeBrowserSession(rawSessionId) });
   } catch (err) {
     sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });

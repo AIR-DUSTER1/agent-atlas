@@ -18,21 +18,11 @@ import {
   handleListExternalAgents,
   handleUpdateExternalAgent,
 } from "./routes/external.js";
-import { handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
-import {
-  handleEstateExport,
-  handleGetEstate,
-  handleInstallBeike,
-  handleSaveBeikeKey,
-  handleStartBeikeLogin,
-} from "./routes/estate.js";
-import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import { handleStaticMap } from "./map-static.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
 import { log } from "./logging.js";
 import { readBody, respondBadRequest } from "./http-body.js";
-import { requireDeviceIdentity } from "./security/device.js";
 import { setExternalTools } from "../agent/general.js";
 
 export interface DispatchContext {
@@ -116,45 +106,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
 
 
-
-    // 房产 Agent（贝壳 CLI）
-    const estateExportMatch = pathname.match(/^\/api\/estate\/exports\/([0-9a-f-]{36})$/i);
-    if (estateExportMatch && req.method === "GET") { await handleEstateExport(res, estateExportMatch[1]!); return; }
-    if (pathname === "/api/estate" && req.method === "GET") { await handleGetEstate(res); return; }
-    if (pathname === "/api/estate/install" && req.method === "POST") { await handleInstallBeike(res, req); return; }
-    if (pathname === "/api/estate/login" && req.method === "POST") { await handleStartBeikeLogin(res, req); return; }
-    if (pathname === "/api/estate/key" && req.method === "POST") { await handleSaveBeikeKey(res, req); return; }
-
-    // 求职岗位 Agent（内置浏览器采集）：状态 / 数据目录 / 登录 / 自检
-    if (pathname === "/api/job" && req.method === "GET") { await handleGetJob(res); return; }
-    if (pathname === "/api/job" && req.method === "PUT") { await handleSaveJob(res, req); return; }
-    if (pathname === "/api/job/login" && req.method === "POST") { await handleJobLogin(res, req); return; }
-    if (pathname === "/api/job/doctor" && req.method === "POST") { await handleJobDoctor(res, req); return; }
-      if (pathname === "/api/job/diagnose" && req.method === "POST") { await handleJobDiagnose(res, req); return; }
-
-    // Browser Use（通用 Agent 插件）：状态 / 实时画面 / 关闭会话
-    if (pathname === "/api/browser/status" && req.method === "GET") { handleBrowserStatus(res); return; }
-    const browserMatch = pathname.match(/^\/api\/browser\/sessions\/([^/]+)(\/screenshot)?$/);
-    if (browserMatch) {
-      let browserSessionId = "";
-      try { browserSessionId = decodeURIComponent(browserMatch[1] || ""); }
-      catch { res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify({ error: "浏览器会话 id 编码非法" })); return; }
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(browserSessionId)) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: "浏览器会话 id 格式非法" }));
-        return;
-      }
-      const userId = requireDeviceIdentity(req, res);
-      if (!userId) return;
-      if (!getSessionByThreadForUser(browserSessionId, userId)) {
-        res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: "Browser Use 会话不存在或不属于当前设备" }));
-        return;
-      }
-      if (!browserMatch[2] && req.method === "GET") { handleBrowserState(res, browserSessionId); return; }
-      if (browserMatch[2] && req.method === "GET") { handleBrowserScreenshot(res, browserSessionId); return; }
-      if (!browserMatch[2] && req.method === "POST") { await handleBrowserClose(res, req, browserSessionId); return; }
-    }
 
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "Not Found" }));
