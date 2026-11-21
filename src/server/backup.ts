@@ -58,6 +58,11 @@ async function backupTargets(): Promise<Array<{ key: string; path: string; schem
     { key: "sessions.ndjson", path: journalPath(), schemaVersion: JOURNAL_SCHEMA_VERSION },
     { key: "checkpoints.ndjson", path: checkpointFilePath(), schemaVersion: CHECKPOINT_SCHEMA_VERSION },
     { key: "memories.json", path: memoriesFilePath(), schemaVersion: 2 },
+    // ⚠ createBackup 会先调 flushMemoryUsage()，它触发 legacy 记忆迁移：
+    //   memories.json → memories.json.v2-backup，并把内容写进 memory-store/。
+    // 所以「旧文件」这一项必须同时认主名与改名前身，否则 0.9 升级用户的原始
+    // 记忆文件不会进备份 —— 迁移一旦出问题就没有回滚依据。
+    { key: "memories.json.v2-backup", path: `${memoriesFilePath()}.v2-backup`, schemaVersion: 2 },
     ...memoryFiles,
     { key: "web-config.json", path: SETTINGS_FILE, schemaVersion: CONFIG_SCHEMA_VERSION },
     { key: "audit.ndjson", path: auditFilePath(), schemaVersion: null },
@@ -339,6 +344,10 @@ export async function auditBackups(): Promise<BackupAudit> {
 }
 
 function restoreDestination(key: string, targets: Map<string, string>): string | null {
+  // 备份里的 memories.json.v2-backup 是「迁移前原文件」的快照（见 backupTargets）。
+  // 恢复时必须写回**主名** memories.json，否则新版启动时 readLegacyRecords 读不到
+  // 任何内容，用户的旧记忆会静默丢失。
+  if (key === "memories.json.v2-backup") return memoriesFilePath();
   if (!key.startsWith("memory-store/")) return targets.get(key) ?? null;
   const rel = key.slice("memory-store/".length);
   try {

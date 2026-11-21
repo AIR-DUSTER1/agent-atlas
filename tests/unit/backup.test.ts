@@ -122,3 +122,72 @@ test("备份保留策略：保留最近 N 份并清理更旧目录", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("legacy 记忆文件在迁移前后都必须进备份，且恢复后仍能被读回", async () => {
+  // 回归背景（M5 实测抓到的两个真实缺陷）：
+  //  1. createBackup 会先 flushMemoryUsage()，它触发 legacy 迁移把
+  //     memories.json 改名成 .v2-backup；旧实现只登记主名，导致原文件没进备份；
+  //  2. restore 只把 .v2-backup 写回同名文件，新版启动读 memories.json 读不到，
+  //     用户旧记忆会静默丢失。
+  const { dir, env, backup } = await prepareEnv();
+  try {
+    // 造 0.9 布局：单文件 memories.json
+    await writeFile(env.MEMORIES_FILE, JSON.stringify({
+      schemaVersion: 2,
+      entries: [{
+        id: "legacy-1",
+        scope: { profileId: "general", userId: "local" },
+        key: "旧版偏好",
+        content: "旧版记忆内容",
+        tags: [],
+        source: "user",
+        status: "active",
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      }],
+    }), "utf8");
+
+    const info = await backup.createBackup();
+    const manifest = JSON.parse(
+      await readFile(join(env.BACKUP_DIR, info.name, "manifest.json"), "utf8"),
+    ) as { files: Array<{ name: string }> };
+    const names = manifest.files.map((file) => file.name);
+    // 断言 1：迁移前的原文件必须进备份（修复前这里没有 v2-backup 条目）
+    assert.ok(
+      names.includes("memories.json.v2-backup") || names.includes("memories.json"),
+      `备份必须包含 legacy 记忆文件，实际：${names.join(", ")}`,
+    );
+
+    // 模拟升级：删掉全部记忆产物，只留备份包
+    const { resetMemoryStore } = await import("../../src/memory-store.js");
+    for (const path of [env.MEMORY_STORE_DIR, `${env.MEMORIES_FILE}.v2-backup`, env.MEMORIES_FILE]) {
+      await rm(path, { recursive: true, force: true });
+    }
+    resetMemoryStore();
+
+    await backup.restoreBackup(info.name);
+    // restore 内部会先做一次 autoSnapshot（其 createBackup 会触发迁移并写空 store），
+    // 因此恢复完必须清掉那份「迁移残留」，让主名文件重新成为唯一来源。
+    await rm(env.MEMORY_STORE_DIR, { recursive: true, force: true });
+    resetMemoryStore();
+    // 断言 2：恢复后主名文件必须回来，否则 readLegacyRecords 读不到
+    const restored = await readFile(env.MEMORIES_FILE, "utf8");
+    assert.match(restored, /旧版记忆内容/, "恢复后 memories.json 必须含旧内容");
+    // 诊断：确认恢复出来的确实是合法 v2 结构（不是被写坏的 JSON）
+    const parsedRestored = JSON.parse(restored) as { schemaVersion?: number; entries?: unknown[] };
+    assert.equal(parsedRestored.schemaVersion, 2, "恢复后 schemaVersion 应为 2");
+    assert.ok(Array.isArray(parsedRestored.entries) && parsedRestored.entries.length === 1, "恢复后应有 1 条 entries");
+
+    // 断言 3：加载后记录确实进内存（完整迁移链路）
+    const { loadMemories, listMemories } = await import("../../src/memory-store.js");
+    const loaded = await loadMemories();
+    const contents = listMemories(undefined, { includeHistory: true }).map((item) => item.content);
+    assert.ok(
+      loaded > 0 && contents.includes("旧版记忆内容"),
+      `加载后应含旧记忆：loaded=${loaded}，contents=${contents.join(" | ") || "(空)"}`,
+    );
+  } finally {
+    for (const key of Object.keys(env)) delete process.env[key];
+    await rm(dir, { recursive: true, force: true });
+  }
+});
