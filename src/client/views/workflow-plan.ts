@@ -1,129 +1,44 @@
 /**
+ * views/workflow-plan.ts — 执行流程面板分发桥（M4 批次 4.6 起）
  * ============================================================
- * views/workflow-plan.ts — 输入框上方的自主执行流程窗体
- * ============================================================
- * 职责：消费 workflow_plan 快照，渲染折叠摘要、目标、步骤状态与总进度。
- * 设计立场：
- *  - 无计划完全不占位；有计划默认折叠，用户展开后更新不强行抢回焦点；
- *  - 所有模型文本用 textContent 写入，步骤状态只做固定枚举映射；
- *  - 计划按会话持久化，切换会话时展示该会话自己的流程，禁止串台。
+ * 渲染已迁往 Vue（workflow-plan-vue.vue + stores/workflow-plan.ts）；
+ * 本文件保留 legacy 侧职责：
+ *  1. setWorkflowPlan / clearWorkflowPlan —— stream 层写入快照的入口；
+ *  2. renderWorkflowPlan —— 会话切换时的重取入口（syncForCurrentSession）。
+ * store 经动态 import 进入（本模块在 1:1 过渡树链上：stream/events → 本模块）。
  */
-import { $ } from "../core/dom.js";
-import { saveLocal, state } from "../core/state.js";
-import { h } from "../ui/h.js";
-import { icon } from "../ui/icon.js";
-import type { WorkflowPlanSnapshot, WorkflowPlanStep, WorkflowStepStatus } from "../modules/types-api.js";
+import { state } from "../core/state.js";
+import { saveLocal } from "../core/state.js";
+import type { WorkflowPlanSnapshot } from "../modules/types-api.js";
 
-const STEP_STATUS_LABEL: Record<WorkflowStepStatus, string> = {
-  pending: "待执行",
-  in_progress: "进行中",
-  completed: "已完成",
-  failed: "失败",
-  skipped: "已跳过",
-};
-
-const STEP_STATUS_ICON: Record<WorkflowStepStatus, "Clock" | "LoaderCircle" | "CircleCheck" | "CircleX" | "ChevronRight"> = {
-  pending: "Clock",
-  in_progress: "LoaderCircle",
-  completed: "CircleCheck",
-  failed: "CircleX",
-  skipped: "ChevronRight",
-};
-
-let lastPlanKey = "";
-
-function stepMeta(step: WorkflowPlanStep): string {
-  if (step.note) return step.note;
-  if (step.detail) return step.detail;
-  return "";
-}
-
-function renderStep(plan: WorkflowPlanSnapshot, step: WorkflowPlanStep, index: number): HTMLElement {
-  const active = step.id === plan.activeStepId && step.status === "in_progress";
-  const item = h("li", {
-    class: `workflow-step status-${step.status}${active ? " is-active" : ""}`,
-    ...(active ? { "aria-current": "step" } : {}),
-  });
-  const marker = h("span", { class: "workflow-step-marker", "aria-hidden": "true" },
-    icon(STEP_STATUS_ICON[step.status], { size: 14 }),
-  );
-  const copy = h("div", { class: "workflow-step-copy" },
-    h("div", { class: "workflow-step-title" },
-      h("span", { class: "workflow-step-index" }, String(index + 1).padStart(2, "0")),
-      h("strong", null, step.title),
-    ),
-  );
-  const meta = stepMeta(step);
-  if (meta) copy.appendChild(h("p", { class: "workflow-step-note" }, meta));
-  const status = h("span", { class: "workflow-step-status" }, STEP_STATUS_LABEL[step.status]);
-  item.append(marker, copy, status);
-  return item;
+async function store() {
+  const { useWorkflowPlanStore } = await import("../stores/workflow-plan.js");
+  return useWorkflowPlanStore();
 }
 
 /** 更新某个会话的计划状态；sid 默认为当前会话，后台流也写到正确会话。 */
-export function setWorkflowPlan(plan: WorkflowPlanSnapshot | null, sid: string | null = state.currentId): void {
+export async function setWorkflowPlan(
+  plan: WorkflowPlanSnapshot | null,
+  sid: string | null = state.currentId,
+): Promise<void> {
   if (!sid) return;
   state.workflowPlans[sid] = plan;
   saveLocal();
-  if (sid === state.currentId) renderWorkflowPlan();
+  (await store()).apply(plan, sid);
 }
 
-export function clearWorkflowPlan(sid: string | null = state.currentId): void {
-  setWorkflowPlan(null, sid);
+export async function clearWorkflowPlan(sid: string | null = state.currentId): Promise<void> {
+  await setWorkflowPlan(null, sid);
 }
 
-export function renderWorkflowPlan(): void {
-  const panel = $("workflow-panel") as HTMLDetailsElement | null;
-  if (!panel) return;
-  const plan = state.currentId ? state.workflowPlans[state.currentId] ?? null : null;
-  if (!plan || !plan.steps.length) {
-    panel.classList.add("hidden");
-    panel.open = false;
-    lastPlanKey = "";
-    return;
-  }
+/** 会话切换 / 首次挂载时重取当前会话自己的计划（禁止串台）。 */
+export async function renderWorkflowPlan(): Promise<void> {
+  (await store()).syncForCurrentSession();
+}
 
-  panel.classList.remove("hidden");
-  const planKey = `${state.currentId}:${plan.id}`;
-  if (planKey !== lastPlanKey) {
-    // 新流程默认收起；同一条流程的后续进度更新不打断用户手动展开。
-    panel.open = false;
-    lastPlanKey = planKey;
-  }
-
-  const total = plan.steps.length;
-  const completed = plan.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
-  const percent = total ? Math.round((completed / total) * 100) : 0;
-  const activeStep = plan.steps.find((step) => step.id === plan.activeStepId);
-  const statusLabel = plan.status === "completed" ? "已完成" : plan.status === "failed" ? "未完成" : "执行中";
-  const activeText = plan.status === "running"
-    ? activeStep ? `正在执行 · ${activeStep.title}` : "准备下一步"
-    : statusLabel;
-
-  const titleEl = $("workflow-active");
-  if (titleEl) titleEl.textContent = activeText;
-  const countEl = $("workflow-count");
-  if (countEl) countEl.textContent = `${completed}/${total} 步`;
-  const percentEl = $("workflow-percent");
-  if (percentEl) percentEl.textContent = `${percent}%`;
-  const statusEl = $("workflow-status");
-  if (statusEl) {
-    statusEl.textContent = statusLabel;
-    statusEl.className = `workflow-status status-${plan.status}`;
-  }
-  const meter = $("workflow-meter");
-  if (meter) {
-    meter.setAttribute("aria-valuenow", String(percent));
-    meter.setAttribute("aria-valuemax", "100");
-    meter.setAttribute("aria-valuetext", `已完成 ${completed} 个步骤，共 ${total} 个`);
-  }
-  const fill = $("workflow-meter-fill");
-  if (fill) {
-    fill.style.width = `${percent}%`;
-    fill.className = `workflow-meter-fill status-${plan.status}`;
-  }
-  const goal = $("workflow-goal");
-  if (goal) goal.textContent = plan.goal;
-  const list = $("workflow-steps");
-  if (list) list.replaceChildren(...plan.steps.map((step, index) => renderStep(plan, step, index)));
+/** 面板挂载（幂等）。 */
+export async function mountWorkflowPlanPanel(): Promise<void> {
+  void import("../apps/workflow-plan-vue.js")
+    .then((m) => m.mountWorkflowPlanVue())
+    .catch(() => {});
 }

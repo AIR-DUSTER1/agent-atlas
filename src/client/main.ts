@@ -97,6 +97,10 @@ async function init(): Promise<void> {
   installConfigFieldHydration();
   loadLocal();
   initIconHydration();
+  // M4 4.6：执行流程面板 + 附件 chips 启动即挂载（由 store 驱动显示）
+  void import("./apps/workflow-plan-vue.js").then((m) => m.mountWorkflowPlanVue()).catch(() => {});
+  void import("./apps/attach-chips-vue.js").then((m) => m.mountAttachChipsVue()).catch(() => {});
+  void import("./apps/context-meter-vue.js").then((m) => m.mountContextMeterVue()).catch(() => {});
   bindScrollToBottom();
   // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
   if (desktopBridge()?.isElectron) document.body.classList.add("in-desktop");

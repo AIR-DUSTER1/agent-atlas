@@ -15,7 +15,6 @@ import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
-import { fmtPercent, fmtTokenRate, fmtTokens } from "../modules/format.js";
 import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../modules/reasoning-display.js";
 import { activateModel } from "./model-actions.js";
 import { prepareModelSwitch } from "../actions/model-switch.js";
@@ -234,60 +233,35 @@ export function renderThinkingMenu(menu: HTMLElement): void {
  * input_token_details.cache_read ≈ 提示词缓存命中）；分母来自产生该用量时
  * 服务端写入的模型 context_length，并按会话落盘（未知时只显示 token 数）。
  */
+/**
+ * 容量条发布：把 usage 汇总成快照，经 window 事件推给 Vue 组件。
+ * 为什么不用 store.apply：bundle 与 1:1 副本是两个模块实例（各有独立 pinia），
+ * 直接跨实例取 store 拿不到同一份状态；window 事件是两者都可靠的通道。
+ * 为什么不用 core state 响应式：state 是普通对象，Vue 无法追踪其变更。
+ */
 export function updateContextBar(): void {
-  const bar = $("context-bar");
   const u = state.currentId ? state.usage[state.currentId] : undefined;
-  if (!bar) return;
-  if (!u || !u.contextTokens) {
-    bar.classList.add("hidden");
-    return;
-  }
-  bar.classList.remove("hidden");
+  const snapshot = !u || !u.contextTokens ? null : {
+    contextTokens: u.contextTokens,
+    lastInput: u.lastInput,
+    lastOutput: u.lastOutput,
+    lastCache: u.lastCache,
+    contextWindow: u.contextWindow ?? state.config?.contextWindow ?? null,
+    inputBudget: u.contextInputBudget ?? state.config?.contextBudget?.inputBudgetTokens ?? null,
+    outputReserveTokens: u.outputReserveTokens ?? 0,
+    safetyMarginTokens: u.safetyMarginTokens ?? 0,
+    taskOutput: u.taskOutput ?? 0,
+    taskActiveMs: u.taskActiveMs ?? 0,
+    contextPending: Boolean(u.contextPending),
+  };
+  void import("../stores/context-meter.js")
+    .then(({ publishContextMeter }) => publishContextMeter(snapshot))
+    .catch(() => {});
+}
 
-  // 分母跟随当前目标模型；used 保留最近一次主模型请求的历史峰值。
-  const win = u.contextWindow ?? state.config?.contextWindow ?? null;
-  const fill = $("ctx-fill");
-  const text = $("ctx-text");
-  if (!fill || !text) return;
-  const requestText = `↑ ${fmtTokens(u.lastInput)} ↓ ${fmtTokens(u.lastOutput)}`;
-  const inputBudget = u.contextInputBudget
-    ?? state.config?.contextBudget?.inputBudgetTokens
-    ?? null;
-  if (win) {
-    // 进度条用「输入预算」做分母：输出预留本来就不应被历史吃掉，
-    // 否则 200k 窗口在 150k used 时仍显示健康，实际下一次请求可能已无输出空间。
-    const scale = inputBudget ?? win;
-    const pct = Math.min(100, (u.contextTokens / scale) * 100);
-    fill.style.width = Math.max(1.5, pct) + "%";
-    fill.className = "ctx-fill" + (pct > 92 ? " danger" : pct > 80 ? " warn" : "");
-    const warning = u.contextTokens > scale ? " · 超出预算" : "";
-    const budgetText = inputBudget
-      ? `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(inputBudget)} · ${pct.toFixed(1)}%`
-      : `上下文 ${fmtTokens(u.contextTokens)} / ${fmtTokens(win)} · ${pct.toFixed(1)}%`;
-    text.textContent = `${budgetText} · ${requestText}${warning}`;
-    bar.title = `模型窗口 ${fmtTokens(win)} · 输出预留 ${fmtTokens(u.outputReserveTokens)} · 安全余量 ${fmtTokens(u.safetyMarginTokens)} · 输出均速按本轮活动时长估算`;
-  } else {
-    fill.style.width = "0%";
-    fill.className = "ctx-fill";
-    text.textContent = `上下文 ${fmtTokens(u.contextTokens)} · ${requestText} · 容量未知`;
-    bar.title = "模型窗口未知；在设置中获取模型列表后显示容量与占比";
-  }
-
-  const speedEl = $("ctx-speed");
-  if (speedEl) {
-    const output = u.taskOutput && u.taskOutput > 0 ? u.taskOutput : u.lastOutput;
-    const speed = !u.contextPending ? fmtTokenRate(output, u.taskActiveMs) : "–";
-    speedEl.textContent = speed === "–" ? "" : `输出均速 ${speed}`;
-    speedEl.classList.toggle("hidden", speed === "–");
-  }
-  const cacheEl = $("ctx-cache");
-  if (!cacheEl) return;
-  if (u.lastInput > 0 && u.lastCache > 0) {
-    cacheEl.textContent = `缓存 ${fmtPercent((u.lastCache / u.lastInput) * 100)}`;
-    cacheEl.classList.remove("hidden");
-  } else {
-    cacheEl.textContent = "";
-    cacheEl.classList.add("hidden");
-  }
-  bar.setAttribute("aria-label", [text.textContent, speedEl?.textContent, cacheEl.textContent].filter(Boolean).join(" · "));
+/** 挂载容量条组件（幂等；composer 初始化时调用）。 */
+export async function mountContextMeter(): Promise<void> {
+  void import("../apps/context-meter-vue.js")
+    .then((m) => m.mountContextMeterVue())
+    .catch(() => {});
 }

@@ -26,38 +26,27 @@ const MAX_TEXT_BYTES = 800_000;
 let fsCwd: string | null = null;   // 当前浏览目录（null = 默认项目根）
 let fsParent: string | null = null; // 上一级目录（根目录时为 null）
 
+/**
+ * 附件去重键（上传件用 uploadId，文件系统件用路径）。
+ * 与 stores/attachments.ts 保持同一口径：本模块在 1:1 过渡树链上，
+ * 不能静态 import store（会把 pinia 带进静态图），因此本地实现 + 门面转发。
+ */
 export function refKey(f: PendingFile): string {
   return f.kind === "upload" ? `up:${f.uploadId}` : `fs:${f.path}`;
 }
 
+/** chips 渲染门面（M4 4.6：DOM 由 attach-chips-vue.vue 渲染，这里只同步 store 镜像）。 */
+/** 挂载 chips 组件（幂等；composer 初始化时调用）。 */
+export async function mountAttachChips(): Promise<void> {
+  void import("../apps/attach-chips-vue.js")
+    .then((m) => m.mountAttachChipsVue())
+    .catch(() => {});
+}
+
 export function renderAttachChips(): void {
-  const wrap = $("attach-chips");
-  if (!wrap) return;
-  wrap.innerHTML = "";
-  if (!state.pendingFiles.length) { wrap.classList.add("hidden"); return; }
-  wrap.classList.remove("hidden");
-  for (const f of state.pendingFiles) {
-    const preview = f.kind === "upload" ? f.preview : null;
-    const chip = document.createElement("span");
-    chip.className = "attach-chip" + (preview ? " has-thumb" : "");
-    chip.innerHTML = `
-      ${preview ? `<img class="thumb" alt="">` : "📎"}
-      <span class="c-name"></span>
-      <span class="c-src"></span>
-      <button class="c-del" title="移除">✕</button>`;
-    const nameEl = chip.querySelector(".c-name");
-    if (nameEl) nameEl.textContent = f.name;
-    const srcEl = chip.querySelector(".c-src");
-    if (srcEl) srcEl.textContent = preview ? "图片" : (f.source || "项目文件");
-    const thumb = chip.querySelector<HTMLImageElement>(".thumb");
-    if (thumb && preview) thumb.src = preview;
-    chip.querySelector(".c-del")?.addEventListener("click", () => {
-      state.pendingFiles = state.pendingFiles.filter((x) => refKey(x) !== refKey(f));
-      renderAttachChips();
-      renderFsSelection();
-    });
-    wrap.appendChild(chip);
-  }
+  void import("../stores/attachments.js")
+    .then(({ useAttachmentsStore }) => useAttachmentsStore().syncFromState())
+    .catch(() => {});
 }
 
 export function addPendingFile(f: PendingFile): boolean {
