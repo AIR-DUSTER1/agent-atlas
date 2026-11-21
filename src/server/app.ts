@@ -29,7 +29,8 @@ import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnautho
 import { writeAudit } from "./audit.js";
 import { log, newRequestId } from "./logging.js";
 import { handleHealthz, handleReadyz } from "./health.js";
-import { handleMetrics } from "./routes/observability.js";
+import { handleClientError, handleDiagnostics, handleMetrics, handleVersion } from "./routes/observability.js";
+import { handleStats } from "./routes/stats.js";
 import { isPostgresBackend } from "./persistence/postgres.js";
 import { ensureProjectsLoaded } from "./projects.js";
 import { ensureUserSessions } from "./sessions.js";
@@ -41,12 +42,8 @@ import { serveStatic } from "./static.js";
 import { dispatchApi } from "./dispatch.js";
 import { AUTH_ENABLED, EXPOSED_NOAUTH_ERR, LOOPBACK_HOST, PORT } from "./http-context.js";
 
-/** 适配器的「响应已直写」标记：返回带该头的 Response，@hono/node-server 不再写 outgoing。 */
-const ALREADY_SENT_HEADER = "x-hono-already-sent";
-
-function alreadySent(): Response {
-  return new Response(null, { headers: { [ALREADY_SENT_HEADER]: "true" } });
-}
+// 「响应已直写」标记统一在 already-sent.ts（M2 的 validation.ts 也要用）。
+import { alreadySent } from "./already-sent.js";
 
 type RawGate = (req: IncomingMessage, res: ServerResponse, pathname: string) => boolean | Promise<boolean>;
 
@@ -326,6 +323,21 @@ export function createApp(): Hono<{ Bindings: HttpBindings; Variables: { request
     respondForbidden(req, res, EXPOSED_NOAUTH_ERR, true);
     return false;
   }));
+
+  // ── 15b. M2 批次 1（探针与运维）：原生挂载；dispatch.ts 对应分支已摘除 ──
+  // 均无请求体：直接复用既有 handler（写原生 res）。认证/管理员门禁由上方中间件覆盖。
+  // handleVersion / handleDiagnostics 只收 res：单独 lambda 标注参数序
+  app.get("/api/version", async (c) => { handleVersion(c.env.outgoing); return alreadySent(); });
+  app.get("/api/diagnostics", async (c) => { await handleDiagnostics(c.env.outgoing); return alreadySent(); });
+  app.get("/api/stats", async (c) => {
+    // handleStats 的参数序是 (res, req)，与 raw() 的 (req, res) 相反，单独写清楚
+    await handleStats(c.env.outgoing, c.env.incoming);
+    return alreadySent();
+  });
+  app.post("/api/client-errors", async (c) => {
+    await handleClientError(c.env.incoming, c.env.outgoing, c.get("requestLog").requestId);
+    return alreadySent();
+  });
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

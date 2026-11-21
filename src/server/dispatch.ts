@@ -58,7 +58,6 @@ import {
   handleSaveRagConfig,
   handleTestRag,
 } from "./routes/rag.js";
-import { handleClientError, handleDiagnostics, handleVersion } from "./routes/observability.js";
 import {
   handleConfirmMemory,
   handleDeleteMemory,
@@ -118,7 +117,6 @@ import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes
 import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleStaticMap } from "./map-static.js";
-import { handleStats } from "./routes/stats.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
 import { log } from "./logging.js";
 import { readBody, respondBadRequest } from "./http-body.js";
@@ -361,12 +359,8 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
       return;
     }
     // 版本与运维诊断（受认证保护；不返回路径、提示词或密钥）
-    if (pathname === "/api/version" && req.method === "GET") { handleVersion(res); return; }
-    if (pathname === "/api/diagnostics" && req.method === "GET") { await handleDiagnostics(res); return; }
-    if (pathname === "/api/client-errors" && req.method === "POST") { await handleClientError(req, res, ctx.requestId); return; }
 
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
-    if (pathname === "/api/stats" && req.method === "GET") { await handleStats(res, req); return; }
 
     // 备份与恢复（F9：换机 / 误删 / 升级前的整机状态快照）
     if (pathname === "/api/backup" && req.method === "POST") { await handleCreateBackup(res); return; }
