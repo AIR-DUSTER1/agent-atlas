@@ -110,7 +110,7 @@ import { disconnectAll } from "./mcp.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
 import { createAdaptorServer } from "@hono/node-server";
 import { createApp } from "./app.js";
-import { refreshMcpTools } from "./dispatch.js";
+import { refreshMcpTools } from "./mcp-refresh.js";
 import { AUTH_ENABLED, HOST, PORT } from "./http-context.js";
 
 // 生产镜像自检：必须在迁移、加载用户配置和监听端口之前完成。

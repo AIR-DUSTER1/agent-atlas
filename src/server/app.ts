@@ -6,7 +6,7 @@
  *  - 横切层逐个包成 middleware（rawGate：门禁函数仍直接写原生 res，返回 false
  *    表示已应答，外壳以 x-hono-already-sent 标记让适配器不再写响应）；
  *  - 认证端点与 /metrics 提前挂载（顺序语义：它们豁免 verifyRequestAuth 门禁）；
- *  - catch-all 分两段：GET 非 /api 走静态文件，其余原样透传给 dispatchApi。
+ *  - M2 完成后全部路由已原生挂载；catch-all 只剩静态文件与 404 兜底。
  * 迁移纪律：M1 只换挂载点、不改任何门禁逻辑与响应形状；M2 起逐批把门禁与路由
  * 原生化（zValidator + Hono Response），每批以 server.test.ts 不改断言直绿为门。
  */
@@ -39,7 +39,6 @@ import { incCounter, incGauge, metricPath, observeHistogram } from "./observabil
 import { lifecycle } from "./lifecycle.js";
 import { BodyTooLargeError, respondBadRequest } from "./http-body.js";
 import { serveStatic } from "./static.js";
-import { dispatchApi } from "./dispatch.js";
 import {
   handleActivate, handleAddModel, handleAddProvider, handleDeleteModel, handleDeleteProvider,
   handleGetApiConfig, handleModels, handleSetReasoning, handleUpdateModel, handleUpdateProvider,
@@ -55,7 +54,7 @@ import {
   handleDeleteMcp, handleImportMcp, handleListMcp, handleSaveMcp, handleSetMcpEnabled,
   handleTestMcp, handleUpdateMcp,
 } from "./routes/mcp.js";
-import { refreshMcpTools } from "./dispatch.js";
+import { refreshMcpTools } from "./mcp-refresh.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import {
   handleCreateUser, handleCreateUserToken, handleDeleteUser, handleListUserTokens,
@@ -84,6 +83,9 @@ import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handl
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
 } from "./routes/browser-use.js";
+import { handleChat, handleResume } from "./routes/chat.js";
+import { handleStaticMap } from "./map-static.js";
+import { parsedJsonOf } from "./http-body.js";
 import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -562,7 +564,33 @@ export function createApp(): Hono<AppEnv> {
   app.get("/api/browser/sessions/:id/screenshot", guarded(async (c, sessionId) => { handleBrowserScreenshot(c.env.outgoing, sessionId); }));
   app.post("/api/browser/sessions/:id", jsonRaw, guarded(async (c, sessionId) => { await handleBrowserClose(c.env.outgoing, c.env.incoming, sessionId); }));
 
-  // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
+  // ── 15m. 结论地图静态代理（批次 3 时留在 dispatch，随批次 10 一并收编）──
+  app.get("/api/map/static", withBody(async (c) => {
+    const url = new URL(c.env.incoming.url ?? "/", `http://localhost:${PORT}`);
+    await handleStaticMap(c.env.outgoing, url);
+  }));
+
+  // ── 15l. M2 批次 10（SSE 核心，最后一批）：原生挂载；dispatch.ts 整体退役 ──
+  // chat/resume 保持「解析后透传」形态：handler 自己把 SSE 写到原生 res，
+  // 流式期间 withBody 的 await 链保持打开（与 catch-all 透传等价）；
+  // 事件契约四处同步、task_usage 位置、AbortSignal 取消链路均不受挂载点影响。
+  app.post("/api/chat", jsonRaw, withBody(async (c) => {
+    const body = parsedJsonOf<{ sessionId?: string; message?: unknown; files?: unknown; headless?: unknown }>(c.env.incoming)!;
+    c.get("requestLog").sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
+    try {
+      await handleChat(c.env.outgoing, c.env.incoming, body.sessionId ?? "", body);
+    } catch (err) {
+      // 附件解析等前置错误 → 400/413（此时流未开始）
+      respondBadRequest(c.env.outgoing, c.env.incoming, err);
+    }
+  }));
+  app.post("/api/resume", jsonRaw, withBody(async (c) => {
+    const body = parsedJsonOf<{ sessionId?: string; decision?: unknown; choice?: unknown }>(c.env.incoming)!;
+    c.get("requestLog").sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
+    await handleResume(c.env.outgoing, c.env.incoming, body.sessionId ?? "", body);
+  }));
+
+  // ── 16. 兜底：GET 非 /api 走静态文件；未匹配的 /api 与其余路径 404 ──
   app.all("*", async (c) => {
     const req = c.env.incoming;
     const res = c.env.outgoing;
@@ -573,7 +601,9 @@ export function createApp(): Hono<AppEnv> {
       res.end("Not Found");
       return alreadySent();
     }
-    await dispatchApi(req, res, { requestId: c.get("requestLog").requestId, sessionId: c.get("requestLog").sessionId });
+    // 未被任何原生路由匹配的 /api 请求（与平移前 dispatch 的 404 形状一致）
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "Not Found" }));
     return alreadySent();
   });
 
