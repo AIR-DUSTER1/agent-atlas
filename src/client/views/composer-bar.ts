@@ -70,6 +70,10 @@ export function applyConfigState(cfg: AppConfig): void {
   if (sideText) sideText.textContent = mock ? mockLabel : `${active ? active.name + " · " : ""}${modelLabel}`;
   renderComposerBar();
   updateContextBar();
+  // M4 4.3：模型管理面板（Vue）随配置刷新（动态 import 保 1:1 静态图干净）
+  void import("../stores/models.js")
+    .then(({ useModelsStore }) => useModelsStore().syncConfig(cfg))
+    .catch(() => {});
 }
 
 /** 更新两个 chip 上的文字（applyConfigState 每次都会调用） */

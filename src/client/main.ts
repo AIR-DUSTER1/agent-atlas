@@ -38,12 +38,7 @@ import {
 import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
 import { closeEstate, installBeikeCli, openEstate, openEstateLogin, pasteEstateKeyFromClipboard, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 import { bindJob } from "./views/job.js";
-import { closeProviderForm, openProviderForm, saveModel } from "./views/model-form.js";
-import {
-  activateModel, fetchGatewayModelChips, removeProvider, saveProvider,
-} from "./views/model-actions.js";
-import { currentlySelectedProvider, renderProviderList } from "./views/model-panel.js";
-import { setSettingsFocus } from "./views/model-store.js";
+
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { bindTracingSettings } from "./views/settings-tracing.js";
 import { loadPluginState } from "./views/settings-plugins.js";
@@ -267,94 +262,10 @@ async function init(): Promise<void> {
     await loadProjects();
     showProjectMenu(menu?.classList.contains("hidden") ?? false);
   });
-  on("add-provider-btn", "click", () => openProviderForm(null));
-  on("provider-use-btn", "click", () => {
-    const p = currentlySelectedProvider();
-    if (p && !p.active) void activateModel(p.id, null);
-  });
-  on("provider-edit-btn", "click", () => {
-    const p = currentlySelectedProvider();
-    if (p) openProviderForm(p.id);
-  });
-  on("provider-delete-btn", "click", () => {
-    const p = currentlySelectedProvider();
-    if (p) void removeProvider(p.id, p.name);
-  });
   on("backup-create-btn", "click", () => { void createBackup(); });
-  on("provider-modal-close", "click", closeProviderForm);
-  on("provider-modal-mask", "click", (e) => {
-    if (e.target === $("provider-modal-mask")) closeProviderForm();
-  });
-  on("pf-cancel-edit", "click", closeProviderForm);
-  on("pf-key-toggle", "click", () => toggleSecretInput("pf-key-toggle", "pf-api-key"));
-  // 弹窗内测试连接 / 拉取模型 → 加入本次新增的初始模型
-  on("pf-test", "click", () => { void fetchGatewayModelChips("pending"); });
-  on("pf-new-fetch-models", "click", () => { void fetchGatewayModelChips("pending"); });
-  on("pf-new-model-add-btn", "click", () => {
-    void import("./views/model-actions.js").then((m) => m.addPendingModelByName(
-      ($("pf-new-model-name") as HTMLInputElement | null)?.value || "", null
-    ));
-  });
-  on("pf-new-model-name", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") {
-      ke.preventDefault();
-      void import("./views/model-actions.js").then((m) => m.addPendingModelByName(
-        ($("pf-new-model-name") as HTMLInputElement | null)?.value || "", null
-      ));
-    }
-  });
-  on("pf-save", "click", () => { void saveProvider(); });
-  // 右栏已存供应商：获取列表或手动添加模型
-  on("pf-fetch-models", "click", () => { void fetchGatewayModelChips("detail"); });
-  on("pf-model-add-btn", "click", () => {
-    void import("./views/model-actions.js").then((m) => m.addModelByName(
-      ($("pf-model-new") as HTMLInputElement | null)?.value || "", null
-    ));
-  });
-  $("pf-model-new")?.addEventListener("keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") {
-      ke.preventDefault();
-      void import("./views/model-actions.js").then((m) => m.addModelByName(
-        ($("pf-model-new") as HTMLInputElement | null)?.value || "", null
-      ));
-    }
-  });
-  // 模型编辑面板：思考等级（方言 / 档位）与保存、删除、设为启用
-  on("mf-save", "click", () => { void saveModel(); });
-  on("mf-activate", "click", () => {
-    void import("./views/model-store.js").then((m) => {
-      const p = m.currentEditingProvider();
-      const model = m.currentEditingModel();
-      if (p && model) void activateModel(p.id, model.id);
-    });
-  });
-  on("mf-delete", "click", () => {
-    void import("./views/model-store.js").then((m) => {
-      const p = m.currentEditingProvider();
-      const model = m.currentEditingModel();
-      if (p && model) void import("./views/model-actions.js").then((a) => a.removeModel(p.id, model.id, model.name));
-    });
-  });
-  on("mf-dialect", "change", () => {
-    void import("./views/model-form.js").then((m) => {
-      m.renderLevelSelect(
-        ($("mf-dialect") as HTMLSelectElement | null)?.value || "auto",
-        "default",
-        ($("mf-custom") as HTMLInputElement | null)?.value || ""
-      );
-    });
-  });
-  on("mf-level", "change", () => {
-    void import("./views/model-form.js").then((m) => {
-      m.renderLevelSelect(
-        ($("mf-dialect") as HTMLSelectElement | null)?.value || "auto",
-        ($("mf-level") as HTMLSelectElement | null)?.value || "default",
-        ($("mf-custom") as HTMLInputElement | null)?.value || ""
-      );
-    });
-  });
+  // M4 4.3：供应商/模型面板与弹窗事件全部由 Vue 组件接管（stores/models 驱动）
+  // 供应商连接弹窗启动即挂载（默认隐藏，开关由 store.providerFormOpen 驱动）
+  void import("./apps/provider-form-vue.js").then((m) => m.mountProviderFormVue()).catch(() => {});
 
   // 文件上下文：📎 附件 / 文件选择器 / 远程文件夹 / 本地上传
   on("attach-btn", "click", () => { void openFsModal(); });
@@ -462,7 +373,7 @@ async function init(): Promise<void> {
       // 供应商弹窗是第一层：只关它，不要把背后的设置页一起关掉。
       if (isProviderFormOpen()) {
         e.preventDefault();
-        closeProviderForm();
+        void import("./views/model-form.js").then((m) => m.closeProviderForm());
         return;
       }
       if (isMcpEditorOpen()) {
@@ -480,17 +391,9 @@ async function init(): Promise<void> {
       setSidebarOpen(false);
       closeCmMenus();
     }
-    if (e.key === "Enter" && ["pf-name", "pf-base-url", "pf-api-key"].includes(target.id)) {
-      e.preventDefault();
-      void saveProvider();
-    }
     if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(target.id)) {
       e.preventDefault();
       void saveKbConfig();
-    }
-    if (e.key === "Enter" && ["mf-name", "mf-label"].includes(target.id)) {
-      e.preventDefault();
-      void saveModel();
     }
   });
 

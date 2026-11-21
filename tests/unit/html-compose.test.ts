@@ -13,6 +13,16 @@ import { composeHtml } from "../../scripts/compose-html.js";
 
 const CLIENT = fileURLToPath(new URL("../../src/client/", import.meta.url));
 
+test("组合产物 div/section 配对平衡（片段手改防回归）", async () => {
+  const html = await composeHtml(join(CLIENT, "index.html"), CLIENT);
+  const stripped = html.replace(/<!--[\s\S]*?-->/g, "");
+  for (const tag of ["div", "section", "aside", "nav", "form", "fieldset"]) {
+    const opens = (stripped.match(new RegExp(`<${tag}\\b`, "g")) ?? []).length;
+    const closes = (stripped.match(new RegExp(`</${tag}>`, "g")) ?? []).length;
+    assert.equal(opens, closes, `${tag} 标签不配对：${opens} 开 / ${closes} 闭（某个片段的收尾标签被改坏）`);
+  }
+});
+
 test("源码入口可组装出完整页面且不保留 include 标记", async () => {
   const html = await composeHtml(join(CLIENT, "index.html"), CLIENT);
   assert.match(html, /<title>agentatlas<\/title>/);

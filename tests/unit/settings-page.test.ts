@@ -87,33 +87,32 @@ test("前端通过独立页面函数切换分区并统一关闭", async () => {
 test("模型与供应商采用左栏选择、右栏模型详情", async () => {
   const root = new URL("../../src/client/", import.meta.url);
   const html = await readClientIndexHtml();
-    const app = await readClientSource();
-  assert.match(html, /class="provider-workspace"/);
-  assert.match(html, /id="provider-list"/);
-  assert.match(html, /id="provider-detail"/);
-  assert.match(html, /id="pf-model-list"/);
-  assert.match(app, /function selectProvider\(providerId: string \| null\): void/);
-  assert.match(app, /function renderProviderDetail\(\): void/);
+  // M4 4.3：模型面板迁往 Vue 组件，结构契约在组件模板上断言
+  const app = await readClientFiles(["views/models-panel-vue.vue", "stores/models.ts"]);
+  assert.match(html, /id="settings-modal"/);
+  assert.match(app, /class="provider-workspace"/);
+  assert.match(app, /id="provider-list"/);
+  assert.match(app, /id="provider-detail"/);
+  assert.match(app, /id="pf-model-list"/);
+  assert.match(app, /function selectProvider\(provider: ProviderEntry\): void/);
   assert.match(app, /provider-nav-item/);
-  assert.match(app, /当前为模拟模式；前往设置添加供应商后可切换模型/);
   assert.doesNotMatch(app, /row\.querySelector\("\.p-use"\)/);
   assert.doesNotMatch(html, /「启用」的供应商 \+ 它当前的模型决定聊天用哪个模型/);
 });
 
 test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创建态覆盖", async () => {
   const html = await readClientIndexHtml();
-    const app = await readClientSource();
-  const detailStart = html.indexOf('id="provider-detail"');
-  const detailEnd = html.indexOf('id="settings-status"', detailStart);
-  const detail = html.slice(detailStart, detailEnd);
-  assert.match(html, /id="provider-modal-mask"[\s\S]*role="dialog"/);
-  assert.match(html, /id="pf-initial-models"/);
-  assert.match(html, /id="provider-modal-close"/);
-  assert.doesNotMatch(detail, /id="provider-form-wrap"/, "连接表单不能继续占用右栏详情");
-  assert.match(app, /provider-modal-mask/);
-  assert.match(app, /function closeProviderForm\(\): void/);
-  assert.match(app, /\(p\.id === selectedProviderId \? " active" : ""\)/);
-  assert.doesNotMatch(app, /providerFormMode !== "create" && p\.id === selectedProviderId/);
+  // M4 4.3：供应商弹窗迁往 Vue 组件，结构契约在组件模板上断言
+  const modal = await readClientFiles(["views/provider-form-vue.vue", "stores/models.ts"]);
+  const panel = await readClientFiles(["views/models-panel-vue.vue"]);
+  assert.match(html, /id="provider-modal-mask"/);
+  assert.match(modal, /id="provider-modal" role="dialog"/);
+  assert.match(modal, /id="pf-initial-models"/);
+  assert.match(modal, /id="provider-modal-close"/);
+  assert.match(modal, /id="provider-form-wrap"/);
+  assert.match(panel, /class="provider-nav-item"/);
+  assert.match(panel, /active: p\.id === store\.selectedProviderId/);
+  assert.doesNotMatch(modal, /providerFormMode !== "create" && p\.id === selectedProviderId/);
 });
 
 test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", async () => {
@@ -140,7 +139,9 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
   const forms = await readClientFiles([
     "views/settings-memories.ts", "views/settings-commands-vue.vue", "ui/field.ts",
   ]);
-  assert.match(html, /id="pf-api-key" type="password"/);
+  // M4 4.3：pf-api-key 随供应商弹窗迁往 Vue 组件
+  const providerForm = await readClientFiles(["views/provider-form-vue.vue"]);
+  assert.match(providerForm, /id="pf-api-key"[\s\S]{0,200}type="password"/);
   assert.match(html, /id="kb-key" type="password"/);
   assert.match(html, /id="estate-key" type="password"/);
   assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);

@@ -19,6 +19,7 @@ import { closeComposerMenu } from "../composer/menu.js";
 
 import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
+import { refreshModelsPanel } from "./model-panel.js";
 import { refreshMemorySettings, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills, showSkillStatus } from "./settings-skills.js";
@@ -56,6 +57,7 @@ export function showSettingsView(view: string): void {
   if (content) content.scrollTop = 0;
 
   if (next === "models") {
+    void refreshModelsPanel().catch(() => {});
     api<AppConfig>("/api/config").then(applyConfigState).catch(() => {});
     void refreshBackups().catch(() => {}); // 备份列表懒加载（失败不打扰设置流程）
   } else if (next === "plugins") {
