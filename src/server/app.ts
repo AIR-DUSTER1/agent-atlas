@@ -56,6 +56,10 @@ import {
   handleTestMcp, handleUpdateMcp,
 } from "./routes/mcp.js";
 import { refreshMcpTools } from "./dispatch.js";
+import {
+  handleCleanupSessions, handleCompactSession, handleDeleteSession, handleExportSession,
+  handleSessionPermission, handleSessions, handleTranscript,
+} from "./routes/sessions.js";
 import { cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -430,6 +434,18 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/mcp/:id/test", withBody(async (c) => { await handleTestMcp(c.env.outgoing, c.req.param("id") as string); }));
   app.patch("/api/mcp/:id", jsonRaw, withBody(async (c) => { await handleUpdateMcp(c.env.outgoing, c.env.incoming, c.req.param("id") as string); await refreshMcpTools(true); }));
   app.delete("/api/mcp/:id", withBody(async (c) => { await handleDeleteMcp(c.env.outgoing, c.req.param("id") as string); await refreshMcpTools(true); }));
+
+  // ── 15f. M2 批次 6（会话管理）：原生挂载；dispatch 分支已摘除 ──
+  // cleanup 静态段必须先于 :id 注册（/api/sessions/cleanup 不能被当成会话 id）。
+  // GET/POST /api/sessions 共用一个 handler（内部按 method 分支），签名 (res, req)。
+  app.get("/api/sessions", withBody(async (c) => { await handleSessions(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/sessions", jsonRaw, withBody(async (c) => { await handleSessions(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/sessions/cleanup", jsonRaw, withBody(async (c) => { await handleCleanupSessions(c.env.outgoing, c.env.incoming); }));
+  app.delete("/api/sessions/:id", withBody(async (c) => { await handleDeleteSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/sessions/:id/compact", jsonRaw, withBody(async (c) => { await handleCompactSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/sessions/:id/permission", jsonRaw, withBody(async (c) => { await handleSessionPermission(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.get("/api/sessions/:id/transcript", withBody(async (c) => { await handleTranscript(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.get("/api/sessions/:id/export", withBody(async (c) => { await handleExportSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

@@ -29,15 +29,6 @@ import {
 import { handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
-  handleCleanupSessions,
-  handleCompactSession,
-  handleDeleteSession,
-  handleExportSession,
-  handleSessionPermission,
-  handleSessions,
-  handleTranscript,
-} from "./routes/sessions.js";
-import {
   handleClearRag,
   handleDeleteRagDoc,
   handleGetRag,
@@ -106,10 +97,6 @@ export async function refreshMcpTools(bumpVersion = false): Promise<void> {
 export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx: DispatchContext): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:0`);
   const pathname = url.pathname;
-    const sessionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
-    const transcriptMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/transcript$/);
-    const compactMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/compact$/);
-    const permissionMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/permission$/);
     const extMatch = pathname.match(/^\/api\/external-agents\/([\w-]+)$/);
     const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
@@ -165,15 +152,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     if (pathname === "/api/routing/test" && req.method === "POST") { await handleTestRouting(res, req); return; }
 
     // 会话
-    if (pathname === "/api/sessions") { await handleSessions(res, req); return; }
-    // 批量清理要放在 sessionMatch 之前：/api/sessions/cleanup 不能被当成会话 id
-    if (pathname === "/api/sessions/cleanup" && req.method === "POST") { await handleCleanupSessions(res, req); return; }
-    if (sessionMatch && req.method === "DELETE") { await handleDeleteSession(res, req, sessionMatch[1]); return; }
-    if (compactMatch && req.method === "POST") { await handleCompactSession(res, req, compactMatch[1]); return; }
-    if (permissionMatch && req.method === "POST") { await handleSessionPermission(res, req, permissionMatch[1]); return; }
-    if (transcriptMatch && req.method === "GET") { await handleTranscript(res, req, transcriptMatch[1]); return; }
-    const exportMatch = pathname.match(/^\/api\/sessions\/([\w-]+)\/export$/);
-    if (exportMatch && req.method === "GET") { await handleExportSession(res, req, exportMatch[1]); return; }
 
     // 外部 Agent
     if (pathname === "/api/external-agents" && req.method === "GET") { await handleListExternalAgents(res); return; }

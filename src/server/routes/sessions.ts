@@ -4,7 +4,7 @@
  * 新建会话语义：{ kind: "agent" }（默认）/ { kind: "demo", demo: 1-4 }
  * / { kind: "external", agentId } / { kind: "estate" } / { kind: "job" }；兼容旧 { demo: N }。
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import { createSession, deleteSession, getSessionForUser, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
 import { requireUserIdentity } from "../security/device.js";
 import { closeBrowserSession } from "../browser-use.js";
@@ -27,7 +27,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
     return;
   }
   if (req.method === "POST") {
-    const body = JSON.parse((await readBody(req)) || "{}") as { kind?: unknown; demo?: unknown; projectId?: unknown; title?: string; agentId?: unknown };
+    const body = parsedJsonOf<{ kind?: unknown; demo?: unknown; projectId?: unknown; title?: string; agentId?: unknown }>(req)!;
     // 新逻辑：{ kind: "agent" }（默认）/ { kind: "demo", demo: 1-4 } / { kind: "external", agentId }
     //         / { kind: "estate" }（房产 Agent，贝壳工具集）
     //         / { kind: "job" }（求职岗位 Agent，内置采集工具集）
@@ -133,7 +133,7 @@ export async function handleSessionPermission(
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
     return;
   }
-  const body = JSON.parse((await readBody(req)) || "{}") as { mode?: unknown };
+  const body = parsedJsonOf<{ mode?: unknown }>(req)!;
   if (!isPermissionMode(body.mode)) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: `mode 必须是 ${PERMISSION_MODES.join(" / ")} 之一` }));
@@ -242,7 +242,7 @@ export async function handleCleanupSessions(
   const identity = requireUserIdentity(req, res);
   if (!identity) return;
   const userId = identity.userId;
-  const body = JSON.parse((await readBody(req)) || "{}") as { daysBefore?: unknown };
+  const body = parsedJsonOf<{ daysBefore?: unknown }>(req)!;
   const days = typeof body.daysBefore === "number" ? Math.floor(body.daysBefore) : NaN;
   if (!Number.isFinite(days) || days < CLEANUP_MIN_DAYS || days > CLEANUP_MAX_DAYS) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
