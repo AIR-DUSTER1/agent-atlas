@@ -37,18 +37,6 @@ import {
   handleSaveRagConfig,
   handleTestRag,
 } from "./routes/rag.js";
-import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
-import { handleCreateSubagent, handleDeleteSubagent, handleListSubagents, handleUpdateSubagent } from "./routes/subagents.js";
-import {
-  handleCreateUser,
-  handleCreateUserToken,
-  handleDeleteUser,
-  handleListUserTokens,
-  handleListUsers,
-  handleResetUserPassword,
-  handleRevokeUserToken,
-  handleUpdateUser,
-} from "./routes/users.js";
 import {
   handleEstateExport,
   handleGetEstate,
@@ -58,8 +46,6 @@ import {
 } from "./routes/estate.js";
 import { handleFsList, handleFsOpenRemote, handleFsRead, handleFsSearch, handleUpload } from "./routes/files.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
-import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
-import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleStaticMap } from "./map-static.js";
 import { loadMcpTools, mcpApprovalDescriptions } from "./mcp-tools.js";
 import { log } from "./logging.js";
@@ -101,11 +87,7 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     const projectMatch = pathname.match(/^\/api\/projects\/([\w-]+)$/);
     const projectRefresh = pathname.match(/^\/api\/projects\/([\w-]+)\/refresh$/);
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
-    const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
-    const subagentMatch = pathname.match(/^\/api\/subagents\/([\w-]+)$/);
     // 用户 id 是 uuid；reset-password / tokens 子路径在各自分支用 endsWith 区分
-    const userMatch = pathname.match(/^\/api\/users\/([\w-]+)$/);
-    const userTokenRevokeMatch = pathname.match(/^\/api\/users\/([\w-]+)\/tokens\/([\w-]+)$/);
 
     // 结论地图：高德/腾讯/百度 Web 服务 Key 仅在服务端代理中使用
     if (pathname === "/api/map/static" && req.method === "GET") { await handleStaticMap(res, url); return; }
@@ -114,42 +96,9 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
 
     // LangSmith 追踪设置（只保存配置；真正上报发生在 runGraphEvents 的 callback 注入点）
 
-    // 内置插件启停（RAG / 找房数据源 / Computer Use）
-    if (pathname === "/api/plugins" && req.method === "GET") { handleListPlugins(res); return; }
-    if (pluginMatch && req.method === "PATCH") { await handleSetPluginEnabled(res, req, pluginMatch[1]); return; }
 
-    // 子代理配置（身份 / 启停 / 模型；提示词与工具由主 Agent 运行时赋予）
-    if (pathname === "/api/subagents" && req.method === "GET") { handleListSubagents(res); return; }
-    if (pathname === "/api/subagents" && req.method === "POST") { await handleCreateSubagent(res, req); return; }
-    if (subagentMatch && req.method === "PATCH") { await handleUpdateSubagent(res, req, subagentMatch[1]); return; }
-    if (subagentMatch && req.method === "DELETE") { await handleDeleteSubagent(res, subagentMatch[1]); return; }
 
-    // 用户管理（U2，admin only；文件模式由路由内统一 404）
-    if (pathname === "/api/users" && req.method === "GET") { await handleListUsers(res); return; }
-    if (pathname === "/api/users" && req.method === "POST") { await handleCreateUser(req, res); return; }
-    if (userMatch && req.method === "PATCH") { await handleUpdateUser(req, res, userMatch[1]); return; }
-    if (userMatch && req.method === "DELETE") { await handleDeleteUser(req, res, userMatch[1]); return; }
-    if (userMatch && pathname.endsWith("/reset-password") && req.method === "POST") {
-      await handleResetUserPassword(req, res, userMatch[1]);
-      return;
-    }
-    if (userMatch && pathname.endsWith("/tokens") && req.method === "GET") {
-      await handleListUserTokens(res, userMatch[1]);
-      return;
-    }
-    if (userMatch && pathname.endsWith("/tokens") && req.method === "POST") {
-      await handleCreateUserToken(req, res, userMatch[1]);
-      return;
-    }
-    if (userTokenRevokeMatch && req.method === "DELETE") {
-      await handleRevokeUserToken(req, res, userTokenRevokeMatch[1], userTokenRevokeMatch[2]);
-      return;
-    }
 
-    // 路由决策层（默认关闭；开启后按规则 → 向量 → 决策模型挑子代理）
-    if (pathname === "/api/routing" && req.method === "GET") { handleGetRouting(res); return; }
-    if (pathname === "/api/routing" && req.method === "PUT") { await handleSaveRouting(res, req); return; }
-    if (pathname === "/api/routing/test" && req.method === "POST") { await handleTestRouting(res, req); return; }
 
     // 会话
 
@@ -200,10 +149,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
 
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
 
-    // 备份与恢复（F9：换机 / 误删 / 升级前的整机状态快照）
-    if (pathname === "/api/backup" && req.method === "POST") { await handleCreateBackup(res); return; }
-    if (pathname === "/api/backup" && req.method === "GET") { await handleListBackups(res); return; }
-    if (pathname === "/api/restore" && req.method === "POST") { await handleRestoreBackup(res, req); return; }
 
     // RAG（外部知识库）
     if (pathname === "/api/rag" && req.method === "GET") { await handleGetRag(res); return; }    if (pathname === "/api/rag/config" && req.method === "POST") { await handleSaveRagConfig(res, req); return; }

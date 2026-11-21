@@ -12,7 +12,7 @@
  *  - 所有错误转中文并带 400，前端直接展示，不需要自己翻译。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { routingSnapshot, saveRoutingSettings } from "../routing-settings.js";
 import { runRouteStep } from "../../routing/route-step.js";
 import { getEnabledSubagents } from "../../subagent-state.js";
@@ -33,7 +33,7 @@ export function handleGetRouting(res: ServerResponse): void {
 
 export async function handleSaveRouting(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = parsedJsonOf(req)! as Record<string, unknown>;
     sendJson(res, 200, await saveRoutingSettings(body));
   } catch (err) {
     sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
@@ -46,7 +46,7 @@ export async function handleSaveRouting(res: ServerResponse, req: IncomingMessag
  */
 export async function handleTestRouting(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as { text?: unknown };
+    const body = parsedJsonOf<{ text?: unknown }>(req)!;
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) throw new Error("请填写一段用于测试的用户请求文本");
     if (text.length > MAX_TEST_TEXT) throw new Error(`测试文本不能超过 ${MAX_TEST_TEXT} 个字符`);

@@ -7,7 +7,7 @@
  * DELETE /api/subagents/:id        删除
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import {
   createSubagent,
   deleteSubagent,
@@ -30,7 +30,7 @@ export async function handleCreateSubagent(
   req: IncomingMessage,
 ): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = parsedJsonOf(req)! as Record<string, unknown>;
     const snapshot = await createSubagent(body);
     bumpConfigVersion();
     sendJson(res, 200, snapshot);
@@ -45,7 +45,7 @@ export async function handleUpdateSubagent(
   id: string,
 ): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = parsedJsonOf(req)! as Record<string, unknown>;
     if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
       throw new Error("enabled 必须是布尔值");
     }

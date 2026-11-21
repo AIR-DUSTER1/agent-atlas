@@ -16,7 +16,7 @@
  * 守卫：不能禁用/删除自己；最后一个 active admin 不可禁用/删除/降级。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { writeAudit } from "../audit.js";
 import { clientIp } from "../security/rate-limit.js";
 import { createHash } from "node:crypto";
@@ -51,13 +51,8 @@ export async function handleListUsers(res: ServerResponse): Promise<void> {
 
 export async function handleCreateUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
-  } catch {
-    sendJson(res, 400, { error: "请求体不是合法 JSON" });
-    return;
-  }
+  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  const body = parsedJsonOf<Record<string, unknown>>(req)!;
   const username = typeof body.username === "string" ? body.username.trim() : "";
   const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";
   const password = typeof body.password === "string" ? body.password : "";
@@ -78,13 +73,8 @@ export async function handleCreateUser(req: IncomingMessage, res: ServerResponse
 
 export async function handleUpdateUser(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
-  } catch {
-    sendJson(res, 400, { error: "请求体不是合法 JSON" });
-    return;
-  }
+  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  const body = parsedJsonOf<Record<string, unknown>>(req)!;
   const actorId = id;
   const wantsDisable = body.status === "disabled";
   const wantsDemote = body.role === "member";
@@ -156,13 +146,8 @@ export async function handleListUserTokens(res: ServerResponse, id: string): Pro
 
 export async function handleCreateUserToken(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
-  } catch {
-    sendJson(res, 400, { error: "请求体不是合法 JSON" });
-    return;
-  }
+  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  const body = parsedJsonOf<Record<string, unknown>>(req)!;
   const label = typeof body.label === "string" ? body.label : "";
   let expiresAt: Date | null = null;
   if (typeof body.expiresInDays === "number" && Number.isFinite(body.expiresInDays) && body.expiresInDays > 0) {

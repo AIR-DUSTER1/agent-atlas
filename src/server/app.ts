@@ -56,10 +56,20 @@ import {
   handleTestMcp, handleUpdateMcp,
 } from "./routes/mcp.js";
 import { refreshMcpTools } from "./dispatch.js";
+import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
+import {
+  handleCreateUser, handleCreateUserToken, handleDeleteUser, handleListUserTokens,
+  handleListUsers, handleResetUserPassword, handleRevokeUserToken, handleUpdateUser,
+} from "./routes/users.js";
 import {
   handleCleanupSessions, handleCompactSession, handleDeleteSession, handleExportSession,
   handleSessionPermission, handleSessions, handleTranscript,
 } from "./routes/sessions.js";
+import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
+import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
+import {
+  handleCreateSubagent, handleDeleteSubagent, handleListSubagents, handleUpdateSubagent,
+} from "./routes/subagents.js";
 import { cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -446,6 +456,31 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/sessions/:id/permission", jsonRaw, withBody(async (c) => { await handleSessionPermission(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.get("/api/sessions/:id/transcript", withBody(async (c) => { await handleTranscript(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.get("/api/sessions/:id/export", withBody(async (c) => { await handleExportSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+
+  // ── 15g. M2 批次 7a（插件 / 路由决策 / 子代理）：原生挂载；dispatch 分支已摘除 ──
+  app.get("/api/plugins", withBody(async (c) => { handleListPlugins(c.env.outgoing); }));
+  app.patch("/api/plugins/:id", jsonRaw, withBody(async (c) => { await handleSetPluginEnabled(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.get("/api/routing", withBody(async (c) => { handleGetRouting(c.env.outgoing); }));
+  app.put("/api/routing", jsonRaw, withBody(async (c) => { await handleSaveRouting(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/routing/test", jsonRaw, withBody(async (c) => { await handleTestRouting(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/subagents", withBody(async (c) => { handleListSubagents(c.env.outgoing); }));
+  app.post("/api/subagents", jsonRaw, withBody(async (c) => { await handleCreateSubagent(c.env.outgoing, c.env.incoming); }));
+  app.patch("/api/subagents/:id", jsonRaw, withBody(async (c) => { await handleUpdateSubagent(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.delete("/api/subagents/:id", withBody(async (c) => { await handleDeleteSubagent(c.env.outgoing, c.req.param("id") as string); }));
+
+  // ── 15h. M2 批次 7b（备份恢复 + 用户管理）：原生挂载；dispatch 分支已摘除 ──
+  // users 系列 handler 参数序是 (req, res)，与 raw() 相反，全部 lambda 显式写。
+  app.post("/api/backup", withBody(async (c) => { await handleCreateBackup(c.env.outgoing); }));
+  app.get("/api/backup", withBody(async (c) => { await handleListBackups(c.env.outgoing); }));
+  app.post("/api/restore", jsonRaw, withBody(async (c) => { await handleRestoreBackup(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/users", withBody(async (c) => { await handleListUsers(c.env.outgoing); }));
+  app.post("/api/users", jsonRaw, withBody(async (c) => { await handleCreateUser(c.env.incoming, c.env.outgoing); }));
+  app.patch("/api/users/:id", jsonRaw, withBody(async (c) => { await handleUpdateUser(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.delete("/api/users/:id", withBody(async (c) => { await handleDeleteUser(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.post("/api/users/:id/reset-password", withBody(async (c) => { await handleResetUserPassword(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.get("/api/users/:id/tokens", withBody(async (c) => { await handleListUserTokens(c.env.outgoing, c.req.param("id") as string); }));
+  app.post("/api/users/:id/tokens", jsonRaw, withBody(async (c) => { await handleCreateUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.delete("/api/users/:id/tokens/:tokenId", withBody(async (c) => { await handleRevokeUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string, c.req.param("tokenId") as string); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

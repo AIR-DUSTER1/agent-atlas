@@ -6,7 +6,7 @@
  * PATCH /api/plugins/:id          只切换 enabled，不碰插件自身配置
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { getPluginSettings, setPluginEnabled } from "../plugin-settings.js";
 import { bumpConfigVersion } from "../sessions.js";
 import { closeAllBrowserSessions } from "../browser-use.js";
@@ -26,7 +26,7 @@ export async function handleSetPluginEnabled(
   id: string
 ): Promise<void> {
   try {
-    const payload = JSON.parse((await readBody(req)) || "{}") as { enabled?: unknown };
+    const payload = parsedJsonOf(req)! as { enabled?: unknown };
     const before = getPluginSettings().enabled;
     const after = await setPluginEnabled(id, payload.enabled);
     if (before[id as keyof typeof before] !== after.enabled[id as keyof typeof after.enabled]) {

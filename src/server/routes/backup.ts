@@ -8,7 +8,7 @@
  * 安全边界动作：audit 记备份创建与恢复（条数/文件数，不含内容）。
  * 恢复只写磁盘不动内存单例 —— 响应里带「需重启」提示由前端转达。
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import { createBackup, listBackups, restoreBackup } from "../backup.js";
 import { writeAudit } from "../audit.js";
 
@@ -38,7 +38,7 @@ export async function handleRestoreBackup(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage
 ): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { name?: unknown };
+  const body = parsedJsonOf<{ name?: unknown }>(req)!;
   const name = typeof body.name === "string" ? body.name : "";
   if (!name) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
