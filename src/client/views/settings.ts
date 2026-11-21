@@ -19,16 +19,16 @@ import { closeComposerMenu } from "../composer/menu.js";
 
 import { uiConfirm } from "../ui/dialog.js";
 import { refreshBackups } from "./settings-backup.js";
-import { refreshMemorySettings, memStatus, bindMemorySettings } from "./settings-memories.js";
+import { refreshMemorySettings, memStatus } from "./settings-memories.js";
 import { refreshCommands, cmdStatus } from "./settings-commands.js";
 import { refreshSkills, showSkillStatus } from "./settings-skills.js";
 import { refreshMcp } from "./settings-mcp.js";
 import { refreshPluginPanel } from "./settings-plugins.js";
 import { refreshTracing } from "./settings-tracing.js";
 import { refreshSubagents } from "./settings-subagents.js";
-import { refreshRouting, bindRoutingSettings } from "./settings-routing.js";
+import { refreshRouting } from "./settings-routing.js";
 import { refreshStats } from "./stats/index.js";
-import { bindUsersSettings, refreshUsers } from "./settings-users.js";
+import { refreshUsers } from "./settings-users.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
@@ -127,9 +127,6 @@ function setRoutingPanelError(err: unknown): void {
 
 /** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
 export function bindSettingsNavigation(): void {
-  bindMemorySettings();
-  bindRoutingSettings();
-  bindUsersSettings();
   document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
     button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
   });

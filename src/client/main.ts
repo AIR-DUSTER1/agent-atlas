@@ -19,7 +19,7 @@ import { renderAll } from "./render/messages.js";
 import { registerToolEnhancer } from "./render/tool-enhancers.js";
 import { installClientErrorReporting } from "./observability/client-errors.js";
 import { icon, initIconHydration } from "./ui/icon.js";
-import { enhanceConfigFields } from "./ui/config-control.js";
+import { enhanceConfigFields, installConfigFieldHydration } from "./ui/config-control.js";
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { exitGoalMode, handleGoalKeydown, syncGoalDraftFromInput } from "./composer/goal.js";
@@ -47,14 +47,11 @@ import { setSettingsFocus } from "./views/model-store.js";
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { bindTracingSettings } from "./views/settings-tracing.js";
 import { loadPluginState } from "./views/settings-plugins.js";
-import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-subagents.js";
-import { refreshBackups } from "./views/settings-backup.js";
+import { isSubagentEditorOpen } from "./views/settings-subagents.js";
+import { createBackup, refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
-import {
-  filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
-} from "./views/settings-skills.js";
-import { bindMcpSettings, closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
+import { closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
 import { compactContext } from "./actions/compact.js";
@@ -102,6 +99,8 @@ bindCompactAction(async () => {
 async function init(): Promise<void> {
   document.documentElement.dataset.appReady = "loading";
   enhanceConfigFields();
+  // M4 4.2 起 Vue 面板挂载在启动注水之后：动态补齐公共配置控件标记
+  installConfigFieldHydration();
   loadLocal();
   initIconHydration();
   bindScrollToBottom();
@@ -217,26 +216,9 @@ async function init(): Promise<void> {
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
   bindTracingSettings();
-  bindMcpSettings();
-  bindSubagentSettings();
-  // M4 4.1：命令页事件全部由 Vue 组件接管（挂载发生在进入 commands 分区时）
+  // M4 4.1/4.2：命令页 / 子代理 / MCP 面板事件由 Vue 组件接管（挂载发生在进入分区时）
   on("stats-refresh", "click", refreshStats);
-  on("skills-refresh-btn", "click", () => {
-    void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
-  });
-  on("skills-search", "input", (e) => {
-    filterSkills((e.currentTarget as HTMLInputElement | null)?.value ?? "");
-  });
-  document.querySelectorAll<HTMLElement>("[data-skill-filter]").forEach((button) => {
-    button.addEventListener("click", () => setSkillFilter(button.dataset.skillFilter ?? "all"));
-  });
-  on("skill-upload-btn", "click", () => {
-    ($("skill-upload-file") as HTMLInputElement | null)?.click();
-  });
-  on("skill-upload-file", "change", (e) => {
-    const input = e.currentTarget as HTMLInputElement | null;
-    void importSkillsFromFiles(input?.files ?? null);
-  });
+  // M4 4.2：技能面板事件全部由 Vue 组件接管（挂载发生在进入 skills 分区时）
 
 
   // 侧栏：会话搜索（本地实时过滤）+ 批量清理旧会话
@@ -298,15 +280,7 @@ async function init(): Promise<void> {
     const p = currentlySelectedProvider();
     if (p) void removeProvider(p.id, p.name);
   });
-  on("backup-create-btn", "click", async () => {
-    try {
-      const res = await api<{ hint?: string; name: string }>("/api/backup", { method: "POST" });
-      uiAlert(res.hint || `备份已创建：${res.name}`, "备份完成");
-      await refreshBackups();
-    } catch (err) {
-      uiAlert(`备份失败：${(err as Error).message}`, "备份");
-    }
-  });
+  on("backup-create-btn", "click", () => { void createBackup(); });
   on("provider-modal-close", "click", closeProviderForm);
   on("provider-modal-mask", "click", (e) => {
     if (e.target === $("provider-modal-mask")) closeProviderForm();

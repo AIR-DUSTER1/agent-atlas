@@ -54,3 +54,23 @@ export function enhanceConfigFields(root: ParentNode = document): number {
   for (const control of found) enhanceConfigControl(control);
   return found.size;
 }
+
+let configObserverInstalled = false;
+
+/**
+ * 动态节点注水：Vue 面板（M4 起逐页迁移）挂载在启动注水**之后**，
+ * 其表单控件不会经过 enhanceConfigFields —— 与图标水合同一模式，
+ * 监听新增节点并对子树补一次公共控件标记。
+ */
+export function installConfigFieldHydration(): void {
+  if (configObserverInstalled || typeof MutationObserver === "undefined") return;
+  configObserverInstalled = true;
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node instanceof Element) enhanceConfigFields(node);
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}

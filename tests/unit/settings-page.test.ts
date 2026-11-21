@@ -151,29 +151,31 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
 });
 test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导入导出齐备", async () => {
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/settings-memories.ts", "views/settings.ts"]);
+  // M4 4.2：记忆面板迁往 Vue 组件，id/结构契约在组件模板上断言
+  const source = await readClientFiles(["views/settings-memories-vue.vue", "stores/memories.ts"]);
   for (const id of [
     "mem-active-provider", "mem-health-badge", "mem-http-enabled", "mem-http-preset",
     "mem-http-base-url", "mem-http-api-key", "mem-test-http-btn", "mem-save-config-btn",
     "mem-personalization-enabled", "mem-personalization-text", "mem-personalization-save-btn",
     "mem-profile-filter", "mem-search", "mem-history-toggle", "mem-export-btn", "mem-import-file",
-  ]) assert.match(html, new RegExp(`id="${id}"`), id);
-  assert.match(html, /id="mem-personalization-text"[^>]*placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。"/);
-  assert.doesNotMatch(html, /例如：我在青岛从事前端开发/);
-  assert.match(html, /请勿填写密钥或敏感凭据/);
-  assert.match(html, /id="mem-http-api-key" type="password"/);
-  assert.match(source, /refreshMemorySettings/);
-  assert.match(source, /testMemoryHttpFromForm/);
-  assert.match(source, /savePersonalizationFromForm/);
-  assert.match(source, /personalization: \{ enabled, text \}/);
-  assert.doesNotMatch(html, /id="mem-(?:key|content|add-btn)"/);
+  ]) assert.match(source, new RegExp(`id="${id}"`), id);
+  assert.match(source, /id="mem-personalization-text"[^>]*placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。"/);
+  assert.doesNotMatch(source, /例如：我在青岛从事前端开发/);
+  assert.match(source, /请勿填写密钥或敏感凭据/);
+  assert.match(source, /id="mem-http-api-key"[\s\S]{0,200}type="password"/);
+  assert.match(source, /refreshSettings/);
+  assert.match(source, /testHttp/);
+  assert.match(source, /savePersonalization/);
+  assert.match(source, /personalization: patch/);
+  assert.doesNotMatch(source, /id="mem-(?:key|content|add-btn)"/);
   assert.match(source, /snapshot/);
   assert.match(source, /authFetch\(`\/api\/memories\/export/);
   assert.doesNotMatch(source, /innerHTML\s*=\s*`[^`]*\$\{[^}]*apiKey/);
 });
 test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与弹窗编辑", async () => {
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/settings-mcp.ts", "main.ts", "views/settings.ts"]);
+  // M4 4.2：MCP 面板迁往 Vue 组件，id/结构契约在组件模板上断言
+  const source = await readClientFiles(["views/settings-mcp-vue.vue", "stores/mcp.ts"]);
   for (const id of [
     "mcp-summary", "mcp-global-enabled", "mcp-global-state", "mcp-import-btn",
     "mcp-import-file", "mcp-refresh-btn", "mcp-add-btn", "mcp-list",
@@ -181,16 +183,15 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
     "mcp-command-preview", "mcp-command-preview-text", "mcp-id", "mcp-name", "mcp-command",
     "mcp-args", "mcp-approval", "mcp-editor-delete", "mcp-editor-save",
   ]) {
-    assert.match(html, new RegExp(`id="${id}"`), id);
+    assert.match(source, new RegExp(`id="${id}"`), id);
   }
-  assert.match(html, /accept="\.json,application\/json"/);
-  assert.match(source, /bindMcpSettings/);
+  assert.match(source, /accept="\.json,application\/json"/);
+  assert.match(source, /method: "PATCH"/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /\/api\/mcp\/import/);
   assert.match(source, /parseArgs/);
   assert.match(source, /envKeys/);
   assert.match(source, /method: "DELETE"/);
-  assert.match(source, /isMcpEditorOpen/);
   assert.match(source, /parseMcpCommandLine/);
   assert.match(source, /applyQuickCommandLine/);
   assert.match(source, /mcp-command-preview/);
@@ -201,31 +202,34 @@ test("MCP Servers 页面支持全局暂停、单服务器启停、JSON 导入与
 });
 test("技能库支持上传、启停、分页与卡片删除", async () => {
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/settings-skills.ts", "main.ts", "views/settings.ts"]);
+  // M4 4.2：技能面板迁往 Vue 组件，id/结构契约在组件模板上断言
+  const source = await readClientFiles(["views/settings-skills-vue.vue", "stores/skills.ts"]);
   for (const id of [
     "skills-refresh-btn", "skills-search", "skill-upload-btn", "skill-upload-file",
-    "skills-count", "skills-count-all", "skills-count-enabled", "skills-count-disabled",
-    "skills-list", "skills-pagination",
+    "skills-count", "skills-list", "skills-pagination",
   ]) {
-    assert.match(html, new RegExp(`id="${id}"`), id);
+    assert.match(source, new RegExp(`id="${id}"`), id);
   }
-  assert.match(html, /accept="\.md,\.markdown,text\/markdown"/);
-  assert.match(html, /data-skill-filter="all"/);
-  assert.match(html, /data-skill-filter="enabled"/);
-  assert.match(html, /data-skill-filter="disabled"/);
+  // 三个计数徽标用动态 id 绑定渲染（skills-count-all / -enabled / -disabled）
+  assert.match(source, /:id="`skills-count-\$\{tab\}`"/);
+  assert.match(source, /accept="\.md,\.markdown,text\/markdown"/);
+  // 三个筛选 tab 用 v-for 动态绑定 data-skill-filter（all / enabled / disabled）
+  assert.match(source, /:data-skill-filter="tab"/);
+  assert.match(source, /\['all', 'enabled', 'disabled'\] as const/);
   assert.doesNotMatch(html, /id="skill-create-btn"/, "新建技能统一走 skill-creator");
   assert.doesNotMatch(html, /id="skill-editor-details"/, "设置页不再提供手写技能编辑表单");
   assert.doesNotMatch(html, /id="skill-(?:add|clear|delete)-btn"/);
-  assert.match(source, /importSkillsFromFiles/);
+  assert.match(source, /importFiles/);
   assert.match(source, /\/api\/skills\/import/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /skill-enabled-toggle/);
   assert.match(source, /SKILLS_PER_PAGE = 5/);
-  assert.match(source, /function renderPagination/);
-  assert.match(source, /function filterSkills/);
+  // 分页/筛选/启停/删除语义在组件层保留（函数名随 Vue 化调整）
+  assert.match(source, /const paginationTokens = computed/);
+  assert.match(source, /function setFilter/);
   assert.match(source, /启用技能 \$\{skill\.name\}/);
-  assert.match(source, /function updateSkillEnabled/);
-  assert.match(source, /async function deleteSkillCard/);
+  assert.match(source, /async function toggleEnabled/);
+  assert.match(source, /async function removeSkill/);
   assert.match(source, /skill-delete-btn/);
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /skill\.path/);
@@ -235,7 +239,8 @@ test("技能库支持上传、启停、分页与卡片删除", async () => {
 
 test("子代理设置页支持列表、启停、新增编辑删除与继承/固定模型", async () => {
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/settings-subagents.ts", "views/settings.ts", "main.ts"]);
+  // M4 4.2：子代理面板迁往 Vue 组件，id/结构契约在组件模板上断言
+  const source = await readClientFiles(["views/settings-subagents-vue.vue", "stores/subagents.ts"]);
   const css = await readFile(new URL("styles/subagents.css", root), "utf8");
   for (const id of [
     "subagents-list", "subagents-empty", "subagents-empty-title", "subagents-empty-copy",
@@ -244,17 +249,17 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
     "subagent-editor-mask", "subagent-editor", "subagent-name", "subagent-description",
     "subagent-model-mode", "subagent-model-hint", "subagent-provider", "subagent-model",
     "subagent-enabled", "subagent-delete-btn", "subagent-save-btn",
-  ]) assert.match(html, new RegExp(`id="${id}"`), id);
+  ]) assert.match(source, new RegExp(`id="${id}"`), id);
   assert.match(html, /data-settings-view="subagents"/);
-  assert.match(html, /value="inherit"/);
-  assert.match(html, /value="fixed"/);
+  assert.match(source, /value="inherit"/);
+  assert.match(source, /value="fixed"/);
   assert.match(source, /\/api\/subagents/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /mode: "inherit"/);
   assert.match(source, /mode: "fixed", providerId, modelId/);
   assert.match(source, /type SubagentFilter = "all" \| "enabled" \| "disabled"/);
-  assert.match(source, /function agentMatches/);
+  assert.match(source, /const filteredAgents = computed/);
   assert.match(source, /data-subagent-filter/);
   assert.match(source, /function trapEditorFocus/);
   assert.match(source, /尚未保存，确定放弃本次修改/);

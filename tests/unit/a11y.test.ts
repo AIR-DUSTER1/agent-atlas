@@ -32,16 +32,21 @@ test("核心正文与弱化文字满足 WCAG AA 4.5:1", () => {
 
 test("表单控件具有可访问名称，消息流与状态点使用 live region", async () => {
   const html = await readClientIndexHtml();
-  // M4 4.1：命令页迁往 Vue 组件后，cmd-* 字段的可访问名称在组件模板上断言
+  // M4 4.1/4.2：迁往 Vue 组件的面板，字段可访问名称在组件模板上断言
   for (const id of [
-    "input", "skill-upload-file", "skills-search",
-    "mcp-id", "mcp-command", "kb-query", "ui-dialog-input",
+    "input", "kb-query", "ui-dialog-input",
   ]) {
     assert.match(html, new RegExp(`(?:input|textarea) id="${id}"[^>]*aria-label=`), id);
   }
+  const mcpVue = await read("views/settings-mcp-vue.vue");
+  assert.match(mcpVue, /id="mcp-id"[\s\S]{0,300}aria-label="MCP 服务器标识"/, "mcp-id");
+  assert.match(mcpVue, /id="mcp-command"[\s\S]{0,300}aria-label="MCP 启动命令"/, "mcp-command");
   const commandsVue = await read("views/settings-commands-vue.vue");
   assert.match(commandsVue, /id="cmd-name"[\s\S]{0,400}aria-label="命令名"/, "cmd-name");
   assert.match(commandsVue, /id="cmd-template"[\s\S]{0,400}aria-label="命令模板"/, "cmd-template");
+  const skillsVue = await read("views/settings-skills-vue.vue");
+  assert.match(skillsVue, /id="skill-upload-file"[\s\S]{0,500}aria-label="选择技能文件"/, "skill-upload-file");
+  assert.match(skillsVue, /id="skills-search"[\s\S]{0,300}aria-label="搜索技能"/, "skills-search");
   assert.match(html, /id="messages"[^>]*role="log"[^>]*aria-live="polite"/);
   assert.match(html, /id="status-dot"[^>]*role="status"[^>]*aria-live="polite"/);
 });
