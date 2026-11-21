@@ -45,6 +45,17 @@ import {
   handleGetApiConfig, handleModels, handleSetReasoning, handleUpdateModel, handleUpdateProvider,
 } from "./routes/config.js";
 import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
+import {
+  handleDeleteCommand, handleListCommands, handleSaveCommand, handleUpdateCommand,
+} from "./routes/commands.js";
+import {
+  handleDeleteSkill, handleImportSkills, handleListSkills, handleSaveSkill, handleSetSkillEnabled,
+} from "./routes/skills.js";
+import {
+  handleDeleteMcp, handleImportMcp, handleListMcp, handleSaveMcp, handleSetMcpEnabled,
+  handleTestMcp, handleUpdateMcp,
+} from "./routes/mcp.js";
+import { refreshMcpTools } from "./dispatch.js";
 import { cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -399,6 +410,26 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/memories/:id/confirm", withBody(async (c) => { await handleConfirmMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
   app.post("/api/memories/:id/reject", withBody(async (c) => { await handleRejectMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
   app.delete("/api/memories/:id", withBody(async (c) => { await handleDeleteMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
+
+  // ── 15e. M2 批次 5（内容管理：命令 / 技能 / MCP）：原生挂载；dispatch 分支已摘除 ──
+  // 技能 id 允许 "/"（含子目录），Hono 用 :id{.+} 通配参数；静态段（/api/skills/import）
+  // 必须先于通配参数注册。MCP 写路由在 handler 后仍接 refreshMcpTools(true)（平移前语义）。
+  app.get("/api/commands", withBody(async (c) => { await handleListCommands(c.env.outgoing); }));
+  app.post("/api/commands", jsonRaw, withBody(async (c) => { await handleSaveCommand(c.env.outgoing, c.env.incoming); }));
+  app.put("/api/commands/:id", jsonRaw, withBody(async (c) => { await handleUpdateCommand(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.delete("/api/commands/:id", withBody(async (c) => { await handleDeleteCommand(c.env.outgoing, c.req.param("id") as string); }));
+  app.get("/api/skills", withBody(async (c) => { await handleListSkills(c.env.outgoing); }));
+  app.post("/api/skills", jsonRaw, withBody(async (c) => { await handleSaveSkill(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/skills/import", jsonRaw, withBody(async (c) => { await handleImportSkills(c.env.outgoing, c.env.incoming); }));
+  app.patch("/api/skills/:id{.+}", jsonRaw, withBody(async (c) => { await handleSetSkillEnabled(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.delete("/api/skills/:id{.+}", withBody(async (c) => { await handleDeleteSkill(c.env.outgoing, c.req.param("id") as string); }));
+  app.get("/api/mcp", withBody(async (c) => { await handleListMcp(c.env.outgoing); }));
+  app.post("/api/mcp", jsonRaw, withBody(async (c) => { await handleSaveMcp(c.env.outgoing, c.env.incoming); await refreshMcpTools(true); }));
+  app.patch("/api/mcp", jsonRaw, withBody(async (c) => { await handleSetMcpEnabled(c.env.outgoing, c.env.incoming); await refreshMcpTools(true); }));
+  app.post("/api/mcp/import", jsonRaw, withBody(async (c) => { await handleImportMcp(c.env.outgoing, c.env.incoming); await refreshMcpTools(true); }));
+  app.post("/api/mcp/:id/test", withBody(async (c) => { await handleTestMcp(c.env.outgoing, c.req.param("id") as string); }));
+  app.patch("/api/mcp/:id", jsonRaw, withBody(async (c) => { await handleUpdateMcp(c.env.outgoing, c.env.incoming, c.req.param("id") as string); await refreshMcpTools(true); }));
+  app.delete("/api/mcp/:id", withBody(async (c) => { await handleDeleteMcp(c.env.outgoing, c.req.param("id") as string); await refreshMcpTools(true); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

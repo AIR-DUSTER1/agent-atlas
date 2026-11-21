@@ -12,7 +12,7 @@
  * 连接与协议在 server/mcp.ts；这里只做 HTTP 形状与中文错误。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import {
   deleteMcpServer, importMcpServers, isMcpEnabled, listMcpStatus,
   saveMcpServer, setMcpEnabled, testMcpServer, updateMcpServer,
@@ -24,11 +24,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
-  try {
-    return JSON.parse(await readBody(req));
-  } catch {
-    throw new Error("请求体不是合法的 JSON");
-  }
+  // 解析在路由层 jsonRaw 完成（M2 批次 5），坏 JSON 已由 onError 统一 400
+  return parsedJsonOf(req)!;
 }
 
 async function mcpState(): Promise<{ enabled: boolean; servers: Awaited<ReturnType<typeof listMcpStatus>> }> {

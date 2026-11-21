@@ -9,7 +9,7 @@
  * 校验与持久化都在 server/commands.ts；这里只做 HTTP 形状与中文错误。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { createCommand, deleteCommand, listCommands, updateCommand } from "../commands.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -22,13 +22,8 @@ export async function handleListCommands(res: ServerResponse): Promise<void> {
 }
 
 export async function handleSaveCommand(res: ServerResponse, req: IncomingMessage): Promise<void> {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(await readBody(req));
-  } catch {
-    sendJson(res, 400, { error: "请求体不是合法的 JSON" });
-    return;
-  }
+  // 解析上移到路由层 jsonRaw（M2 批次 5）：坏 JSON → onError 400，语义不变
+  const payload = parsedJsonOf(req)!;
   try {
     const command = await createCommand(payload);
     sendJson(res, 200, { command, created: true, commands: await listCommands() });
@@ -42,13 +37,7 @@ export async function handleUpdateCommand(
   req: IncomingMessage,
   originalName: string,
 ): Promise<void> {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(await readBody(req));
-  } catch {
-    sendJson(res, 400, { error: "请求体不是合法的 JSON" });
-    return;
-  }
+  const payload = parsedJsonOf(req)!;
   try {
     const oldName = decodeURIComponent(originalName);
     const command = await updateCommand(oldName, payload);

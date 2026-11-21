@@ -10,7 +10,7 @@
  * 扫描/匹配逻辑在 skills.ts；这里只做 HTTP 形状与中文错误。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { BodyTooLargeError, readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf } from "../http-body.js";
 import { deleteSkill, importSkillFiles, listSkills, saveSkill, setSkillEnabled, SKILLS_DIR } from "../../skills.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -19,21 +19,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 async function readJsonObject(req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = JSON.parse(await readBody(req));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      sendJson(res, 400, { error: "请求体必须是 JSON 对象" });
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) {
-      respondBadRequest(res, req, err);
-      return null;
-    }
-    sendJson(res, 400, { error: "请求体不是合法的 JSON" });
+  // 解析与 413/坏 JSON 已在路由层 jsonRaw + onError 处理（M2 批次 5），这里只做形状检查
+  const parsed: unknown = parsedJsonOf(req)!;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    sendJson(res, 400, { error: "请求体必须是 JSON 对象" });
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function decodeSkillId(id: string): string | null {

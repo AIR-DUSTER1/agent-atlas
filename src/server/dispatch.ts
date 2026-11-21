@@ -58,23 +58,6 @@ import {
   handleRevokeUserToken,
   handleUpdateUser,
 } from "./routes/users.js";
-import { handleDeleteCommand, handleListCommands, handleSaveCommand, handleUpdateCommand } from "./routes/commands.js";
-import {
-  handleDeleteMcp,
-  handleImportMcp,
-  handleListMcp,
-  handleSaveMcp,
-  handleSetMcpEnabled,
-  handleTestMcp,
-  handleUpdateMcp,
-} from "./routes/mcp.js";
-import {
-  handleDeleteSkill,
-  handleImportSkills,
-  handleListSkills,
-  handleSaveSkill,
-  handleSetSkillEnabled,
-} from "./routes/skills.js";
 import {
   handleEstateExport,
   handleGetEstate,
@@ -235,51 +218,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     }
 
     // 记忆插槽配置 / 连接测试 / 运行状态
-    // 用户自定义命令（提示词模板；前端斜杠菜单与设置页共用）
-    if (pathname === "/api/commands" && req.method === "GET") { await handleListCommands(res); return; }
-    if (pathname === "/api/commands" && req.method === "POST") { await handleSaveCommand(res, req); return; }
-    const commandMatch = pathname.match(/^\/api\/commands\/([\w-]+)$/);
-    if (commandMatch && req.method === "PUT") { await handleUpdateCommand(res, req, commandMatch[1]); return; }
-    if (commandMatch && req.method === "DELETE") { await handleDeleteCommand(res, commandMatch[1]); return; }
-
-    // 技能库（按关键词命中注入的领域指南；纯文档不执行）
-    if (pathname === "/api/skills" && req.method === "GET") { await handleListSkills(res); return; }
-    if (pathname === "/api/skills" && req.method === "POST") { await handleSaveSkill(res, req); return; }
-    if (pathname === "/api/skills/import" && req.method === "POST") { await handleImportSkills(res, req); return; }
-    const skillMatch = pathname.match(/^\/api\/skills\/(.+)$/);
-    if (skillMatch && req.method === "PATCH") { await handleSetSkillEnabled(res, req, skillMatch[1]); return; }
-    if (skillMatch && req.method === "DELETE") { await handleDeleteSkill(res, skillMatch[1]); return; }
-
-    // MCP 客户端（JSON-RPC over stdio 自实现；工具默认全登记审批）
-    if (pathname === "/api/mcp" && req.method === "GET") { await handleListMcp(res); return; }
-    if (pathname === "/api/mcp" && req.method === "POST") {
-      await handleSaveMcp(res, req);
-      await refreshMcpTools(true);
-      return;
-    }
-    if (pathname === "/api/mcp" && req.method === "PATCH") {
-      await handleSetMcpEnabled(res, req);
-      await refreshMcpTools(true);
-      return;
-    }
-    if (pathname === "/api/mcp/import" && req.method === "POST") {
-      await handleImportMcp(res, req);
-      await refreshMcpTools(true);
-      return;
-    }
-    const mcpTestMatch = pathname.match(/^\/api\/mcp\/([\w-]+)\/test$/);
-    if (mcpTestMatch && req.method === "POST") { await handleTestMcp(res, mcpTestMatch[1]); return; }
-    const mcpUpdateMatch = pathname.match(/^\/api\/mcp\/([\w-]+)$/);
-    if (mcpUpdateMatch && req.method === "PATCH") {
-      await handleUpdateMcp(res, req, mcpUpdateMatch[1]);
-      await refreshMcpTools(true);
-      return;
-    }
-    if (mcpUpdateMatch && req.method === "DELETE") {
-      await handleDeleteMcp(res, mcpUpdateMatch[1]);
-      await refreshMcpTools(true);
-      return;
-    }
     // 版本与运维诊断（受认证保护；不返回路径、提示词或密钥）
 
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
