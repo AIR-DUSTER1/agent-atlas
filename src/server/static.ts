@@ -2,10 +2,15 @@
  * ============================================================
  * static.ts — 前端静态文件分发（白名单式防目录穿越）
  * ============================================================
- * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与一层已登记子目录
- * （core/ composer/ render/ stream/ views/ actions/ modules/ ui/ vendor/ styles/）；额外仅放行 views/stats/。
+ * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与已登记的一层子目录
+ * （assets/ vendor/ styles/）；全部 no-store，页面和脚本始终取最新构建。
+ *
+ * M4 4.6 收紧：1:1 过渡树（core/ render/ stream/ views/ … 的逐文件副本）已退役，
+ * 白名单同步收缩到真正还会产出的三个目录。少放行一个目录，就少一条潜在的
+ * 静态探测面 —— 不再保留「历史上曾经有用」的目录。
+ *
  * 在路径正则之外再做 realpath 边界和 lstat 普通文件校验，拒绝符号链接、
- * 未知扩展与目录列表；全部 no-store，页面和脚本始终取最新构建。
+ * 未知扩展与目录列表。
  */
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { join, dirname, isAbsolute, relative } from "node:path";
@@ -23,11 +28,13 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 
-/** 允许的一层子目录（字面量白名单；不含用户可控段） */
-const ALLOWED_DIRS = new Set([
-  // assets：M3 起 Vite 打包产物目录（assets/app.js 等）；vendor 已随三段式构建退役
-  "assets", "apps", "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles", "observability",
-]);
+/**
+ * 允许的一层子目录（字面量白名单；不含用户可控段）。
+ * - assets：Vite 打包产物（assets/app.js + 动态增强 chunk）
+ * - vendor：import map 指向的自包含库（chart/icons/marked/dompurify/highlight）
+ * - styles：拷贝过来的样式表
+ */
+const ALLOWED_DIRS = new Set(["assets", "vendor", "styles"]);
 
 /** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */
 function isInside(root: string, target: string): boolean {
@@ -37,18 +44,13 @@ function isInside(root: string, target: string): boolean {
 
 export async function serveStatic(pathname: string, res: ServerResponse): Promise<boolean> {
   const raw = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  // 单层文件，或「允许的子目录/单层文件」两种形态
-  // 单层文件、一层已登记目录，或唯一登记的 views/stats 第二层目录
+  // 单层文件，或「已登记子目录/单层文件」两种形态
   const single = raw.match(/^(\w[\w.-]*)$/);
   const nested = raw.match(/^([a-z]+)\/(\w[\w.-]*)$/);
-  const nestedStats = raw.match(/^views\/(stats)\/(\w[\w.-]*)$/);
-  if (!single && !nested && !nestedStats) return false;
+  if (!single && !nested) return false;
 
   let rel: string;
-  if (nestedStats) {
-    const [, subdir, file] = nestedStats;
-    rel = join("views", subdir ?? "", file ?? "");
-  } else if (nested) {
+  if (nested) {
     const [, dir, file] = nested;
     if (!ALLOWED_DIRS.has(dir)) return false;
     rel = join(dir, file ?? "");

@@ -495,11 +495,12 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   const index = await fetch(srv.base + "/");
   assert.equal(index.status, 200);
   const html = await index.text();
-  // M3：Vite 打包产物为 assets/app.js（固定名，服务端 no-store 下无需哈希）；
-  // 源码里的 import map 保留（源码不动），打包后不再被消费。
+  // M3：Vite 打包产物为 assets/app.js（固定名，服务端 no-store 下无需哈希）
   assert.match(html, /<script type="module"[^>]*src="\.\/assets\/app\.js">/);
-  assert.match(html, /<script type="importmap">/);
-  assert.match(html, /"chart\.js": "\/vendor\/chart-lib\.js"/);
+  // M4 4.6：import map 随 vendor 自包含库退役 —— npm 包由 Vite 打包，
+  // 页面不再需要 import map，也不能再残留 vendor 路径引用
+  assert.doesNotMatch(html, /<script type="importmap">/);
+  assert.doesNotMatch(html, /vendor\/[a-z-]+-lib\.js/);
 
   for (const file of [
     "/styles/tokens.css", "/styles/reset.css", "/styles/layout.css", "/styles/typography.css",
@@ -524,17 +525,19 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);
   }
-  // 过渡期双产物：1:1 树与 vendor 库仍产出（e2e 依赖旧路径），M5 清底后改 404 断言
+  // M4 4.6：1:1 过渡树与 vendor 自包含库均已退役 —— 这些路径必须 404，
+  // 防「脚本又把旧产物写回 public/」的回归。
   for (const file of [
     "/main.js",
     "/modules/format.js",
     "/core/state.js",
+    "/render/parts.js",
+    "/views/sessions.js",
     "/vendor/chart.js", "/vendor/chart-lib.js", "/vendor/icons-lib.js",
     "/vendor/marked-lib.js", "/vendor/dompurify-lib.js", "/vendor/highlight-lib.js",
   ]) {
     const res = await fetch(srv.base + file);
-    assert.equal(res.status, 200, file);
-    assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);
+    assert.equal(res.status, 404, file);
   }
 });
 

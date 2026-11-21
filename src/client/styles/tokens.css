@@ -52,22 +52,6 @@
 }
 
 /* ---------- 浅色主题 ---------- */
-/* import map 不支持时显示明确升级提示，避免增强功能静默失效 */
-#browser-compat {
-  display: none;
-  position: fixed;
-  z-index: 10000;
-  inset: 12px 12px auto;
-  padding: 10px 14px;
-  border: 1px solid var(--amber);
-  border-radius: 10px;
-  background: var(--bg-elev);
-  color: var(--text);
-  box-shadow: 0 10px 30px rgba(0,0,0,.28);
-  font-size: 13px;
-  line-height: 1.6;
-}
-html[data-importmap-unsupported="true"] #browser-compat { display: block; }
 html[data-theme="light"] {
   --bg: #f7f8fa;
   --bg-side: #eef0f4;

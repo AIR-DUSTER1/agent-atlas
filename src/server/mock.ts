@@ -28,6 +28,7 @@ interface MockInput {
   approval?: ApprovalPayload;    // resume：被审批的载荷
   turnIndex?: number;            // 本会话第几轮（用于模拟缓存命中率递增）
   kind?: string;                 // 会话类型（estate → 房产演示场景）
+  sessionId?: string;            // 聊天会话 id（browser 场景要回填成当前会话，才能通过前端隔离判定）
   signal?: AbortSignal;
 }
 
@@ -161,7 +162,7 @@ async function* interruptFlow(req: ApprovalPayload, signal?: AbortSignal): Async
 // ---------------------------------------------------------------------------
 // 场景识别
 // ---------------------------------------------------------------------------
-type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "batch-tools" | "same-tools" | "slow-thinking" | "estate-many" | "chat";
+type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "batch-tools" | "same-tools" | "slow-thinking" | "estate-many" | "browser-open" | "chat";
 
 function detectScenario(message: string): Scenario {
   if (/邮件|email/i.test(message)) return "email";
@@ -175,6 +176,8 @@ function detectScenario(message: string): Scenario {
   if (/慢速思考|思考过程/.test(message)) return "slow-thinking";
   // 候选超过 12 套：验证结论表上限与「完整候选」Excel 下载入口
   if (/大量候选|房源上限/.test(message)) return "estate-many";
+  // 右侧浏览器画面：产出带 browserUse 载荷的 browser_open 工具结果
+  if (/打开浏览器|右侧浏览器/.test(message)) return "browser-open";
   // 创作类（写诗/作文/写文章）优先于天气：一句话里同时出现「查天气+写诗」时走多 Agent 协作
   if (/诗|词|文章|作文|写一[首篇封个]|润色/.test(message)) return "poem";
   // 房产关键词覆盖：找房/对比区位/户型图/贝壳
@@ -298,6 +301,38 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       yield { type: "tool_result", id, content: await getCurrentTime.invoke({}) };
       yield { type: "node", name: "agent" };
       yield* streamText("已经帮你查到当前时间，见上方工具结果 ⏰", signal);
+      return;
+    }
+
+    // ---- Browser Use：产出带 browserUse 载荷的工具结果，右侧画面据此自动打开 ----
+    // 演示模式不启动真实浏览器：工具结果是合成的，画面轮询由前端/e2e 拦截。
+    // 存在理由：browser dock 的打开链路要由真实事件流驱动，才能替代旧 1:1 副本调用。
+    case "browser-open": {
+      yield { type: "node", name: "agent" };
+      yield* streamText("我在右侧浏览器里打开一个页面给你看。", signal);
+      const openId = MOCK_ID();
+      yield* streamToolCall(openId, "browser_open", { url: "https://example.com/" }, signal);
+      const now = Date.now();
+      yield {
+        type: "tool_result",
+        id: openId,
+        content: JSON.stringify({
+          ok: true,
+          action: "open",
+          sessionId: input.sessionId ?? "mock-browser-session",
+          browserUse: {
+            sessionId: input.sessionId ?? "mock-browser-session",
+            open: true,
+            updatedAt: now,
+            url: "https://example.com/",
+            title: "Browser Use Test",
+          },
+          state: { url: "https://example.com/", title: "Browser Use Test", updatedAt: now, busy: false },
+          note: "右侧浏览器画面会自动刷新。",
+        }),
+      };
+      yield { type: "node", name: "agent" };
+      yield* streamText("页面已经在右侧打开了，你可以继续让我读取或操作它。", signal);
       return;
     }
 

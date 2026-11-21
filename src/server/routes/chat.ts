@@ -398,7 +398,7 @@ async function handleChatInner(
   if (!config.apiKey) {
     session.turns += 1; // 轮次递增，供模拟用量（上下文增长 / 缓存命中率）使用
     await streamToClient(res, req, session, (signal) =>
-      mockRun({ message: typeof fullMessage === "string" ? fullMessage : message, rawMessage: message, kind: session.kind, turnIndex: session.turns - 1, signal })
+      mockRun({ message: typeof fullMessage === "string" ? fullMessage : message, rawMessage: message, kind: session.kind, sessionId: session.id, turnIndex: session.turns - 1, signal })
     , (events) => completeTurnRecord(session, events), message);
     return;
   }

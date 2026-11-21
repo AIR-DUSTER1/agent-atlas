@@ -90,10 +90,14 @@ test("静默会话、设置分区、供应商弹窗与设备隔离提示", async
 });
 
 test("Browser Use 右侧浏览器面板可打开、切换布局并关闭", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await login(page);
   await createChat(page);
-  // M3 起页面跑 Vite bundle，测试通过 1:1 副本（/core/state.js 等）驱动 dock 时
-  // 必须显式赋副本的 state.currentId——bundle 内部状态与副本不再共享实例。
+
+  // M4 4.6：1:1 过渡树已退役，改为真实 UI 驱动 —— 服务端 mock 产出带
+  // browserUse 载荷的 browser_open 工具结果，前端据此自动打开右侧画面。
+  // 画面轮询由 route 拦截（不启动真实浏览器）。
   const sessionId = await page.evaluate(async () => {
     const list = await fetch("/api/sessions", { credentials: "include" }).then((r) => r.json()) as Array<{ id: string }>;
     return list[0]?.id ?? "";
@@ -127,18 +131,19 @@ test("Browser Use 右侧浏览器面板可打开、切换布局并关闭", async
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
-  await page.evaluate(async ({ sid, modulePath, statePath }) => {
-    const stateMod = await import(statePath);
-    stateMod.state.currentId = sid;
-    const mod = await import(modulePath);
-    mod.openBrowserDock(sid);
-  }, { sid: sessionId, modulePath: "/views/browser-use.js", statePath: "/core/state.js" });
-  await expect(page.locator("#browser-dock")).toBeVisible();
+
+  await page.locator("#input").fill("打开右侧浏览器");
+  await page.locator("#send-btn").click();
+  await expect(page.locator("#browser-dock")).toBeVisible({ timeout: 25_000 });
   await expect(page.locator("#main")).toHaveClass(/browser-open/);
-  await expect(page.locator("#browser-dock-title")).toBeVisible();
+  await expect(page.locator("#browser-dock-title")).toHaveText("Browser Use Test");
+  await expect(page.locator("#browser-dock-url")).toHaveText("https://example.com/");
+  await expect(page.locator("#browser-dock-state")).toHaveText("实时连接");
+
   await page.locator("#browser-dock-close").click();
   await expect(page.locator("#browser-dock")).toBeHidden();
   await expect(page.locator("#main")).not.toHaveClass(/browser-open/);
+  expect(pageErrors).toEqual([]);
 });
 
 test("会话发送、刷新恢复、人工审批折叠且只出现一个助手头像", async ({ page }) => {
