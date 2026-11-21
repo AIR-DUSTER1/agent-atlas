@@ -163,8 +163,8 @@ async function init(): Promise<void> {
     }));
   state.sessions.push(...stale);
 
-  buildDemoCards($("demo-cards"));
-  buildDemoCards($("modal-cards"));
+  // M4 4.5：卡片与示例 chips 由 Vue 挂载（两处 Agent 卡片 + 示例 chips，幂等）
+  buildDemoCards();
   buildExampleChips();
   renderPermChip(); // 初始态无选中会话 → 权限 chip 隐藏（选中 agent/estate 会话后再出现）
 
