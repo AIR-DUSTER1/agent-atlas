@@ -1,11 +1,15 @@
 /**
- * views/stats/charts.ts — Chart.js 六图与降级
+ * views/stats/charts.ts — Chart.js 六图引擎与降级判定
  * ============================================================
- * 图表库由动态 import 加载，加载失败只替换统计区为数据表，不影响设置页与会话。
- * 每张图有独立容器、ResizeObserver、PNG 导出；主题切换时销毁并按语义 token 重建。
+ * 职责：把区间数据编译成 6 份 Chart 配置，在 Vue 渲染好的卡片骨架上创建
+ * 实例，并管理 ResizeObserver / PNG 导出 / 主题切换重建。
+ * 设计立场：
+ *  - 卡片骨架（标题、副标题、canvas、空态、导出按钮）由 Vue 组件声明式渲染；
+ *    本模块只做 Canvas 必需的命令式部分，不再自建 DOM；
+ *  - 图表库仍动态 import，失败时通过 onFallback 交回组件渲染数据表降级；
+ *  - 每张图独立容器与 observer，销毁时逐个 disconnect（防止 resize 泄漏）。
  */
 import { fmtTokens } from "../../modules/format.js";
-import { h } from "../../ui/h.js";
 import type { ChartConfiguration } from "../../vendor/chart.js";
 import type { StatsRange } from "../../modules/types.js";
 
@@ -14,14 +18,13 @@ type ChartOptions = NonNullable<ChartConfiguration["options"]>;
 type ChartModule = typeof import("../../vendor/chart.js");
 type ChartInstance = InstanceType<ChartModule["Chart"]>;
 
-interface ChartCard {
+/** 一张图的声明：key 与组件模板里的 data-chart-key 对齐。 */
+export interface ChartSpec {
   key: string;
   title: string;
   subtitle: string;
-  card: HTMLElement;
-  canvas: HTMLCanvasElement;
-  exportButton: HTMLButtonElement;
-  empty: HTMLElement;
+  hasData: boolean;
+  config: ChartConfiguration;
 }
 
 let charts: ChartInstance[] = [];
@@ -29,6 +32,9 @@ let observers: ResizeObserver[] = [];
 let currentRange: StatsRange | null = null;
 let themeBound = false;
 let renderGeneration = 0;
+/** 当前根容器：主题切换重建时复用。 */
+let currentRoot: HTMLElement | null = null;
+let currentFallback: ((reason: string) => void) | null = null;
 
 function css(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -52,20 +58,6 @@ function colors(): Record<string, string> {
     amber: css("--amber", "#e2a13c"),
     red: css("--red", "#e5604f"),
   };
-}
-
-function chartCard(title: string, subtitle: string): ChartCard {
-  const canvas = h("canvas", { role: "img", "aria-label": title });
-  const empty = h("p", { class: "stats-chart-empty hidden" }, "当前区间暂无数据。");
-  const exportButton = h("button", { type: "button", class: "ghost-btn small", disabled: true }, "存为 PNG");
-  const card = h("section", { class: "stats-card stats-chart-card" },
-    h("div", { class: "stats-card-head" },
-      h("div", null, h("h3", null, title), h("p", { class: "key-state" }, subtitle)),
-      exportButton,
-    ),
-    h("div", { class: "stats-chart-canvas-wrap" }, canvas, empty),
-  );
-  return { key: title, title, subtitle, card, canvas, exportButton, empty };
 }
 
 function commonScales(colorMap: Record<string, string>, stacked = false): ChartOptions["scales"] {
@@ -109,7 +101,17 @@ function dailyCacheRate(range: StatsRange): number[] {
   return (range.byDay ?? []).map((day) => day.inputTokens > 0 ? (day.cacheReadTokens / day.inputTokens) * 100 : 0);
 }
 
-function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Array<{ key: string; hasData: boolean; config: ChartConfiguration }> {
+/** 六图的静态元信息（标题与顺序），组件据此渲染骨架。 */
+export const CHART_SPECS: ReadonlyArray<{ key: string; title: string; subtitle: string }> = [
+  { key: "daily", title: "每日 Token 趋势", subtitle: "输入 / 输出堆叠柱 + 缓存命中率" },
+  { key: "model-share", title: "模型用量占比", subtitle: "按输入 + 输出 token" },
+  { key: "model-compare", title: "模型对比", subtitle: "按实际模型调用次数" },
+  { key: "hour", title: "活动时段分布", subtitle: "服务器本地 24 小时" },
+  { key: "cache", title: "缓存命中率趋势", subtitle: "按自然日" },
+  { key: "tools", title: "工具调用 Top", subtitle: "流式分片去重后计数" },
+];
+
+function buildConfigs(range: StatsRange, colorMap: Record<string, string>): ChartSpec[] {
   const days = range.byDay ?? [];
   const models = range.byModelShare ?? range.byModel ?? [];
   const tools = range.toolCalls ?? [];
@@ -119,6 +121,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
   return [
     {
       key: "daily",
+      title: "每日 Token 趋势",
+      subtitle: "输入 / 输出堆叠柱 + 缓存命中率",
       hasData: days.some((day) => day.turns > 0 || day.inputTokens > 0 || day.outputTokens > 0),
       config: {
         type: "bar",
@@ -144,6 +148,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
     },
     {
       key: "model-share",
+      title: "模型用量占比",
+      subtitle: "按输入 + 输出 token",
       hasData: models.length > 0,
       config: {
         type: "doughnut",
@@ -161,6 +167,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
     },
     {
       key: "model-compare",
+      title: "模型对比",
+      subtitle: "按实际模型调用次数",
       hasData: models.length > 0,
       config: {
         type: "bar",
@@ -181,6 +189,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
     },
     {
       key: "hour",
+      title: "活动时段分布",
+      subtitle: "服务器本地 24 小时",
       hasData: hours.some((hour) => hour.turns > 0 || hour.tokens > 0),
       config: {
         type: "bar",
@@ -198,6 +208,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
     },
     {
       key: "cache",
+      title: "缓存命中率趋势",
+      subtitle: "按自然日",
       hasData: days.some((day) => day.inputTokens > 0),
       config: {
         type: "line",
@@ -226,6 +238,8 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
     },
     {
       key: "tools",
+      title: "工具调用 Top",
+      subtitle: "流式分片去重后计数",
       hasData: tools.length > 0,
       config: {
         type: "bar",
@@ -247,46 +261,10 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Arra
   ];
 }
 
-function fallback(range: StatsRange, reason: string): void {
-  const container = document.getElementById("stats-charts");
-  if (!container) return;
-  const days = range.byDay ?? [];
-  const models = range.byModel ?? [];
-  const dailyBody = h("tbody");
-  for (const day of days.filter((item) => item.turns > 0)) {
-    dailyBody.appendChild(h("tr", null,
-      h("td", null, day.date),
-      h("td", { class: "num" }, String(day.turns)),
-      h("td", { class: "num" }, fmtTokens(day.inputTokens)),
-      h("td", { class: "num" }, fmtTokens(day.outputTokens)),
-    ));
-  }
-  const modelBody = h("tbody");
-  for (const model of models) {
-    modelBody.appendChild(h("tr", null,
-      h("td", null, model.model),
-      h("td", { class: "num" }, String(model.calls)),
-      h("td", { class: "num" }, fmtTokens(model.inputTokens + model.outputTokens)),
-    ));
-  }
-  container.replaceChildren(
-    h("section", { class: "stats-card stats-degraded", role: "status" },
-      h("h3", null, "图表暂不可用"),
-      h("p", null, `已切换为数据表：${reason}`),
-    ),
-    h("div", { class: "stats-grid" },
-      h("section", { class: "stats-card" }, h("h3", null, "每日用量"), h("table", { class: "stats-table" },
-        h("thead", null, h("tr", null, h("th", null, "日期"), h("th", { class: "num" }, "轮次"), h("th", { class: "num" }, "输入"), h("th", { class: "num" }, "输出"))), dailyBody)),
-      h("section", { class: "stats-card" }, h("h3", null, "模型用量"), h("table", { class: "stats-table" },
-        h("thead", null, h("tr", null, h("th", null, "模型"), h("th", { class: "num" }, "调用"), h("th", { class: "num" }, "Tokens"))), modelBody)),
-    ),
-  );
-}
-
-function exportChart(card: ChartCard, chart: ChartInstance): void {
+function exportChart(key: string, chart: ChartInstance): void {
   const link = document.createElement("a");
   link.href = chart.toBase64Image("image/png", 2);
-  link.download = `agent-stats-${card.key}-${new Date().toISOString().slice(0, 10)}.png`;
+  link.download = `agent-stats-${key}-${new Date().toISOString().slice(0, 10)}.png`;
   link.click();
 }
 
@@ -298,63 +276,62 @@ export function destroyStatsCharts(): void {
   charts = [];
 }
 
-export async function renderCharts(range: StatsRange): Promise<void> {
+/**
+ * 在 Vue 渲染好的卡片骨架上创建图表。
+ * @param root 图表区根节点（含 [data-chart-key] 卡片）
+ * @param onFallback 图表库加载失败时回调，由组件切成数据表降级
+ */
+export async function renderCharts(
+  range: StatsRange,
+  root: HTMLElement | null,
+  onFallback?: (reason: string) => void,
+): Promise<void> {
   destroyStatsCharts();
   const generation = renderGeneration;
   currentRange = range;
+  currentRoot = root;
+  currentFallback = onFallback ?? null;
   if (!themeBound) {
     themeBound = true;
-    window.addEventListener("themechange", () => { if (currentRange) void renderCharts(currentRange); });
+    window.addEventListener("themechange", () => {
+      if (currentRange) void renderCharts(currentRange, currentRoot, currentFallback ?? undefined);
+    });
   }
-  const container = document.getElementById("stats-charts");
-  if (!container) return;
-  container.replaceChildren();
-  const cards = [
-    chartCard("每日 Token 趋势", "输入 / 输出堆叠柱 + 缓存命中率"),
-    chartCard("模型用量占比", "按输入 + 输出 token"),
-    chartCard("模型对比", "按实际模型调用次数"),
-    chartCard("活动时段分布", "服务器本地 24 小时"),
-    chartCard("缓存命中率趋势", "按自然日"),
-    chartCard("工具调用 Top", "流式分片去重后计数"),
-  ];
-  for (const card of cards) container.appendChild(card.card);
+  if (!root) return;
 
   let mod: ChartModule;
   try {
     mod = await import("../../vendor/chart.js");
   } catch {
-    fallback(range, "图表依赖加载失败（网络中断或构建产物缺失）");
+    onFallback?.("图表依赖加载失败（网络中断或构建产物缺失）");
     return;
   }
+  if (generation !== renderGeneration || !root.isConnected) return;
 
-  if (generation !== renderGeneration) return;
   const colorMap = colors();
-  const configs = buildConfigs(range, colorMap);
-  for (let index = 0; index < cards.length; index += 1) {
-    const card = cards[index];
-    const item = configs[index];
-    if (!card || !item) continue;
-    if (item.key === "model-share") {
-      const total = (range.byModelShare ?? []).reduce((sum, model) => sum + model.inputTokens + model.outputTokens, 0);
-      card.card.querySelector(".stats-chart-canvas-wrap")?.appendChild(
-        h("div", { class: "stats-donut-center" },
-          h("strong", null, fmtTokens(total)),
-          h("span", null, "Tokens"),
-        ),
-      );
-    }
-    if (!item.hasData) {
-      card.empty.classList.remove("hidden");
-      card.canvas.classList.add("hidden");
+  const specs = buildConfigs(range, colorMap);
+  for (const spec of specs) {
+    const card = root.querySelector<HTMLElement>(`[data-chart-key="${spec.key}"]`);
+    if (!card) continue;
+    const canvas = card.querySelector<HTMLCanvasElement>("canvas");
+    const empty = card.querySelector<HTMLElement>(".stats-chart-empty");
+    const exportButton = card.querySelector<HTMLButtonElement>(".stats-chart-export");
+    if (!canvas) continue;
+    if (!spec.hasData) {
+      empty?.classList.remove("hidden");
+      canvas.classList.add("hidden");
       continue;
     }
-    const chart = new mod.Chart(card.canvas, item.config);
+    empty?.classList.add("hidden");
+    const chart = new mod.Chart(canvas, spec.config);
     charts.push(chart);
-    card.exportButton.disabled = false;
-    card.exportButton.addEventListener("click", () => exportChart(card, chart));
+    if (exportButton) {
+      exportButton.disabled = false;
+      exportButton.addEventListener("click", () => exportChart(spec.key, chart));
+    }
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(() => chart.resize());
-      observer.observe(card.card);
+      observer.observe(card);
       observers.push(observer);
     }
   }

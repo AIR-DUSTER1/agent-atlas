@@ -9,14 +9,8 @@
           </div>
         </div>
         <button id="new-chat-btn" title="新建对话（选择 Agent，归属当前项目）">＋ 新建对话</button>
-        <div class="project-switch" id="project-switch">
-          <button id="project-btn" class="project-btn" title="选择项目文件夹（本地 / 云端）">
-            <span id="project-btn-icon"><i class="ui-icon" data-icon="FolderTree" aria-hidden="true"></i></span>
-            <span id="project-btn-text">全部项目</span>
-            <i class="ui-icon chevron-down" data-icon="ChevronDown" aria-hidden="true"></i>
-          </button>
-          <div id="project-menu" class="project-menu hidden"></div>
-        </div>
+        <!-- M4 批次 4.4：项目切换器（按钮 + 菜单）由 project-switcher-vue.vue 渲染 -->
+        <div class="project-switch" id="project-switch"></div>
 
         <div class="session-tools">
           <label class="session-search">

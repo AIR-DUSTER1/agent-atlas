@@ -1,41 +1,65 @@
 /**
- * views/browser-use.ts — Browser Use 右侧实时画面与工具卡
+ * views/browser-use.ts — Browser Use 右侧实时画面：轮询与状态机（M4 批次 4.4 起）
  * ============================================================
- * 工具结果到达后自动打开当前会话的右侧浏览器；画面只轮询认证 API，不把页面内容
- * 写入 localStorage。切换会话时隐藏其他会话的浏览器，返回原会话再恢复。
+ * 面板渲染已迁往 Vue（browser-dock-vue.vue + stores/browser-dock.ts）；本文件
+ * 保留全部「行为」职责：
+ *  1. 1.2s 轮询认证 API（画面内容不落 localStorage）；
+ *  2. 会话隔离判定（当前会话一变就收起，返回原会话再恢复）；
+ *  3. 关闭按钮的服务端会话清理；
+ *  4. 工具卡上的「重新打开」提示（由通用工具卡增强注册表调用）。
+ * 渲染数据经 window 快照通道推给 Vue（bundle 与 1:1 副本是两个模块实例，
+ * 各有独立 pinia；e2e 从 1:1 副本驱动时只有 window 两边都可见）。
  */
 import { api } from "../core/api.js";
 import { $ } from "../core/dom.js";
 import { state } from "../core/state.js";
+import type { BrowserDockSnapshot } from "../stores/browser-dock.js";
 import type { BrowserPageState, ToolPart } from "../modules/types.js";
 
 const POLL_INTERVAL_MS = 1_200;
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let dockSessionId: string | null = null;
 let lastUpdatedAt = 0;
 let pollInFlight = false;
+/** 上一次发布的快照：同会话的字段增量合并，字段未变就不推送。 */
+let lastSnapshot: BrowserDockSnapshot | null = null;
 
-function setText(id: string, text: string): void {
-  const el = $(id);
-  if (el) el.textContent = text;
-}
-
-function setState(text: string, cls = ""): void {
-  const el = $("browser-dock-state");
-  if (!el) return;
-  el.textContent = text;
-  el.className = "browser-dock-state" + (cls ? ` ${cls}` : "");
+function publish(partial: Partial<BrowserDockSnapshot> & { visible: boolean }): void {
+  const base: BrowserDockSnapshot = {
+    sessionId: dockSessionId ?? "",
+    visible: partial.visible,
+    title: "等待网页",
+    url: "about:blank",
+    stateText: "未连接",
+    stateTone: "",
+    meta: "会话隔离 · 空闲 10 分钟自动关闭",
+    screenshotSrc: "",
+    emptyVisible: true,
+    emptyTitle: "等待 Agent 打开网页",
+    emptyDetail: "浏览器画面会在这里实时更新",
+  };
+  const carried = lastSnapshot && lastSnapshot.sessionId === (dockSessionId ?? "") ? lastSnapshot : null;
+  const next: BrowserDockSnapshot = { ...base, ...(carried ?? {}), ...partial, sessionId: dockSessionId ?? "" };
+  const changed = JSON.stringify(next) !== JSON.stringify(lastSnapshot);
+  lastSnapshot = next;
+  if (!changed) return;
+  // 直接写 window：本模块在 1:1 过渡树上（e2e 从副本驱动），
+  // 动态 import stores/browser-dock.js 会因裸包名 pinia 解析失败。
+  // Vue 组件在 bundle 侧订阅同一份快照，window 是两边唯一共同通道。
+  window.__agentatlasBrowserDock = next;
+  for (const listener of window.__agentatlasBrowserDockListeners ?? []) listener();
 }
 
 function showDockShell(): void {
-  $("browser-dock")?.classList.remove("hidden");
   $("main")?.classList.add("browser-open");
+  publish({ visible: true });
 }
 
 function hideDockShell(): void {
-  $("browser-dock")?.classList.add("hidden");
   $("main")?.classList.remove("browser-open");
   stopPolling();
+  publish({ visible: false, stateText: "未连接", stateTone: "" });
 }
 
 function stopPolling(): void {
@@ -49,24 +73,23 @@ function startPolling(): void {
 }
 
 function applyPageState(page: BrowserPageState): void {
-  setText("browser-dock-title", page.title || page.url || "未命名页面");
-  setText("browser-dock-url", page.url || "about:blank");
-  setText("browser-dock-meta", `更新于 ${new Date(page.updatedAt).toLocaleTimeString()} · 会话隔离`);
-  setState(page.error ? "页面异常" : page.busy ? "AI 操作中" : "实时连接", page.error ? "" : page.busy ? "busy" : "live");
-  const screen = $("browser-dock-screen") as HTMLImageElement | null;
-  const empty = $("browser-dock-empty");
-  if (screen && page.updatedAt !== lastUpdatedAt) {
-    lastUpdatedAt = page.updatedAt;
-    screen.src = `/api/browser/sessions/${encodeURIComponent(page.sessionId)}/screenshot?v=${page.updatedAt}`;
-  }
-  if (empty && page.error) {
-    screen?.classList.remove("ready");
-    empty.style.visibility = "visible";
-    const strong = empty.querySelector("strong");
-    const detail = empty.querySelector("span");
-    if (strong) strong.textContent = page.error;
-    if (detail) detail.textContent = "请让 Agent 重新打开或刷新页面";
-  }
+  const shotChanged = page.updatedAt !== lastUpdatedAt;
+  if (shotChanged) lastUpdatedAt = page.updatedAt;
+  publish({
+    visible: true,
+    title: page.title || page.url || "未命名页面",
+    url: page.url || "about:blank",
+    meta: `更新于 ${new Date(page.updatedAt).toLocaleTimeString()} · 会话隔离`,
+    stateText: page.error ? "页面异常" : page.busy ? "AI 操作中" : "实时连接",
+    stateTone: page.error ? "" : page.busy ? "busy" : "live",
+    emptyVisible: Boolean(page.error),
+    ...(shotChanged
+      ? { screenshotSrc: `/api/browser/sessions/${encodeURIComponent(page.sessionId)}/screenshot?v=${page.updatedAt}` }
+      : {}),
+    ...(page.error
+      ? { emptyTitle: page.error, emptyDetail: "请让 Agent 重新打开或刷新页面" }
+      : {}),
+  });
 }
 
 async function refreshBrowserDock(): Promise<void> {
@@ -79,10 +102,13 @@ async function refreshBrowserDock(): Promise<void> {
     showDockShell();
     applyPageState(page);
   } catch (err) {
-    setState("已关闭", "");
-    setText("browser-dock-meta", err instanceof Error ? err.message : String(err));
-    const screen = $("browser-dock-screen") as HTMLImageElement | null;
-    screen?.classList.remove("ready");
+    publish({
+      visible: true,
+      stateText: "已关闭",
+      stateTone: "",
+      meta: err instanceof Error ? err.message : String(err),
+      screenshotSrc: "",
+    });
     // 历史消息回放会再次渲染旧工具卡；对应浏览器若已不在服务端，面板应自动收起，
     // 不能因为一条旧记录长期占住右侧空间。
     hideDockShell();
@@ -96,19 +122,19 @@ export function openBrowserDock(sessionId: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return;
   dockSessionId = sessionId;
   lastUpdatedAt = 0;
-  setText("browser-dock-title", "正在连接浏览器");
-  setText("browser-dock-url", "about:blank");
-  setState("连接中", "busy");
-  const screen = $("browser-dock-screen") as HTMLImageElement | null;
-  screen?.classList.remove("ready");
-  const empty = $("browser-dock-empty");
-  const strong = empty?.querySelector("strong");
-  const detail = empty?.querySelector("span");
-  if (strong) strong.textContent = "等待 Agent 打开网页";
-  if (detail) detail.textContent = "浏览器画面会在这里实时更新";
-  if (empty) empty.style.visibility = "visible";
+  publish({
+    visible: true,
+    title: "正在连接浏览器",
+    url: "about:blank",
+    stateText: "连接中",
+    stateTone: "busy",
+    screenshotSrc: "",
+    emptyVisible: true,
+    emptyTitle: "等待 Agent 打开网页",
+    emptyDetail: "浏览器画面会在这里实时更新",
+  });
   if (state.currentId !== sessionId) { hideDockShell(); return; }
-  showDockShell();
+  $("main")?.classList.add("browser-open");
   void refreshBrowserDock();
   startPolling();
 }
@@ -144,29 +170,25 @@ export function renderBrowserInToolCard(part: ToolPart, card: HTMLElement): void
   body.appendChild(note);
 }
 
-export function bindBrowserDock(): void {
-  $("browser-dock-close")?.addEventListener("click", () => {
-    const sessionId = dockSessionId;
-    dockSessionId = null;
-    hideDockShell();
-    if (sessionId) void api(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    }).catch(() => {});
-  });
+/** 关闭命令入口：Vue 的关闭按钮只触发命令，服务端清理仍在这里。 */
+function closeDockSession(): void {
+  const sessionId = dockSessionId;
+  dockSessionId = null;
+  hideDockShell();
+  if (!sessionId) return;
+  void api(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  }).catch(() => {});
+}
 
-  const screen = $("browser-dock-screen") as HTMLImageElement | null;
-  screen?.addEventListener("load", () => {
-    screen.classList.add("ready");
-    const empty = $("browser-dock-empty");
-    if (empty) empty.style.visibility = "hidden";
-  });
-  screen?.addEventListener("error", () => {
-    screen.classList.remove("ready");
-    const empty = $("browser-dock-empty");
-    if (empty) empty.style.visibility = "visible";
-  });
+export function bindBrowserDock(): void {
+  window.__agentatlasBrowserDockCommands = { close: closeDockSession };
+  // 面板挂载一次（幂等）：启动即挂上空态，首次 openBrowserDock 直接可见。
+  void import("../apps/browser-dock-vue.js")
+    .then((m) => m.mountBrowserDockVue())
+    .catch(() => {});
 
   document.addEventListener("agentatlas:session-selected", (event) => {
     const sessionId = (event as CustomEvent<{ sessionId?: unknown }>).detail?.sessionId;

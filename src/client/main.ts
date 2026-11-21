@@ -24,7 +24,7 @@ import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { exitGoalMode, handleGoalKeydown, syncGoalDraftFromInput } from "./composer/goal.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
-import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged } from "./views/projects.js";
+import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged, bindProjectCommands } from "./views/projects.js";
 import { renderSessions, loadSessionList } from "./views/sessions.js";
 import {
   closeCmMenus, hydrateFromServer, renderPermChip, renderPermMenu, selectSession, showChatState, showWelcomeState,
@@ -39,7 +39,6 @@ import { loadRag, openKb, closeKb, renderRagHitsInToolCard } from "./views/rag.j
 import { closeEstate, openEstate, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
-import { bindTracingSettings } from "./views/settings-tracing.js";
 import { loadPluginState } from "./views/settings-plugins.js";
 import { isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { createBackup, refreshBackups } from "./views/settings-backup.js";
@@ -115,6 +114,8 @@ async function init(): Promise<void> {
   applyConfigState(state.config);
   const footNote = $("side-foot-note");
   if (footNote) footNote.textContent = `点击模型名可修改配置 · ${formatBuildLabel()}`;
+  // 项目切换器命令面必须在首次 loadProjects 之前注册（Vue 组件挂载时读取它）
+  bindProjectCommands();
   await loadProjects();
   await loadExternalAgents();
   await loadRag();
@@ -213,8 +214,7 @@ async function init(): Promise<void> {
   on("side-model", "click", () => openSettings("models"));
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
-  bindTracingSettings();
-  // M4 4.1/4.2：命令页 / 子代理 / MCP 面板事件由 Vue 组件接管（挂载发生在进入分区时）
+  // M4 4.1/4.2：命令页 / 子代理 / MCP / 链路追踪面板事件由 Vue 组件接管（挂载发生在进入分区时）
   on("stats-refresh", "click", refreshStats);
   // M4 4.2：技能面板事件全部由 Vue 组件接管（挂载发生在进入 skills 分区时）
 

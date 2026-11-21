@@ -1,19 +1,23 @@
 /**
  * ============================================================
- * views/projects.ts — 项目文件夹（本地 / 云端 Git 仓库）
+ * views/projects.ts — 项目文件夹：数据与副作用（M4 批次 4.4 起）
  * ============================================================
- * 菜单使用统一浮动层与安全 DOM 原语；项目图标来自 Lucide 白名单。
- * 删除项目后由服务端迁移会话，前端只重拉列表，避免本地状态猜测。
+ * 切换器渲染已迁往 Vue（project-switcher-vue.vue + stores/projects.ts）；
+ * 本文件保留全部「行为」职责：
+ *  1. 列表拉取与竞态守卫（晚到的过期响应必须丢弃）；
+ *  2. 添加本地 / 云端项目的完整流程（系统目录框、降级手输、单飞锁）；
+ *  3. 选中 / 刷新云端 / 删除项目的副作用与确认对话；
+ *  4. 菜单开合（ui/menu.ts 浮动控制器）与命令面注册。
+ * 渲染数据经 window 通道推给 Vue（bundle 与 1:1 副本是两个模块实例，
+ * 各有独立 pinia），本模块静态依赖图保持纯 .ts。
  */
 import { $, desktopBridge, setSidebarOpen } from "../core/dom.js";
 import { api, ApiError } from "../core/api.js";
 import { saveLocal, state } from "../core/state.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
-import { h } from "../ui/h.js";
-import { icon, type IconName } from "../ui/icon.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
 import { toast } from "../ui/toast.js";
-import { isNoProjectView, PROJECT_VIEW_ALL, PROJECT_VIEW_NONE } from "../modules/project-view.js";
+import { PROJECT_VIEW_ALL, PROJECT_VIEW_NONE } from "../modules/project-view.js";
 import type { ProjectEntry } from "../modules/types.js";
 
 let menuController: MenuController | null = null;
@@ -22,13 +26,14 @@ export function projectById(id: string | null): ProjectEntry | undefined {
   return state.projects.find((project) => project.id === id);
 }
 
-export function projectIcon(project: ProjectEntry | null | undefined): IconName {
-  return project?.type === "cloud" ? "Globe" : "Folder";
-}
-
 /** 会话列表要跟着项目一起刷新：由 app 注入，避免 projects ↔ session-list 的循环依赖 */
 let onProjectsChanged: () => void = () => {};
 export function bindProjectsChanged(handler: () => void): void { onProjectsChanged = handler; }
+
+/** 通知 Vue 侧重新同步（core state 已更新后调用）。 */
+function notifyProjectsChanged(): void {
+  for (const listener of window.__agentatlasProjectListeners ?? []) listener();
+}
 
 /**
  * 拉取项目列表并刷新切换器。
@@ -51,7 +56,6 @@ export async function loadProjects(): Promise<void> {
     state.projects = data.projects || [];
     if (state.projectView !== PROJECT_VIEW_ALL && state.projectView !== PROJECT_VIEW_NONE && !projectById(state.projectView)) state.projectView = PROJECT_VIEW_ALL;
     renderProjectSwitcher();
-    onProjectsChanged();
   } catch { /* 服务重启等临时失败不阻塞主界面 */ }
 }
 
@@ -62,6 +66,14 @@ export function applyProjectList(projects: ProjectEntry[], view?: string): void 
   if (view !== undefined) state.projectView = view;
   saveLocal();
   renderProjectSwitcher();
+}
+
+/** 把 core state 的项目数据同步给 Vue 切换器（幂等挂载 + 通知重算）。 */
+export function renderProjectSwitcher(): void {
+  void import("../apps/project-switcher-vue.js")
+    .then((m) => m.mountProjectSwitcherVue())
+    .catch(() => {});
+  notifyProjectsChanged();
   onProjectsChanged();
 }
 
@@ -95,124 +107,9 @@ function chooseProject(projectId: string): void {
   saveLocal();
   showProjectMenu(false);
   setSidebarOpen(false);
-  renderProjectSwitcher();
+  // Vue 侧同步 + 会话列表刷新
+  notifyProjectsChanged();
   onProjectsChanged();
-}
-
-export function renderProjectSwitcher(): void {
-  const view = state.projectView;
-  const noProject = isNoProjectView(view);
-  const active = view === PROJECT_VIEW_ALL || noProject ? null : projectById(view);
-  const iconHost = $("project-btn-icon");
-  const textEl = $("project-btn-text");
-  iconHost?.replaceChildren(icon(noProject ? "Folder" : active ? projectIcon(active) : "FolderTree", { size: 15 }));
-  if (textEl) textEl.textContent = noProject ? "不选择项目" : active ? active.name : "全部项目";
-
-  const menu = $("project-menu");
-  if (!menu) return;
-  menu.replaceChildren();
-  menu.setAttribute("role", "menu");
-
-  menu.appendChild(h("button", {
-    type: "button",
-    role: "menuitem",
-    class: "pm-item" + (view === PROJECT_VIEW_ALL ? " active" : ""),
-    onclick: () => chooseProject(PROJECT_VIEW_ALL),
-  },
-  h("span", { class: "pm-ic" }, icon("FolderTree", { size: 15 })),
-  h("span", { class: "pm-name" }, "全部项目"),
-  h("span", { class: "pm-check" }, view === PROJECT_VIEW_ALL ? "✓" : ""),
-  ));
-
-  menu.appendChild(h("button", {
-    type: "button",
-    role: "menuitem",
-    class: "pm-item" + (noProject ? " active" : ""),
-    title: "创建会话时不绑定任何项目",
-    onclick: () => chooseProject(PROJECT_VIEW_NONE),
-  },
-  h("span", { class: "pm-ic" }, icon("Folder", { size: 15 })),
-  h("span", { class: "pm-name" }, "不选择项目"),
-  h("span", { class: "pm-sub none" }, "无项目上下文"),
-  h("span", { class: "pm-check" }, noProject ? "✓" : ""),
-  ));
-
-  for (const project of state.projects) {
-    const select = h("button", {
-      type: "button",
-      role: "menuitem",
-      class: "pm-select",
-      title: project.name,
-      onclick: () => chooseProject(project.id),
-    },
-    h("span", { class: "pm-ic" }, icon(projectIcon(project), { size: 15 })),
-    h("span", { class: "pm-name" }, project.name),
-    h("span", { class: `pm-sub ${project.type}` }, project.type === "cloud" ? "云端" : "本地"),
-    );
-    const item = h("div", { class: "pm-item pm-item-complex" + (view === project.id ? " active" : "") }, select);
-
-    if (project.type === "cloud") {
-      const refresh = h("button", {
-        type: "button",
-        class: "pm-x pm-refresh",
-        title: "git pull 刷新缓存",
-        "aria-label": `刷新 ${project.name}`,
-        onclick: async (event: MouseEvent) => {
-          event.stopPropagation();
-          refresh.replaceChildren(icon("LoaderCircle", { size: 13, className: "spin" }));
-          try {
-            await api(`/api/projects/${project.id}/refresh`, { method: "POST" });
-          } catch (err) {
-            uiAlert(`刷新失败：${(err as Error).message}`, "刷新云端文件夹");
-          }
-          refresh.replaceChildren(icon("RefreshCw", { size: 13 }));
-        },
-      }, icon("RefreshCw", { size: 13 }));
-      item.appendChild(refresh);
-    }
-
-    if (!project.builtin) {
-      item.appendChild(h("button", {
-        type: "button",
-        class: "pm-x pm-del",
-        title: "删除项目",
-        "aria-label": `删除 ${project.name}`,
-        onclick: async (event: MouseEvent) => {
-          event.stopPropagation();
-          const confirmed = await uiConfirm(
-            `删除项目「${project.name}」？${project.type === "cloud" ? "\n云端缓存副本将一并删除。" : ""}\n其会话会归入「未归属」。`,
-            { title: "删除项目", okText: "删除", danger: true },
-          );
-          if (!confirmed) return;
-          try {
-            await api(`/api/projects/${project.id}`, { method: "DELETE" });
-            if (state.projectView === project.id) state.projectView = "all";
-            saveLocal();
-            await loadProjects();
-          } catch (err) {
-            uiAlert(`删除失败：${(err as Error).message}`, "删除项目");
-          }
-        },
-      }, icon("X", { size: 13 })));
-    }
-
-    item.appendChild(h("span", { class: "pm-check" }, view === project.id ? "✓" : ""));
-    menu.appendChild(item);
-  }
-
-  menu.appendChild(h("div", { class: "pm-divider" }));
-  menu.appendChild(h("button", {
-    type: "button",
-    role: "menuitem",
-    class: "pm-item pm-manage",
-    onclick: () => { showProjectMenu(false); void addProjectFolder("local"); },
-  }, icon("FolderOpen", { size: 15 }), h("span", null, "添加本地文件夹（系统选择）")));
-  menu.appendChild(h("button", {
-    type: "button",
-    role: "menuitem",
-    class: "pm-item pm-manage",
-    onclick: () => { showProjectMenu(false); void addProjectFolder("cloud"); },
-  }, icon("Globe", { size: 15 }), h("span", null, "添加云端文件夹（Git 仓库）")));
 }
 
 /** 优先用系统目录选择框取得绝对路径；无桌面环境时显式降级到手动输入。 */
@@ -251,6 +148,7 @@ export async function pickLocalProjectDirectory(): Promise<string | null> {
     return typeof path === "string" && path.trim() ? path.trim() : null;
   }
 }
+
 let projectAddInFlight: Promise<void> | null = null;
 
 /** 同一页面只允许一个项目添加流程，双击不会重复打开目录框或重复提交项目。 */
@@ -296,4 +194,48 @@ async function addProjectFolderOnce(type: "local" | "cloud"): Promise<void> {
   } catch (err) {
     uiAlert(`${type === "cloud" ? "云端仓库" : "本地文件夹"}添加失败：${(err as Error).message}`, "添加项目");
   }
+}
+
+/** 刷新云端项目的本地缓存（git pull）。 */
+async function refreshCloudProject(project: ProjectEntry): Promise<void> {
+  try {
+    await api(`/api/projects/${project.id}/refresh`, { method: "POST" });
+  } catch (err) {
+    uiAlert(`刷新失败：${(err as Error).message}`, "刷新云端文件夹");
+  }
+}
+
+/** 删除项目（云端副本一并删除；其会话归入「未归属」）。 */
+async function removeProject(project: ProjectEntry): Promise<void> {
+  const confirmed = await uiConfirm(
+    `删除项目「${project.name}」？${project.type === "cloud" ? "\n云端缓存副本将一并删除。" : ""}\n其会话会归入「未归属」。`,
+    { title: "删除项目", okText: "删除", danger: true },
+  );
+  if (!confirmed) return;
+  try {
+    await api(`/api/projects/${project.id}`, { method: "DELETE" });
+    if (state.projectView === project.id) state.projectView = PROJECT_VIEW_ALL;
+    saveLocal();
+    await loadProjects();
+  } catch (err) {
+    uiAlert(`删除失败：${(err as Error).message}`, "删除项目");
+  }
+}
+
+/** 注册组件命令面：Vue 只发意图，副作用与确认对话都在这里。 */
+export function bindProjectCommands(): void {
+  window.__agentatlasProjectCommands = {
+    choose: (view) => { chooseProject(view); },
+    addLocal: () => { showProjectMenu(false); void addProjectFolder("local"); },
+    addCloud: () => { showProjectMenu(false); void addProjectFolder("cloud"); },
+    refreshCloud: (id) => {
+      const project = projectById(id);
+      if (project) void refreshCloudProject(project);
+    },
+    remove: (id) => {
+      const project = projectById(id);
+      if (project) void removeProject(project);
+    },
+  };
+  renderProjectSwitcher();
 }

@@ -62,18 +62,26 @@ test("设置页大标题不再重复展示说明文案", async () => {
 });
 test("链路追踪设置页支持安全 opt-in、Key 掩码和保存契约", async () => {
   const html = await readClientIndexHtml();
-  const source = await readClientFiles(["views/settings-tracing.ts", "views/settings.ts", "main.ts"]);
+  // M4 4.2：分区 body 迁入 Vue 组件，静态帧只留挂载容器 #tracing-panel
+  const source = await readClientFiles([
+    "views/settings-tracing-vue.vue",
+    "stores/tracing.ts",
+    "views/settings-tracing.ts",
+    "views/settings.ts",
+  ]);
+  assert.match(html, /id="settings-view-tracing"/);
+  assert.match(html, /id="tracing-panel"/);
   for (const id of [
-    "settings-view-tracing", "tracing-enabled", "tracing-backend", "tracing-project",
+    "tracing-enabled", "tracing-backend", "tracing-project",
     "tracing-endpoint", "tracing-agent-id", "tracing-agent-environment", "tracing-api-key", "tracing-clear-key", "tracing-anonymize",
     "tracing-warning", "tracing-status", "tracing-save-btn",
-  ]) assert.match(html, new RegExp(`id="${id}"`), id);
+  ]) assert.match(source, new RegExp(`id="${id}"`), id);
   const nav = await readClientFiles(["stores/settings.ts"]);
   assert.match(nav, /view: "tracing"/);
-  assert.match(html, /开启即表示允许对话内容发送到 LangSmith/);
+  assert.match(source, /开启即表示允许对话内容发送到 LangSmith/);
   assert.match(source, /\/api\/tracing/);
   assert.match(source, /method: "PUT"/);
-  assert.match(source, /bindTracingSettings/);
+  assert.match(source, /mountTracingVue/);
   assert.match(source, /tracing-clear-key/);
   assert.doesNotMatch(source, /innerHTML/);
 });
@@ -120,16 +128,22 @@ test("新增与编辑供应商使用独立弹窗，左栏选中态不再被创�
 
 test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", async () => {
   const html = await readClientIndexHtml();
-  const stats = await readClientFiles(["views/stats/index.ts", "views/stats/kpi.ts", "views/stats/charts.ts", "views/stats/tables.ts"]);
-  assert.match(html, /id="stats-window-overview"/);
-  assert.match(html, /id="stats-kpis"/);
-  assert.match(html, /id="stats-charts"/);
-  assert.match(html, /id="stats-tables"/);
-  assert.match(html, /id="stats-refresh"/);
-  assert.match(stats, /activeRangeId = "7d"/);
-  assert.match(stats, /await import\("\.\.\/\.\.\/vendor\/chart\.js"\)/);
-  assert.match(stats, /renderKpis/);
-  assert.match(stats, /renderTables/);
+  // M4 4.2：分区 body 迁入 Vue 组件（stats-panel-vue.vue），静态帧只留 #stats-modal
+  const stats = await readClientFiles([
+    "views/stats-panel-vue.vue",
+    "stores/stats.ts",
+    "views/stats/charts.ts",
+    "views/stats/index.ts",
+  ]);
+  assert.match(html, /id="settings-view-stats"/);
+  assert.match(html, /id="stats-modal"/);
+  for (const id of ["stats-window-overview", "stats-kpis", "stats-charts", "stats-tables", "stats-refresh"]) {
+    assert.match(stats, new RegExp(`id="${id}"`), id);
+  }
+  assert.match(stats, /activeRangeId: "7d"/);
+  assert.match(stats, /import\("\.\.\/\.\.\/vendor\/chart\.js"\)/);
+  assert.match(stats, /CHART_SPECS/);
+  assert.match(stats, /stats-chart-card/);
   assert.match(stats, /ResizeObserver/);
   assert.match(stats, /toBase64Image/);
   assert.match(stats, /toolCalls/);

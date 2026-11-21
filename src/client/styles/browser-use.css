@@ -5,6 +5,11 @@
   --browser-dock-width: min(48vw, 720px);
 }
 
+/* M4 4.4：面板由 Vue 挂载到 #browser-dock-mount。
+   容器必须 display: contents，否则绝对定位的 #browser-dock 会以这个空 div
+   为包含块，top/right/bottom 全部失准（与 #settings-nav-mount 同一个坑）。 */
+#browser-dock-mount { display: contents; }
+
 #browser-dock {
   position: absolute;
   z-index: 24;
