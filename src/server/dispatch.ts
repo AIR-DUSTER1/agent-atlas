@@ -21,15 +21,6 @@ import {
 import { handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
-  handleClearRag,
-  handleDeleteRagDoc,
-  handleGetRag,
-  handleIngest,
-  handleRagSearch,
-  handleSaveRagConfig,
-  handleTestRag,
-} from "./routes/rag.js";
-import {
   handleEstateExport,
   handleGetEstate,
   handleInstallBeike,
@@ -75,7 +66,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
   const url = new URL(req.url ?? "/", `http://localhost:0`);
   const pathname = url.pathname;
     const extMatch = pathname.match(/^\/api\/external-agents\/([\w-]+)$/);
-    const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
     // 用户 id 是 uuid；reset-password / tokens 子路径在各自分支用 endsWith 区分
 
     // 结论地图：高德/腾讯/百度 Web 服务 Key 仅在服务端代理中使用
@@ -126,13 +116,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     // 使用统计（只读聚合，数据源为 journal 回放后的内存轮次）
 
 
-    // RAG（外部知识库）
-    if (pathname === "/api/rag" && req.method === "GET") { await handleGetRag(res); return; }    if (pathname === "/api/rag/config" && req.method === "POST") { await handleSaveRagConfig(res, req); return; }
-    if (pathname === "/api/rag/test" && req.method === "POST") { await handleTestRag(res, req); return; }
-    if (pathname === "/api/rag/ingest" && req.method === "POST") { await handleIngest(res, req); return; }
-    if (pathname === "/api/rag/search" && req.method === "POST") { await handleRagSearch(res, req); return; }
-    if (ragDocMatch && req.method === "DELETE") { await handleDeleteRagDoc(res, req, ragDocMatch[1]); return; }
-    if (pathname === "/api/rag/clear" && req.method === "POST") { await handleClearRag(res, req); return; }
 
     // 房产 Agent（贝壳 CLI）
     const estateExportMatch = pathname.match(/^\/api\/estate\/exports\/([0-9a-f-]{36})$/i);

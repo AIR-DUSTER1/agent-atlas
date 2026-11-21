@@ -75,6 +75,10 @@ import {
   handleRefreshProject, handleSetActiveProject,
 } from "./routes/projects.js";
 import { handleFsList, handleFsOpenRemote, handleFsRead, handleFsSearch, handleUpload } from "./routes/files.js";
+import {
+  handleClearRag, handleDeleteRagDoc, handleGetRag, handleIngest, handleRagSearch,
+  handleSaveRagConfig, handleTestRag,
+} from "./routes/rag.js";
 import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -502,6 +506,15 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/fs/read", jsonRaw, withBody(async (c) => { await handleFsRead(c.env.outgoing, c.env.incoming); }));
   app.post("/api/fs/open-remote", jsonRaw, withBody(async (c) => { await handleFsOpenRemote(c.env.outgoing, c.env.incoming); }));
   app.post("/api/files/upload", jsonRawFor(12_000_000), withBody(async (c) => { await handleUpload(c.env.outgoing, c.env.incoming); }));
+
+  // ── 15j. M2 批次 9a（RAG 外部知识库）：原生挂载；dispatch 分支已摘除 ──
+  app.get("/api/rag", withBody(async (c) => { await handleGetRag(c.env.outgoing); }));
+  app.post("/api/rag/config", jsonRaw, withBody(async (c) => { await handleSaveRagConfig(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/rag/test", jsonRaw, withBody(async (c) => { await handleTestRag(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/rag/ingest", jsonRaw, withBody(async (c) => { await handleIngest(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/rag/search", jsonRaw, withBody(async (c) => { await handleRagSearch(c.env.outgoing, c.env.incoming); }));
+  app.delete("/api/rag/docs/:id", withBody(async (c) => { await handleDeleteRagDoc(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/rag/clear", jsonRaw, withBody(async (c) => { await handleClearRag(c.env.outgoing, c.env.incoming); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

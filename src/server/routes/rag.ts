@@ -4,7 +4,7 @@
  * 真实的向量存储与 embedding 由外部服务完成（契约见 src/server/rag.ts）；
  * getRagPublic 是 async 导出函数，**必须 await** 再 stringify（§5.5 老 JSON 坑）。
  */
-import { readBody, respondBadRequest, BodyTooLargeError } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { getRagPublic, saveRagConfig, testRagConnection, searchRag, ingestFolder, ingestText, deleteRagDoc, clearRag } from "../rag.js";
 
 export async function handleGetRag(res: import("node:http").ServerResponse): Promise<void> {
@@ -14,7 +14,7 @@ export async function handleGetRag(res: import("node:http").ServerResponse): Pro
 }
 
 export async function handleSaveRagConfig(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { baseURL?: string; apiKey?: unknown; collection?: unknown; topK?: unknown };
+  const body = parsedJsonOf<{ baseURL?: string; apiKey?: unknown; collection?: unknown; topK?: unknown }>(req)!;
   try {
     const rag = await saveRagConfig({ ...body, baseURL: body.baseURL ?? "" });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -25,7 +25,7 @@ export async function handleSaveRagConfig(res: import("node:http").ServerRespons
 }
 
 export async function handleTestRag(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { baseURL?: string; apiKey?: unknown };
+  const body = parsedJsonOf<{ baseURL?: string; apiKey?: unknown }>(req)!;
   try {
     const r = await testRagConnection({
       baseURL: typeof body.baseURL === "string" && body.baseURL.trim() ? body.baseURL : undefined,
@@ -43,7 +43,7 @@ export async function handleTestRag(res: import("node:http").ServerResponse, req
 }
 
 export async function handleIngest(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { path?: string; name?: string; content?: string };
+  const body = parsedJsonOf<{ path?: string; name?: string; content?: string }>(req)!;
   try {
     let summary: unknown;
     if (typeof body.path === "string" && body.path.trim()) {
@@ -63,7 +63,7 @@ export async function handleIngest(res: import("node:http").ServerResponse, req:
 }
 
 export async function handleRagSearch(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as { query?: string; topK?: number };
+  const body = parsedJsonOf<{ query?: string; topK?: number }>(req)!;
   try {
     const r = await searchRag(body.query ?? "", body.topK);
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
