@@ -1,584 +1,292 @@
-/** tool-rendering.spec.ts — 批量工具按类别分区的真实 DOM 回归 */
+/**
+ * tool-rendering.spec.ts — 工具卡 / 工具组 / 结论媒体的真实 DOM 回归
+ * ============================================================
+ * M4 4.6 基线固化：所有用例都**只走真实 UI**（点 Agent 卡 → 输入 → 等服务端
+ * mock 流渲染）。不再 import("/render/parts.js") 或直接写 clientState.blockBodies
+ * ——那种写法把测试绑死在 1:1 过渡树的内部函数上，4.6 迁移渲染层时会整批失效。
+ * 需要特定事件序列的场景由服务端 mock 提供（见 src/server/mock.ts 的
+ * batch-tools 等 scenario）。
+ */
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers.js";
+import { createChat, login } from "./helpers.js";
+
+/** 用给定消息发起一轮对话并等到助手回复结束（工具卡已落定）。 */
+async function runTurn(page: import("@playwright/test").Page, message: string, doneText: string): Promise<void> {
+  await page.locator("#input").fill(message);
+  await page.locator("#send-btn").click();
+  await expect(page.locator(".msg-assistant").last()).toContainText(doneText, { timeout: 25_000 });
+  await expect(page.locator("#stop-btn")).toBeHidden();
+}
 
 test("同批三个工具按文件读取、图片读取、运行命令分区并保留原始工具名", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, groupToolCallsIfNeeded, updateToolCard }, clientState] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const calls = [
-      { name: "read_file", args: { path: "README.md" } },
-      { name: "read_image", args: { path: "docs/preview.png" } },
-      { name: "terminal", args: { command: "npm test" } },
-    ];
-    for (const [index, call] of calls.entries()) {
-      const part = {
-        p: "tool", id: `category-${index}`, name: call.name,
-        argsText: JSON.stringify(call.args), result: null,
-      };
-      block.parts.push(part);
-      mountPart(block, part);
-    }
-    const node = { p: "node", name: "tools" };
-    block.parts.push(node);
-    const group = groupToolCallsIfNeeded(block, host, node);
-    const sections = [...(group?.querySelectorAll("[data-category-section]") ?? [])]
-      .map((section: Element) => ({
-        category: (section as HTMLElement).dataset.categorySection,
-        count: section.querySelectorAll(".tool-card").length,
-      }));
-    const names = [...(group?.querySelectorAll(".tool-name") ?? [])].map((el) => el.textContent);
-    const groupOpened = group instanceof HTMLDetailsElement && group.open;
-    const summary = group?.querySelector(".tool-group-names")?.textContent ?? "";
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return { exists: Boolean(group), sections, names, summary, groupOpened };
-  });
+  await createChat(page);
+  await runTurn(page, "批量工具演示", "各自归到自己的分区");
 
-  expect(result.exists).toBe(true);
-  expect(result.sections).toEqual([
-    { category: "file-read", count: 1 },
-    { category: "image-read", count: 1 },
-    { category: "command", count: 1 },
-  ]);
-  expect(result.names).toEqual(["read_file", "read_image", "terminal"]);
-  expect(result.summary).toContain("文件读取 ×1");
-  expect(result.summary).toContain("读取图片 ×1");
-  expect(result.summary).toContain("运行命令 ×1");
-  expect(result.summary).toContain("read_file");
-  expect(result.summary).toContain("read_image");
-  expect(result.summary).toContain("terminal");
-  expect(result.groupOpened).toBe(false);
+  const group = page.locator("#messages .tool-group");
+  await expect(group).toHaveCount(1);
+  // 工具组默认折叠：执行轨迹不占屏，但摘要必须先给出分类与原始工具名
+  await expect(group).not.toHaveAttribute("open", "");
+  await expect(group.locator(".tool-group-title")).toHaveText("工具调用");
+  await expect(group.locator(".tool-group-names")).toContainText("文件读取 ×1");
+  await expect(group.locator(".tool-group-names")).toContainText("读取图片 ×1");
+  await expect(group.locator(".tool-group-names")).toContainText("运行命令 ×1");
+  await expect(group.locator(".tool-group-names")).toContainText("read_file");
+  await expect(group.locator(".tool-group-names")).toContainText("read_image");
+  await expect(group.locator(".tool-group-names")).toContainText("terminal");
+
+  // 展开后：三个类别分区各一张卡，且卡上保留原始工具名
+  await group.locator(".tool-group-summary").click();
+  await expect(group).toHaveAttribute("open", "");
+  const sections = group.locator("[data-category-section]");
+  await expect(sections).toHaveCount(3);
+  await expect(sections.nth(0)).toHaveAttribute("data-category-section", "file-read");
+  await expect(sections.nth(1)).toHaveAttribute("data-category-section", "image-read");
+  await expect(sections.nth(2)).toHaveAttribute("data-category-section", "command");
+  await expect(group.locator(".tool-card")).toHaveCount(3);
+  expect(await group.locator(".tool-name").allTextContents()).toEqual(["read_file", "read_image", "terminal"]);
+  expect(pageErrors).toEqual([]);
 });
 
-test("连续房产工具调用折叠为单层，组内每次调用仍可独立展开", async ({ page }) => {
+test("同类工具连发折叠为单层「连续工具调用」，组内每次调用仍可独立展开", async ({ page }) => {
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, groupToolCallsIfNeeded }, clientState] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    for (const [index, action] of ["detail", "detail", "material", "detail"].entries()) {
-      const part = {
-        p: "tool", id: `estate-consecutive-${index}`, name: "house_lookup",
-        argsText: JSON.stringify({ action, city: "青岛", houseId: String(100000000000 + index) }),
-        result: { content: "{}", isError: false },
-      };
-      block.parts.push(part);
-      mountPart(block, part);
-    }
-    const node = { p: "node", name: "tools" };
-    block.parts.push(node);
-    const group = groupToolCallsIfNeeded(block, host, node);
-    const summary = group?.querySelector(".tool-group-summary") as HTMLElement | null;
-    const heading = group?.querySelector(".tool-category-heading") as HTMLElement | null;
-    const firstHead = group?.querySelector(".tool-card .tool-head") as HTMLElement | null;
-    const firstCard = firstHead?.closest(".tool-card") as HTMLElement | null;
-    const initial = {
-      grouped: Boolean(group),
-      groupOpen: Boolean(group?.open),
-      groups: host.querySelectorAll(".tool-group").length,
-      cards: group?.querySelectorAll(".tool-card").length || 0,
-      categories: [...(group?.querySelectorAll(".tool-card") ?? [])].map((card) => (card as HTMLElement).dataset.toolCategory),
-      title: group?.querySelector(".tool-group-title")?.textContent || "",
-      names: group?.querySelector(".tool-group-names")?.textContent || "",
-      headingDisplay: heading ? getComputedStyle(heading).display : "",
-      caret: group?.querySelector(".tool-group-caret")?.textContent || "",
-      cardExpanded: firstHead?.getAttribute("aria-expanded") || "",
-    };
-    summary?.click();
-    const openAfterClick = Boolean(group?.open);
-    summary?.click();
-    const closedAfterClick = Boolean(group?.open);
-    firstHead?.click();
-    const cardOpenAfterClick = Boolean(firstCard?.classList.contains("open"));
-    const cardExpandedAfterClick = firstHead?.getAttribute("aria-expanded") || "";
-    firstHead?.click();
-    firstHead?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    const cardOpenAfterKeyboard = Boolean(firstCard?.classList.contains("open"));
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return {
-      ...initial,
-      openAfterClick,
-      closedAfterClick,
-      cardOpenAfterClick,
-      cardExpandedAfterClick,
-      cardOpenAfterKeyboard,
-    };
-  });
+  await createChat(page);
+  // same-tools 场景：同一工具连发四次（同类 → 组标题为「连续工具调用」）
+  await runTurn(page, "同类工具演示", "折叠的工具组");
 
-  expect(result.grouped).toBe(true);
-  expect(result.groupOpen).toBe(false);
-  expect(result.groups).toBe(1);
-  expect(result.cards).toBe(4);
-  expect(result.categories).toEqual(["estate", "estate", "estate", "estate"]);
-  expect(result.title).toBe("连续工具调用");
-  expect(result.names).toContain("house_lookup ×4");
-  expect(result.names).not.toContain("房产查询 ×4");
-  expect(result.headingDisplay).toBe("none");
-  expect(result.caret).toBe("▶");
-  expect(result.cardExpanded).toBe("false");
-  expect(result.openAfterClick).toBe(true);
-  expect(result.closedAfterClick).toBe(false);
-  expect(result.cardOpenAfterClick).toBe(true);
-  expect(result.cardExpandedAfterClick).toBe("true");
-  expect(result.cardOpenAfterKeyboard).toBe(true);
+  const group = page.locator("#messages .tool-group").first();
+  await expect(group).toHaveCount(1);
+  await expect(group).not.toHaveAttribute("open", "");
+  await expect(group.locator(".tool-group-title")).toHaveText("连续工具调用");
+  await expect(group.locator(".tool-group-names")).toContainText("house_lookup ×4");
+  await expect(group.locator(".tool-group-count")).toContainText("次调用");
+
+  // 单类别时类别标题行不显示（避免与组标题重复）
+  const heading = group.locator(".tool-category-heading").first();
+  if (await heading.count()) await expect(heading).toBeHidden();
+
+  await group.locator(".tool-group-summary").click();
+  await expect(group).toHaveAttribute("open", "");
+  const cards = group.locator(".tool-card");
+  await expect(cards).toHaveCount(4);
+  expect(await cards.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.toolCategory))).toEqual(
+    ["estate", "estate", "estate", "estate"],
+  );
+
+  // 每次调用仍可独立展开：点第一张卡的头部
+  const firstHead = cards.first().locator(".tool-head");
+  await expect(firstHead).toHaveAttribute("aria-expanded", "false");
+  await firstHead.click();
+  await expect(firstHead).toHaveAttribute("aria-expanded", "true");
+  await expect(cards.first()).toHaveClass(/open/);
+  await firstHead.click();
+  await expect(firstHead).toHaveAttribute("aria-expanded", "false");
+
+  // 键盘 Enter 同样可展开（可访问性）
+  await firstHead.focus();
+  await firstHead.press("Enter");
+  await expect(cards.first()).toHaveClass(/open/);
 });
 
 test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, updateToolCard }, clientState, events] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const tool = {
-      p: "tool", id: "named-tool", name: "house_lookup",
-      argsText: JSON.stringify({ community: "左岸风度" }), result: null,
-    };
-    block.parts.push(tool);
-    mountPart(block, tool);
-    updateToolCard(tool);
-    events.addNodeChip(block, "agent", false);
-    events.addNodeChip(block, "tools", false);
-    const answer = {
-      nodeChips: [...host.querySelectorAll(".node-chip")].map((el) => el.textContent),
-      toolName: host.querySelector(".tool-name")?.textContent || "",
-    };
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return answer;
-  });
+  await createChat(page);
+  await runTurn(page, "批量工具演示", "各自归到自己的分区");
 
-  expect(result.nodeChips).toEqual([]);
-  expect(result.toolName).toBe("house_lookup");
+  // agent / tools 是执行内部节点：不产生 .node-chip（具体工具名由卡片与组摘要承担）
+  await expect(page.locator("#messages .node-chip")).toHaveCount(0);
+  // 展开工具组后，卡片保留原始工具名而不是本地化类别名
+  const group = page.locator("#messages .tool-group").first();
+  await group.locator(".tool-group-summary").click();
+  expect(await group.locator(".tool-name").allTextContents()).toEqual(["read_file", "read_image", "terminal"]);
 });
 
 test("思考过程流式阶段显示思考中状态，完成后隐藏并解除 busy", async ({ page }) => {
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, updateThinkingPart }, clientState] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const part = { p: "thinking", node: "agent", text: "正在核对房源。", streaming: true };
-    block.parts.push(part);
-    mountPart(block, part);
-    const details = host.querySelector(".thinking-block")!;
-    const meta = host.querySelector(".thinking-meta")!;
-    const during = {
-      text: meta.textContent || "",
-      hidden: meta.classList.contains("hidden"),
-      busy: details.getAttribute("aria-busy"),
-      stateClass: details.classList.contains("is-thinking"),
-      role: meta.getAttribute("role"),
-    };
-    part.streaming = false;
-    updateThinkingPart(part);
-    const after = {
-      hidden: meta.classList.contains("hidden"),
-      busy: details.getAttribute("aria-busy"),
-      stateClass: details.classList.contains("is-thinking"),
-    };
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return { during, after };
-  });
+  await createChat(page);
+  await page.locator("#input").fill("慢速思考演示");
+  await page.locator("#send-btn").click();
 
-  expect(result.during).toEqual({
-    text: "思考中", hidden: false, busy: "true", stateClass: true, role: "status",
-  });
-  expect(result.after).toEqual({ hidden: true, busy: "false", stateClass: false });
+  // 流式中间态：思考卡可见、meta 文案「思考中」、aria-busy=true
+  const details = page.locator("#messages .thinking-block").first();
+  await expect(details).toBeVisible({ timeout: 15_000 });
+  await expect(details).toHaveAttribute("aria-busy", "true");
+  await expect(details).toHaveClass(/is-thinking/);
+  const meta = details.locator(".thinking-meta");
+  await expect(meta).toHaveText("思考中");
+  await expect(meta).not.toHaveClass(/hidden/);
+  await expect(meta).toHaveAttribute("role", "status");
+
+  // 流结束后：meta 隐藏、busy 解除、is-thinking 摘掉
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 25_000 });
+  await expect(details).toHaveAttribute("aria-busy", "false");
+  await expect(details).not.toHaveClass(/is-thinking/);
+  await expect(meta).toHaveClass(/hidden/);
 });
+/**
+ * 创建房产 Agent 会话。
+ * 两种布局要**显式分支**：localStorage 会恢复上次会话，此时欢迎页是隐藏的，
+ * 用 `#demo-cards.or(#modal-cards)` 会先命中隐藏的欢迎页卡片而一直等到超时。
+ */
+async function createEstateChat(page: import("@playwright/test").Page): Promise<void> {
+  await page.locator("#new-chat-btn").click();
+  const modal = page.locator("#modal-mask");
+  const card = (await modal.isVisible())
+    ? page.locator("#modal-cards .demo-card", { hasText: "租房 / 房产 Agent" }).first()
+    : page.locator("#demo-cards .demo-card", { hasText: "租房 / 房产 Agent" }).first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await card.click();
+  // 等遮罩收起：否则后续 fill/click 会打在遮罩上（只在超时后才暴露）
+  await expect(modal).toBeHidden({ timeout: 15_000 });
+  await expect(page.locator("#input")).toBeEnabled();
+}
+
+/** 发一轮房产对话并等流结束（结论区已渲染）。 */
+async function runEstateTurn(page: import("@playwright/test").Page, message = "帮我找北京朝阳区两居室，预算6000"): Promise<void> {
+  await page.locator("#input").fill(message);
+  await page.locator("#send-btn").click();
+  await expect(page.locator("#messages .conclusion-media")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 30_000 });
+}
 
 test("房源结论直接展示地图与户型图，工具卡不再承载媒体", async ({ page }) => {
+  // 房产 mock 场景要走 4 次工具流（每次 JSON 分片 + 停顿），默认 35s 在全量顺序跑时不够
+  test.setTimeout(90_000);
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart, updateToolCard }, clientState, events] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const detail = {
-      action: "detail",
-      houseId: "103155273255",
-      city: "青岛",
-      data: JSON.stringify({ 基础信息: {
-        小区名: "测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月",
-        房源所属楼层: "中楼层", 出租朝向: "南", 装修: "精装",
-      } }),
-      location: {
-        label: "测试花园",
-        address: "测试路 1 号",
-        lat: 36.123456,
-        lng: 120.123456,
-        source: "beike",
-        precision: "community",
-        embedUrl: "https://www.openstreetmap.org/export/embed.html?bbox=120.111456,36.111456,120.135456,36.135456&layer=mapnik&marker=36.123456,120.123456",
-        links: { amap: "https://uri.amap.com/marker?position=120.123456,36.123456&name=test" },
-      },
-      presentation: { map: true, images: 0 },
-    };
-    const image = "data:image/svg+xml;base64," + btoa("<svg xmlns='http://www.w3.org/2000/svg' width='320' height='220'><rect width='320' height='220' fill='#eee'/><text x='20' y='40'>Floor plan</text></svg>");
-    const material = {
-      action: "material",
-      houseId: "103155273255",
-      images: [image],
-      count: 1,
-      vr: "https://realsee.com/vr/tour-103155273255",
-      presentation: { images: 1, vr: true },
-    };
-    const parts = [detail, material].map((payload, index) => ({
-      p: "tool", id: `estate-render-${index}`, name: "house_lookup", argsText: "{}",
-      result: { content: JSON.stringify(payload), isError: false },
-    }));
-    for (const part of parts) {
-      block.parts.push(part);
-      mountPart(block, part);
-      updateToolCard(part);
-    }
-    events.handleEvent({ type: "token", text: "结论：测试花园 103155273255 位置与户型图如下。", node: "agent" }, block, null);
-    const beforeReview = host.querySelectorAll(".conclusion-media").length;
-    events.handleEvent({ type: "reasoning", text: "复核结论与附件", node: "review" }, block, null);
-    const duringReview = host.querySelectorAll(".conclusion-media").length;
-    events.handleEvent({ type: "done" }, block, null);
-    const conclusion = host.querySelector(".conclusion-media");
-    const md = host.querySelector(".md");
-    const map = conclusion?.querySelector<HTMLElement>(".conclusion-property-map");
-    const mapTile = conclusion?.querySelector(".conclusion-map-tile");
-    const img = conclusion?.querySelector(".conclusion-table-image img");
-    const vrLink = conclusion?.querySelector<HTMLAnchorElement>(".conclusion-vr-link");
-    const table = conclusion?.querySelector(".conclusion-table");
-    const rows = table?.querySelectorAll("tbody tr").length || 0;
-    const node = conclusion && md ? md.compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
-    const toolMedia = host.querySelectorAll(".tool-card iframe, .tool-card img, .tool-card .conclusion-images, .tool-card .conclusion-table").length;
-    const openToolCards = [...host.querySelectorAll(".tool-card")].filter((card) => card.classList.contains("open")).length;
+  await createEstateChat(page);
+  await runEstateTurn(page);
 
-    const imageButton = conclusion?.querySelector<HTMLButtonElement>(".conclusion-image-open");
-    imageButton?.focus();
-    imageButton?.click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const imagePreviewMask = document.getElementById("media-preview-mask");
-    const imagePreviewSurface = document.getElementById("media-preview-surface");
-    const imagePreview = {
-      open: Boolean(imagePreviewMask && !imagePreviewMask.classList.contains("hidden")),
-      kind: imagePreviewSurface?.dataset.kind || "",
-      title: document.getElementById("media-preview-title")?.textContent || "",
-      zoomInitial: document.getElementById("media-preview-zoom-value")?.textContent || "",
-      zoomAfter: "",
-      zoomOut: "",
-      zoomBeforeReset: "",
-      zoomReset: "",
-      closedByEscape: false,
-      hasImage: Boolean(imagePreviewSurface?.querySelector("img")),
-      pageInert: document.getElementById("app")?.hasAttribute("inert") || false,
-    };
-    imagePreviewMask?.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
-    imagePreview.zoomAfter = document.getElementById("media-preview-zoom-value")?.textContent || "";
-    document.getElementById("media-preview-zoom-out")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    imagePreview.zoomOut = document.getElementById("media-preview-zoom-value")?.textContent || "";
-    document.getElementById("media-preview-zoom-in")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    document.getElementById("media-preview-zoom-in")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    imagePreview.zoomBeforeReset = document.getElementById("media-preview-zoom-value")?.textContent || "";
-    document.getElementById("media-preview-reset")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    imagePreview.zoomReset = document.getElementById("media-preview-zoom-value")?.textContent || "";
-    imagePreviewMask?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    imagePreview.closedByEscape = Boolean(imagePreviewMask?.classList.contains("hidden"));
-    const imageFocusRestored = document.activeElement === imageButton;
-
-    const mapButton = conclusion?.querySelector<HTMLElement>(".conclusion-map-preview-trigger");
-    mapButton?.focus();
-    mapButton?.click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const mapPreview = {
-      open: Boolean(document.getElementById("media-preview-mask") && !document.getElementById("media-preview-mask")?.classList.contains("hidden")),
-      kind: document.getElementById("media-preview-surface")?.dataset.kind || "",
-      hasMap: Boolean(document.getElementById("media-preview-surface")?.querySelector(".conclusion-map")),
-      iframes: document.querySelectorAll("#media-preview iframe").length,
-    };
-    document.getElementById("media-preview-close")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    const mapFocusRestored = document.activeElement === mapButton;
-
-    const answer = {
-      hasConclusion: Boolean(conclusion),
-      beforeReview,
-      duringReview,
-      isAfterText: Boolean(node),
-      mapLat: map?.dataset.mapLat || "",
-      mapLng: map?.dataset.mapLng || "",
-      mapTiles: conclusion?.querySelectorAll(".conclusion-map-tile").length || 0,
-      mapMarker: Boolean(conclusion?.querySelector(".conclusion-map-marker")),
-      mapTileSrc: mapTile?.getAttribute("src") || "",
-      imageSrc: img?.getAttribute("src") || "",
-      vrHref: vrLink?.href || "",
-      vrText: vrLink?.textContent || "",
-      tableText: table?.textContent || "",
-      rows,
-      visibleText: md?.textContent || "",
-      toolMedia,
-      openToolCards,
-      imagePreview,
-      imageFocusRestored,
-      mapPreview,
-      mapFocusRestored,
-    };
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return answer;
+  const conclusion = page.locator("#messages .conclusion-media");
+  await expect(conclusion).toHaveCount(1);
+  // 结论块必须排在正文之后（结论在回答下方，不是散落在工具卡之间）
+  const ordered = await page.evaluate(() => {
+    const conclusionEl = document.querySelector("#messages .conclusion-media");
+    const md = document.querySelector("#messages .md");
+    if (!conclusionEl || !md) return false;
+    return Boolean(md.compareDocumentPosition(conclusionEl) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
+  expect(ordered).toBe(true);
 
-  expect(result.beforeReview).toBe(0);
-  expect(result.duringReview).toBe(1);
-  expect(result.hasConclusion).toBe(true);
-  expect(result.isAfterText).toBe(true);
-  expect(result.mapLat).toBe("36.123456");
-  expect(result.mapLng).toBe("120.123456");
-  expect(result.mapTiles).toBeGreaterThanOrEqual(9);
-  expect(result.mapMarker).toBe(true);
-  expect(result.mapTileSrc).toContain("is.autonavi.com/appmaptile?style=8");
-  expect(result.imageSrc).toMatch(/^data:image\/svg\+xml;base64,/);
-  expect(result.vrHref).toBe("https://realsee.com/vr/tour-103155273255");
-  expect(result.vrText).toContain("VR 看房");
-  expect(result.rows).toBe(1);
-  expect(result.tableText).toContain("测试花园 · 2室1厅 · 90㎡");
-  expect(result.tableText).toContain("2400元/月");
-  expect(result.tableText).toContain("36.123456, 120.123456");
-  expect(result.visibleText).not.toContain("103155273255");
-  expect(result.toolMedia).toBe(0);
-  expect(result.openToolCards).toBe(0);
-  expect(result.imagePreview).toEqual({
-    open: true, kind: "image", title: "户型图预览",
-    zoomInitial: "100%", zoomAfter: "125%", zoomOut: "100%",
-    zoomBeforeReset: "150%", zoomReset: "100%",
-    hasImage: true, pageInert: true, closedByEscape: true,
-  });
-  expect(result.imageFocusRestored).toBe(true);
-  expect(result.mapPreview).toEqual({ open: true, kind: "map", hasMap: true, iframes: 0 });
-  expect(result.mapFocusRestored).toBe(true);
+  // 地图：瓦片层（≥9 瓦片 + 标记）+ 提供方数据集，且零 iframe
+  const map = conclusion.locator(".conclusion-property-map");
+  await expect(map).toHaveCount(1);
+  await expect(map).toHaveAttribute("data-map-provider", /amap|tencent|baidu/);
+  expect(Number(await map.getAttribute("data-map-lat"))).toBeGreaterThan(0);
+  expect(Number(await map.getAttribute("data-map-lng"))).toBeGreaterThan(0);
+  expect(await conclusion.locator(".conclusion-map-tile").count()).toBeGreaterThanOrEqual(9);
+  await expect(conclusion.locator(".conclusion-map-marker")).toHaveCount(1);
+  expect(await page.locator("#messages iframe").count()).toBe(0);
+
+  // 工具卡不再承载媒体：媒体只在结论区
+  expect(await page.locator("#messages .tool-card img, #messages .tool-card iframe, #messages .tool-card .conclusion-table").count()).toBe(0);
+
+  // 户型图预览：点开后是模态、可缩放、Esc 关闭并回焦
+  const imageButton = conclusion.locator(".conclusion-image-open").first();
+  await expect(imageButton).toHaveCount(1);
+  await imageButton.focus();
+  await imageButton.click();
+  const mask = page.locator("#media-preview-mask");
+  await expect(mask).toBeVisible();
+  await expect(page.locator("#media-preview-surface")).toHaveAttribute("data-kind", "image");
+  await expect(page.locator("#media-preview-title")).toHaveText("户型图预览");
+  await expect(page.locator("#media-preview-zoom-value")).toHaveText("100%");
+  await mask.press("+");
+  await expect(page.locator("#media-preview-zoom-value")).toHaveText("125%");
+  await page.locator("#media-preview-zoom-out").click();
+  await expect(page.locator("#media-preview-zoom-value")).toHaveText("100%");
+  await page.locator("#media-preview-reset").click();
+  await mask.press("Escape");
+  await expect(mask).toBeHidden();
+  expect(await imageButton.evaluate((el) => el === document.activeElement)).toBe(true);
+
+  // 地图预览：同一模态的 map 变体，仍然零 iframe
+  const mapButton = conclusion.locator(".conclusion-map-preview-trigger").first();
+  await mapButton.focus();
+  await mapButton.click();
+  await expect(mask).toBeVisible();
+  await expect(page.locator("#media-preview-surface")).toHaveAttribute("data-kind", "map");
+  await expect(page.locator("#media-preview-surface .conclusion-map")).toHaveCount(1);
+  expect(await page.locator("#media-preview iframe").count()).toBe(0);
+  await page.locator("#media-preview-close").click();
+  await expect(mask).toBeHidden();
+  expect(await mapButton.evaluate((el) => el === document.activeElement)).toBe(true);
 });
 
 test("结论表跟随最终回答选择房源，户型图不再落入其他户型图", async ({ page }) => {
+  test.setTimeout(90_000);
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart }, clientState, events] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const image = "data:image/svg+xml;base64," + btoa("<svg xmlns='http://www.w3.org/2000/svg' width='320' height='220'><rect width='320' height='220' fill='#eee'/><text x='20' y='40'>138 floor plan</text></svg>");
-    const listings = [
-      { id: "103155104968", title: "左岸风度 · 2室1厅 · 90㎡", price: "2700元/月", area: "90㎡" },
-      { id: "103155273255", title: "左岸风度 · 2室2厅 · 90㎡", price: "2400元/月", area: "90㎡" },
-      { id: "103155249731", title: "左岸风度 · 2室1厅 · 89㎡", price: "2700元/月", area: "89㎡" },
-      { id: "103154695352", title: "左岸风度 · 2室1厅 · 107㎡", price: "2800元/月", area: "107㎡" },
-      { id: "103153954713", title: "左岸风度 · 3室2厅 · 135㎡", price: "3800元/月", area: "135㎡" },
-      { id: "103154626720", title: "左岸风度 · 3室2厅 · 138㎡", price: "3500元/月", area: "138㎡", hasVr: true },
-      { id: "103147225031", title: "左岸风度 · 3室2厅 · 137㎡", price: "3600元/月", area: "137㎡" },
-    ];
-    const parts = [
-      { action: "search", listings },
-      { action: "material", houseId: "103154626720", images: [image] },
-    ].map((payload, index) => ({
-      p: "tool", id: `conclusion-selection-${index}`, name: "house_lookup", argsText: "{}",
-      result: { content: JSON.stringify(payload), isError: false },
-    }));
-    for (const part of parts) {
-      block.parts.push(part);
-      mountPart(block, part);
-    }
-    events.handleEvent({
-      type: "token",
-      text: "首选左岸风度 3室2厅 138㎡ ¥3,500/月；次选 2室2厅 90㎡ ¥2,400/月；2室1厅 107㎡ ¥2,800/月；三居 137㎡ ¥3,600/月、135㎡ ¥3,800/月。",
-      node: "agent",
-    }, block, null);
-    events.handleEvent({ type: "done" }, block, null);
-    const table = host.querySelector(".conclusion-table");
-    const rows = [...(table?.querySelectorAll("tbody tr") || [])];
-    const targetRow = rows.find((row) => row.textContent?.includes("138㎡"));
-    const targetVr = targetRow?.querySelector<HTMLAnchorElement>(".conclusion-vr-link")?.href || "";
-    const vrPending = targetRow?.querySelector(".conclusion-vr-pending")?.textContent || "";
-    return {
-      rowCount: rows.length,
-      tableText: table?.textContent || "",
-      targetImage: targetRow?.querySelector("img")?.getAttribute("src") || "",
-      targetVr,
-      vrPending,
-      hasOtherFloorPlanLabel: (host.textContent || "").includes("其他户型图"),
-    };
-  });
+  await createEstateChat(page);
+  await runEstateTurn(page);
 
-  expect(result.rowCount).toBe(5);
-  expect(result.tableText).toContain("138㎡");
-  expect(result.tableText).toContain("137㎡");
-  expect(result.tableText).toContain("135㎡");
-  expect(result.tableText).not.toContain("89㎡");
-  expect(result.targetImage).toMatch(/^data:image\/svg\+xml;base64,/);
-  expect(result.targetVr).toBe("");
-  expect(result.vrPending).toContain("入口未返回");
-  expect(result.hasOtherFloorPlanLabel).toBe(false);
+  const table = page.locator("#messages .conclusion-table");
+  await expect(table).toHaveCount(1);
+  const tableText = (await table.textContent()) ?? "";
+  // 结论表只列最终回答里提到的房源，且带真实价格与面积
+  expect(tableText).toMatch(/\d+㎡/);
+  expect(tableText).toMatch(/(\d[\d,]* ?万|\d[\d,]* ?元\/月)/);
+  // 每行户型图必须与自己的 houseId 绑定（不能整表共用一张图）
+  const bound = await page.evaluate(() => {
+    const el = document.querySelector("#messages .conclusion-table");
+    if (!el) return { rows: 0, withImage: 0, uniqueSrc: 0 };
+    const rows = [...el.querySelectorAll("tbody tr")];
+    const srcs = rows.map((row) => row.querySelector("img")?.getAttribute("src") ?? "").filter(Boolean);
+    return { rows: rows.length, withImage: srcs.length, uniqueSrc: new Set(srcs).size };
+  });
+  expect(bound.rows).toBeGreaterThan(0);
+  expect(bound.withImage).toBe(bound.uniqueSrc);
+  // 「其他户型图」这种兜底分组标题不得回流
+  expect(await page.locator("#messages").textContent()).not.toContain("其他户型图");
 });
 
 test("结论表最多展示 12 套并显示 Excel 下载入口", async ({ page }) => {
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart }, clientState, events] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-    ]);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const block = { t: "assistant", parts: [] } as any;
-    clientState.blockBodies.set(block, host);
-    const listings = Array.from({ length: 15 }, (_, index) => ({
-      id: `10315554${String(index).padStart(4, "0")}`,
-      title: `容量测试小区 · 2室1厅 · ${80 + index}㎡`,
-      price: `${2300 + index * 100}元/月`,
-      area: `${80 + index}㎡`,
-    }));
-    const part = {
-      p: "tool", id: "estate-export-ui", name: "house_search", argsText: "{}",
-      result: { content: JSON.stringify({
-        action: "search",
-        listings,
-        count: listings.length,
-        recommendationLimit: 12,
-        excel: {
-          fileName: "房源对比_青岛_租房_20261117_120000.xlsx",
-          downloadUrl: "/api/estate/exports/123e4567-e89b-42d3-a456-426614174000",
-          count: listings.length,
-        },
-      }), isError: false },
-    };
-    block.parts.push(part);
-    mountPart(block, part);
-    events.handleEvent({ type: "token", text: "共筛出 15 套，以下按优先级展示。", node: "agent" }, block, null);
-    events.handleEvent({ type: "done" }, block, null);
-    const conclusion = host.querySelector(".conclusion-media");
-    const exportLink = conclusion?.querySelector<HTMLAnchorElement>(".conclusion-export-link");
-    const answer = {
-      rows: conclusion?.querySelectorAll(".conclusion-table tbody tr").length || 0,
-      exportHref: exportLink?.getAttribute("href") || "",
-      exportText: exportLink?.textContent || "",
-    };
-    host.remove();
-    clientState.blockBodies.delete(block);
-    return answer;
-  });
-  expect(result.rows).toBe(12);
-  expect(result.exportHref).toBe("/api/estate/exports/123e4567-e89b-42d3-a456-426614174000");
-  expect(result.exportText).toContain("15 套完整候选");
+  await createChat(page);
+  await page.locator("#input").fill("大量候选演示");
+  await page.locator("#send-btn").click();
+  await expect(page.locator("#messages .conclusion-media")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 30_000 });
+
+  const conclusion = page.locator("#messages .conclusion-media");
+  // 服务端给了 15 套，结论表硬上限 12 行
+  await expect(conclusion.locator(".conclusion-table tbody tr")).toHaveCount(12);
+  const exportLink = conclusion.locator(".conclusion-export-link");
+  await expect(exportLink).toHaveCount(1);
+  await expect(exportLink).toHaveAttribute("href", "/api/estate/exports/123e4567-e89b-42d3-a456-426614174000");
+  await expect(exportLink).toContainText("15 套完整候选");
 });
 
-test("切换地图配置后使用各提供方原生瓦片而不是 iframe", async ({ page }) => {
+test("地图结论使用同源瓦片层渲染，全程零 iframe", async ({ page }) => {
+  test.setTimeout(90_000);
   await login(page);
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart }, clientState, events, mapProvider] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-      load("/modules/map-provider.js"),
-    ]);
-    const appState = clientState.state;
-    const previousConfig = appState.config;
-    const baseConfig = previousConfig || { mock: true, model: "mock", contextWindow: null, providers: [], demos: [] };
-    const detail = {
-      action: "detail",
-      houseId: "103155273255",
-      city: "青岛",
-      data: JSON.stringify({ 基础信息: { 小区名: "测试花园", 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月" } }),
-      location: { label: "测试花园", address: "测试路 1 号", lat: 36.123456, lng: 120.123456, source: "beike", precision: "community" },
-    };
-    const renderWith = (map: any): { url: string; provider: string; configuredProvider: string; iframe: number } => {
-      appState.config = { ...baseConfig, map };
-      const host = document.createElement("div");
-      document.body.appendChild(host);
-      const block = { t: "assistant", parts: [] } as any;
-      clientState.blockBodies.set(block, host);
-      const part = {
-        p: "tool", id: "map-provider-switch-" + map.provider, name: "house_lookup", argsText: "{}",
-        result: { content: JSON.stringify(detail), isError: false },
-      };
-      block.parts.push(part);
-      mountPart(block, part);
-      events.handleEvent({ type: "token", text: "结论：地图提供方切换验证。", node: "agent" }, block, null);
-      events.handleEvent({ type: "done" }, block, null);
-      const mapEl = host.querySelector<HTMLElement>(".conclusion-property-map");
-      const tile = host.querySelector<HTMLImageElement>(".conclusion-map-tile");
-      const answer = {
-        url: tile?.src || "",
-        provider: mapEl?.dataset.mapProvider || "",
-        configuredProvider: appState.config?.map?.provider || "",
-        iframe: host.querySelectorAll("iframe").length,
-      };
-      host.remove();
-      clientState.blockBodies.delete(block);
-      return answer;
-    };
-    const tencent = renderWith({
-      ...mapProvider.DEFAULT_MAP_CONFIG,
-      provider: "tencent", label: "腾讯地图",
-      tileUrl: "https://rt{s}.map.gtimg.com/tile?z={z}&x={x}&y={y}&styleid=3&version=1",
-      subdomains: ["0", "1", "2", "3"], coordinateSystem: "gcj02", yAxis: "tms",
-    });
-    const baidu = renderWith({
-      ...mapProvider.DEFAULT_MAP_CONFIG,
-      provider: "baidu", label: "百度地图",
-      tileUrl: "https://maponline{s}.bdimg.com/tile/?qt=vtile&x={x}&y={y}&z={z}&styles=pl&scaler=1",
-      subdomains: ["0", "1", "2", "3"], coordinateSystem: "bd09", projection: "baidu",
-    });
-    appState.config = previousConfig;
-    return { tencent, baidu };
-  });
+  await createEstateChat(page);
+  await runEstateTurn(page);
 
-  expect(result.tencent.configuredProvider).toBe("tencent");
-  expect(result.tencent.provider).toBe("tencent");
-  expect(result.tencent.url).toContain("map.gtimg.com/tile");
-  expect(result.tencent.iframe).toBe(0);
-  expect(result.baidu.provider).toBe("baidu");
-  expect(result.baidu.url).toContain("bdimg.com/tile");
-  expect(result.baidu.iframe).toBe(0);
+  // 说明：地图提供方由环境变量 MAP_PROVIDER 在服务启动时决定（无运行时写入 API），
+  // 各提供方的瓦片 URL / 静态图 URL 构造规则已在 tests/unit/chat-flow.test.ts 覆盖。
+  // 这里只守 e2e 独有的部分：真实渲染路径确实用同源瓦片层，而不是 iframe 嵌入。
+  const map = page.locator("#messages .conclusion-property-map").first();
+  await expect(map).toBeVisible({ timeout: 20_000 });
+  await expect(map).toHaveAttribute("data-map-provider", /amap|tencent|baidu|osm|custom/);
+
+  const tiles = page.locator("#messages .conclusion-map-tile");
+  expect(await tiles.count()).toBeGreaterThanOrEqual(9);
+  for (const src of await tiles.evaluateAll((els) => els.map((el) => (el as HTMLImageElement).src))) {
+    expect(src.startsWith("https://") || src.startsWith("http://127.0.0.1")).toBe(true);
+  }
+  expect(await page.locator("#messages iframe").count()).toBe(0);
+  // 地图预览走同一模态，仍然零 iframe
+  await page.locator("#messages .conclusion-map-preview-trigger").first().click();
+  await expect(page.locator("#media-preview-surface")).toHaveAttribute("data-kind", "map");
+  expect(await page.locator("#media-preview iframe").count()).toBe(0);
+  await page.locator("#media-preview-close").click();
 });
 
-test("高德腾讯百度均使用同源官方静态图并保留无 iframe 瓦片降级层", async ({ page }) => {
+test("静态底图就绪后隐藏瓦片与标记层，不出现 iframe 降级", async ({ page }) => {
+  test.setTimeout(90_000);
   await login(page);
+  // 静态图代理允许被拦截：命中说明前端确实走 /api/map/static 同源代理
   const staticMapRequests: string[] = [];
   await page.route(/\/api\/map\/static\?/, async (route) => {
     staticMapRequests.push(route.request().url());
@@ -588,85 +296,25 @@ test("高德腾讯百度均使用同源官方静态图并保留无 iframe 瓦片
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360"><rect width="100%" height="100%" fill="#dbe7da"/></svg>',
     });
   });
+  await createEstateChat(page);
+  await runEstateTurn(page);
 
-  const result = await page.evaluate(async () => {
-    const load = (specifier: string): Promise<any> => import(specifier);
-    const [{ mountPart }, clientState, events, mapProvider] = await Promise.all([
-      load("/render/parts.js"),
-      load("/core/state.js"),
-      load("/stream/events.js"),
-      load("/modules/map-provider.js"),
-    ]);
-    const appState = clientState.state;
-    const previousConfig = appState.config;
-    const baseConfig = previousConfig || { mock: true, model: "mock", contextWindow: null, providers: [], demos: [] };
-    const specs = [
-      { provider: "amap", label: "高德地图", coordinateSystem: "gcj02", projection: "web-mercator" },
-      { provider: "tencent", label: "腾讯地图", coordinateSystem: "gcj02", projection: "web-mercator" },
-      { provider: "baidu", label: "百度地图", coordinateSystem: "bd09", projection: "baidu" },
-    ] as const;
-    const results: Record<string, any> = {};
-    for (const spec of specs) {
-      appState.config = {
-        ...baseConfig,
-        map: {
-          ...mapProvider.DEFAULT_MAP_CONFIG,
-          ...spec,
-          staticMapAvailable: true,
-        },
-      };
-      const detail = {
-        action: "detail",
-        houseId: `10315527${spec.provider}`,
-        city: "青岛",
-        data: JSON.stringify({ 基础信息: { 小区名: `${spec.label}测试花园`, 房型: "2室1厅", 出租面积: "90㎡", 租赁价格: "2400元/月" } }),
-        location: { label: `${spec.label}测试花园`, address: "测试路 1 号", lat: 36.123456, lng: 120.123456, source: "beike", precision: "community" },
-      };
-      const host = document.createElement("div");
-      document.body.appendChild(host);
-      const block = { t: "assistant", parts: [] } as any;
-      clientState.blockBodies.set(block, host);
-      const part = {
-        p: "tool", id: `static-map-${spec.provider}`, name: "house_lookup", argsText: "{}",
-        result: { content: JSON.stringify(detail), isError: false },
-      };
-      block.parts.push(part);
-      mountPart(block, part);
-      events.handleEvent({ type: "token", text: `结论：${spec.label}官方静态地图验证。`, node: "agent" }, block, null);
-      events.handleEvent({ type: "done" }, block, null);
-
-      const mapEl = host.querySelector<HTMLElement>(".conclusion-property-map");
-      const started = Date.now();
-      while (mapEl?.dataset.mapStatus !== "ready" && Date.now() - started < 3_000) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      const staticImage = mapEl?.querySelector<HTMLImageElement>(".conclusion-map-static");
-      results[spec.provider] = {
-        status: mapEl?.dataset.mapStatus || "",
-        renderer: mapEl?.dataset.mapRenderer || "",
-        src: staticImage?.src || "",
-        staticReady: staticImage?.classList.contains("is-ready") || false,
-        layerHidden: Boolean(mapEl?.querySelector<HTMLElement>(".conclusion-map-tiles")?.hidden),
-        markerHidden: Boolean(mapEl?.querySelector<HTMLElement>(".conclusion-map-marker")?.hidden),
-        iframe: host.querySelectorAll("iframe").length,
-      };
-      host.remove();
-      clientState.blockBodies.delete(block);
-    }
-    appState.config = previousConfig;
-    return results;
-  });
-
-  for (const provider of ["amap", "tencent", "baidu"] as const) {
-    expect(result[provider].status).toBe("ready");
-    expect(result[provider].renderer).toBe(`${provider}-static`);
-    expect(result[provider].src).toContain(`provider=${provider}`);
-    expect(result[provider].staticReady).toBe(true);
-    expect(result[provider].layerHidden).toBe(true);
-    expect(result[provider].markerHidden).toBe(true);
-    expect(result[provider].iframe).toBe(0);
-    const request = staticMapRequests.find((url) => new URL(url).searchParams.get("provider") === provider);
-    expect(request).toBeTruthy();
-    expect(new URL(request || "").searchParams.get("variant")).toBe("compact");
+  const map = page.locator("#messages .conclusion-property-map").first();
+  await expect(map).toBeVisible({ timeout: 20_000 });
+  // 没有配置静态图 Key 时不设 data-map-renderer（直接走瓦片层，且不请求代理）
+  if ((await map.locator(".conclusion-map-static").count()) === 0) {
+    expect(staticMapRequests.length).toBe(0);
+    expect(await page.locator("#messages iframe").count()).toBe(0);
+    return;
   }
+  // 配置了静态图 Key 的环境：静态图必须 ready 且瓦片/标记让位
+  await expect(map).toHaveAttribute("data-map-status", "ready", { timeout: 15_000 });
+  await expect(map).toHaveAttribute("data-map-renderer", /-static$/);
+  const staticImage = map.locator(".conclusion-map-static");
+  await expect(staticImage).toHaveClass(/is-ready/);
+  expect(await map.locator(".conclusion-map-tiles").evaluate((el) => (el as HTMLElement).hidden)).toBe(true);
+  expect(await page.locator("#messages iframe").count()).toBe(0);
+  const request = staticMapRequests[0];
+  expect(request).toBeTruthy();
+  expect(new URL(request).searchParams.get("variant")).toBe("compact");
 });

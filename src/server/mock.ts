@@ -161,10 +161,20 @@ async function* interruptFlow(req: ApprovalPayload, signal?: AbortSignal): Async
 // ---------------------------------------------------------------------------
 // 场景识别
 // ---------------------------------------------------------------------------
-type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "chat";
+type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "batch-tools" | "same-tools" | "slow-thinking" | "estate-many" | "chat";
 
 function detectScenario(message: string): Scenario {
   if (/邮件|email/i.test(message)) return "email";
+  // 批量工具演示：一次调三个不同类别的工具，用于验证工具组分区与折叠。
+  // 存在理由：工具分组是纯前端渲染行为，若没有可触发的服务端场景，
+  // e2e 只能 import("/render/parts.js") 驱动——那会锁死 1:1 过渡树。
+  if (/批量工具|工具分组/.test(message)) return "batch-tools";
+  // 同类工具连发：验证「单类别折叠为连续工具调用」这一分支
+  if (/同类工具|连续工具/.test(message)) return "same-tools";
+  // 慢速思考：思考卡只在流式期间显示「思考中」，需要足够长的窗口让 e2e 捕获中间态
+  if (/慢速思考|思考过程/.test(message)) return "slow-thinking";
+  // 候选超过 12 套：验证结论表上限与「完整候选」Excel 下载入口
+  if (/大量候选|房源上限/.test(message)) return "estate-many";
   // 创作类（写诗/作文/写文章）优先于天气：一句话里同时出现「查天气+写诗」时走多 Agent 协作
   if (/诗|词|文章|作文|写一[首篇封个]|润色/.test(message)) return "poem";
   // 房产关键词覆盖：找房/对比区位/户型图/贝壳
@@ -288,6 +298,94 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       yield { type: "tool_result", id, content: await getCurrentTime.invoke({}) };
       yield { type: "node", name: "agent" };
       yield* streamText("已经帮你查到当前时间，见上方工具结果 ⏰", signal);
+      return;
+    }
+
+    // ---- 批量工具：三个不同类别的工具，验证工具组分区 / 折叠 / 原始名保留 ----
+    // 供 e2e 用真实 UI 驱动（不需要 import("/render/parts.js") 那种 1:1 耦合）。
+    // ⚠ 事件顺序必须是「3 个 tool_call/result 先出，再出 node/tools」：
+    // 分组器从 node/tools 往前收集紧邻的 tool parts，少于 3 个不成组。
+    case "batch-tools": {
+      yield { type: "node", name: "agent" };
+      yield* streamText("我一次读取一个文档、一张图片，再跑一条命令，然后再汇总。", signal);
+      const fileId = MOCK_ID();
+      yield* streamToolCall(fileId, "read_file", { path: "README.md" }, signal);
+      yield { type: "tool_result", id: fileId, content: "# agentatlas\n\n批量工具演示文件内容。" };
+      const imageId = MOCK_ID();
+      yield* streamToolCall(imageId, "read_image", { path: "docs/preview.png" }, signal);
+      yield { type: "tool_result", id: imageId, content: "（演示图片）" };
+      const cmdId = MOCK_ID();
+      yield* streamToolCall(cmdId, "terminal", { command: "npm test" }, signal);
+      yield { type: "tool_result", id: cmdId, content: "687 tests passed" };
+      // 收口：node/tools 触发分组，把上面三张卡折叠进工具组
+      yield { type: "node", name: "tools" };
+      yield { type: "node", name: "agent" };
+      yield* streamText("三个工具都执行完了：文件读取、图片读取与命令执行各自归到自己的分区。", signal);
+      return;
+    }
+
+    // ---- 同类工具连发：单类别折叠（标题变「连续工具调用」）----
+    case "same-tools": {
+      yield { type: "node", name: "agent" };
+      yield* streamText("我把同一个查询按四个候选依次跑一遍。", signal);
+      const ids: string[] = [];
+      for (let index = 0; index < 4; index += 1) {
+        const id = MOCK_ID();
+        ids.push(id);
+        yield* streamToolCall(id, "house_lookup", { action: "detail", city: "青岛", houseId: String(100000000000 + index) }, signal);
+        yield { type: "tool_result", id, content: JSON.stringify({ action: "detail", ok: true }) };
+      }
+      yield { type: "node", name: "tools" };
+      yield { type: "node", name: "agent" };
+      yield* streamText("四个候选都查完了，见上方折叠的工具组。", signal);
+      return;
+    }
+
+    // ---- 慢速思考：思考卡只在流式期间显示「思考中」，需要可观测的中间态 ----
+    case "slow-thinking": {
+      yield { type: "node", name: "agent" };
+      for (let index = 0; index < 8; index += 1) {
+        if (signal?.aborted) return;
+        yield { type: "reasoning", text: `第 ${index + 1} 步核对房源。` };
+        await sleep(220);
+      }
+      yield* streamText("核对完成。", signal);
+      return;
+    }
+
+    // ---- 候选超过 12 套：验证结论表上限与「完整候选」Excel 入口 ----
+    case "estate-many": {
+      yield { type: "node", name: "agent" };
+      yield* streamText("候选比较多，我先拉一批再筛。", signal);
+      const many = Array.from({ length: 15 }, (_, index) => ({
+        id: `10315554${String(index).padStart(4, "0")}`,
+        title: `容量测试小区 · 2室1厅 · ${80 + index}㎡`,
+        price: `${2300 + index * 100}元/月`,
+        area: `${80 + index}㎡`,
+      }));
+      const searchId = MOCK_ID();
+      yield* streamToolCall(searchId, "house_search", { mode: "rent", city: "北京", query: "容量测试" }, signal);
+      yield {
+        type: "tool_result",
+        id: searchId,
+        content: JSON.stringify({
+          action: "search",
+          mode: "rent",
+          city: "北京",
+          count: many.length,
+          listings: many,
+          recommendationLimit: 12,
+          // 导出产物走真实契约路径（/api/estate/exports/<uuid>），前端只校验格式
+          excel: {
+            fileName: "房源对比_北京_租房_20261121_120000.xlsx",
+            downloadUrl: "/api/estate/exports/123e4567-e89b-42d3-a456-426614174000",
+            count: many.length,
+          },
+        }),
+      };
+      yield { type: "node", name: "tools" };
+      yield { type: "node", name: "agent" };
+      yield* streamText("一共 15 套，结论表按优先级只列前 12 套，完整清单可在上方下载。", signal);
       return;
     }
 
