@@ -51,7 +51,6 @@ import { bindSubagentSettings, isSubagentEditorOpen } from "./views/settings-sub
 import { refreshBackups } from "./views/settings-backup.js";
 import { refreshStats } from "./views/stats/index.js";
 import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
-import { bindCommandSettings, refreshCommands } from "./views/settings-commands.js";
 import {
   filterSkills, importSkillsFromFiles, refreshSkills, setSkillFilter, showSkillStatus,
 } from "./views/settings-skills.js";
@@ -220,7 +219,7 @@ async function init(): Promise<void> {
   bindTracingSettings();
   bindMcpSettings();
   bindSubagentSettings();
-  bindCommandSettings();
+  // M4 4.1：命令页事件全部由 Vue 组件接管（挂载发生在进入 commands 分区时）
   on("stats-refresh", "click", refreshStats);
   on("skills-refresh-btn", "click", () => {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));

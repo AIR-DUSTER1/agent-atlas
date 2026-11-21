@@ -138,14 +138,16 @@ test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", as
 test("设置表单密钥只显示掩码，必填错误就地呈现", async () => {
   const html = await readClientIndexHtml();
   const forms = await readClientFiles([
-    "views/settings-memories.ts", "views/settings-commands.ts", "ui/field.ts",
+    "views/settings-memories.ts", "views/settings-commands-vue.vue", "ui/field.ts",
   ]);
   assert.match(html, /id="pf-api-key" type="password"/);
   assert.match(html, /id="kb-key" type="password"/);
   assert.match(html, /id="estate-key" type="password"/);
   assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);
-  assert.match(forms, /setFieldError\("cmd-name"/);
+  // M4 4.1：命令名错误改由 Vue 组件就地呈现（aria-invalid + role=alert）
+  assert.match(forms, /errors\.name/);
   assert.match(forms, /aria-invalid/);
+  assert.match(forms, /role="alert"/);
 });
 test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导入导出齐备", async () => {
   const html = await readClientIndexHtml();

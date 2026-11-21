@@ -1,27 +1,28 @@
 /**
  * ============================================================
- * views/settings-plugins.ts — 设置页插件目录与启停
+ * views/settings-plugins.ts — 插件面板数据装载与 legacy 对话框入口
  * ============================================================
- * 职责：读取 RAG / 贝壳 / 求职 / Browser Use / Computer Use 状态并提交启停。
+ * M4 批次 4.1 起卡片渲染与启停写回已迁往 Vue（settings-plugins-vue.vue +
+ * stores/plugins.ts）；本文件只保留三件 legacy 侧职责：
+ *  1. 面板状态装载入口（loadPluginState / refreshPluginPanel，供壳与 main 调用）；
+ *  2. #plugin-status 状态行写入（Vue 组件与壳的错误路径共用）；
+ *  3. 「管理」按钮的 legacy 对话框跳转（RAG / 贝壳 / 求职面板尚未 Vue 化）。
  * 设计立场：
  *  - 开关只改变 tool allowlist，插件自身配置仍保留；关闭不等于删除配置；
- *  - 卡片文本全部走 h() 的 textContent 语义，不拼用户可控 HTML；
- *  - 关闭 Computer Use 默认不发任何 PowerShell，启用仍受会话权限与审批约束。
+ *  - Vue 面板与 Pinia store 都经**动态 import** 进入：1:1 过渡树（tsc）的
+ *    静态图不能出现 .vue 与裸包名（vue/pinia），否则浏览器按 1:1 路径
+ *    import 内部模块（render/parts.js → estate.js → 本模块）整链崩断；
+ *  - 本模块的静态依赖图保持纯 .ts、零前端框架依赖。
  */
-import { api } from "../core/api.js";
 import { $ } from "../core/dom.js";
-import { state } from "../core/state.js";
-import { h } from "../ui/h.js";
 import { uiAlert } from "../ui/dialog.js";
-import { BUILTIN_PLUGINS, pluginTransportMeta, type BuiltinPlugin } from "../modules/plugin-registry.js";
-import type { BrowserUseState, EstateState, JobState, PluginSettingsState, RagState } from "../modules/types.js";
-import { refreshAgentCards } from "./shell.js";
-
-type PluginId = keyof PluginSettingsState["enabled"];
+import { state } from "../core/state.js";
+import type { BuiltinPlugin } from "../modules/plugin-registry.js";
 
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 
-function setPluginStatus(text: string, cls = ""): void {
+/** 状态行写入（#plugin-status，static HTML）：空文案即清零计时器。 */
+export function pluginStatus(text: string, cls = ""): void {
   const el = $("plugin-status");
   if (!el) return;
   el.textContent = text;
@@ -29,73 +30,13 @@ function setPluginStatus(text: string, cls = ""): void {
   clearTimeout(statusTimer);
   if (text) {
     statusTimer = setTimeout(() => {
-      if (el.textContent === text) setPluginStatus("");
+      if (el.textContent === text) pluginStatus("");
     }, 6000);
   }
 }
 
-function pluginKey(plugin: BuiltinPlugin): PluginId {
-  return plugin.id as PluginId;
-}
-
-function isEnabled(plugin: BuiltinPlugin): boolean {
-  return state.plugins?.enabled[pluginKey(plugin)] ?? plugin.defaultEnabled;
-}
-
-function readiness(plugin: BuiltinPlugin): { ready: boolean; label: string } {
-  if (plugin.id === "rag") {
-    const ready = Boolean(state.rag?.configured);
-    return { ready, label: ready ? "已配置" : "未配置" };
-  }
-  if (plugin.id === "estate") {
-    const ready = Boolean(state.estate?.installed);
-    return {
-      ready,
-      label: ready
-        ? `已安装${state.estate?.version ? ` ${state.estate.version}` : ""}`
-        : "未安装",
-    };
-  }
-  if (plugin.id === "job") {
-    const status = state.job;
-    if (!status) return { ready: false, label: "未检测" };
-    if (!status.browserOK) return { ready: false, label: "未找到浏览器" };
-    return { ready: true, label: `就绪 · ${status.lastRunJobs} 条岗位` };
-  }
-  if (plugin.id === "browser") {
-    const status = state.browser;
-    if (!status) return { ready: false, label: "未检测" };
-    return {
-      ready: status.available,
-      label: status.available
-        ? `${status.browserName}${status.activeSessions ? ` · ${status.activeSessions}/${status.maxSessions} 会话` : ""}`
-        : "未找到 Chrome / Edge",
-    };
-  }
-  const available = !state.plugins || state.plugins.platform === "win32";
-  return { ready: available, label: available ? "Windows 可用" : "仅支持 Windows" };
-}
-
-async function togglePlugin(plugin: BuiltinPlugin, input: HTMLInputElement): Promise<void> {
-  const next = input.checked;
-  input.disabled = true;
-  try {
-    state.plugins = await api<PluginSettingsState>(`/api/plugins/${encodeURIComponent(plugin.id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    renderPluginCards();
-    refreshAgentCards();
-    setPluginStatus(`✓ ${plugin.name}已${next ? "启用" : "停用"}，下一条消息生效`, "ok");
-  } catch (err) {
-    input.checked = !next;
-    input.disabled = false;
-    setPluginStatus(`✗ ${(err as Error).message}`, "err");
-  }
-}
-
-function openPluginManage(plugin: BuiltinPlugin): void {
+/** 面板打开时「管理」按钮：跳转对应 legacy 面板或弹出能力说明。 */
+export function openPluginManage(plugin: BuiltinPlugin): void {
   if (plugin.id === "rag") {
     void import("./rag.js").then((mod) => mod.openKb());
     return;
@@ -130,89 +71,26 @@ function openPluginManage(plugin: BuiltinPlugin): void {
   }
 }
 
-/** 首次初始化只需要启停状态；插件页打开后再补齐 RAG / CLI 的详细状态。 */
+/** 首次初始化只需要启停状态（main 启动时调用一次）。 */
 export async function loadPluginState(): Promise<void> {
-  try {
-    state.plugins = await api<PluginSettingsState>("/api/plugins");
-  } catch {
-    // 旧服务进程没有 /api/plugins：保留目录默认值，不阻断启动。
-  }
-  renderPluginCards();
+  const { usePluginsStore } = await import("../stores/plugins.js");
+  await usePluginsStore().loadEnabled();
 }
 
-/** 设置页插件分区懒加载：各接口互不阻塞，任一失败保留其它状态。 */
+/** 设置页插件分区懒加载：挂载 Vue 面板后由 store 拉取各插件运行态。 */
 export async function refreshPluginPanel(): Promise<void> {
-  // M4 批次 4.1：Vue+antdv-next 试点挂载（动态加载，不进首屏闭包）；
-  // 1:1 过渡树里本动态 import 会因 .vue 缺失而拒绝，降级不影响 h() 面板。
+  // Vue 面板经动态 import 进入（1:1 过渡树里 .vue 缺失会拒绝，降级不影响状态装载）；
+  // 4.5 壳反转后面板随应用壳一起挂载，本动态分支随之退役。
   void import("../apps/settings-plugins-vue.js")
     .then((m) => m.mountPluginsVue())
     .catch(() => {});
-  const [rag, estate, job, browser, plugins] = await Promise.allSettled([
-    api<RagState>("/api/rag"),
-    api<EstateState>("/api/estate"),
-    api<JobState>("/api/job"),
-    api<BrowserUseState>("/api/browser/status"),
-    api<PluginSettingsState>("/api/plugins"),
-  ]);
-  if (rag.status === "fulfilled") state.rag = rag.value;
-  if (estate.status === "fulfilled") state.estate = estate.value;
-  if (job.status === "fulfilled") state.job = job.value;
-  if (browser.status === "fulfilled") state.browser = browser.value;
-  if (plugins.status === "fulfilled") state.plugins = plugins.value;
-  renderPluginCards();
+  const { usePluginsStore } = await import("../stores/plugins.js");
+  await usePluginsStore().refreshAll();
 }
 
-export function renderPluginCards(): void {
-  const list = $("plugin-list");
-  if (!list) return;
-  list.replaceChildren();
-  for (const plugin of BUILTIN_PLUGINS) {
-    const transport = pluginTransportMeta(plugin.transport);
-    const ready = readiness(plugin);
-    const enabled = isEnabled(plugin);
-    const supported = plugin.id !== "computer" || !state.plugins || state.plugins.platform === "win32";
-    const toggle = h("input", {
-      type: "checkbox",
-      role: "switch",
-      "aria-label": supported ? `${enabled ? "停用" : "启用"}${plugin.name}` : `${plugin.name}仅支持 Windows`,
-    });
-    toggle.checked = enabled;
-    toggle.disabled = !supported;
-    toggle.addEventListener("change", () => { void togglePlugin(plugin, toggle); });
-
-    const manage = h("button", {
-      type: "button",
-      class: "plugin-manage btn btn-approve",
-      onclick: () => openPluginManage(plugin),
-    }, plugin.manageLabel);
-
-    const card = h("article", {
-      class: "plugin-card" + (enabled ? "" : " disabled"),
-      dataset: { pluginId: plugin.id, transport: transport.id },
-    },
-      h("div", { class: "plugin-main" },
-        h("div", { class: "plugin-icon", "aria-hidden": "true" }, plugin.icon),
-        h("div", { class: "plugin-copy" },
-          h("div", { class: "plugin-title-row" },
-            h("h3", null, plugin.name),
-            h("span", { class: `plugin-kind kind-${transport.id}` }, transport.label),
-          ),
-          h("p", { class: "plugin-desc" }, plugin.description),
-          h("div", { class: "plugin-runtime-row" },
-            h("span", { class: "plugin-runtime" }, plugin.runtime),
-            h("span", { class: "plugin-status" + (ready.ready ? " ready" : "") }, ready.label),
-            h("span", { class: "plugin-enabled-state" + (enabled ? " on" : "") }, enabled ? "已启用" : "已停用"),
-          ),
-        ),
-      ),
-      h("div", { class: "plugin-actions" },
-        h("label", {
-          class: "plugin-switch",
-          title: supported ? (enabled ? "停用插件" : "启用插件") : "当前平台不支持",
-        }, toggle, h("span", { class: "plugin-switch-track", "aria-hidden": "true" })),
-        manage,
-      ),
-    );
-    list.appendChild(card);
-  }
+/** legacy 侧（rag / estate 配置流）改写状态后刷新插件卡片：同步回 store，Vue 卡片自动重渲染。 */
+export function refreshPluginCards(): void {
+  void import("../stores/plugins.js")
+    .then(({ usePluginsStore }) => usePluginsStore().syncFromLegacyState())
+    .catch(() => {});
 }

@@ -15,7 +15,7 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert } from "../ui/dialog.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
-import { renderPluginCards } from "./settings-plugins.js";
+import { refreshPluginCards } from "./settings-plugins.js";
 import type { EstateState, ToolPart } from "../modules/types.js";
 
 export function setEstateStatus(msg: string, cls = ""): void {
@@ -31,7 +31,7 @@ export async function loadEstate(): Promise<void> {
   } catch {
     state.estate = null; // 旧服务进程没有该接口 → 静默降级
   }
-  renderPluginCards();
+  refreshPluginCards();
 }
 
 export async function openEstate(): Promise<void> {
@@ -78,7 +78,7 @@ export async function installBeikeCli(): Promise<void> {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
     });
     state.estate = { ...(state.estate || { installed: false }), ...res };
-    renderPluginCards();
+    refreshPluginCards();
     renderEstatePanel();
   } catch (err) {
     setEstateStatus(`✗ 安装失败：${(err as Error).message}`, "err");
@@ -354,7 +354,7 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
           method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
         });
         state.estate = { ...(state.estate || { installed: false }), ...res };
-        renderPluginCards();
+        refreshPluginCards();
         fix.textContent = `✓ 安装完成${res.version ? " " + res.version : ""}，请重新发送刚才的问题`;
       } catch (err) {
         fix.textContent = "安装失败：" + (err as Error).message;

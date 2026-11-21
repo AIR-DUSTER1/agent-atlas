@@ -14,7 +14,7 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../ui/dialog.js";
 import { escapeHtml } from "../modules/format.js";
-import { renderPluginCards } from "./settings-plugins.js";
+import { refreshPluginCards } from "./settings-plugins.js";
 import type { FsListResult, RagHit, RagState, ToolPart } from "../modules/types.js";
 
 export function setKbStatus(text: string, kind: string): void {
@@ -30,7 +30,7 @@ export async function loadRag(): Promise<void> {
   } catch {
     state.rag = null; // 旧服务进程没有该接口 → 静默降级
   }
-  renderPluginCards();
+  refreshPluginCards();
 }
 
 export async function openKb(): Promise<void> {
@@ -135,7 +135,7 @@ export async function saveKbConfig(): Promise<void> {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     state.rag = res.rag;
-    renderPluginCards();
+    refreshPluginCards();
     renderKbDocs();
     setKbStatus(`✓ 配置已保存（集合 ${state.rag.collection}）`, "ok");
   } catch (err) { setKbStatus(`✗ ${(err as Error).message}`, "err"); }

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { readClientIndexHtml } from "../helpers/client-html.js";
-import { readClientSource } from "../helpers/client-source.js";
 import {
   BUILTIN_PLUGINS,
   PLUGIN_TRANSPORTS,
@@ -33,21 +32,26 @@ test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插
   const html = await readClientIndexHtml();
   const shell = await readFile(new URL("views/shell.ts", root), "utf8");
   const navigation = await readFile(new URL("views/navigation.ts", root), "utf8");
+  // M4 4.1：卡片渲染与启停写回迁往 Vue 组件 + Pinia store，h() 渲染器退役
+  const pluginPanel = await readFile(new URL("views/settings-plugins-vue.vue", root), "utf8");
   const pluginSettings = await readFile(new URL("views/settings-plugins.ts", root), "utf8");
-  const app = await readClientSource();
+  const pluginStore = await readFile(new URL("stores/plugins.ts", root), "utf8");
   assert.match(html, /data-settings-view="plugins"/);
   assert.match(html, /id="settings-view-plugins"/);
   assert.match(html, /id="plugin-list"/);
   assert.match(html, /id="plugin-status"/);
   assert.doesNotMatch(html, /id="kb-btn"|id="estate-btn"/);
-  assert.match(app, /function renderPluginCards\(\)/);
-  assert.match(app, /pluginTransportMeta\(plugin\.transport\)/);
-  assert.match(app, /plugin\.id === "rag"/);
-  assert.match(app, /plugin\.id === "estate"/);
-  assert.match(app, /plugin\.id === "computer"/);
-  assert.match(app, /plugin\.id === "browser"/);
-  assert.match(app, /plugin-switch/);
-  assert.match(pluginSettings, /toggle\.disabled = !supported/);
+  // Vue 卡片 DOM 契约（e2e 依赖）：data-plugin-id / role=switch / 状态文案 / 传输类型标识
+  assert.match(pluginPanel, /:data-plugin-id="row\.plugin\.id"/);
+  assert.match(pluginPanel, /:data-transport="row\.transport\.id"/);
+  assert.match(pluginPanel, /role="switch"/);
+  assert.match(pluginPanel, /plugin-switch/);
+  assert.match(pluginPanel, /已启用|已停用/);
+  assert.match(pluginPanel, /readinessOf/);
+  assert.match(pluginPanel, /plugin\.id !== "computer"/);
+  assert.match(pluginSettings, /refreshPluginPanel/);
+  assert.match(pluginStore, /PATCH/);
+  assert.match(pluginStore, /syncToLegacyState/);
   assert.match(shell, /refreshWelcomePluginCopy\(\)/);
   assert.match(navigation, /refreshWelcomePluginCopy/);
 });
