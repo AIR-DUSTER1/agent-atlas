@@ -51,17 +51,20 @@ test("执行流程窗体位于上下文条和输入控制上方", async () => {
 });
 
 test("侧栏按项目与今天/昨天/更早分组，并显示相对时间", async () => {
-  const source = await readClientFiles(["views/sessions.ts"]);
-  assert.match(source, /function sessionDayGroup/);
-  assert.match(source, /session-time-head/);
-  assert.match(source, /昨天 \$\{time\}/);
-  assert.match(source, /天前/);
+  // M4 4.5：日期分组与时间文案在 modules/session-tree.ts，渲染在 .vue
+  const shared = await readClientFiles(["modules/session-tree.ts"]);
+  const vue = await readClientFiles(["views/session-tree-vue.vue"]);
+  assert.match(shared, /export function sessionDayGroup/);
+  assert.match(vue, /class="session-time-head"/);
+  assert.match(shared, /昨天 \$\{time\}/);
+  assert.match(shared, /天前/);
 });
 
 test("多个会话可并行生成，切换会话不再被全局流状态拦截", async () => {
   const turn = await readClientFiles(["stream/turn.ts"]);
   const navigation = await readClientFiles(["views/navigation.ts"]);
-  const sessions = await readClientFiles(["views/sessions.ts"]);
+  const vue = await readClientFiles(["views/session-tree-vue.vue"]);
+  const store = await readClientFiles(["stores/sessions.ts"]);
   const events = await readClientFiles(["stream/events.ts"]);
 
   assert.match(turn, /state\.streams\[sid\]/);
@@ -69,7 +72,8 @@ test("多个会话可并行生成，切换会话不再被全局流状态拦截",
   assert.match(turn, /state\.streams\[state\.currentId\]\?\.ctrl\.abort\(\)/);
   assert.match(navigation, /export function selectSession\(sid: string\): void \{\s*closeComposerMenu\(\);/);
   assert.doesNotMatch(navigation, /当前正在生成回复，请先停止或等待完成/);
-  assert.match(sessions, /class: "s-running"/);
+  assert.match(store, /running: Boolean\(state\.streams\[session\.id\]\)/);
+  assert.match(vue, /class="s-running"/);
   assert.match(events, /const visible = sid === state\.currentId/);
 });
 test("消息流有回到底部按钮与未读累计", async () => {

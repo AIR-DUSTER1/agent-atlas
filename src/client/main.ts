@@ -25,7 +25,7 @@ import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindComp
 import { exitGoalMode, handleGoalKeydown, syncGoalDraftFromInput } from "./composer/goal.js";
 import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
 import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged, bindProjectCommands } from "./views/projects.js";
-import { renderSessions, loadSessionList } from "./views/sessions.js";
+import { renderSessions, loadSessionList, bindSessionCommands } from "./views/sessions.js";
 import {
   closeCmMenus, hydrateFromServer, renderPermChip, renderPermMenu, selectSession, showChatState, showWelcomeState,
 } from "./views/navigation.js";
@@ -42,7 +42,6 @@ import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views
 import { loadPluginState } from "./views/settings-plugins.js";
 import { isSubagentEditorOpen } from "./views/settings-subagents.js";
 import { createBackup, refreshBackups } from "./views/settings-backup.js";
-import { refreshStats } from "./views/stats/index.js";
 import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
 import { closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
@@ -82,6 +81,8 @@ registerToolEnhancer((part) => Boolean(part.name?.startsWith("browser_")), rende
 bindProjectsChanged(() => renderSessions());
 bindShellCreate(createSession);
 bindExtCreate(createSession);
+// M4 4.5：会话树的切换/导出/删除/折叠命令面（Vue 组件挂载时读取）
+bindSessionCommands();
 bindCompactAction(async () => {
   await compactContext();
 });
@@ -214,8 +215,8 @@ async function init(): Promise<void> {
   on("side-model", "click", () => openSettings("models"));
   on("settings-back-btn", "click", closeSettingsPage);
   bindSettingsNavigation();
-  // M4 4.1/4.2：命令页 / 子代理 / MCP / 链路追踪面板事件由 Vue 组件接管（挂载发生在进入分区时）
-  on("stats-refresh", "click", refreshStats);
+  // M4 4.1/4.2：命令页 / 子代理 / MCP / 链路追踪 / 统计面板事件全部由 Vue 组件接管
+  // （挂载发生在进入分区时；#stats-refresh 已随 stats 分区迁入组件，不再在此绑定）
   // M4 4.2：技能面板事件全部由 Vue 组件接管（挂载发生在进入 skills 分区时）
 
 

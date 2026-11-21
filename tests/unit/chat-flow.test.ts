@@ -158,11 +158,12 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
 });
 
 test("会话项右侧操作按钮共享横向操作区，导出与删除不会重叠", async () => {
-  const app = await readClientSource();
+  // M4 4.5：会话项渲染迁到 session-tree-vue.vue
+  const vue = await readClientFiles(["views/session-tree-vue.vue"]);
   const css = await readClientCss();
-  assert.match(app, /const exportButton = h\("button",/);
-  assert.match(app, /const deleteButton = h\("button",/);
-  assert.match(app, /h\("div", \{ class: "s-actions" \}, exportButton, deleteButton\)/);
+  assert.match(vue, /class="s-action s-export"/);
+  assert.match(vue, /class="s-action s-del"/);
+  assert.match(vue, /class="s-actions"/);
   assert.match(css, /\.s-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*2px/s);
   assert.match(css, /\.session-item \.s-title\s*\{[^}]*padding-right:\s*56px/s);
   assert.match(css, /@media \(hover: none\), \(pointer: coarse\)/);

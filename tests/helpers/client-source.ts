@@ -44,6 +44,8 @@ export const CLIENT_SOURCES = [
   "modules/clipboard.ts",
   "modules/message-copy.ts",
   "modules/agent-profile.ts",
+  "modules/project-view.ts",
+  "modules/session-tree.ts",
   "modules/plugin-registry.ts",
   "modules/types.ts",
   "modules/types-api.ts",
