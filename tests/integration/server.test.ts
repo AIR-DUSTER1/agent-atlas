@@ -495,7 +495,9 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   const index = await fetch(srv.base + "/");
   assert.equal(index.status, 200);
   const html = await index.text();
-  assert.match(html, /<script type="module" src="\/main\.js"><\/script>/);
+  // M3：Vite 打包产物为 assets/app.js（固定名，服务端 no-store 下无需哈希）；
+  // 源码里的 import map 保留（源码不动），打包后不再被消费。
+  assert.match(html, /<script type="module"[^>]*src="\.\/assets\/app\.js">/);
   assert.match(html, /<script type="importmap">/);
   assert.match(html, /"chart\.js": "\/vendor\/chart-lib\.js"/);
 
@@ -515,18 +517,18 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
     assert.match(res.headers.get("content-type") ?? "", /text\/css/, file);
   }
 
-  // 前端源码在 src/client/*.ts，构建后按职责分目录落到 public/
+  // M3：tsc 1:1 产物与 vendor *-lib.js 退役，前端只暴露打包后的 assets/app.js
+  // 与动态增强 chunk；旧 1:1 路径与 vendor 探测必须 404（防目录漂移回归）。
+  for (const file of ["/assets/app.js", "/assets/markdown.js", "/assets/chart.js"]) {
+    const res = await fetch(srv.base + file);
+    assert.equal(res.status, 200, file);
+    assert.match(res.headers.get("content-type") ?? "", /text\/javascript/, file);
+  }
+  // 过渡期双产物：1:1 树与 vendor 库仍产出（e2e 依赖旧路径），M5 清底后改 404 断言
   for (const file of [
     "/main.js",
-    "/modules/format.js", "/modules/chat-flow.js",
-    "/modules/plugin-registry.js", "/modules/types.js",
-    "/core/state.js", "/core/dom.js", "/core/api.js",
-    "/ui/dialog.js", "/ui/menu.js", "/ui/toast.js",
-    "/render/parts.js", "/render/messages.js",
-    "/stream/events.js", "/stream/turn.js",
-    "/views/sessions.js", "/views/settings.js", "/views/model-actions.js",
-    "/views/stats/index.js", "/views/stats/kpi.js", "/views/stats/charts.js", "/views/stats/tables.js",
-    "/observability/client-errors.js",
+    "/modules/format.js",
+    "/core/state.js",
     "/vendor/chart.js", "/vendor/chart-lib.js", "/vendor/icons-lib.js",
     "/vendor/marked-lib.js", "/vendor/dompurify-lib.js", "/vendor/highlight-lib.js",
   ]) {

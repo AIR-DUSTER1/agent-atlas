@@ -155,8 +155,8 @@ async function main(): Promise<void> {
     const index = await waitHttp(`${base}/`);
     const csp = index.headers.get("content-security-policy") || "";
     if (!csp.includes("default-src 'self'")) throw new Error("首页缺少 CSP");
-    await waitHttp(`${base}/main.js`);
-    await waitHttp(`${base}/vendor/chart-lib.js`);
+    await waitHttp(`${base}/assets/app.js`);
+    await waitHttp(`${base}/assets/chart.js`);
     await waitHttp(`${base}/styles/ui.css`);
 
     const login = await fetch(`${base}/api/auth/session`, {

@@ -24,7 +24,7 @@ COPY tests ./tests
 COPY desktop ./desktop
 RUN npm run typecheck \
  && RELEASE_CHANNEL="${RELEASE_CHANNEL}" GIT_COMMIT="${GIT_COMMIT}" BUILD_TIME="${BUILD_TIME}" npm run build:client \
- && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/main.js','src/server/public/build-info.json','src/server/public/vendor/chart-lib.js','src/server/public/styles/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
+ && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/assets/app.js','src/server/public/build-info.json','src/server/public/styles/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
 
 FROM ${NODE_IMAGE} AS production-deps
 WORKDIR /app

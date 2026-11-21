@@ -18,12 +18,10 @@ import { readBuildInfoFile, readPackageVersion } from "../src/versioning.js";
 
 const REQUIRED_ARTIFACTS = [
   "src/server/public/index.html",
-  "src/server/public/main.js",
+  "src/server/public/assets/app.js",
   "src/server/public/build-info.json",
   "src/server/public/styles/tokens.css",
   "src/server/public/styles/layout.css",
-  "src/server/public/vendor/chart.js",
-  "src/server/public/vendor/icons-lib.js",
 ];
 
 function check(id: string, ok: boolean, message: string, category: ReadinessCheck["category"]): ReadinessCheck {

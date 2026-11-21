@@ -92,10 +92,12 @@ test("静默会话、设置分区、供应商弹窗与设备隔离提示", async
 test("Browser Use 右侧浏览器面板可打开、切换布局并关闭", async ({ page }) => {
   await login(page);
   await createChat(page);
-  const sessionId = await page.evaluate(async (modulePath) => {
-    const mod = await import(modulePath);
-    return mod.state.currentId;
-  }, "/core/state.js");
+  // M3 起页面跑 Vite bundle，测试通过 1:1 副本（/core/state.js 等）驱动 dock 时
+  // 必须显式赋副本的 state.currentId——bundle 内部状态与副本不再共享实例。
+  const sessionId = await page.evaluate(async () => {
+    const list = await fetch("/api/sessions", { credentials: "include" }).then((r) => r.json()) as Array<{ id: string }>;
+    return list[0]?.id ?? "";
+  });
   expect(sessionId).toBeTruthy();
   await page.route("**/api/browser/sessions/**", async (route) => {
     const url = route.request().url();
@@ -125,10 +127,12 @@ test("Browser Use 右侧浏览器面板可打开、切换布局并关闭", async
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
-  await page.evaluate(async ({ sid, modulePath }) => {
+  await page.evaluate(async ({ sid, modulePath, statePath }) => {
+    const stateMod = await import(statePath);
+    stateMod.state.currentId = sid;
     const mod = await import(modulePath);
-    mod.openBrowserDock(String(sid));
-  }, { sid: sessionId, modulePath: "/views/browser-use.js" });
+    mod.openBrowserDock(sid);
+  }, { sid: sessionId, modulePath: "/views/browser-use.js", statePath: "/core/state.js" });
   await expect(page.locator("#browser-dock")).toBeVisible();
   await expect(page.locator("#main")).toHaveClass(/browser-open/);
   await expect(page.locator("#browser-dock-title")).toBeVisible();
@@ -703,37 +707,12 @@ test("审批卡出现后切走再切回，批准按钮仍可执行", async ({ pa
  */
 test("求职会话显示权限切换，且切换后前后端一致", async ({ page }) => {
   await login(page);
-  // 直接建求职会话，避免依赖 Agent 选择页的卡片文案
-  const sid = await page.evaluate(async () => {
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ kind: "job", projectId: "default" }),
-    });
-    const data = await res.json() as { id: string };
-    return data.id;
-  });
-
-  await page.evaluate(async (id) => {
-    // 动态 import 的是浏览器已构建产物（tsc 输出），路径是站点绝对路径。
-    // 用字符串变量包一层，避免 tsc 把 "/core/state.js" 当成本地模块去解析。
-    const stateMod = "/core/state.js";
-    const sessionsMod = "/views/sessions.js";
-    const navMod = "/views/navigation.js";
-    const { state } = await import(/* @vite-ignore */ stateMod) as {
-      state: { sessions: unknown[]; stale?: unknown };
-    };
-    const sessions = await import(/* @vite-ignore */ sessionsMod) as { renderSessions: () => void };
-    const nav = await import(/* @vite-ignore */ navMod) as { selectSession: (sid: string) => void };
-    const res = await fetch("/api/sessions", { credentials: "include" });
-    const list = await res.json() as Array<Record<string, unknown>>;
-    const current = state.sessions as Array<{ stale?: boolean }>;
-    state.sessions = [...list.map((s) => ({ ...s, stale: false })), ...current.filter((s) => s.stale)];
-    sessions.renderSessions();
-    nav.selectSession(id);
-  }, sid);
-
+  // M3 起页面跑 Vite bundle：会话必须由 bundle 自己创建（1:1 副本注入 state 的旧法
+  // 会让权限 chip 读到空会话）。走真实 Agent 选择页点「求职岗位 Agent」卡片。
+  await page.locator("#new-chat-btn").click();
+  const jobCard = page.locator("#demo-cards .demo-card", { hasText: "求职岗位 Agent" })
+    .or(page.locator("#modal-cards .demo-card", { hasText: "求职岗位 Agent" })).first();
+  await jobCard.click();
   await expect(page.locator("#perm-group")).toBeVisible();
   await expect(page.locator("#cm-perm .cm-text")).toHaveText(/权限·审批/);
 
@@ -743,10 +722,10 @@ test("求职会话显示权限切换，且切换后前后端一致", async ({ pa
   await expect(page.locator("#cm-perm .cm-text")).toHaveText(/权限·只读/);
 
   // 服务端也要真的记下（不只是前端 chip 文案变了）
-  const serverMode = await page.evaluate(async (id) => {
+  const serverMode = await page.evaluate(async () => {
     const res = await fetch("/api/sessions", { credentials: "include" });
     const list = await res.json() as Array<{ id: string; permissionMode?: string }>;
-    return list.find((s) => s.id === id)?.permissionMode;
-  }, sid);
+    return list[0]?.permissionMode;
+  });
   expect(serverMode).toBe("readonly");
 });

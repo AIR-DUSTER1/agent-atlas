@@ -1,28 +1,37 @@
 /**
- * scripts/build-client.ts — 前端构建：TS → 浏览器可执行 ESM + vendor + 静态资源
+ * scripts/build-client.ts — 前端构建（框架迁移 M3：Vite 接管，源码不动）
  * ============================================================
- * 本项目坚持「不加整体打包器」：tsc 一比一编译应用源码，只有 npm 前端库经
- * esbuild 打成自包含 vendor。每次从空目录构建，并校验 import map 对应的
- * CSP hash，任何缺产物或清单漂移都必须非 0 退出。
+ * 流程：compose 片段组装 → 注入构建身份 → CSP hash 校验 → 写 index.vite.html
+ * → vite build（把 main.ts 及其依赖、vendor wrapper 的 npm 包打进 assets/）→
+ * 复制 styles → 写 build-info → 产物自检。
+ *
+ * M3 变化：页面入口与依赖图由 Vite 打包（assets/app.js + 动态增强 chunk），
+ * 类型检查仍由 `npm run typecheck`（tsc --noEmit）承担。
+ * ⚠ 过渡期双产物（对计划「vendor 停止生成」的有意偏离，记入 agent-wiki）：
+ * tool-rendering 等 e2e 仍通过 `import("/render/parts.js")` 旧 1:1 路径拿内部模块，
+ * 所以 tsc 1:1 树与 vendor *-lib.js 继续产出，直到 M4 按批改写测试、M5 清底。
+ * 动态加载红线不受影响：wrapper 的 await import(...) 由 Vite 分割成独立 chunk，
+ * 「图表 / Markdown / 高亮不进首屏启动闭包」的语义保持。
  */
-import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { build as viteBuild } from "vite";
 import { promisify } from "node:util";
 import { buildVendors } from "./build-vendor.js";
+
+const execFileAsync = promisify(execFile);
 import { assertCspHashHtml } from "./csp-integrity.js";
 import { composeHtml } from "./compose-html.js";
 import { createBuildInfo, injectBuildInfoHtml, writeBuildInfo } from "../src/versioning.js";
 
-const execFileAsync = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src", "client");
 const OUT = join(ROOT, "src", "server", "public");
 const STYLE_DIR = join(SRC, "styles");
-
-
-
+/** 组装后的临时入口：gitignore；vite 以它为 rollup input，构建后重命名为 index.html */
+const COMPOSED_ENTRY = join(SRC, "index.vite.html");
 
 /**
  * 样式按目录自动发现，禁止再维护第二份手写白名单。
@@ -58,8 +67,25 @@ async function main(): Promise<void> {
   const buildInfo = await createBuildInfo({ root: ROOT });
   const indexHtml = injectBuildInfoHtml(await composeHtml(join(SRC, "index.html"), SRC), buildInfo);
   assertCspHashHtml(indexHtml);
+  await writeFile(COMPOSED_ENTRY, indexHtml, "utf8");
 
-  // tsc 用项目本地版本：直接调 node_modules 里的 tsc，避免 PATH 差异
+  try {
+    await viteBuild({
+      configFile: join(ROOT, "vite.config.ts"),
+      logLevel: "info",
+    });
+  } catch (err) {
+    console.error("✗ Vite 构建失败");
+    throw err;
+  } finally {
+    await rm(COMPOSED_ENTRY, { force: true });
+  }
+
+  // vite 以 input 文件名输出（index.vite.html）→ 重命名为 index.html（vite 版本，
+  // 脚本引用已改写为 ./assets/app.js —— 不能再用 composed 文本覆盖回去）
+  await rename(join(OUT, "index.vite.html"), join(OUT, "index.html"));
+
+  // 过渡期双产物：tsc 1:1 树 + vendor 库（e2e 的内部模块导入依赖它们，见文件头说明）
   const tscBin = join(ROOT, "node_modules", "typescript", "bin", "tsc");
   try {
     await execFileAsync(process.execPath, [tscBin, "-p", join(ROOT, "tsconfig.client.json")], {
@@ -72,18 +98,26 @@ async function main(): Promise<void> {
     console.error("✗ 前端 TypeScript 编译失败");
     process.exit(1);
   }
-
-  await copyStyles(indexHtml);
-  await writeFile(join(OUT, "index.html"), indexHtml, "utf8");
-  await writeBuildInfo(ROOT, buildInfo);
-
-  // wrapper 已由 tsc 输出；这里生成同名隔离的 *-lib.js 并做自包含检查
   await buildVendors();
 
-  // 产物自检：入口脚本必须存在，否则页面会白屏而 CI 仍是绿的
-  const entries = await readdir(OUT);
-  if (!entries.includes("main.js")) {
-    console.error("✗ 构建产物缺少 main.js（tsconfig.client.json 的 outDir 是否被改过？）");
+  await copyStyles(indexHtml);
+  await writeBuildInfo(ROOT, buildInfo);
+
+  // 产物自检：入口 HTML / 打包脚本 / 样式必须存在，否则页面会白屏而 CI 仍是绿的
+  const entries = await readdir(OUT, { withFileTypes: true });
+  const names = entries.map((e) => e.name);
+  if (!names.includes("index.html")) {
+    console.error("✗ 构建产物缺少 index.html（vite input/outDir 是否被改过？）");
+    process.exit(1);
+  }
+  const assets = await readdir(join(OUT, "assets")).catch(() => [] as string[]);
+  if (!assets.includes("app.js")) {
+    console.error("✗ 构建产物缺少 assets/app.js（rollup entryFileNames 是否被改过？）");
+    process.exit(1);
+  }
+  const vendorEntries = await readdir(join(OUT, "vendor")).catch(() => [] as string[]);
+  if (!vendorEntries.some((name) => name.endsWith("-lib.js"))) {
+    console.error("✗ 过渡期双产物缺少 vendor 库（e2e 依赖 1:1 路径，见文件头说明）");
     process.exit(1);
   }
   console.log(`✓ 前端构建完成 → src/server/public/ (${buildInfo.version} · ${buildInfo.buildId})`);

@@ -53,3 +53,6 @@ playwright-report/
 /coverage/
 .c8temp*/
 .coverage-raw-*/
+
+# vite 组装临时入口（build-client 写入，构建后删除）
+src/client/index.vite.html
