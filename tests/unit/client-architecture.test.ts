@@ -209,8 +209,10 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
   assert.match(events, /case "model_retry": upsertModelRetry/);
   assert.match(events, /u\.contextWindow = ev\.contextWindow/);
   const composer = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
-  assert.match(composer, /const inputBudget = u\.contextInputBudget/);
-  assert.match(composer, /const scale = inputBudget \?\? win/);
+  // M4 4.6：容量条派生计算迁往 stores/context-meter.ts（组件只消费）
+  const meter = await readFile(join(CLIENT, "stores", "context-meter.ts"), "utf8");
+  assert.match(meter, /const scale = s\.inputBudget \?\? s\.contextWindow/);
+  assert.match(composer, /inputBudget: u\.contextInputBudget/);
   assert.match(composer, /contextInputBudget = cfg\.contextBudget\?\.inputBudgetTokens/);
   assert.match(composer, /usage\.contextWindow = cfg\.contextWindow/);
   assert.match(composer, /targetChanged = previousProvider\?\.id !== nextProvider\?\.id/);

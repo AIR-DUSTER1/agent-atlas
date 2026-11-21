@@ -40,8 +40,10 @@ test("新建会话会刷新上下文容量条，不残留上一会话用量", as
 
 test("执行流程窗体位于上下文条和输入控制上方", async () => {
   const html = await readClientIndexHtml();
-  const workflow = html.indexOf('id="workflow-panel"');
-  const context = html.indexOf('id="context-bar"');
+  // M4 4.6：workflow-panel 与 context-bar 由 Vue 组件渲染（骨架只剩挂载点），
+  // 顺序断言改为「挂载点顺序」（组件内元素仍按 workflow → context 排列）。
+  const workflow = html.indexOf('id="workflow-plan-mount"');
+  const context = html.indexOf('id="context-meter-mount"');
   const composer = html.indexOf('id="composer-bar"');
   const input = html.indexOf('id="input-box"');
   assert.ok(workflow >= 0 && context >= 0 && composer >= 0 && input >= 0);
