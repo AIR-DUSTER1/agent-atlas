@@ -36,7 +36,9 @@ test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插
   const pluginPanel = await readFile(new URL("views/settings-plugins-vue.vue", root), "utf8");
   const pluginSettings = await readFile(new URL("views/settings-plugins.ts", root), "utf8");
   const pluginStore = await readFile(new URL("stores/plugins.ts", root), "utf8");
-  assert.match(html, /data-settings-view="plugins"/);
+  // M4 4.5：导航迁往 store（settings-nav-vue 渲染 data-settings-view）
+  const navStore = await readFile(new URL("stores/settings.ts", root), "utf8");
+  assert.match(navStore, /view: "plugins"/);
   assert.match(html, /id="settings-view-plugins"/);
   assert.match(html, /id="plugin-list"/);
   assert.match(html, /id="plugin-status"/);

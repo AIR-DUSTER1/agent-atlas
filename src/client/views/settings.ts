@@ -1,14 +1,14 @@
 /**
  * ============================================================
- * views/settings.ts — 设置页骨架：分区导航 / 开合
+ * views/settings.ts — 设置页壳：分区切换 / 懒加载 / 开合（M4 批次 4.5 起）
  * ============================================================
- * 职责：设置页的打开关闭、全部分区的切换与懒加载。
- * 设计立场：
- *  - 分区懒加载：只有切到某个分区才拉它的数据（打开设置不该打一堆请求）；
- *  - 分区内容各自独立成模块（backup / memories / stats），本文件只管导航；
- *  - 插件目录由 settings-plugins.ts 独立负责，本文件不承载具体插件渲染。
+ * 导航渲染已迁往 Vue（settings-nav-vue.vue + stores/settings.ts）：本文件
+ * 只保留「壳」职责：
+ *  1. 分区面板显隐（过渡期分区内容是 include 的 legacy 片段，仍由 DOM 切类）；
+ *  2. 分区数据懒加载分发（refreshXxx 桥）；
+ *  3. 设置页开合与返回按钮 / 退出登录。
+ * 导航状态（当前分区 / 搜索词 / 隐藏项）全部在 store，不再读写 DOM 选中态。
  */
-
 import { $, setSidebarOpen } from "../core/dom.js";
 import { api, logoutSession } from "../core/api.js";
 import { state } from "../core/state.js";
@@ -33,22 +33,29 @@ import { refreshUsers } from "./settings-users.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "tracing", "memories", "commands", "skills", "mcp", "stats", "users"]);
+/**
+ * 分区清单与 stores/settings.ts 的 SETTINGS_NAV_GROUPS 一致（导航由 Vue 渲染）。
+ * 这里保留一份本地常量：本模块在 1:1 过渡树链上（settings-plugins → 本模块），
+ * 静态 import store 会把 pinia 带进 1:1 静态图并崩掉整条浏览器链。
+ */
+const SETTINGS_VIEWS = new Set<string>([
+  "models", "plugins", "subagents", "routing", "tracing",
+  "memories", "commands", "skills", "mcp", "stats", "users",
+]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
   return Boolean(page) && !page?.classList.contains("hidden");
 }
 
-/** 切换设置页分区；数据只在对应分区被选中时懒加载。 */
+/** 切换设置页分区；导航选中态由 Vue 响应 store，面板显隐与懒加载在这里。 */
 export function showSettingsView(view: string): void {
   const next = SETTINGS_VIEWS.has(view) ? view : "models";
   state.settingsView = next;
-  document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((btn) => {
-    const active = btn.dataset.settingsView === next;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-selected", String(active));
-  });
+  // 同步 store（Vue 导航据此渲染 active / aria-selected）
+  void import("../stores/settings.js")
+    .then(({ useSettingsStore }) => { useSettingsStore().show(next); })
+    .catch(() => {});
   document.querySelectorAll<HTMLElement>(".settings-view").forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.settingsPanel !== next);
   });
@@ -78,25 +85,25 @@ export function showSettingsView(view: string): void {
     void refreshMcp().catch(() => {});
   } else if (next === "users") {
     // 分区入口对非 admin 隐藏；直开 URL 时这里再挡一层（懒加载即校验）。
-    void refreshUsers().catch(() => showSettingsView("models"));
+    void refreshUsers()
+      .then((visible) => {
+        if (visible) return;
+        void import("../stores/settings.js").then(({ useSettingsStore }) => {
+          useSettingsStore().setHidden("users", true);
+        });
+        showSettingsView("models");
+      })
+      .catch(() => showSettingsView("models"));
   } else {
     refreshStats();
   }
 }
 
-/** 过滤左侧设置项；搜索只匹配导航标题/说明，不触碰表单数据。 */
-function filterSettingsNav(query: string): void {
-  const term = query.trim().toLowerCase();
-  const buttons = [...document.querySelectorAll<HTMLElement>(".settings-nav-item")];
-  for (const button of buttons) {
-    const match = !term || (button.textContent ?? "").toLowerCase().includes(term);
-    button.classList.toggle("hidden", !match);
-    button.classList.toggle("search-hit", Boolean(term && match));
-  }
-  for (const group of document.querySelectorAll<HTMLElement>(".settings-nav-group")) {
-    const visible = [...group.querySelectorAll<HTMLElement>(".settings-nav-item")].some((button) => !button.classList.contains("hidden"));
-    group.classList.toggle("hidden", !visible);
-  }
+/** 挂载设置导航组件（幂等；设置页首次打开时调用）。 */
+export async function mountSettingsNav(): Promise<void> {
+  void import("../apps/settings-nav-vue.js")
+    .then((m) => m.mountSettingsNavVue())
+    .catch(() => {});
 }
 
 function setTracingPanelError(err: unknown): void {
@@ -127,11 +134,8 @@ function setRoutingPanelError(err: unknown): void {
   el.className = "settings-status err";
 }
 
-/** 绑定设置页导航、搜索与 `/` 聚焦；只执行一次。 */
+/** 绑定设置页外壳（返回 / 退出登录）；只执行一次。导航交互由 Vue 组件接管。 */
 export function bindSettingsNavigation(): void {
-  document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
-    button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
-  });
   const logout = $("settings-logout-btn");
   logout?.addEventListener("click", () => {
     void (async () => {
@@ -153,44 +157,17 @@ export function bindSettingsNavigation(): void {
       logout?.classList.toggle("hidden", !(status?.authenticated && status.authRequired && !status.autoSession));
     })
     .catch(() => {});
-  const input = $("settings-search") as HTMLInputElement | null;
-  if (!input) return;
-  input.addEventListener("input", () => filterSettingsNav(input.value));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && input.value) {
-      input.value = "";
-      filterSettingsNav("");
-      event.preventDefault();
-      event.stopPropagation();
-    } else if (event.key === "Enter") {
-      const first = document.querySelector<HTMLElement>(".settings-nav-item:not(.hidden)");
-      if (first?.dataset.settingsView) {
-        showSettingsView(first.dataset.settingsView);
-        first.focus();
-      }
-      event.preventDefault();
-    }
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "/" || !isSettingsPageOpen()) return;
-    const target = event.target as HTMLElement | null;
-    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-    event.preventDefault();
-    input.focus();
-    input.select();
-  });
 }
+
 /** 打开独立设置页；models 分区可带供应商 id 做定位高亮。 */
 export function openSettings(view = "models", focusProviderId: string | null = null): void {
   closeCmMenus();
   closeComposerMenu();
   setSidebarOpen(false);
   const target = SETTINGS_VIEWS.has(view) ? view : "models";
+  void mountSettingsNav();
   void import("./model-store.js").then((m) => m.setSettingsFocus(target === "models" ? focusProviderId : null));
   void import("./model-form.js").then((m) => m.closeProviderForm());
-  const search = $("settings-search") as HTMLInputElement | null;
-  if (search) search.value = "";
-  filterSettingsNav("");
   $("settings-page")?.classList.remove("hidden");
   document.body.classList.add("settings-open");
   showSettingsView(target);

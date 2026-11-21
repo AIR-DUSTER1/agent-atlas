@@ -59,3 +59,9 @@
   .settings-nav-item { width: auto; min-width: max-content; margin: 0; padding: 7px 9px; }
 }
 .key-row .ui-field-error { flex-basis: 100%; color: var(--danger); font-size: var(--font-xs); }
+
+/* M4 4.5：导航由 Vue 组件挂载到 #settings-nav-mount；
+   挂载容器必须自己占住 settings-page-body 的网格首列（否则空 div 占列、nav 落到下一行）。 */
+#settings-nav-mount {
+  display: contents;
+}

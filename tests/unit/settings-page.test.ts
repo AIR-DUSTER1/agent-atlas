@@ -9,17 +9,16 @@ import { readClientIndexHtml } from "../helpers/client-html.js";
 const root = new URL("../../src/client/", import.meta.url);
 
 test("设置导航按工作台/扩展/数据分组，并支持搜索过滤与 / 聚焦", async () => {
-  const html = await readClientIndexHtml();
-  const settings = await readClientFiles(["views/settings.ts", "main.ts"]);
-  assert.match(html, /id="settings-search"/);
-  assert.match(html, /data-settings-group="workbench"/);
-  assert.match(html, /data-settings-group="extensions"/);
-  assert.match(html, /data-settings-group="data"/);
-  assert.match(settings, /export function bindSettingsNavigation\(/);
-  assert.match(settings, /button\.classList\.toggle\("hidden", !match\)/);
-  assert.match(settings, /event\.key === "Escape" && input\.value/);
-  assert.match(settings, /event\.key !== "\/"/);
-  assert.match(settings, /bindSettingsNavigation\(\);/);
+  // M4 4.5：导航迁往 Vue 组件 + settings store，结构契约在组件/状态层上断言
+  const nav = await readClientFiles(["views/settings-nav-vue.vue", "stores/settings.ts"]);
+  assert.match(nav, /id="settings-search"/);
+  assert.match(nav, /:data-settings-group="group\.id"/);
+  assert.match(nav, /id: "workbench"/);
+  assert.match(nav, /id: "extensions"/);
+  assert.match(nav, /id: "data"/);
+  assert.match(nav, /event\.key === "Escape" && searchTerm\.value/);
+  assert.match(nav, /event\.key !== "\/"/);
+  assert.match(nav, /filteredGroups/);
 });
 test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮", async () => {
   const html = await readClientIndexHtml();
@@ -33,7 +32,8 @@ test("设置入口固定在左下，顶栏不再散放记忆/统计/设置按钮
 test("设置页包含返回按钮、全部分区与集中面板", async () => {
   const html = await readClientIndexHtml();
   assert.match(html, /id="settings-page"/);
-  assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('class="settings-nav-item active"'));
+  // M4 4.5：导航 active 类在 Vue 组件内，静态骨架保留 #settings-nav-mount 挂载点
+  assert.ok(html.indexOf('id="settings-back-btn"') < html.indexOf('id="settings-nav-mount"'));
   for (const view of ["models", "plugins", "subagents", "tracing", "memories", "stats"]) {
     assert.match(html, new RegExp(`data-settings-panel="${view}"`));
   }
@@ -48,7 +48,8 @@ test("插件页不再重复展示 MCP 接入类型", async () => {
   const pluginsPage = html.slice(start, end);
   assert.doesNotMatch(pluginsPage, /MCP 标准 server/);
   assert.doesNotMatch(pluginsPage, /MCP 是独立扩展类型/);
-  assert.match(html, /data-settings-view="mcp"/);
+  const nav = await readClientFiles(["stores/settings.ts"]);
+  assert.match(nav, /view: "mcp"/);
 });
 test("设置页大标题不再重复展示说明文案", async () => {
   const html = await readClientIndexHtml();
@@ -67,7 +68,8 @@ test("链路追踪设置页支持安全 opt-in、Key 掩码和保存契约", asy
     "tracing-endpoint", "tracing-agent-id", "tracing-agent-environment", "tracing-api-key", "tracing-clear-key", "tracing-anonymize",
     "tracing-warning", "tracing-status", "tracing-save-btn",
   ]) assert.match(html, new RegExp(`id="${id}"`), id);
-  assert.match(html, /data-settings-view="tracing"/);
+  const nav = await readClientFiles(["stores/settings.ts"]);
+  assert.match(nav, /view: "tracing"/);
   assert.match(html, /开启即表示允许对话内容发送到 LangSmith/);
   assert.match(source, /\/api\/tracing/);
   assert.match(source, /method: "PUT"/);
@@ -81,7 +83,8 @@ test("前端通过独立页面函数切换分区并统一关闭", async () => {
   assert.match(app, /function openSettings\(view = "models"/);
   assert.match(app, /function showSettingsView\(view(?:: string)?\): void/);
   assert.match(app, /function closeSettingsPage\(\): void/);
-  assert.match(app, /dataset\.settingsView/);
+  // M4 4.5：导航状态改由 settings store 承接（state.settingsView 仅作 legacy 镜像）
+  assert.match(app, /useSettingsStore\(\)\.show\(next\)/);
   assert.doesNotMatch(app, /settings-mask|memories-mask|stats-mask/);
 });
 test("模型与供应商采用左栏选择、右栏模型详情", async () => {
@@ -255,7 +258,8 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
     "subagent-model-mode", "subagent-model-hint", "subagent-provider", "subagent-model",
     "subagent-enabled", "subagent-delete-btn", "subagent-save-btn",
   ]) assert.match(source, new RegExp(`id="${id}"`), id);
-  assert.match(html, /data-settings-view="subagents"/);
+  const navSrc = await readClientFiles(["stores/settings.ts"]);
+  assert.match(navSrc, /view: "subagents"/);
   assert.match(source, /value="inherit"/);
   assert.match(source, /value="fixed"/);
   assert.match(source, /\/api\/subagents/);
