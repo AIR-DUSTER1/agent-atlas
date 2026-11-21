@@ -6,14 +6,14 @@
  * PostgreSQL users.id（文件模式回落到 local/设备身份）。
  * 设计立场：
  *  - 浏览器无法获得真实 MAC；设备 Cookie 只证明设备，不证明用户；
- *  - ownerId 必须来自已认证用户或 local bootstrap，绝不能由前端传入；
+ *  - userId 必须来自已认证用户或 local bootstrap，绝不能由前端传入；
  *  - 设备 Cookie 只换短期会话，所有业务 API 仍校验短期会话；
  *  - 本机直连使用 bootstrap 管理员身份；公网新设备必须先用用户访问令牌配对。
  */
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { appendSetCookie, issueSession, parseCookies, setSessionCookie, verifySessionRequest } from "./session.js";
-import { isPostgresBackend, localOwnerIdentity } from "../persistence/postgres.js";
+import { isPostgresBackend, localUserIdentity } from "../persistence/postgres.js";
 
 export const DEVICE_COOKIE = "lg_agent_device";
 export const LOCAL_DEVICE_ID = "local";
@@ -27,7 +27,7 @@ const autoAuthorizedRequests = new WeakSet<IncomingMessage>();
 export type DeviceRole = "admin" | "member";
 
 export interface RequestIdentity {
-  ownerId: string;
+  userId: string;
   deviceId: string;
   role: DeviceRole;
 }
@@ -68,9 +68,9 @@ function safeEqualText(a: string, b: string): boolean {
 }
 
 function localRequestIdentity(deviceId = LOCAL_DEVICE_ID): RequestIdentity {
-  const local = localOwnerIdentity();
+  const local = localUserIdentity();
   return {
-    ownerId: local?.ownerId ?? LOCAL_DEVICE_ID,
+    userId: local?.userId ?? LOCAL_DEVICE_ID,
     deviceId,
     role: local?.role ?? "admin",
   };
@@ -79,12 +79,12 @@ function localRequestIdentity(deviceId = LOCAL_DEVICE_ID): RequestIdentity {
 export function issueDeviceIdentity(
   now = Date.now(),
   did: string = randomUUID(),
-  owner: Pick<RequestIdentity, "ownerId" | "role"> = localRequestIdentity(),
+  owner: Pick<RequestIdentity, "userId" | "role"> = localRequestIdentity(),
 ): { token: string; payload: DevicePayload } {
   const payload: DevicePayload = {
     v: DEVICE_VERSION,
     did,
-    uid: owner.ownerId,
+    uid: owner.userId,
     role: owner.role,
     iat: now,
     exp: now + deviceTtlDays() * 86_400_000,
@@ -154,19 +154,19 @@ function authEnabled(): boolean {
 function identityFromDevice(payload: DevicePayload): RequestIdentity | null {
   if (payload.v === 1) {
     if (isPostgresBackend()) return null;
-    return { ownerId: payload.did, deviceId: payload.did, role: "admin" };
+    return { userId: payload.did, deviceId: payload.did, role: "admin" };
   }
   if (!payload.uid || !payload.role) return null;
-  return { ownerId: payload.uid, deviceId: payload.did, role: payload.role };
+  return { userId: payload.uid, deviceId: payload.did, role: payload.role };
 }
 
 function sessionIdentity(req: IncomingMessage): RequestIdentity | null {
   const session = verifySessionRequest(req);
   if (!session) return null;
-  if (session.ownerId) {
+  if (session.userId) {
     return {
-      ownerId: session.ownerId,
-      deviceId: deviceFromRequest(req)?.did ?? session.ownerId,
+      userId: session.userId,
+      deviceId: deviceFromRequest(req)?.did ?? session.userId,
       role: session.role ?? "member",
     };
   }
@@ -180,7 +180,7 @@ function cache(req: IncomingMessage, identity: RequestIdentity): RequestIdentity
 
 /**
  * 在任何 API 路由前解析/建立设备身份。
- * 返回值保留为设备 ID 兼容旧调用；owner 通过 ownerIdentityForRequest 获取。
+ * 返回值保留为设备 ID 兼容旧调用；owner 通过 userIdentityForRequest 获取。
  */
 export function ensureDeviceIdentity(req: IncomingMessage, res: ServerResponse): string | null {
   const cached = requestIdentities.get(req);
@@ -210,7 +210,7 @@ export function ensureDeviceIdentity(req: IncomingMessage, res: ServerResponse):
     const deviceId = randomUUID();
     const identity: RequestIdentity = isPostgresBackend()
       ? localRequestIdentity(deviceId)
-      : { ownerId: deviceId, deviceId, role: "admin" };
+      : { userId: deviceId, deviceId, role: "admin" };
     cache(req, identity);
     appendSetCookie(res, deviceCookie(issueDeviceIdentity(Date.now(), identity.deviceId, identity).token));
     return identity.deviceId;
@@ -220,7 +220,7 @@ export function ensureDeviceIdentity(req: IncomingMessage, res: ServerResponse):
 }
 
 /** 路由取 owner 时使用；正常 HTTP 流程已由 ensureDeviceIdentity 填充。 */
-export function ownerIdentityForRequest(req: IncomingMessage): RequestIdentity | null {
+export function userIdentityForRequest(req: IncomingMessage): RequestIdentity | null {
   const cached = requestIdentities.get(req);
   if (cached) return cached;
   const existing = deviceFromRequest(req);
@@ -232,7 +232,7 @@ export function ownerIdentityForRequest(req: IncomingMessage): RequestIdentity |
 }
 
 export function deviceIdentityForRequest(req: IncomingMessage): string | null {
-  return ownerIdentityForRequest(req)?.deviceId ?? deviceFromRequest(req)?.did ?? null;
+  return userIdentityForRequest(req)?.deviceId ?? deviceFromRequest(req)?.did ?? null;
 }
 
 /**
@@ -241,7 +241,7 @@ export function deviceIdentityForRequest(req: IncomingMessage): string | null {
  */
 export function ensureDeviceSession(req: IncomingMessage, res: ServerResponse): string | null {
   const deviceId = ensureDeviceIdentity(req, res);
-  const identity = ownerIdentityForRequest(req);
+  const identity = userIdentityForRequest(req);
   if (!deviceId || !identity) return deviceId;
   if (!authEnabled() || verifySessionRequest(req)) return deviceId;
   const { token } = issueSession(Date.now(), undefined, identity);
@@ -259,7 +259,7 @@ export function hasAuthorizedDeviceSession(req: IncomingMessage): boolean {
  * 用 token 摘要派生稳定 API 设备身份；生产数据库模式只接受 AUTH_TOKEN。
  */
 export function adoptBearerIdentity(req: IncomingMessage, res: ServerResponse): string | null {
-  const existing = ownerIdentityForRequest(req);
+  const existing = userIdentityForRequest(req);
   if (existing) return existing.deviceId;
   const match = /^Bearer\s+(.+)$/i.exec((req.headers.authorization ?? "").trim());
   if (!match?.[1]) return null;
@@ -268,7 +268,7 @@ export function adoptBearerIdentity(req: IncomingMessage, res: ServerResponse): 
   if (isPostgresBackend() && (!expected || bearer !== expected)) return null;
   const digest = createHash("sha256").update(bearer).digest("hex").slice(0, 32);
   const identity: RequestIdentity = {
-    ownerId: localRequestIdentity().ownerId,
+    userId: localRequestIdentity().userId,
     deviceId: `api-${digest}`,
     role: "admin",
   };
@@ -278,28 +278,28 @@ export function adoptBearerIdentity(req: IncomingMessage, res: ServerResponse): 
 }
 
 export function isAdminRequest(req: IncomingMessage): boolean {
-  return ownerIdentityForRequest(req)?.role === "admin";
+  return userIdentityForRequest(req)?.role === "admin";
 }
-export function requireOwnerIdentity(req: IncomingMessage, res: ServerResponse): RequestIdentity | null {
-  const identity = ownerIdentityForRequest(req);
+export function requireUserIdentity(req: IncomingMessage, res: ServerResponse): RequestIdentity | null {
+  const identity = userIdentityForRequest(req);
   if (identity) return identity;
   res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ error: "设备身份缺失或已过期，请刷新页面重新建立会话", authRequired: true }));
   return null;
 }
 
-/** 兼容旧路由：返回 ownerId，不再返回设备 ID；需要设备用 ownerIdentityForRequest。 */
+/** 兼容旧路由：返回 userId，不再返回设备 ID；需要设备用 userIdentityForRequest。 */
 export function requireDeviceIdentity(req: IncomingMessage, res: ServerResponse): string | null {
-  return requireOwnerIdentity(req, res)?.ownerId ?? null;
+  return requireUserIdentity(req, res)?.userId ?? null;
 }
 
 /** 登录成功或静默续期时刷新设备凭据；本机固定身份不需要 Cookie。 */
 export function renewDeviceCookie(res: ServerResponse, identity: RequestIdentity): void;
-export function renewDeviceCookie(res: ServerResponse, deviceId: string, owner?: Pick<RequestIdentity, "ownerId" | "role">): void;
+export function renewDeviceCookie(res: ServerResponse, deviceId: string, owner?: Pick<RequestIdentity, "userId" | "role">): void;
 export function renewDeviceCookie(
   res: ServerResponse,
   identityOrDeviceId: RequestIdentity | string,
-  owner?: Pick<RequestIdentity, "ownerId" | "role">,
+  owner?: Pick<RequestIdentity, "userId" | "role">,
 ): void {
   const identity = typeof identityOrDeviceId === "string"
     ? { deviceId: identityOrDeviceId, ...(owner ?? localRequestIdentity()) }
@@ -314,11 +314,11 @@ export function renewDeviceCookie(
 
 export function enrollDeviceIdentity(
   res: ServerResponse,
-  owner: Pick<RequestIdentity, "ownerId" | "role"> = localRequestIdentity(),
+  owner: Pick<RequestIdentity, "userId" | "role"> = localRequestIdentity(),
 ): string {
   const deviceId = randomUUID();
-  const effectiveOwner = !isPostgresBackend() && owner.ownerId === LOCAL_DEVICE_ID
-    ? { ...owner, ownerId: deviceId }
+  const effectiveOwner = !isPostgresBackend() && owner.userId === LOCAL_DEVICE_ID
+    ? { ...owner, userId: deviceId }
     : owner;
   const issued = issueDeviceIdentity(Date.now(), deviceId, effectiveOwner);
   appendSetCookie(res, deviceCookie(issued.token));

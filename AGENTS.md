@@ -10,7 +10,7 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 
 - 未交付能力不得在 README「当前能力」中冒充已完成。
 - 通用、房产、求职 Agent 必须保持 Profile、工具 allowlist、审批与记忆 scope 隔离。
-- `STATE_BACKEND=file` 仍是默认单实例边界；`STATE_BACKEND=postgres` 提供 ownerId + RLS 多租户数据面，但 SSE、限流与浏览器会话仍按单实例设计，不得暗示已支持集群高可用。
+- `STATE_BACKEND=file` 仍是默认单实例边界；`STATE_BACKEND=postgres` 提供 userId + RLS 多用户数据面，但 SSE、限流与浏览器会话仍按单实例设计，不得暗示已支持集群高可用。
 
 ## 2. 规范分层与 Skill 路由
 

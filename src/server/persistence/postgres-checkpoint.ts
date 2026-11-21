@@ -3,13 +3,13 @@
  * persistence/postgres-checkpoint.ts — owner 隔离的 PostgreSQL 检查点
  * ============================================================
  * 复用 MemorySaver 的 serde 与内存语义，只把 checkpoint/write 行落 PostgreSQL。
- * 所有查询都通过 withOwnerTransaction；thread_id 即使被猜到，也会被 RLS 拒绝。
+ * 所有查询都通过 withUserTransaction；thread_id 即使被猜到，也会被 RLS 拒绝。
  */
 import { MemorySaver, type Checkpoint, type CheckpointMetadata } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { sanitizeCheckpointMessage } from "../../agent/checkpoint-sanitize.js";
 import { log } from "../logging.js";
-import { withOwnerTransaction } from "./postgres.js";
+import { withUserTransaction } from "./postgres.js";
 
 function sanitizeCheckpoint(checkpoint: Checkpoint): Checkpoint {
   const messages = (checkpoint.channel_values as { messages?: unknown } | undefined)?.messages;
@@ -52,25 +52,25 @@ interface WriteRow {
 export class PostgresPersistentSaver extends MemorySaver {
   private loaded = false;
   private writeChain: Promise<void> = Promise.resolve();
-  private readonly ownerId: string;
+  private readonly userId: string;
 
-  constructor(ownerId: string) {
+  constructor(userId: string) {
     super();
-    this.ownerId = ownerId;
+    this.userId = userId;
   }
 
   filePathOf(): string {
-    return `postgres:${this.ownerId}`;
+    return `postgres:${this.userId}`;
   }
 
   async loadFromDisk(): Promise<void> {
     if (this.loaded) return;
     try {
-      const rows = await withOwnerTransaction(this.ownerId, (client) => client.query<CheckpointRow & { seq: string }>(
+      const rows = await withUserTransaction(this.userId, (client) => client.query<CheckpointRow & { seq: string }>(
         `SELECT seq, thread_id, checkpoint_ns, checkpoint_id, parent_id,
                 checkpoint_type, checkpoint_data, metadata_type, metadata_data
-         FROM checkpoint_rows WHERE owner_id = $1 ORDER BY seq ASC`,
-        [this.ownerId],
+         FROM checkpoint_rows WHERE user_id = $1 ORDER BY seq ASC`,
+        [this.userId],
       ));
       for (const row of rows.rows) {
         const checkpoint = await this.serde.loadsTyped(row.checkpoint_type, row.checkpoint_data) as Checkpoint;
@@ -83,10 +83,10 @@ export class PostgresPersistentSaver extends MemorySaver {
           },
         }, checkpoint, metadata);
       }
-      const writes = await withOwnerTransaction(this.ownerId, (client) => client.query<WriteRow & { seq: string }>(
+      const writes = await withUserTransaction(this.userId, (client) => client.query<WriteRow & { seq: string }>(
         `SELECT seq, thread_id, checkpoint_ns, checkpoint_id, task_id, channel, value_type, value_data
-         FROM checkpoint_writes WHERE owner_id = $1 ORDER BY seq ASC`,
-        [this.ownerId],
+         FROM checkpoint_writes WHERE user_id = $1 ORDER BY seq ASC`,
+        [this.userId],
       ));
       for (const row of writes.rows) {
         const value = await this.serde.loadsTyped(row.value_type, row.value_data);
@@ -119,13 +119,13 @@ export class PostgresPersistentSaver extends MemorySaver {
     const threadId = config.configurable?.thread_id;
     if (typeof threadId === "string") {
       this.queue(async () => {
-        await withOwnerTransaction(this.ownerId, (client) => client.query(
+        await withUserTransaction(this.userId, (client) => client.query(
           `INSERT INTO checkpoint_rows
-             (owner_id, thread_id, checkpoint_ns, checkpoint_id, parent_id,
+             (user_id, thread_id, checkpoint_ns, checkpoint_id, parent_id,
               checkpoint_type, checkpoint_data, metadata_type, metadata_data, created_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [
-            this.ownerId, threadId, String(config.configurable?.checkpoint_ns ?? ""), checkpoint.id,
+            this.userId, threadId, String(config.configurable?.checkpoint_ns ?? ""), checkpoint.id,
             typeof config.configurable?.checkpoint_id === "string" ? config.configurable.checkpoint_id : null,
             checkpointType, Buffer.from(checkpointBytes), metadataType, Buffer.from(metadataBytes), Date.now(),
           ],
@@ -150,13 +150,13 @@ export class PostgresPersistentSaver extends MemorySaver {
     if (typeof threadId !== "string" || typeof checkpointId !== "string") return;
     const checkpointNs = String(config.configurable?.checkpoint_ns ?? "");
     this.queue(async () => {
-      await withOwnerTransaction(this.ownerId, async (client) => {
+      await withUserTransaction(this.userId, async (client) => {
         for (const [idx, entry] of entries.entries()) {
           await client.query(
             `INSERT INTO checkpoint_writes
-               (owner_id, thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, value_type, value_data, created_at)
+               (user_id, thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, value_type, value_data, created_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-            [this.ownerId, threadId, checkpointNs, checkpointId, taskId, idx, entry.channel,
+            [this.userId, threadId, checkpointNs, checkpointId, taskId, idx, entry.channel,
               entry.valueType, Buffer.from(entry.valueBytes), Date.now()],
           );
         }
@@ -167,9 +167,9 @@ export class PostgresPersistentSaver extends MemorySaver {
   override async deleteThread(threadId: string): Promise<void> {
     await super.deleteThread(threadId);
     this.queue(async () => {
-      await withOwnerTransaction(this.ownerId, async (client) => {
-        await client.query("DELETE FROM checkpoint_writes WHERE owner_id = $1 AND thread_id = $2", [this.ownerId, threadId]);
-        await client.query("DELETE FROM checkpoint_rows WHERE owner_id = $1 AND thread_id = $2", [this.ownerId, threadId]);
+      await withUserTransaction(this.userId, async (client) => {
+        await client.query("DELETE FROM checkpoint_writes WHERE user_id = $1 AND thread_id = $2", [this.userId, threadId]);
+        await client.query("DELETE FROM checkpoint_rows WHERE user_id = $1 AND thread_id = $2", [this.userId, threadId]);
       });
     });
   }

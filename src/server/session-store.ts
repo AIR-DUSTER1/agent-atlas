@@ -5,6 +5,10 @@
  * T2-2 会话持久化 / T2-3 审批持久化 / T2-4 历史注入，共用的存储层。
  * 数据落 `.setting/sessions.ndjson`（gitignore —— 对话内容不入库）。
  *
+ * 序列化边界（用户体系改造 U0）：磁盘行沿用历史键 `ownerId`（append-only 历史必须
+ * 永久可读），内存标识符一律 userId；映射只发生在 journalWrite / journalSession /
+ * applyEvent / compactJournal 四处，不要把磁盘键名扩散到其它模块。
+ *
  * journal 事件（一行一 JSON）：
  *   session   会话创建 / 元数据全量（upsert 形）
  *   rename    标题变更
@@ -35,7 +39,7 @@ import { profileIdForKind, type AgentProfileId } from "../agent/profile.js";
 import { isPermissionMode, type PermissionMode } from "../agent/permission.js";
 import { log } from "./logging.js";
 import { LOCAL_DEVICE_ID } from "./security/device.js";
-import { isPostgresBackend, withOwnerTransaction } from "./persistence/postgres.js";
+import { isPostgresBackend, withUserTransaction } from "./persistence/postgres.js";
 
 // 测试钩子：e2e 用临时 journal（tests/helpers 注入 SESSIONS_FILE），
 // 避免跑测试把假会话写进开发者真实的 .setting/sessions.ndjson。
@@ -65,8 +69,8 @@ export interface SessionRecord {
   agentProfileId: AgentProfileId | null;
   demo: 1 | 2 | 3 | 4 | null;
   agentId: string | null;
-  /** PostgreSQL 多租户 owner；文件模式回落到设备身份。 */
-  ownerId?: string;
+  /** 所属用户；内存字段名 userId，journal 磁盘行对应历史键 ownerId。 */
+  userId?: string;
   /** 会话属于哪个浏览器设备；旧 journal 缺失时回落到本机身份。 */
   deviceId?: string;
   projectId: string;
@@ -117,18 +121,18 @@ let loaded = false;
 // journal 写入（fire-and-forget）
 // ---------------------------------------------------------------------------
 
-/** sessionId → ownerId；只用于给非 session 事件补租户归属。 */
-const ownerBySession = new Map<string, string>();
+/** sessionId → userId；只用于给非 session 事件补归属（磁盘键 ownerId 的内存投影）。 */
+const userBySession = new Map<string, string>();
 
-function ownerFor(id: string): string {
-  return ownerBySession.get(id) ?? LOCAL_DEVICE_ID;
+function userFor(id: string): string {
+  return userBySession.get(id) ?? LOCAL_DEVICE_ID;
 }
 
-async function appendJournal(ownerId: string, line: unknown): Promise<void> {
+async function appendJournal(userId: string, line: unknown): Promise<void> {
   if (isPostgresBackend()) {
-    await withOwnerTransaction(ownerId, (client) => client.query(
-      "INSERT INTO session_journal_events(owner_id, event) VALUES ($1, $2)",
-      [ownerId, line],
+    await withUserTransaction(userId, (client) => client.query(
+      "INSERT INTO session_journal_events(user_id, event) VALUES ($1, $2)",
+      [userId, line],
     ));
     return;
   }
@@ -138,11 +142,12 @@ async function appendJournal(ownerId: string, line: unknown): Promise<void> {
 /** 在途写入集合：优雅退出前用 flushJournal() 等它们落盘 */
 const pendingWrites = new Set<Promise<void>>();
 
-/** 所有写入都是后台任务：失败只告警，绝不向上抛（聊天流不能因此中断） */
-function journalWrite(ownerId: string, ev: Record<string, unknown>): void {
-  const event = { ...ev, ownerId };
+/** 所有写入都是后台任务：失败只告警，绝不向上抛（聊天流不能因此中断）。
+ * 序列化边界：磁盘行的归属键固定为 ownerId（历史格式），入参是内存语义 userId。 */
+function journalWrite(userId: string, ev: Record<string, unknown>): void {
+  const event = { ...ev, ownerId: userId };
   let task: Promise<void>;
-  task = appendJournal(ownerId, event)
+  task = appendJournal(userId, event)
     .catch((err) => {
       log("error", "journal_write_failed", { message: err instanceof Error ? err.message : String(err) });
     })
@@ -163,41 +168,43 @@ export async function flushJournal(): Promise<void> {
 export function journalSession(rec: {
   id: string; kind: SessionKind;
   demo: 1 | 2 | 3 | 4 | null;
-  agentId: string | null; ownerId?: string; deviceId?: string; projectId: string; title: string; createdAt: number; threadId: string;
+  agentId: string | null; userId?: string; deviceId?: string; projectId: string; title: string; createdAt: number; threadId: string;
   permissionMode?: PermissionMode;
 }): void {
   // profile identity 只由服务端从 kind 派生，不接受调用方注入。
-  const ownerId = rec.ownerId ?? rec.deviceId ?? LOCAL_DEVICE_ID;
-  ownerBySession.set(rec.id, ownerId);
-  journalWrite(ownerId, {
+  const userId = rec.userId ?? rec.deviceId ?? LOCAL_DEVICE_ID;
+  userBySession.set(rec.id, userId);
+  const { userId: _memUserId, ...diskRec } = rec;
+  journalWrite(userId, {
     ts: Date.now(),
     ev: "session",
-    session: { ...rec, agentProfileId: profileIdForKind(rec.kind) },
+    // 序列化边界：磁盘 session 对象沿用历史键 ownerId；内存入参是 userId。
+    session: { ...diskRec, ownerId: userId, agentProfileId: profileIdForKind(rec.kind) },
   });
 }
 
 export function journalRename(id: string, title: string): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "rename", id, title });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "rename", id, title });
 }
 
 export function journalProject(id: string, projectId: string): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "project", id, projectId });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "project", id, projectId });
 }
 
 export function journalPermission(id: string, permissionMode: PermissionMode): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "permission", id, permissionMode });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "permission", id, permissionMode });
 }
 
 export function journalDelete(id: string): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "delete", id });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "delete", id });
 }
 
 export function journalApproval(id: string, toolName: string, payload: unknown): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "approval", id, toolName, payload });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "approval", id, toolName, payload });
 }
 
 export function journalDecided(id: string, status: "approved" | "rejected" | "answered"): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "decided", id, status });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "decided", id, status });
 }
 
 export function journalCompact(
@@ -206,11 +213,11 @@ export function journalCompact(
   summary: string,
   details: { beforeChars: number; afterChars: number; usedModel: boolean; lastCompactTurnId: string | null }
 ): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "compact", id, threadId, summary, ...details });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "compact", id, threadId, summary, ...details });
 }
 
 export function journalContextInjected(id: string): void {
-  journalWrite(ownerFor(id), { ts: Date.now(), ev: "contextInjected", id });
+  journalWrite(userFor(id), { ts: Date.now(), ev: "contextInjected", id });
 }
 
 export function journalTurn(
@@ -226,7 +233,7 @@ export function journalTurn(
   storage?: unknown
 ): void {
   // 轮次身份同样由 kind 派生，避免 journal 中的伪造字段把执行域改到另一个 Agent。
-  journalWrite(ownerFor(id), {
+  journalWrite(userFor(id), {
     ts: Date.now(),
     ev: "turn",
     id,
@@ -250,7 +257,7 @@ export function journalTurn(
 /** 测试专用：丢弃内存回放态并重读 SESSIONS_FILE，让下一个用例能换 journal 重新回放 */
 export function resetJournalStore(): void {
   state.clear();
-  ownerBySession.clear();
+  userBySession.clear();
   loaded = false;
   JOURNAL_FILE = resolveJournalFile();
 }
@@ -290,15 +297,18 @@ function applyEvent(ev: Record<string, unknown>): void {
     }
     const base = findOrMake(s.id);
     const kind = isSessionKind(s.kind) ? s.kind : base.kind;
+    // 磁盘行的归属键是历史 ownerId（见文件头说明）；磁盘形状单独声明，不混入内存记录类型。
+    const diskSession = s as Partial<SessionRecord> & { ownerId?: unknown };
+    const diskLine = ev as Record<string, unknown> & { ownerId?: unknown };
     Object.assign(base, {
       kind,
       // 不接受 journal 自报 profile；kind 是唯一权威，避免跨域身份伪造。
       agentProfileId: profileIdForKind(kind),
       demo: s.demo ?? null,
       agentId: s.agentId ?? null,
-      ownerId: typeof s.ownerId === "string" && s.ownerId
-        ? s.ownerId
-        : typeof ev.ownerId === "string" && ev.ownerId ? ev.ownerId : base.ownerId,
+      userId: typeof diskSession.ownerId === "string" && diskSession.ownerId
+        ? diskSession.ownerId
+        : typeof diskLine.ownerId === "string" && diskLine.ownerId ? diskLine.ownerId : base.userId,
       deviceId: typeof s.deviceId === "string" && s.deviceId ? s.deviceId : base.deviceId,
       projectId: s.projectId ?? "default",
       title: s.title ?? base.title,
@@ -306,7 +316,7 @@ function applyEvent(ev: Record<string, unknown>): void {
       threadId: s.threadId ?? base.threadId,
       permissionMode: isPermissionMode(s.permissionMode) ? s.permissionMode : "approve",
     });
-    ownerBySession.set(base.id, base.ownerId ?? base.deviceId ?? LOCAL_DEVICE_ID);
+    userBySession.set(base.id, base.userId ?? base.deviceId ?? LOCAL_DEVICE_ID);
   } else if (evName === "rename") {
     const base = findOrMake(String(ev.id ?? ""));
     if (typeof ev.title === "string") base.title = ev.title;
@@ -354,7 +364,7 @@ function applyEvent(ev: Record<string, unknown>): void {
     base.turns += 1;
     const turnIndex = base.turns - 1;
     const journalTs = typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : base.createdAt;
-    ownerBySession.set(id, base.ownerId ?? base.deviceId ?? LOCAL_DEVICE_ID);
+    userBySession.set(id, base.userId ?? base.deviceId ?? LOCAL_DEVICE_ID);
     base.turnHistory.push({
       // 旧数据缺身份时用稳定派生值；不能每次 replay 随机 UUID，否则统计与审计无法对账。
       turnId: typeof ev.turnId === "string" && ev.turnId
@@ -377,7 +387,7 @@ function findOrMake(id: string): SessionRecord {
   let rec = state.get(id);
   if (!rec) {
     rec = {
-      id, kind: "agent", agentProfileId: null, demo: null, agentId: null, ownerId: LOCAL_DEVICE_ID, deviceId: LOCAL_DEVICE_ID,
+      id, kind: "agent", agentProfileId: null, demo: null, agentId: null, userId: LOCAL_DEVICE_ID, deviceId: LOCAL_DEVICE_ID,
       projectId: "default",
       title: "", createdAt: Date.now(), threadId: "", pendingApproval: null, turns: 0, turnHistory: [],
       contextSummary: null, contextSummaryInjected: false, lastCompactTurnId: null, lastCompact: null,
@@ -393,15 +403,15 @@ function enforceCap(): void {
   for (const rec of entries.slice(0, state.size - SESSIONS_MAX)) state.delete(rec.id);
 }
 
-/** PostgreSQL 模式只回放当前 owner 的事件；文件模式保持原有全量回放。 */
-export async function replaySessionsForOwner(ownerId: string): Promise<void> {
+/** PostgreSQL 模式只回放当前用户的事件；文件模式保持原有全量回放。 */
+export async function replaySessionsForUser(userId: string): Promise<void> {
   if (!isPostgresBackend()) {
     if (!loaded) await replaySessions();
     return;
   }
-  const result = await withOwnerTransaction(ownerId, (client) => client.query<{ event: Record<string, unknown> }>(
-    "SELECT event FROM session_journal_events WHERE owner_id = $1 ORDER BY seq ASC",
-    [ownerId],
+  const result = await withUserTransaction(userId, (client) => client.query<{ event: Record<string, unknown> }>(
+    "SELECT event FROM session_journal_events WHERE user_id = $1 ORDER BY seq ASC",
+    [userId],
   ));
   for (const row of result.rows) applyEvent(row.event);
   enforceCap();
@@ -416,7 +426,7 @@ async function compactJournal(): Promise<void> {
   const snapshot = journalSnapshot();
   const lines: string[] = [JSON.stringify({ ts: Date.now(), ev: "schema", schemaVersion: JOURNAL_SCHEMA_VERSION })];
   for (const rec of snapshot) {
-    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, ownerId: rec.ownerId, deviceId: rec.deviceId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
+    lines.push(JSON.stringify({ ts: rec.createdAt, ev: "session", session: { id: rec.id, kind: rec.kind, agentProfileId: rec.agentProfileId, demo: rec.demo, agentId: rec.agentId, ownerId: rec.userId, deviceId: rec.deviceId, projectId: rec.projectId, title: rec.title, createdAt: rec.createdAt, threadId: rec.threadId, permissionMode: rec.permissionMode ?? "approve" } }));
     if (rec.contextSummary) {
       lines.push(JSON.stringify({
         ts: Date.now(), ev: "compact", id: rec.id, threadId: rec.threadId,

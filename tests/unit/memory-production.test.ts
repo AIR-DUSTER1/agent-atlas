@@ -42,7 +42,7 @@ test("自动沉降低置信候选默认不注入，确认后才成为 active", a
     configureMemoryDistillation({ mode: "confirm", maxPerTurn: 3, hourlyLimit: 20 });
     const result = await distillTurn({
       sessionId: "s1",
-      ownerId: "local",
+      userId: "local",
       turnId: "t1",
       profileId: "general",
       userText: "请记住：以后回答都先给结论，少用列表。",
@@ -77,7 +77,7 @@ test("自动沉淀 smart 模式只自动激活高置信非身份记忆", async (
     configureMemoryDistillation({ mode: "smart", maxPerTurn: 3, hourlyLimit: 20 });
     await distillTurn({
       sessionId: "s2",
-      ownerId: "local",
+      userId: "local",
       turnId: "t2",
       profileId: "general",
       userText: "以后项目测试统一用 npm test。",

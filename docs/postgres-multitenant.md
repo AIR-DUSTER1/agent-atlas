@@ -1,15 +1,15 @@
 # PostgreSQL 多用户与 RLS
 
 > 适用版本：`0.9.0-beta.17` 开发预览
-> 状态：单实例应用 + PostgreSQL 多租户数据面。默认文件后端仍保留，桌面端和本地开发不需要数据库。
+> 状态：单实例应用 + PostgreSQL 多用户数据面。默认文件后端仍保留，桌面端和本地开发不需要数据库。
 
 ## 1. 能力边界
 
 启用 `STATE_BACKEND=postgres` 后：
 
-- 每个真实用户有独立 `ownerId`（`users.id`）
-- 会话 journal、LangGraph checkpoint、项目目录和用户设置都带 `owner_id`
-- 业务查询在事务内设置 `app.owner_id`，由 PostgreSQL RLS 做第二道隔离
+- 每个真实用户有独立 `userId`（`users.id`）
+- 会话 journal、LangGraph checkpoint、项目目录和用户设置都带 `user_id`（历史磁盘 journal 行沿用 `ownerId` 键，见 `session-store.ts` 序列化边界说明）
+- 业务查询在事务内设置 `app.user_id`，由 PostgreSQL RLS 做第二道隔离
 - 普通用户只能访问自己的会话、项目、checkpoint 和记忆 scope
 - 全局供应商、插件、MCP、技能、备份与诊断接口只允许管理员操作
 
@@ -97,7 +97,7 @@ npm run user:create -- --name "Alice" --email alice@example.com
 
 命令只输出一次 `accessToken`。请通过安全渠道交给用户；不要写入日志、README 或提交记录。
 
-用户首次打开页面时输入该访问令牌，之后设备 Cookie 会自动续期。`AUTH_TOKEN` 只用于管理员 bootstrap，不能作为普通用户令牌分发。
+日常用户管理在 Web「设置 → 账号与安全」（仅管理员可见）：创建用户（用户名 + 初始密码）、禁用/启用、重置密码、软删除、访问令牌管理。用户用「用户名 + 密码」登录，首登或密码被重置后强制修改；修改密码会使该用户全部会话与设备免登失效。连续 10 次登录失败锁定 15 分钟。`AUTH_TOKEN` 只用于管理员 bootstrap 与运维通道，不能作为普通用户令牌分发。
 
 ## 6. 数据模型与 RLS
 
@@ -135,8 +135,8 @@ docker compose ... exec -T agent npm run data:check
 
 ## 8. 升级与回滚
 
-1. 升级前执行数据库 dump 和应用数据备份。
-2. 固定新镜像 digest，执行 `db:migrate`。
+1. 升级前执行数据库 dump 和应用数据备份（迁移 002 会把 `owner_id` 列改名为 `user_id` 并重建 RLS 策略，同时为 `users` 表增补登录列 `username` / `password_hash` / `must_change_password` / `credential_epoch`）。
+2. 固定新镜像 digest，执行 `db:migrate`（启动时也会自动执行）。
 3. 检查 `/healthz`、`/readyz`、`/api/version`、旧会话读取和跨用户 404。
 4. 运行 `npm run test:postgres` 和质量门。
 

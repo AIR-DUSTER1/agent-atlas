@@ -13,7 +13,7 @@ import { writeAudit } from "../audit.js";
 import { memorySlot } from "../../memory/slot.js";
 import { localMemoryStoreStatus, readLocalRecords } from "../../memory/providers/local-store.js";
 import { isMemoryProfileId, memoryScope } from "../../memory/scope.js";
-import { tenantContextOrLocal } from "../tenant-context.js";
+import { userContextOrLocal } from "../user-context.js";
 import {
   configureSemanticMemory,
   embedTexts,
@@ -37,7 +37,7 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
 
 function profileOf(raw: string | null | undefined) {
   const profileId = isMemoryProfileId(raw) ? raw : "general";
-  return { profileId, scope: memoryScope(profileId, tenantContextOrLocal().ownerId) };
+  return { profileId, scope: memoryScope(profileId, userContextOrLocal().userId) };
 }
 
 export async function handleGetMemoryConfig(res: import("node:http").ServerResponse): Promise<void> {
@@ -125,7 +125,7 @@ export async function handleReindexMemory(
     if (!isMemoryProfileId(raw)) throw new Error("profileId 只能是 general、estate 或 job");
     const config = await readMemoryConfig();
     if (config.activeProvider !== "local") throw new Error("语义索引只对内置本地记忆生效，请先切回本地 Provider");
-    const scope = memoryScope(raw, tenantContextOrLocal().ownerId);
+    const scope = memoryScope(raw, userContextOrLocal().userId);
     const records = (await readLocalRecords()).filter((record) =>
       record.scope.profileId === scope.profileId && record.scope.userId === scope.userId && record.status === "active"
     );

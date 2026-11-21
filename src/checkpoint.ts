@@ -454,13 +454,13 @@ const postgresSavers = new Map<string, PostgresPersistentSaver>();
 
 export type CheckpointSaver = PersistentSaver | PostgresPersistentSaver;
 
-export function getCheckpointSaver(ownerId?: string): CheckpointSaver {
+export function getCheckpointSaver(userId?: string): CheckpointSaver {
   if (isPostgresBackend()) {
-    if (!ownerId) throw new Error("PostgreSQL 检查点必须提供 ownerId");
-    const existing = postgresSavers.get(ownerId);
+    if (!userId) throw new Error("PostgreSQL 检查点必须提供 userId");
+    const existing = postgresSavers.get(userId);
     if (existing) return existing;
-    const created = new PostgresPersistentSaver(ownerId);
-    postgresSavers.set(ownerId, created);
+    const created = new PostgresPersistentSaver(userId);
+    postgresSavers.set(userId, created);
     return created;
   }
   if (!saverSingleton) {
@@ -470,8 +470,8 @@ export function getCheckpointSaver(ownerId?: string): CheckpointSaver {
 }
 
 /** 启动路径：取单例并完成磁盘回放（幂等，可安全重复调用） */
-export async function ensureCheckpointsLoaded(ownerId?: string): Promise<CheckpointSaver> {
-  const saver = getCheckpointSaver(ownerId);
+export async function ensureCheckpointsLoaded(userId?: string): Promise<CheckpointSaver> {
+  const saver = getCheckpointSaver(userId);
   await saver.loadFromDisk();
   return saver;
 }

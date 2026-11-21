@@ -11,7 +11,7 @@ import { memorySlot } from "../../memory/slot.js";
 import { localMemoryStoreStatus } from "../../memory/providers/local-store.js";
 import { exportLocalMemories, importLocalMemories } from "../../memory/import-export.js";
 import { readMemoryConfig } from "../memory-config.js";
-import { tenantContextOrLocal } from "../tenant-context.js";
+import { userContextOrLocal } from "../user-context.js";
 
 function profileIdOf(raw: string | null | undefined): MemoryProfileId | null {
   if (!raw) return "general";
@@ -34,7 +34,7 @@ export async function handleListMemories(
 ): Promise<void> {
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
-  const memories = await memorySlot.list(memoryScope(profileId, tenantContextOrLocal().ownerId), { includeHistory });
+  const memories = await memorySlot.list(memoryScope(profileId, userContextOrLocal().userId), { includeHistory });
   sendJson(res, 200, {
     memories,
     profileId,
@@ -50,7 +50,7 @@ export async function handleListMemoryCandidates(
 ): Promise<void> {
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
-  const memories = await memorySlot.list(memoryScope(profileId, tenantContextOrLocal().ownerId), { statuses: ["candidate"] });
+  const memories = await memorySlot.list(memoryScope(profileId, userContextOrLocal().userId), { statuses: ["candidate"] });
   sendJson(res, 200, { memories, profileId });
 }
 
@@ -62,7 +62,7 @@ export async function handleConfirmMemory(
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
   try {
-    const entry = await memorySlot.confirm(id, memoryScope(profileId, tenantContextOrLocal().ownerId));
+    const entry = await memorySlot.confirm(id, memoryScope(profileId, userContextOrLocal().userId));
     if (!entry) {
       sendJson(res, 404, { error: "候选记忆不存在、已被处理，或不属于当前 Agent" });
       return;
@@ -81,7 +81,7 @@ export async function handleRejectMemory(
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
   try {
-    const gone = await memorySlot.reject(id, memoryScope(profileId, tenantContextOrLocal().ownerId));
+    const gone = await memorySlot.reject(id, memoryScope(profileId, userContextOrLocal().userId));
     if (!gone) {
       sendJson(res, 404, { error: "候选记忆不存在、已被处理，或不属于当前 Agent" });
       return;
@@ -100,7 +100,7 @@ export async function handleDeleteMemory(
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
   try {
-    const gone = await memorySlot.delete(id, memoryScope(profileId, tenantContextOrLocal().ownerId));
+    const gone = await memorySlot.delete(id, memoryScope(profileId, userContextOrLocal().userId));
     if (!gone) {
       sendJson(res, 404, { error: "该记忆不存在（可能已被删除，或不属于当前 Agent）" });
       return;
@@ -118,7 +118,7 @@ export async function handleExportMemories(
 ): Promise<void> {
   const profileId = profileIdOf(rawProfileId);
   if (!profileId) return respondInvalidScope(res);
-  const snapshot = await exportLocalMemories(memoryScope(profileId, tenantContextOrLocal().ownerId), { includeHistory });
+  const snapshot = await exportLocalMemories(memoryScope(profileId, userContextOrLocal().userId), { includeHistory });
   const date = new Date().toISOString().slice(0, 10);
   res.writeHead(200, {
     "Content-Type": "application/json; charset=utf-8",
@@ -140,7 +140,7 @@ export async function handleImportMemories(
     const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
     if (!profileId) return respondInvalidScope(res);
     const config = await readMemoryConfig();
-    const result = await importLocalMemories(memoryScope(profileId, tenantContextOrLocal().ownerId), body.snapshot, {
+    const result = await importLocalMemories(memoryScope(profileId, userContextOrLocal().userId), body.snapshot, {
       mode: body.mode === "replace" ? "replace" : "merge",
       allowPII: config.local.allowPII,
     });

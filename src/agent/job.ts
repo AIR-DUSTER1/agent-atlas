@@ -100,7 +100,7 @@ export function jobProfileWithPlugins(): AgentProfile {
   };
 }
 
-export function createJobGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, ownerId?: string) {
+export function createJobGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, userId?: string) {
   // 与通用 / 房产 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(jobProfileWithPlugins(), undefined, { sessionId, modelRuntime, ownerId });
+  return createWorkflowGraph(jobProfileWithPlugins(), undefined, { sessionId, modelRuntime, userId });
 }

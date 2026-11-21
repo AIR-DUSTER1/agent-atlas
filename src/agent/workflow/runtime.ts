@@ -26,8 +26,8 @@ import type { WorkflowChatModel, WorkflowModels } from "./types.js";
 export interface WorkflowGraphOptions {
   checkpointer?: MemorySaver;
   sessionId?: string;
-  /** 当前会话真实 owner；用于长期记忆 scope。 */
-  ownerId?: string;
+  /** 当前会话真实用户；用于长期记忆 scope。 */
+  userId?: string;
   riskAssessor?: ToolRiskAssessor;
   /** 子代理可使用独立「供应商 × 模型」快照；主图不传时走全局当前模型。 */
   modelRuntime?: ModelRuntimeConfig;
@@ -68,10 +68,10 @@ export function createWorkflowRuntime(
   const baseTools = planningEnabled && !hasPlanTool
     ? [...profile.tools, updateWorkflowPlanTool]
     : profile.tools;
-  const tools = options?.ownerId
+  const tools = options?.userId
     ? [
         ...baseTools.filter((item) => item.name !== "memory_save" && item.name !== "memory_recall"),
-        ...createMemoryTools(profile.id, options.ownerId).memoryTools,
+        ...createMemoryTools(profile.id, options.userId).memoryTools,
       ]
     : baseTools;
   const modelOptions = { sessionId: options?.sessionId, runtime: options?.modelRuntime };

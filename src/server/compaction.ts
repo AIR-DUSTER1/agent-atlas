@@ -133,7 +133,7 @@ export async function compactSession(session: Session): Promise<CompactResult> {
   const nextThreadId = `web-${randomUUID()}`;
   const compactedTurnId = session.turnHistory.at(-1)?.turnId ?? null;
   if (isAgentKind(session.kind)) {
-    void getCheckpointSaver(session.ownerId).deleteThread(session.threadId);
+    void getCheckpointSaver(session.userId).deleteThread(session.threadId);
   }
   session.graph = buildGraph(session.kind, session.demo, nextThreadId);
   session.threadId = nextThreadId;

@@ -60,6 +60,13 @@
               <span class="sn-copy"><strong>MCP 服务器</strong><small>接入外部工具（默认需审批）</small></span>
             </button>
           </div>
+          <div class="settings-nav-group" data-settings-group="system">
+            <div class="settings-nav-group-title">系统</div>
+            <button type="button" class="settings-nav-item hidden" data-settings-view="users" role="tab" aria-selected="false" aria-controls="settings-view-users">
+              <span class="sn-icon"><i class="ui-icon" data-icon="User" aria-hidden="true"></i></span>
+              <span class="sn-copy"><strong>用户管理</strong><small>多用户账号、密码与访问令牌</small></span>
+            </button>
+          </div>
           <div class="settings-nav-group" data-settings-group="data">
             <div class="settings-nav-group-title">数据</div>
             <button type="button" class="settings-nav-item" data-settings-view="stats" role="tab" aria-selected="false" aria-controls="settings-view-stats">
@@ -81,6 +88,7 @@
         <!-- @include ./skills.html -->
         <!-- @include ./mcp.html -->
         <!-- @include ./stats.html -->
+        <!-- @include ./users.html -->
       </div>
     </div>
   </section>

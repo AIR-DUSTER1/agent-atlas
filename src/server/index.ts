@@ -45,7 +45,7 @@
 import { createServer } from "node:http";
 import { config } from "../config.js";
 import { PRODUCT_NAME } from "../product.js";
-import { bumpConfigVersion, getSessionByThreadForOwner, restoreSessions, ensureOwnerSessions } from "./sessions.js";
+import { bumpConfigVersion, getSessionByThreadForUser, restoreSessions, ensureUserSessions } from "./sessions.js";
 import { loadTraceSettings } from "./trace-settings.js";
 import { loadSettings, refreshModelInfo } from "./settings.js";
 import { ensureProjectsLoaded, loadProjects } from "./projects.js";
@@ -63,10 +63,10 @@ import { configureRoutingBreaker, configureRoutingVectorFinder } from "../routin
 import { CircuitBreaker } from "./runtime/circuit-breaker.js";
 import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, requireDeviceIdentity, isAdminRequest } from "./security/device.js";
-import { ownerIdentityForRequest } from "./security/device.js";
+import { userIdentityForRequest } from "./security/device.js";
 import { initializePostgres, closePostgres, isPostgresBackend } from "./persistence/postgres.js";
 import { ensureBootstrapAdmin } from "./persistence/accounts.js";
-import { enterTenantContext, localTenantContext } from "./tenant-context.js";
+import { enterUserContext, localUserContext } from "./user-context.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
 import { serveStatic } from "./static.js";
@@ -81,6 +81,7 @@ import { log, newRequestId } from "./logging.js";
 import { SETTINGS_FILE } from "./config-store.js";
 import { BUILD_INFO } from "./build-info.js";
 import { assertProductionEnvironment, assertProductionRuntimeReady, isProductionMode } from "./production.js";
+import { hasLocalLock } from "./security/local-lock.js";
 import { collectProductionReleaseChecks, failedReleaseChecks } from "./release-check.js";
 import { authFailureLimiter, clientIp } from "./security/rate-limit.js";
 import { incCounter, incGauge, metricPath, observeHistogram, startProcessMetrics } from "./observability/metrics.js";
@@ -89,7 +90,11 @@ import { runPersistenceMigrations } from "./persistence/migrations.js";
 import { applyMemoryRuntime } from "./memory-http.js";
 import { installMemoryMetricsSink } from "./memory-observability.js";
 import { startMemoryMaintenance, stopMemoryMaintenance } from "./memory-maintenance.js";
-import { handleAuthLogin, handleAuthLogout, handleAuthRenew, handleAuthStatus } from "./routes/auth.js";
+import {
+  assertFreshCredentials, assertPasswordChangeAllowed, handleAuthLogin, handleAuthLogout,
+  handleAuthMe, handleAuthPassword, handleAuthRenew, handleAuthStatus, handleClearLocalLock,
+  handleLocalLockStatus, handlePasswordLogin, handleSetLocalLock,
+} from "./routes/auth.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import {
   handleGetApiConfig, handleAddProvider, handleAddModel, handleUpdateModel, handleDeleteModel,
@@ -119,6 +124,10 @@ import {
 import { loadJob } from "./job.js";
 import { closeAllBrowserSessions } from "./browser-use.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
+import {
+  handleCreateUser, handleCreateUserToken, handleDeleteUser, handleListUserTokens,
+  handleListUsers, handleResetUserPassword, handleRevokeUserToken, handleUpdateUser,
+} from "./routes/users.js";
 import {
   handleCreateSubagent,
   handleDeleteSubagent,
@@ -257,6 +266,7 @@ const EXPOSED_NOAUTH_ERR =
   "请设置环境变量 AUTH_TOKEN 后携带 Bearer token 访问，或改用 HOST=127.0.0.1 仅本机使用";
 
 function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
+  if (pathname.startsWith("/api/users")) return true;
   if (method === "GET" || method === "HEAD") {
     return pathname === "/api/models"
       || pathname.startsWith("/api/memory/config")
@@ -328,6 +338,14 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/auth/session" && req.method === "POST") { await handleAuthLogin(req, res); return; }
     if (pathname === "/api/auth/session/renew" && req.method === "POST") { await handleAuthRenew(req, res); return; }
     if (pathname === "/api/auth/logout" && req.method === "POST") { await handleAuthLogout(req, res); return; }
+    // 用户名密码登录（U1）与自助改密；登录入口必须在凭据纪元门禁之前。
+    if (pathname === "/api/auth/login" && req.method === "POST") { await handlePasswordLogin(req, res); return; }
+    if (pathname === "/api/auth/me" && req.method === "GET") { await handleAuthMe(req, res); return; }
+    if (pathname === "/api/auth/password" && req.method === "POST") { await handleAuthPassword(req, res); return; }
+    // 本地访问密码锁（U3，仅文件模式）
+    if (pathname === "/api/auth/local-lock" && req.method === "GET") { await handleLocalLockStatus(req, res); return; }
+    if (pathname === "/api/auth/local-lock" && req.method === "POST") { await handleSetLocalLock(req, res); return; }
+    if (pathname === "/api/auth/local-lock" && req.method === "DELETE") { await handleClearLocalLock(req, res); return; }
 
     // Prometheus 指标不是 /api/*，但同样需要会话认证；静态页匿名无法读取。
     if (pathname === "/metrics") {
@@ -365,20 +383,26 @@ const server = createServer(async (req, res) => {
     // 否则创建会话后下一条脚本请求会被设备隔离误拒绝。
     if (pathname.startsWith("/api/")) adoptBearerIdentity(req, res);
 
-    // 认证通过后建立租户上下文；数据库 RLS、文件授权和记忆 scope 都从这里取 owner。
+    // 凭据纪元门禁（U1）：改密后旧会话/旧设备静默会话在统一入口 401，强制重登。
+    if (pathname.startsWith("/api/") && !(await assertFreshCredentials(req, res))) return;
+
+    // 认证通过后建立用户上下文；数据库 RLS、文件授权和记忆 scope 都从这里取用户。
     if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
-      const identity = ownerIdentityForRequest(req);
+      const identity = userIdentityForRequest(req);
       if (isPostgresBackend() && !identity) {
         respondUnauthorized(req, res);
         return;
       }
       const context = identity
-        ? { ownerId: identity.ownerId, deviceId: identity.deviceId, role: identity.role }
-        : localTenantContext();
-      enterTenantContext(context);
-      if (isPostgresBackend()) await ensureOwnerSessions(context.ownerId);
-      if (isPostgresBackend()) await ensureProjectsLoaded(context.ownerId);
+        ? { userId: identity.userId, deviceId: identity.deviceId, role: identity.role }
+        : localUserContext();
+      enterUserContext(context);
+      if (isPostgresBackend()) await ensureUserSessions(context.userId);
+      if (isPostgresBackend()) await ensureProjectsLoaded(context.userId);
     }
+
+    // 首登强制改密（U1）：除 /api/auth/* 外全部 403，前端据此跳改密页。
+    if (pathname.startsWith("/api/") && !(await assertPasswordChangeAllowed(req, res, pathname))) return;
 
     // 多用户模式：全局供应商、插件、MCP、技能、备份等控制面只允许管理员修改。
     if (isPostgresBackend() && isAdminOnlyApi(pathname, req.method) && !isAdminRequest(req)) {
@@ -418,6 +442,9 @@ const server = createServer(async (req, res) => {
     const ragDocMatch = pathname.match(/^\/api\/rag\/docs\/([\w-]+)$/);
     const pluginMatch = pathname.match(/^\/api\/plugins\/([\w-]+)$/);
     const subagentMatch = pathname.match(/^\/api\/subagents\/([\w-]+)$/);
+    // 用户 id 是 uuid；reset-password / tokens 子路径在各自分支用 endsWith 区分
+    const userMatch = pathname.match(/^\/api\/users\/([\w-]+)$/);
+    const userTokenRevokeMatch = pathname.match(/^\/api\/users\/([\w-]+)\/tokens\/([\w-]+)$/);
 
     // 结论地图：高德/腾讯/百度 Web 服务 Key 仅在服务端代理中使用
     if (pathname === "/api/map/static" && req.method === "GET") { await handleStaticMap(res, url); return; }
@@ -447,6 +474,28 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/subagents" && req.method === "POST") { await handleCreateSubagent(res, req); return; }
     if (subagentMatch && req.method === "PATCH") { await handleUpdateSubagent(res, req, subagentMatch[1]); return; }
     if (subagentMatch && req.method === "DELETE") { await handleDeleteSubagent(res, subagentMatch[1]); return; }
+
+    // 用户管理（U2，admin only；文件模式由路由内统一 404）
+    if (pathname === "/api/users" && req.method === "GET") { await handleListUsers(res); return; }
+    if (pathname === "/api/users" && req.method === "POST") { await handleCreateUser(req, res); return; }
+    if (userMatch && req.method === "PATCH") { await handleUpdateUser(req, res, userMatch[1]); return; }
+    if (userMatch && req.method === "DELETE") { await handleDeleteUser(req, res, userMatch[1]); return; }
+    if (userMatch && pathname.endsWith("/reset-password") && req.method === "POST") {
+      await handleResetUserPassword(req, res, userMatch[1]);
+      return;
+    }
+    if (userMatch && pathname.endsWith("/tokens") && req.method === "GET") {
+      await handleListUserTokens(res, userMatch[1]);
+      return;
+    }
+    if (userMatch && pathname.endsWith("/tokens") && req.method === "POST") {
+      await handleCreateUserToken(req, res, userMatch[1]);
+      return;
+    }
+    if (userTokenRevokeMatch && req.method === "DELETE") {
+      await handleRevokeUserToken(req, res, userTokenRevokeMatch[1], userTokenRevokeMatch[2]);
+      return;
+    }
 
     // 路由决策层（默认关闭；开启后按规则 → 向量 → 决策模型挑子代理）
     if (pathname === "/api/routing" && req.method === "GET") { handleGetRouting(res); return; }
@@ -633,9 +682,9 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "浏览器会话 id 格式非法" }));
         return;
       }
-      const ownerId = requireDeviceIdentity(req, res);
-      if (!ownerId) return;
-      if (!getSessionByThreadForOwner(browserSessionId, ownerId)) {
+      const userId = requireDeviceIdentity(req, res);
+      if (!userId) return;
+      if (!getSessionByThreadForUser(browserSessionId, userId)) {
         res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: "Browser Use 会话不存在或不属于当前设备" }));
         return;
@@ -797,6 +846,20 @@ server.listen(PORT, HOST, async () => {
       console.warn(
         `  ⚠⚠⚠  HOST=${HOST} 且未配置 AUTH_TOKEN：本服务的接口可以修改配置 / 执行命令 / 消耗网关配额，\n` +
         `  ⚠⚠⚠  当前对局域网所有设备开放。仅限可信内网临时使用，公网场景必须先设置 AUTH_TOKEN。\n`
+      );
+    }
+  }
+  // 存储策略自检（用户体系改造 U4）：线上坚持 file 后端必须意识到多用户隔离失效。
+  if (isProductionMode() && !isPostgresBackend()) {
+    const lockEnabled = await hasLocalLock();
+    log("warn", "file_backend_in_production", { localLockEnabled: lockEnabled });
+    if (process.stderr.isTTY) {
+      const lockHint = lockEnabled
+        ? `  ⚠  已启用本地访问密码锁；单用户模式下多用户隔离仍不可用。\n`
+        : `  ⚠  尚未设置访问密码锁：任何人拿到地址即可操作本服务，请尽快在设置 → 账号与安全 中开启。\n`;
+      console.warn(
+        `  ⚠  线上部署检测到文件后端（STATE_BACKEND=file）：建议使用 PostgreSQL 以获得多用户与事务完整性。\n` +
+        lockHint
       );
     }
   }

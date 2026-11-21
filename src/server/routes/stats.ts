@@ -12,7 +12,7 @@
  * 时间窗口按服务器本地自然日计算，包含今天；journal 回放后的 turnHistory 同样计入。
  */
 import { listSessions, type Session, type TurnRecord } from "../sessions.js";
-import { requireOwnerIdentity } from "../security/device.js";
+import { requireUserIdentity } from "../security/device.js";
 
 const RANGE_WINDOWS = [
   { id: "7d", label: "近 7 天", days: 7 },
@@ -355,8 +355,8 @@ export async function handleStats(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage,
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(buildStats(listSessions(identity.ownerId))));
+  res.end(JSON.stringify(buildStats(listSessions(identity.userId))));
 }

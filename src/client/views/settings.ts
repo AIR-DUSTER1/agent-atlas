@@ -28,10 +28,11 @@ import { refreshTracing } from "./settings-tracing.js";
 import { refreshSubagents } from "./settings-subagents.js";
 import { refreshRouting, bindRoutingSettings } from "./settings-routing.js";
 import { refreshStats } from "./stats/index.js";
+import { bindUsersSettings, refreshUsers } from "./settings-users.js";
 import { destroyStatsCharts } from "./stats/charts.js";
 import type { AppConfig } from "../modules/types.js";
 
-const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "tracing", "memories", "commands", "skills", "mcp", "stats"]);
+const SETTINGS_VIEWS = new Set(["models", "plugins", "subagents", "routing", "tracing", "memories", "commands", "skills", "mcp", "stats", "users"]);
 
 export function isSettingsPageOpen(): boolean {
   const page = $("settings-page");
@@ -73,6 +74,9 @@ export function showSettingsView(view: string): void {
     void refreshSkills().catch((err) => showSkillStatus(`✗ ${(err as Error).message}`, "err"));
   } else if (next === "mcp") {
     void refreshMcp().catch(() => {});
+  } else if (next === "users") {
+    // 分区入口对非 admin 隐藏；直开 URL 时这里再挡一层（懒加载即校验）。
+    void refreshUsers().catch(() => showSettingsView("models"));
   } else {
     refreshStats();
   }
@@ -125,6 +129,7 @@ function setRoutingPanelError(err: unknown): void {
 export function bindSettingsNavigation(): void {
   bindMemorySettings();
   bindRoutingSettings();
+  bindUsersSettings();
   document.querySelectorAll<HTMLElement>(".settings-nav-item").forEach((button) => {
     button.addEventListener("click", () => showSettingsView(button.dataset.settingsView || "models"));
   });

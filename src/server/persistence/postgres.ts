@@ -4,8 +4,8 @@
  * ============================================================
  * 职责：集中管理 file/postgres 双后端开关、连接池、迁移和 RLS 会话变量。
  * 设计立场：
- *  - 业务代码不得直接 new Pool；所有租户查询都通过 withOwnerTransaction，
- *    由事务级 app.owner_id 交给 PostgreSQL RLS 做最后一道隔离；
+ *  - 业务代码不得直接 new Pool；所有租户查询都通过 withUserTransaction，
+ *    由事务级 app.user_id 交给 PostgreSQL RLS 做最后一道隔离；
  *  - DATABASE_URL 是运行时低权限角色；DATABASE_ADMIN_URL 只用于迁移/bootstrap；
  *  - file 后端保持默认，桌面端和现有本地开发不受影响。
  */
@@ -18,14 +18,14 @@ const { Pool } = pg;
 
 export type StateBackend = "file" | "postgres";
 
-export interface LocalOwnerIdentity {
-  ownerId: string;
+export interface LocalUserIdentity {
+  userId: string;
   role: "admin" | "member";
 }
 
 let appPool: pg.Pool | null = null;
 let adminPool: pg.Pool | null = null;
-let localOwner: LocalOwnerIdentity | null = null;
+let localUser: LocalUserIdentity | null = null;
 
 function envValue(name: string): string {
   return (process.env[name] ?? "").trim();
@@ -74,25 +74,25 @@ function getAdminPool(): pg.Pool {
   return adminPool;
 }
 
-export function setLocalOwnerIdentity(owner: LocalOwnerIdentity): void {
-  localOwner = owner;
+export function setLocalUserIdentity(owner: LocalUserIdentity): void {
+  localUser = owner;
 }
 
-export function localOwnerIdentity(): LocalOwnerIdentity | null {
-  return localOwner;
+export function localUserIdentity(): LocalUserIdentity | null {
+  return localUser;
 }
 
 /** owner 事务：SET LOCAL 只在当前事务有效，连接归还池后不会串租户。 */
-export async function withOwnerTransaction<T>(
-  ownerId: string,
+export async function withUserTransaction<T>(
+  userId: string,
   work: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   if (!isPostgresBackend()) throw new Error("当前不是 PostgreSQL 后端");
-  if (!ownerId.trim()) throw new Error("ownerId 不能为空");
+  if (!userId.trim()) throw new Error("userId 不能为空");
   const client = await getAppPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("SELECT set_config('app.owner_id', $1, true)", [ownerId]);
+    await client.query("SELECT set_config('app.user_id', $1, true)", [userId]);
     const result = await work(client);
     await client.query("COMMIT");
     return result;
@@ -146,7 +146,11 @@ async function migrationSql(version: number): Promise<string> {
   return readFile(file, "utf8");
 }
 
-const MIGRATIONS = [{ version: 1, name: "multitenant-rls" }] as const;
+const MIGRATIONS = [
+  { version: 1, name: "multitenant-rls" },
+  // 用户体系改造：owner→user 语义迁移 + 登录列（见 002 文件头）
+  { version: 2, name: "user-semantics-and-login" },
+] as const;
 
 /** 启动前执行；迁移使用 DATABASE_ADMIN_URL，迁移完成后运行时走 DATABASE_URL。 */
 export async function initializePostgres(): Promise<void> {

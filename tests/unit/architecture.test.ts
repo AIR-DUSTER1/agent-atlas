@@ -133,3 +133,59 @@ test("Agent 与工具只依赖 Memory Slot，不直接触碰具体 Provider/旧�
   assert.match(workflow, /memory\/slot\.js/);
   assert.match(tools, /memory\/slot\.js/);
 });
+
+// ---------------------------------------------------------------------------
+// 用户体系术语守门（用户体系改造 U0）：租户/owner 心智只允许存在于
+// persistence/sql/ 迁移脚本与两条历史磁盘序列化边界里。
+// ---------------------------------------------------------------------------
+
+/** 允许出现历史磁盘键 `ownerId` 的白名单：文件路径 → 允许出现的最大次数。 */
+const OWNER_DISK_BOUNDARIES: Array<{ file: string; max: number; reason: string }> = [
+  {
+    file: "src/server/session-store.ts",
+    max: 11,
+    reason: "journal 是 append-only 历史，磁盘行键 ownerId 必须永久可读（见该文件头序列化边界说明）",
+  },
+  {
+    file: "src/server/projects.ts",
+    max: 4,
+    reason: ".web-config.json 的项目项读旧 ownerId 键做兼容，写出统一 userId",
+  },
+  {
+    file: "src/server/security/session.ts",
+    max: 3,
+    reason: "旧会话 Cookie 载荷键 ownerId 的平滑兼容读；新签发一律写 userId",
+  },
+];
+
+test("用户术语守门：tenant/owner 语义零残留（磁盘边界白名单除外）", async () => {
+  const files = await listTs(SRC);
+  const tenantLeftovers: string[] = [];
+  const ownerLeftovers: string[] = [];
+  for (const file of files) {
+    const rel = relative(ROOT, file).replaceAll("\\", "/");
+    if (rel.includes("/public/")) continue;
+    const source = await readFile(file, "utf8");
+    // 租户术语一律禁止（user-context.ts 只允许在注释里说明历史命名）。
+    const withoutComments = source
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+    if (/TenantContext|TenantRole|tenantContext|tenant-context|withOwnerTransaction|AuthenticatedOwner|ownerIdentityForRequest|currentOwnerId/.test(withoutComments)) {
+      tenantLeftovers.push(rel);
+    }
+    // owner_id / ownerId 只允许出现在 SQL 迁移目录与磁盘序列化边界。
+    if (/owner_id/.test(withoutComments) && !rel.includes("persistence/sql/")) {
+      ownerLeftovers.push(`${rel} (owner_id)`);
+    }
+    const boundary = OWNER_DISK_BOUNDARIES.find((entry) => entry.file === rel);
+    const ownerIdCount = (withoutComments.match(/ownerId/g) ?? []).length;
+    if (ownerIdCount > 0 && !boundary) ownerLeftovers.push(`${rel} (ownerId ×${ownerIdCount})`);
+    if (boundary && ownerIdCount > boundary.max) {
+      ownerLeftovers.push(`${rel} (ownerId ×${ownerIdCount} > 白名单 ${boundary.max}：${boundary.reason})`);
+    }
+  }
+  assert.deepEqual(tenantLeftovers, [], `租户术语残留：${tenantLeftovers.join(", ")}`);
+  assert.deepEqual(ownerLeftovers, [], `owner 术语越界：${ownerLeftovers.join("; ")}`);
+});

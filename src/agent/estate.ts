@@ -100,7 +100,7 @@ export function estateProfileWithPlugins(): AgentProfile {
   };
 }
 
-export function createEstateGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, ownerId?: string) {
+export function createEstateGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, userId?: string) {
   // 与通用 Agent 共用同一套编排：需求理解 → 澄清 → ReAct → 反思
-  return createWorkflowGraph(estateProfileWithPlugins(), undefined, { sessionId, modelRuntime, ownerId });
+  return createWorkflowGraph(estateProfileWithPlugins(), undefined, { sessionId, modelRuntime, userId });
 }

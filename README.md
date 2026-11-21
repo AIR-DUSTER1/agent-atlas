@@ -43,7 +43,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
 | 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆；上下文条精简展示占比、请求量、缓存与输出均速 |
-| 安全与运维 | 高风险审批、审计日志、设备静默认证、按设备隔离会话、配置加密、用量统计、备份恢复、Prometheus 指标与可选 LangSmith 链路追踪 |
+| 安全与运维 | 高风险审批、审计日志、设备静默认证、用户名密码登录与多用户管理、本地访问密码锁、按设备隔离会话、配置加密、用量统计、备份恢复、Prometheus 指标与可选 LangSmith 链路追踪 |
 
 ## 界面预览
 
@@ -200,10 +200,14 @@ DATABASE_URL=postgresql://agent_app:APP_PASSWORD@postgres:5432/agentatlas
 DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 ```
 
-- `AUTH_TOKEN` 只作为管理员 bootstrap；普通用户通过 `npm run user:create -- --name Alice` 获取独立访问令牌。
-- 会话、审批、checkpoint、项目和统计由 `ownerId` 隔离；数据库表启用 RLS。
+- 用户用「用户名 + 密码」登录；管理员在「设置 → 账号与安全」创建用户、重置密码、管理访问令牌（CLI 通道 `npm run user:create -- --name Alice` 仍可用）。
+- 首登或密码被重置后强制改密；修改密码会使该用户全部会话与设备免登失效。
+- 连续 10 次登录失败锁定账户 15 分钟；IP 维度另有 5 次 / 15 分钟限流。
+- `AUTH_TOKEN` 只作为管理员 bootstrap 与运维通道；会话、审批、checkpoint、项目和统计由 `userId` 隔离，数据库表启用 RLS。
 - 供应商、插件、MCP、技能、备份和诊断配置只允许管理员修改。
 - 当前仍是单实例运行，SSE、限流和内存流锁尚未迁移到多实例。
+
+文件模式的本地访问密码锁在「设置 → 账号与安全」开启：设置后新设备配对需输入访问密码；忘记密码在本机运行 `npm run lock:clear`。
 
 完整部署、角色权限、备份和回滚说明见 [PostgreSQL 多用户与 RLS](docs/postgres-multitenant.md)。
 ## 配置说明
@@ -216,7 +220,9 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
 | `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
 | `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为管理员 bootstrap 密钥 |
-| `STATE_BACKEND` / `DATABASE_URL` / `DATABASE_ADMIN_URL` | 可选 PostgreSQL 多租户后端与迁移/运行角色 |
+| `BOOTSTRAP_ADMIN_USERNAME` | bootstrap 管理员登录名，默认 `admin` |
+| `BOOTSTRAP_ADMIN_NAME` | bootstrap 管理员显示名，默认「管理员」 |
+| `STATE_BACKEND` / `DATABASE_URL` / `DATABASE_ADMIN_URL` | 可选 PostgreSQL 多用户后端与迁移/运行角色 |
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
 | `SESSION_SECRET` / `DATA_KEY` | 生产会话与设备凭据签名、配置加密密钥 |
 | `DEVICE_TTL_DAYS` | 已配对设备凭据有效期，默认 180 天（1–365） |
@@ -350,7 +356,7 @@ npm run build:client
 | [监控与告警](docs/monitoring.md) | 探针、Prometheus、日志与审计 |
 | [故障排查](docs/troubleshooting.md) | 启动、登录、SSE、配置与数据问题 |
 | [升级与回滚](docs/upgrade-rollback.md) | 发布约定、升级步骤与回滚决策 |
-| [PostgreSQL 多用户](docs/postgres-multitenant.md) | ownerId、RLS、角色、备份与验收 |
+| [PostgreSQL 多用户](docs/postgres-multitenant.md) | userId、RLS、角色、备份与验收 |
 | [生产检查单](docs/production-checklist.md) | 上线前安全、数据、资源与质量门 |
 | [运行手册](docs/runbook.md) | 磁盘、配置、MCP、认证与 SSE 故障处置 |
 | [支持边界](docs/support.md) | 支持范围、安全报告与维护责任 |

@@ -25,7 +25,7 @@ export interface SessionPayload {
   iat: number;
   exp: number;
   /** PostgreSQL 多用户模式写入；文件模式为空。 */
-  ownerId?: string;
+  userId?: string;
   role?: "admin" | "member";
 }
 
@@ -78,7 +78,7 @@ export function sessionFromRequest(req: IncomingMessage): string | null {
 export function issueSession(
   now = Date.now(),
   sid: string = randomUUID(),
-  owner?: { ownerId: string; role: "admin" | "member" },
+  owner?: { userId: string; role: "admin" | "member" },
 ): { token: string; payload: SessionPayload } {
   const ttlMs = sessionTtlHours() * 60 * 60 * 1000;
   const payload: SessionPayload = {
@@ -86,7 +86,7 @@ export function issueSession(
     sid,
     iat: now,
     exp: now + ttlMs,
-    ...(owner?.ownerId ? { ownerId: owner.ownerId } : {}),
+    ...(owner?.userId ? { userId: owner.userId } : {}),
     ...(owner?.role ? { role: owner.role } : {}),
   };
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -105,9 +105,15 @@ export function verifySessionToken(token: string, now = Date.now()): SessionPayl
   } catch {
     return null;
   }
+  // 旧版本 Cookie 的载荷键是 ownerId（用户体系改造前的历史命名）；
+  // 平滑滚动：读出后归一到 userId，新签发一律写 userId。
+  const legacy = payload as SessionPayload & { ownerId?: unknown };
+  if (payload.userId === undefined && typeof legacy.ownerId === "string") {
+    payload.userId = legacy.ownerId;
+  }
   if (
     !payload || payload.v !== SESSION_VERSION || typeof payload.sid !== "string" || !payload.sid ||
-    (payload.ownerId !== undefined && typeof payload.ownerId !== "string") ||
+    (payload.userId !== undefined && typeof payload.userId !== "string") ||
     (payload.role !== undefined && payload.role !== "admin" && payload.role !== "member") ||
     typeof payload.iat !== "number" || typeof payload.exp !== "number" ||
     payload.exp <= now || payload.iat > now + 60_000 || revokedSessions.has(payload.sid)

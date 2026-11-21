@@ -5,8 +5,8 @@
  * / { kind: "external", agentId } / { kind: "estate" } / { kind: "job" }；兼容旧 { demo: N }。
  */
 import { readBody, respondBadRequest } from "../http-body.js";
-import { createSession, deleteSession, getSessionForOwner, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
-import { requireOwnerIdentity } from "../security/device.js";
+import { createSession, deleteSession, getSessionForUser, isDemo, listSessions, getTurnHistory, updatePermissionMode, type Session, type TurnRecord } from "../sessions.js";
+import { requireUserIdentity } from "../security/device.js";
 import { closeBrowserSession } from "../browser-use.js";
 import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
@@ -14,12 +14,12 @@ import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
 import { writeAudit } from "../audit.js";
 
 export async function handleSessions(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
+  const userId = identity.userId;
   if (req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(listSessions(ownerId).map((s) => ({
+    res.end(JSON.stringify(listSessions(userId).map((s) => ({
       id: s.id, kind: s.kind, agentProfileId: s.agentProfileId, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
       permissionMode: s.permissionMode,
       pendingApproval: Boolean(s.pendingApproval),
@@ -47,7 +47,7 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
       const session = createSession(
         kind, demo, projectId, body.title,
         typeof body.agentId === "string" ? body.agentId : null,
-        ownerId,
+        userId,
         identity.deviceId,
       );
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -64,10 +64,10 @@ export async function handleDeleteSession(
   req: import("node:http").IncomingMessage,
   id: string,
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
-  const session = getSessionForOwner(id, ownerId);
+  const userId = identity.userId;
+  const session = getSessionForUser(id, userId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
@@ -80,10 +80,10 @@ export async function handleDeleteSession(
 
 /** POST /api/sessions/:id/compact —— 压缩当前会话上下文（模型摘要 + 重建线程） */
 export async function handleCompactSession(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, id: string): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
-  const session = getSessionForOwner(id, ownerId);
+  const userId = identity.userId;
+  const session = getSessionForUser(id, userId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
@@ -104,10 +104,10 @@ export async function handleTranscript(
   req: import("node:http").IncomingMessage,
   id: string,
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
-  const session = getSessionForOwner(id, ownerId);
+  const userId = identity.userId;
+  const session = getSessionForUser(id, userId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
@@ -124,10 +124,10 @@ export async function handleSessionPermission(
   req: import("node:http").IncomingMessage,
   id: string
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
-  const session = getSessionForOwner(id, ownerId);
+  const userId = identity.userId;
+  const session = getSessionForUser(id, userId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
@@ -194,10 +194,10 @@ export async function handleExportSession(
   req: import("node:http").IncomingMessage,
   id: string,
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
-  const session = getSessionForOwner(id, ownerId);
+  const userId = identity.userId;
+  const session = getSessionForUser(id, userId);
   if (!session) {
     res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
@@ -239,9 +239,9 @@ export async function handleCleanupSessions(
   res: import("node:http").ServerResponse,
   req: import("node:http").IncomingMessage
 ): Promise<void> {
-  const identity = requireOwnerIdentity(req, res);
+  const identity = requireUserIdentity(req, res);
   if (!identity) return;
-  const ownerId = identity.ownerId;
+  const userId = identity.userId;
   const body = JSON.parse((await readBody(req)) || "{}") as { daysBefore?: unknown };
   const days = typeof body.daysBefore === "number" ? Math.floor(body.daysBefore) : NaN;
   if (!Number.isFinite(days) || days < CLEANUP_MIN_DAYS || days > CLEANUP_MAX_DAYS) {
@@ -250,7 +250,7 @@ export async function handleCleanupSessions(
     return;
   }
   const cutoff = Date.now() - days * 86_400_000;
-  const victims: Session[] = listSessions(ownerId).filter((s) => s.createdAt < cutoff);
+  const victims: Session[] = listSessions(userId).filter((s) => s.createdAt < cutoff);
   for (const s of victims) {
     deleteSession(s.id);
     await closeBrowserSession(s.threadId).catch(() => {});

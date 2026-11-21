@@ -529,7 +529,7 @@ API Key 在界面和 API 中只返回掩码；真实 Key 不会出现在日志�
 
 每个设备有独立身份，会话、审批、导出、统计和 Browser Use 状态按设备或 owner 绑定。生产环境开启认证后，不同真实用户的会话和数据互不可见。
 
-`STATE_BACKEND=postgres` 时使用 PostgreSQL 的 `ownerId + RLS` 数据面，适合多个真实用户共享一个自托管实例。当前 SSE、限流和浏览器会话仍按单实例设计，不等同于多节点集群高可用。
+`STATE_BACKEND=postgres` 时使用 PostgreSQL 的 `userId + RLS` 数据面，适合多个真实用户共享一个自托管实例。当前 SSE、限流和浏览器会话仍按单实例设计，不等同于多节点集群高可用。
 
 ### 14.3 数据目录
 
@@ -581,7 +581,7 @@ Docker 镜像默认包含与 `playwright-core` 匹配的无头 Chrome，Browser 
 
 - 管理员连接 `DATABASE_ADMIN_URL` 只用于迁移和 bootstrap
 - 应用连接 `DATABASE_URL` 使用低权限角色
-- 会话、检查点、项目、设置和审计按 ownerId 隔离
+- 会话、检查点、项目、设置和审计按 userId 隔离
 - RLS 在数据库层兜底
 - 备份和恢复必须同时覆盖数据库与文件数据
 

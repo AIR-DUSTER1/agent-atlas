@@ -180,6 +180,6 @@ export function generalProfileWithExternal(parentModelRuntime?: ModelRuntimeConf
   });
 }
 
-export function createAgentGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, ownerId?: string) {
-  return createWorkflowGraph(generalProfileWithExternal(modelRuntime), undefined, { sessionId, modelRuntime, ownerId });
+export function createAgentGraph(sessionId?: string, modelRuntime?: ModelRuntimeConfig, userId?: string) {
+  return createWorkflowGraph(generalProfileWithExternal(modelRuntime), undefined, { sessionId, modelRuntime, userId });
 }

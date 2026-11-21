@@ -8,7 +8,7 @@ import { listProjects, getActiveProjectId, setActiveProject, addProject, deleteP
 import { moveSessions } from "../sessions.js";
 import { writeAudit } from "../audit.js";
 import { DirectoryPickerBusyError, pickDirectory } from "../directory-picker.js";
-import { tenantContextOrLocal } from "../tenant-context.js";
+import { userContextOrLocal } from "../user-context.js";
 import { isPostgresBackend } from "../persistence/postgres.js";
 import { isAdminRequest } from "../security/device.js";
 
@@ -70,7 +70,7 @@ export async function handleSetActiveProject(res: import("node:http").ServerResp
 export async function handleDeleteProject(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage, id: string): Promise<void> {
   try {
     await deleteProject(id);
-    const moved = moveSessions(id, "default", tenantContextOrLocal().ownerId);
+    const moved = moveSessions(id, "default", userContextOrLocal().userId);
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ ok: true, movedSessions: moved, projects: listProjects(), activeProjectId: getActiveProjectId() }));
   } catch (err) {

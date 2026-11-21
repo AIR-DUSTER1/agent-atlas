@@ -2,8 +2,8 @@
  * ============================================================
  * projects.ts — 用户隔离的项目文件夹管理（本地 / 云端）
  * ============================================================
- * 文件模式把 ownerId 一并写入 .web-config.json；PostgreSQL 模式落到 projects 表。
- * 每次目录授权都绑定当前 owner，成员只能浏览自己添加的项目，不能复用管理员路径。
+ * 文件模式把 userId 一并写入 .web-config.json；PostgreSQL 模式落到 projects 表。
+ * 每次目录授权都绑定当前用户，成员只能浏览自己添加的项目，不能复用管理员路径。
  */
 import { promises as fsp } from "node:fs";
 import { execFile } from "node:child_process";
@@ -12,8 +12,8 @@ import { randomUUID } from "node:crypto";
 import { resolve, basename, join } from "node:path";
 import { PROJECT_ROOT, authorizeRoot, unauthorizeRoot } from "./files.js";
 import { readConfig, mergeConfig } from "./config-store.js";
-import { isPostgresBackend, withOwnerTransaction } from "./persistence/postgres.js";
-import { runWithTenantContext, tenantContextOrLocal } from "./tenant-context.js";
+import { isPostgresBackend, withUserTransaction } from "./persistence/postgres.js";
+import { runWithUserContext, userContextOrLocal } from "./user-context.js";
 
 const run = promisify(execFile);
 const CLOUD_DIR = join(PROJECT_ROOT, ".setting", "cloud");
@@ -21,7 +21,7 @@ const MAX_PROJECTS = 12;
 
 export interface Project {
   id: string;
-  ownerId: string;
+  userId: string;
   name: string;
   type: "local" | "cloud";
   path: string;
@@ -29,62 +29,62 @@ export interface Project {
   builtin?: boolean;
 }
 
-const projectsByOwner = new Map<string, Project[]>();
-const activeByOwner = new Map<string, string>();
+const projectsByUser = new Map<string, Project[]>();
+const activeByUser = new Map<string, string>();
 let fileLoaded = false;
 
-function currentOwnerId(): string {
-  return tenantContextOrLocal().ownerId;
+function currentUserId(): string {
+  return userContextOrLocal().userId;
 }
 
-function ownerProjects(ownerId = currentOwnerId()): Project[] {
-  let list = projectsByOwner.get(ownerId);
+function userProjects(userId = currentUserId()): Project[] {
+  let list = projectsByUser.get(userId);
   if (!list) {
     list = [];
-    projectsByOwner.set(ownerId, list);
+    projectsByUser.set(userId, list);
   }
   return list;
 }
 
-function activeProjectId(ownerId = currentOwnerId()): string {
-  return activeByOwner.get(ownerId) ?? "default";
+function activeProjectId(userId = currentUserId()): string {
+  return activeByUser.get(userId) ?? "default";
 }
 
-async function persist(ownerId = currentOwnerId()): Promise<void> {
+async function persist(userId = currentUserId()): Promise<void> {
   if (isPostgresBackend()) {
-    const list = ownerProjects(ownerId);
-    await withOwnerTransaction(ownerId, async (client) => {
-      await client.query("DELETE FROM projects WHERE owner_id = $1 AND id <> 'default'", [ownerId]);
+    const list = userProjects(userId);
+    await withUserTransaction(userId, async (client) => {
+      await client.query("DELETE FROM projects WHERE user_id = $1 AND id <> 'default'", [userId]);
       for (const project of list) {
         await client.query(
-          `INSERT INTO projects(owner_id, id, name, type, path, url, created_at, updated_at)
+          `INSERT INTO projects(user_id, id, name, type, path, url, created_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (owner_id, id) DO UPDATE SET
+           ON CONFLICT (user_id, id) DO UPDATE SET
              name = EXCLUDED.name, type = EXCLUDED.type, path = EXCLUDED.path,
              url = EXCLUDED.url, updated_at = EXCLUDED.updated_at`,
-          [ownerId, project.id, project.name, project.type, project.path, project.url ?? null,
+          [userId, project.id, project.name, project.type, project.path, project.url ?? null,
             Date.now(), Date.now()],
         );
       }
       await client.query(
-        `INSERT INTO user_settings(owner_id, settings, updated_at)
+        `INSERT INTO user_settings(user_id, settings, updated_at)
          VALUES ($1, jsonb_build_object('activeProjectId', $2), now())
-         ON CONFLICT (owner_id) DO UPDATE SET
+         ON CONFLICT (user_id) DO UPDATE SET
            settings = jsonb_set(user_settings.settings, '{activeProjectId}', to_jsonb($2::text), true),
            updated_at = now()`,
-        [ownerId, activeProjectId(ownerId)],
+        [userId, activeProjectId(userId)],
       );
     });
     return;
   }
 
-  const projects = [...projectsByOwner.values()].flat();
-  const activeProjects = Object.fromEntries(activeByOwner);
+  const projects = [...projectsByUser.values()].flat();
+  const activeProjects = Object.fromEntries(activeByUser);
   await mergeConfig({ projects, activeProjects });
 }
 
 async function authorizeProject(project: Project): Promise<void> {
-  await runWithTenantContext({ ownerId: project.ownerId, deviceId: "project", role: "admin" }, async () => {
+  await runWithUserContext({ userId: project.userId, deviceId: "project", role: "admin" }, async () => {
     authorizeRoot(project.path, project.name);
   });
 }
@@ -95,62 +95,66 @@ export async function loadProjects(): Promise<void> {
   fileLoaded = true;
   const saved = await readConfig();
   const savedList = Array.isArray(saved.projects) ? saved.projects as Array<Partial<Project>> : [];
-  const fallbackOwner = "local";
+  const fallbackUser = "local";
   for (const item of savedList) {
     if (!item || !item.id || typeof item.path !== "string" || (item.type !== "local" && item.type !== "cloud")) continue;
     if (item.id === "default") continue;
     const exists = await fsp.stat(item.path).then((s) => s.isDirectory()).catch(() => false);
     if (!exists) continue;
-    const ownerId = typeof item.ownerId === "string" && item.ownerId ? item.ownerId : fallbackOwner;
+    // 反序列化边界：历史配置项的归属键是 ownerId（用户体系改造前），读出后归一到 userId。
+    const legacy = item as Partial<Project> & { ownerId?: unknown };
+    const userId = typeof item.userId === "string" && item.userId
+      ? item.userId
+      : (typeof legacy.ownerId === "string" && legacy.ownerId ? legacy.ownerId : fallbackUser);
     const project: Project = {
       id: item.id,
-      ownerId,
+      userId,
       name: item.name || "未命名项目",
       type: item.type,
       path: resolve(item.path),
       ...(typeof item.url === "string" ? { url: item.url } : {}),
     };
-    ownerProjects(ownerId).push(project);
+    userProjects(userId).push(project);
     await authorizeProject(project);
   }
   const activeProjects = saved.activeProjects && typeof saved.activeProjects === "object"
     ? saved.activeProjects as Record<string, unknown>
     : {};
-  for (const [ownerId, id] of Object.entries(activeProjects)) {
-    if (typeof id === "string" && ownerProjects(ownerId).some((project) => project.id === id)) {
-      activeByOwner.set(ownerId, id);
+  for (const [userId, id] of Object.entries(activeProjects)) {
+    if (typeof id === "string" && userProjects(userId).some((project) => project.id === id)) {
+      activeByUser.set(userId, id);
     }
   }
-  if (typeof saved.activeProjectId === "string" && ownerProjects(fallbackOwner).some((project) => project.id === saved.activeProjectId)) {
-    activeByOwner.set(fallbackOwner, saved.activeProjectId);
+  if (typeof saved.activeProjectId === "string" && userProjects(fallbackUser).some((project) => project.id === saved.activeProjectId)) {
+    activeByUser.set(fallbackUser, saved.activeProjectId);
   }
 }
 
-/** PostgreSQL 模式按 owner 懒加载，不把全库项目列表读进进程。 */
-export async function ensureProjectsLoaded(ownerId = currentOwnerId()): Promise<void> {
-  if (!isPostgresBackend() || projectsByOwner.has(ownerId)) return;
-  const rows = await withOwnerTransaction(ownerId, (client) => client.query<{
+/** PostgreSQL 模式按用户懒加载，不把全库项目列表读进进程。 */
+export async function ensureProjectsLoaded(userId = currentUserId()): Promise<void> {
+  if (!isPostgresBackend() || projectsByUser.has(userId)) return;
+  const rows = await withUserTransaction(userId, (client) => client.query<{
     id: string; name: string; type: "local" | "cloud"; path: string; url: string | null;
-  }>("SELECT id, name, type, path, url FROM projects WHERE owner_id = $1 ORDER BY updated_at DESC", [ownerId]));
+  }>("SELECT id, name, type, path, url FROM projects WHERE user_id = $1 ORDER BY updated_at DESC", [userId]));
   const list: Project[] = [];
   for (const row of rows.rows) {
     const project: Project = {
-      id: row.id, ownerId, name: row.name, type: row.type, path: resolve(row.path),
+      id: row.id, userId, name: row.name, type: row.type, path: resolve(row.path),
       ...(row.url ? { url: row.url } : {}),
     };
     list.push(project);
     await authorizeProject(project);
   }
-  projectsByOwner.set(ownerId, list);
-  const settings = await withOwnerTransaction(ownerId, (client) => client.query<{ settings: { activeProjectId?: unknown } }>(
-    "SELECT settings FROM user_settings WHERE owner_id = $1", [ownerId],
+  projectsByUser.set(userId, list);
+  const settings = await withUserTransaction(userId, (client) => client.query<{ settings: { activeProjectId?: unknown } }>(
+    "SELECT settings FROM user_settings WHERE user_id = $1", [userId],
   ));
   const active = settings.rows[0]?.settings?.activeProjectId;
-  if (typeof active === "string" && list.some((project) => project.id === active)) activeByOwner.set(ownerId, active);
+  if (typeof active === "string" && list.some((project) => project.id === active)) activeByUser.set(userId, active);
 }
 
 export function listProjects(): Project[] {
-  return ownerProjects();
+  return userProjects();
 }
 
 export function getActiveProjectId(): string {
@@ -158,12 +162,12 @@ export function getActiveProjectId(): string {
 }
 
 export function getProject(id: string): Project | undefined {
-  return ownerProjects().find((project) => project.id === id);
+  return userProjects().find((project) => project.id === id);
 }
 
 export function setActiveProject(id: string): void {
-  if (!ownerProjects().some((project) => project.id === id)) throw new Error("项目不存在");
-  activeByOwner.set(currentOwnerId(), id);
+  if (!userProjects().some((project) => project.id === id)) throw new Error("项目不存在");
+  activeByUser.set(currentUserId(), id);
   void persist().catch(() => {});
 }
 
@@ -173,8 +177,8 @@ function slugFromUrl(url: string): string {
 }
 
 export async function addProject(input: { name?: string; type?: string; path?: string; url?: string }): Promise<Project> {
-  const ownerId = currentOwnerId();
-  const list = ownerProjects(ownerId);
+  const userId = currentUserId();
+  const list = userProjects(userId);
   if (list.length >= MAX_PROJECTS) throw new Error(`项目数量已达上限（${MAX_PROJECTS} 个）`);
   const type = input.type === "cloud" ? "cloud" : "local";
 
@@ -185,10 +189,10 @@ export async function addProject(input: { name?: string; type?: string; path?: s
     if (!st.isDirectory()) throw new Error("该路径不是文件夹");
     if (list.some((project) => resolve(project.path) === path)) throw new Error("该文件夹已添加过");
     const name = input.name?.trim() || basename(path) || path;
-    const project: Project = { id: randomUUID(), ownerId, name, type: "local", path };
+    const project: Project = { id: randomUUID(), userId, name, type: "local", path };
     list.push(project);
     authorizeRoot(path, name);
-    await persist(ownerId);
+    await persist(userId);
     return project;
   }
 
@@ -198,9 +202,9 @@ export async function addProject(input: { name?: string; type?: string; path?: s
   }
   const name = input.name?.trim() || slugFromUrl(url);
   if (list.some((project) => project.url === url)) throw new Error("该仓库已添加过");
-  const ownerCloudDir = join(CLOUD_DIR, ownerId.replace(/[^A-Za-z0-9_-]/g, "_"));
-  await fsp.mkdir(ownerCloudDir, { recursive: true });
-  const target = join(ownerCloudDir, `${name}-${randomUUID().slice(0, 6)}`);
+  const userCloudDir = join(CLOUD_DIR, userId.replace(/[^A-Za-z0-9_-]/g, "_"));
+  await fsp.mkdir(userCloudDir, { recursive: true });
+  const target = join(userCloudDir, `${name}-${randomUUID().slice(0, 6)}`);
   try {
     await run("git", ["clone", "--depth", "1", url, target], { timeout: 120_000 });
   } catch (err) {
@@ -208,10 +212,10 @@ export async function addProject(input: { name?: string; type?: string; path?: s
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`git clone 失败（确认已安装 git、有网络与仓库权限）：${message.slice(0, 160)}`);
   }
-  const project: Project = { id: randomUUID(), ownerId, name, type: "cloud", path: target, url };
+  const project: Project = { id: randomUUID(), userId, name, type: "cloud", path: target, url };
   list.push(project);
   authorizeRoot(target, name);
-  await persist(ownerId);
+  await persist(userId);
   return project;
 }
 
@@ -223,14 +227,14 @@ export async function refreshCloudProject(id: string): Promise<Project> {
 }
 
 export async function deleteProject(id: string): Promise<void> {
-  const ownerId = currentOwnerId();
+  const userId = currentUserId();
   const project = getProjectChecked(id);
   if (project.builtin) throw new Error("内置项目（本仓库）不可删除");
   unauthorizeRoot(project.path);
   if (project.type === "cloud") await fsp.rm(project.path, { recursive: true, force: true }).catch(() => {});
-  projectsByOwner.set(ownerId, ownerProjects(ownerId).filter((item) => item.id !== id));
-  if (activeProjectId(ownerId) === id) activeByOwner.set(ownerId, "default");
-  await persist(ownerId);
+  projectsByUser.set(userId, userProjects(userId).filter((item) => item.id !== id));
+  if (activeProjectId(userId) === id) activeByUser.set(userId, "default");
+  await persist(userId);
 }
 
 function getProjectChecked(id: string): Project {

@@ -14,8 +14,8 @@ import {
 import { FailureRateLimiter, clientIp } from "../../src/server/security/rate-limit.js";
 import {
   deviceCookie, ensureDeviceIdentity, ensureDeviceSession, hasAuthorizedDeviceSession,
-  isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken, deviceFromRequest, ownerIdentityForRequest,
-  deviceIdentityForRequest, isAdminRequest, adoptBearerIdentity, requireOwnerIdentity, requireDeviceIdentity,
+  isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken, deviceFromRequest, userIdentityForRequest,
+  deviceIdentityForRequest, isAdminRequest, adoptBearerIdentity, requireUserIdentity, requireDeviceIdentity,
   renewDeviceCookie, enrollDeviceIdentity, clearDeviceCookieOnResponse, deviceTtlDays,
 } from "../../src/server/security/device.js";
 
@@ -291,16 +291,16 @@ test("设备 Cookie 解析、owner 映射、Bearer 与续期写入完整路径",
   process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
   process.env.AUTH_TOKEN = "device-route-token-at-least-32-chars";
   try {
-    const issued = issueDeviceIdentity(Date.now(), "device-owner-a", { ownerId: "owner-a", role: "member" });
+    const issued = issueDeviceIdentity(Date.now(), "device-owner-a", { userId: "owner-a", role: "member" });
     const cookie = deviceCookie(issued.token).split(";")[0];
     const req = fakeRequest({ cookie, remote: "198.51.100.20" });
     const res = fakeResponse();
     assert.equal(deviceFromRequest(req)?.did, "device-owner-a");
     assert.equal(ensureDeviceIdentity(req, res), "device-owner-a");
-    assert.deepEqual(ownerIdentityForRequest(req), { ownerId: "owner-a", deviceId: "device-owner-a", role: "member" });
+    assert.deepEqual(userIdentityForRequest(req), { userId: "owner-a", deviceId: "device-owner-a", role: "member" });
     assert.equal(deviceIdentityForRequest(req), "device-owner-a");
     assert.equal(isAdminRequest(req), false);
-    assert.deepEqual(requireOwnerIdentity(req, res), { ownerId: "owner-a", deviceId: "device-owner-a", role: "member" });
+    assert.deepEqual(requireUserIdentity(req, res), { userId: "owner-a", deviceId: "device-owner-a", role: "member" });
     assert.equal(requireDeviceIdentity(req, res), "owner-a");
 
     const bearer = fakeRequest({ authorization: "Bearer legacy-bearer-token" });

@@ -28,7 +28,7 @@ import { getExternalAgent } from "./external.js";
 import {
   journalSession, journalDelete, journalApproval, journalDecided, journalTurn, journalPermission,
   journalCompact, journalContextInjected,
-  replaySessions, replaySessionsForOwner, journalSnapshot, maybeCompactJournal, type SessionRecord,
+  replaySessions, replaySessionsForUser, journalSnapshot, maybeCompactJournal, type SessionRecord,
 } from "./session-store.js";
 import type { AgentEvent, InterruptPayload } from "./events.js";
 import { canonicalizeTurnEvents, describeTurnStorage, type TurnStorageSummary } from "./turn-record.js";
@@ -104,9 +104,9 @@ export interface Session {
   demo: 1 | 2 | 3 | 4 | null;
   /** kind === "external"：接入的第三方 Agent id（external.ts 注册表） */
   agentId: string | null;
-  /** PostgreSQL 多租户 owner；文件模式等于设备身份。 */
-  ownerId: string;
-  /** 浏览器设备隔离键；API 只能访问本租户设备的会话。 */
+  /** 所属用户（PostgreSQL 模式）；文件模式等于设备身份。 */
+  userId: string;
+  /** 浏览器设备隔离键；API 只能访问本用户设备的会话。 */
   deviceId: string;
   /** 归属的项目文件夹（"default" = 未归属会话的内部兜底标识） */
   projectId: string;
@@ -157,21 +157,21 @@ export function buildGraph(
   kind: SessionKind,
   demo: 1 | 2 | 3 | 4 | null,
   sessionId?: string,
-  ownerId = LOCAL_DEVICE_ID,
+  userId = LOCAL_DEVICE_ID,
 ): unknown {
   // 建图时冻结当前「供应商 × 模型」快照：主图和 inherit 子代理必须使用同一模型，
   // 不能被另一个并发会话随后的切换悄悄改掉。
-  if (kind === "agent") return createAgentGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, ownerId);
+  if (kind === "agent") return createAgentGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, userId);
   // 房产 Agent：贝壳工具集 + 同一形态（ReAct + 记忆 + 审批），见 agent/estate.ts
-  if (kind === "estate") return createEstateGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, ownerId);
+  if (kind === "estate") return createEstateGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, userId);
   // 求职岗位 Agent：内置求职工具集 + 同一形态（ReAct + 审批 + 反思）
-  if (kind === "job") return createJobGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, ownerId);
+  if (kind === "job") return createJobGraph(sessionId, resolveModelRuntime({ mode: "inherit" }) ?? undefined, userId);
   switch (demo) {
     case 1: return createBasicGraph(sessionId);
     case 2: return createMemoryGraph(sessionId);
     case 3: return createHitlGraph(sessionId);
     case 4: return createMultiAgentGraph(sessionId);
-    default: return createAgentGraph(sessionId, undefined, ownerId);
+    default: return createAgentGraph(sessionId, undefined, userId);
   }
 }
 
@@ -187,9 +187,9 @@ export async function rebuildIfStale(session: Session): Promise<boolean> {
   if (session.kind === "external") return false; // 外部会话无图，不需要重建
   if (session.configVersion === configVersionCounter) return false;
   if (session.pendingApproval) {
-    void getCheckpointSaver(session.ownerId).deleteThread(session.threadId); // fire-and-forget：内存态在 promise 体内同步先删
+    void getCheckpointSaver(session.userId).deleteThread(session.threadId); // fire-and-forget：内存态在 promise 体内同步先删
   }
-  session.graph = buildGraph(session.kind, session.demo, session.threadId, session.ownerId);
+  session.graph = buildGraph(session.kind, session.demo, session.threadId, session.userId);
   session.configVersion = configVersionCounter;
   session.pendingApproval = null; // 旧图上的 interrupt 状态随重建失效
   if (session.contextSummary) session.contextSummaryInjected = false;
@@ -202,8 +202,8 @@ export function createSession(
   projectId: string | undefined,
   title?: string,
   agentId?: string | null,
-  ownerId: string = LOCAL_DEVICE_ID,
-  deviceId: string = ownerId,
+  userId: string = LOCAL_DEVICE_ID,
+  deviceId: string = userId,
 ): Session {
   // 外部 Agent 会话不建 LangGraph：每条消息直接启动第三方工具的子进程（external.ts）
   const external = kind === "external" ? getExternalAgent(agentId ?? "") : undefined;
@@ -221,12 +221,12 @@ export function createSession(
     agentProfileId: profileIdForKind(kind),
     demo: kind === "demo" ? demo : null,
     agentId: external?.id ?? null,
-    ownerId,
+    userId,
     deviceId,
     projectId: projectId || "default",
     title: title?.trim() || defaultTitle,
     createdAt: Date.now(),
-    graph: kind === "external" ? null : buildGraph(kind, demo, threadId, ownerId),
+    graph: kind === "external" ? null : buildGraph(kind, demo, threadId, userId),
     threadId,
     pendingApproval: null,
     configVersion: currentConfigVersion(),
@@ -245,7 +245,7 @@ export function createSession(
   // T2-2：创建即落 journal —— 白名单挑字段（Session 内含编译图/内存结构，严禁整只序列化）
   journalSession({
     id: session.id, kind: session.kind,
-    demo: session.demo, agentId: session.agentId, ownerId: session.ownerId, deviceId: session.deviceId,
+    demo: session.demo, agentId: session.agentId, userId: session.userId, deviceId: session.deviceId,
     projectId: session.projectId, title: session.title, createdAt: session.createdAt, threadId: session.threadId,
     permissionMode: session.permissionMode,
   });
@@ -310,10 +310,10 @@ export function getTurnHistory(session: Session): TurnRecord[] {
 }
 
 /** 项目删除后，把其会话迁移到未归属（内部 default） */
-export function moveSessions(fromProjectId: string, toProjectId: string, ownerId?: string): number {
+export function moveSessions(fromProjectId: string, toProjectId: string, userId?: string): number {
   let moved = 0;
   for (const s of sessions.values()) {
-    if (s.projectId === fromProjectId && (!ownerId || s.ownerId === ownerId)) {
+    if (s.projectId === fromProjectId && (!userId || s.userId === userId)) {
       s.projectId = toProjectId;
       moved += 1;
     }
@@ -325,37 +325,37 @@ export function getSession(id: string): Session | undefined {
   return sessions.get(id);
 }
 
-/** 业务 API 的唯一入口：会话 id 必须与真实 ownerId 同时匹配才返回。 */
-export function getSessionForOwner(id: string, ownerId: string): Session | undefined {
+/** 业务 API 的唯一入口：会话 id 必须与真实 userId 同时匹配才返回。 */
+export function getSessionForUser(id: string, userId: string): Session | undefined {
   const session = sessions.get(id);
-  return session?.ownerId === ownerId ? session : undefined;
+  return session?.userId === userId ? session : undefined;
 }
 
-/** 兼容旧调用（文件模式设备身份即 owner）；新代码统一用 getSessionForOwner。 */
+/** 兼容旧调用（文件模式设备身份即用户）；新代码统一用 getSessionForUser。 */
 export function getSessionForDevice(id: string, deviceId: string): Session | undefined {
   const session = sessions.get(id);
-  return session && (session.ownerId === deviceId || session.deviceId === deviceId) ? session : undefined;
+  return session && (session.userId === deviceId || session.deviceId === deviceId) ? session : undefined;
 }
 
-/** Browser Use 使用 threadId 作为会话键，必须沿 threadId 再做一次 owner 归属校验。 */
-export function getSessionByThreadForOwner(threadId: string, ownerId: string): Session | undefined {
+/** Browser Use 使用 threadId 作为会话键，必须沿 threadId 再做一次用户归属校验。 */
+export function getSessionByThreadForUser(threadId: string, userId: string): Session | undefined {
   for (const session of sessions.values()) {
-    if (session.threadId === threadId && session.ownerId === ownerId) return session;
+    if (session.threadId === threadId && session.userId === userId) return session;
   }
   return undefined;
 }
 
-/** 兼容旧调用（文件模式设备身份即 owner）；新代码统一用 getSessionByThreadForOwner。 */
+/** 兼容旧调用（文件模式设备身份即用户）；新代码统一用 getSessionByThreadForUser。 */
 export function getSessionByThreadForDevice(threadId: string, deviceId: string): Session | undefined {
   for (const session of sessions.values()) {
-    if (session.threadId === threadId && (session.ownerId === deviceId || session.deviceId === deviceId)) return session;
+    if (session.threadId === threadId && (session.userId === deviceId || session.deviceId === deviceId)) return session;
   }
   return undefined;
 }
 
-export function listSessions(ownerId?: string): Session[] {
+export function listSessions(userId?: string): Session[] {
   return [...sessions.values()]
-    .filter((session) => !ownerId || session.ownerId === ownerId)
+    .filter((session) => !userId || session.userId === userId)
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -373,7 +373,7 @@ export function deleteSession(id: string): boolean {
     journalDelete(id); // T2-2：删除也落 journal（重启后同样消失）
     // 产品图的持久检查点一并清理，否则 checkpoints.ndjson 里的死线程只增不减；
     // demo / external 线程从没写过日志，deleteThread 是无害空操作。
-    if (session) void getCheckpointSaver(session.ownerId).deleteThread(session.threadId);
+    if (session) void getCheckpointSaver(session.userId).deleteThread(session.threadId);
   }
   return gone;
 }
@@ -439,20 +439,20 @@ export function takeContextSummary(session: Session): string | null {
   return `【上下文压缩摘要（此前对话已被压缩，以下内容用于延续上下文）】\n\n${session.contextSummary}`;
 }
 
-export async function restoreSessions(ownerId?: string): Promise<number> {
+export async function restoreSessions(userId?: string): Promise<number> {
   // F0：先回放持久检查点 —— 产品图的图实例虽是新建的，但共享检查点里
   // 已有各 thread 的完整多轮状态，重启后第三轮依然记得前两轮。
-  if (isPostgresBackend() && !ownerId) return 0;
-  const saver = await ensureCheckpointsLoaded(ownerId);
+  if (isPostgresBackend() && !userId) return 0;
+  const saver = await ensureCheckpointsLoaded(userId);
   if (isPostgresBackend()) {
-    if (!ownerId) return 0;
-    await replaySessionsForOwner(ownerId);
+    if (!userId) return 0;
+    await replaySessionsForUser(userId);
   } else {
     await replaySessions();
   }
   const records = journalSnapshot().filter((rec) => {
-    if (!ownerId) return true;
-    return (rec.ownerId ?? rec.deviceId ?? LOCAL_DEVICE_ID) === ownerId;
+    if (!userId) return true;
+    return (rec.userId ?? rec.deviceId ?? LOCAL_DEVICE_ID) === userId;
   });
   let restored = 0;
   for (const rec of records) {
@@ -462,8 +462,8 @@ export async function restoreSessions(ownerId?: string): Promise<number> {
     const hasGraph = kind !== "external";
     const pend = rec.pendingApproval;
     const threadId = rec.threadId || `web-${randomUUID()}`;
-    const recordOwnerId = rec.ownerId ?? rec.deviceId ?? LOCAL_DEVICE_ID;
-    const graph = hasGraph ? buildGraph(kind, rec.demo, threadId, recordOwnerId) : null;
+    const recordUserId = rec.userId ?? rec.deviceId ?? LOCAL_DEVICE_ID;
+    const graph = hasGraph ? buildGraph(kind, rec.demo, threadId, recordUserId) : null;
     // 有持久检查点的产品会话：完整线程记忆已随检查点恢复，不再注入
     // journal 摘录（避免同一历史进两遍上下文）；无检查点的（旧数据 / demo /
     // 纯 mock 轮次）维持摘录注入路径不变。
@@ -475,8 +475,8 @@ export async function restoreSessions(ownerId?: string): Promise<number> {
       agentProfileId: profileIdForKind(kind),
       demo: rec.demo,
       agentId: rec.agentId,
-      ownerId: recordOwnerId,
-      deviceId: rec.deviceId ?? recordOwnerId,
+      userId: recordUserId,
+      deviceId: rec.deviceId ?? recordUserId,
       projectId: rec.projectId,
       title: rec.title || "已恢复的对话",
       createdAt: rec.createdAt,
@@ -515,33 +515,33 @@ export async function restoreSessions(ownerId?: string): Promise<number> {
   return restored;
 }
 
-const restoredOwners = new Set<string>();
-const ownerRestorePromises = new Map<string, Promise<number>>();
+const restoredUsers = new Set<string>();
+const userRestorePromises = new Map<string, Promise<number>>();
 
 /**
- * PostgreSQL 模式按 owner 懒加载会话事件。
- * 路由在认证后调用；同一 owner 的并发首请求共享一次回放，避免重复构建图。
+ * PostgreSQL 模式按用户懒加载会话事件。
+ * 路由在认证后调用；同一用户的并发首请求共享一次回放，避免重复构建图。
  */
-export async function ensureOwnerSessions(ownerId: string): Promise<number> {
+export async function ensureUserSessions(userId: string): Promise<number> {
   if (!isPostgresBackend()) return 0;
-  if (restoredOwners.has(ownerId)) return 0;
-  const pending = ownerRestorePromises.get(ownerId);
+  if (restoredUsers.has(userId)) return 0;
+  const pending = userRestorePromises.get(userId);
   if (pending) return pending;
-  const task = restoreSessions(ownerId)
+  const task = restoreSessions(userId)
     .then((count) => {
-      restoredOwners.add(ownerId);
+      restoredUsers.add(userId);
       return count;
     })
-    .finally(() => ownerRestorePromises.delete(ownerId));
-  ownerRestorePromises.set(ownerId, task);
+    .finally(() => userRestorePromises.delete(userId));
+  userRestorePromises.set(userId, task);
   return task;
 }
 
 /** 测试专用：清空内存会话与 owner 懒加载状态。 */
 export function resetSessionsForTests(): void {
   sessions.clear();
-  restoredOwners.clear();
-  ownerRestorePromises.clear();
+  restoredUsers.clear();
+  userRestorePromises.clear();
 }
 /** （内部信息导出）当前恢复的会话数 —— 启动日志用 */
 export function countSessions(): number {
