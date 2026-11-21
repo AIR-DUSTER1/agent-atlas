@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     role,
   });
   process.stdout.write(JSON.stringify({
-    ownerId: created.ownerId,
+    userId: created.userId,
     displayName: created.displayName,
     role: created.role,
     accessToken: created.token,
