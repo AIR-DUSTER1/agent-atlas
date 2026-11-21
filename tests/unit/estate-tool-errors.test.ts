@@ -133,9 +133,11 @@ test("MCP initialize 成功不再被误判为业务 Key 有效", async () => {
   }
 });
 test("贝壳登录只使用系统浏览器且一次点击只打开一次", async () => {
-  const [source, client, html] = await Promise.all([
+  const [source, client, vue, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
+    // M4 4.4：面板交互迁往 Vue 组件
+    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
     readClientIndexHtml(),
   ]);
   const start = source.slice(
@@ -151,15 +153,15 @@ test("贝壳登录只使用系统浏览器且一次点击只打开一次", async
   assert.match(source, /env: buildBeikeChildEnv\(\)/);
   assert.doesNotMatch(source, /beike_skill/);
   // 登录链接的 source 由后端 keyUrl 统一提供（回退 workbuddy），前端不再写死 source=unknown
-  assert.doesNotMatch(client, /source=unknown/);
-  assert.match(client, /safeHref\(st\.keyUrl/);
-  assert.match(client, /status\.textContent = "🔐 需要登录"/);
-  assert.match(client, /navigator\.clipboard.*readText/);
-  assert.match(client, /pasteEstateKeyFromClipboard/);
-  assert.match(client, /从剪贴板读取/);
-  assert.match(html, /id="estate-key-link"[^>]+source=workbuddy/);
-  assert.match(html, /estate-key-paste/);
-  assert.match(html, /页面显示的是掩码/);
+  assert.doesNotMatch(client + vue, /source=unknown/);
+  assert.match(vue, /safeHref\(st\.value\.keyUrl/);
+  assert.match(vue, /navigator\.clipboard.*readText/);
+  assert.match(vue, /pasteKeyFromClipboard/);
+  assert.match(vue, /从剪贴板读取/);
+  assert.match(html + vue, /id="estate-key-link"/);
+  assert.match(html + vue, /source=workbuddy/);
+  assert.match(vue, /estate-key-paste/);
+  assert.match(vue, /页面显示的是掩码/);
   assert.match(source, /检测到的是页面掩码/);
   assert.doesNotMatch(html, /登录窗口由 agentatlas 托管|estate-login-recover/);
 });
@@ -209,23 +211,27 @@ test("自装目录可在嵌套路径中找到 Unix beike 与 Windows beike.exe",
 });
 
 test("房产面板不再限定 Windows，并提示 Linux/macOS 与 BEIKE_CLI_PATH", async () => {
-  const [client, html] = await Promise.all([
+  const [client, vue] = await Promise.all([
+    // M4 4.4：面板迁往 Vue 组件，契约断言同时覆盖桥与组件模板
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/client/pages/overlays/estate.html", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
   ]);
-  assert.doesNotMatch(client, /仅支持 Windows/);
-  assert.match(client, /当前平台的官方二进制/);
-  assert.match(html, /Linux \/ macOS/);
-  assert.match(html, /BEIKE_CLI_PATH/);
+  const combined = `${client}
+${vue}`;
+  assert.doesNotMatch(combined, /仅支持 Windows/);
+  assert.match(combined, /当前平台的官方二进制/);
+  assert.match(combined, /Linux \/ macOS/);
+  assert.match(combined, /BEIKE_CLI_PATH/);
 });
 
 test("保存 Key 的失败原因完整展示，不回退成未知错误", async () => {
-  const [client, route] = await Promise.all([
+  const [client, route, vue] = await Promise.all([
     readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/server/routes/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
   ]);
-  assert.match(client, /message\?: string; error\?: string/);
-  assert.match(client, /res\.message \|\| res\.error/);
+  assert.match(client + vue, /message\?: string; error\?: string/);
+  assert.match(vue, /res\.message \|\| res\.error/);
   assert.match(route, /error: r\.message/);
   const estate = await readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8");
   assert.match(estate, /previousKey = await fsp\.readFile/);

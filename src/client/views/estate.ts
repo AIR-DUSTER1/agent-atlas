@@ -1,197 +1,25 @@
 /**
  * ============================================================
- * views/estate.ts — 房产 Agent（贝壳）：数据源面板 + 工具卡专属渲染
+ * views/estate.ts — 房产面板分发桥与工具卡渲染（M4 批次 4.4 起）
  * ============================================================
- * 职责：贝壳 CLI 的检测 / 安装 / Key 保存，以及 house_* 工具结果的富卡片
- * （房源列表 / 区位地图 / 户型图 / 经纪人二维码 / 安装引导）。
- * 设计立场：
- *  - 所有外链与图片都过 safeHref / safeImageSrc 白名单（工具结果来自外部服务，不可信）；
- *  - 结论地图由原生瓦片渲染，这里只保留安全外链与工具结果；
- *  - 安装动作使用官方 manifest，覆盖 Windows / Linux / macOS 的 x64 与 arm64 官方二进制。
+ * 贝壳面板（检测 / 安装 / Key）已迁往 Vue（estate-panel-vue.vue +
+ * stores/estate.ts）；本文件保留 legacy 侧职责：
+ *  1. 状态条写入（#estate-status，Vue 组件与壳共用）；
+ *  2. 弹窗开合入口 openEstate / closeEstate（插件面板与全局 Esc 链调用）；
+ *  3. 启动装载 loadEstate（main.ts 调用，镜像 core state）；
+ *  4. house_* 工具结果富卡片渲染（renderEstateInToolCard，4.6 随对话核心迁移）。
+ * store 经动态 import 进入（本模块在 1:1 过渡树链上）。
  */
-
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { state } from "../core/state.js";
-import { uiAlert } from "../ui/dialog.js";
 import { safeHref, safeImageSrc } from "../modules/format.js";
-import { refreshPluginCards } from "./settings-plugins.js";
 import type { EstateState, ToolPart } from "../modules/types.js";
+import { uiAlert } from "../ui/dialog.js";
+import { refreshPluginCards } from "./settings-plugins.js";
 
-export function setEstateStatus(msg: string, cls = ""): void {
-  const el = $("estate-status");
-  if (!el) return;
-  el.textContent = msg;
-  el.className = "estate-status" + (cls ? " " + cls : "");
-}
+export { uiAlert };
 
-export async function loadEstate(): Promise<void> {
-  try {
-    state.estate = await api<EstateState>("/api/estate");
-  } catch {
-    state.estate = null; // 旧服务进程没有该接口 → 静默降级
-  }
-  refreshPluginCards();
-}
-
-export async function openEstate(): Promise<void> {
-  $("estate-mask")?.classList.remove("hidden");
-  await loadEstate();
-  renderEstatePanel();
-}
-
-export function closeEstate(): void {
-  $("estate-mask")?.classList.add("hidden");
-}
-
-function renderEstatePanel(): void {
-  const st = state.estate || { installed: false };
-  if (st.installed) {
-    setEstateStatus(`✓ 已安装贝壳 CLI${st.version ? " " + st.version : ""}${st.viaPATH ? "（来自系统 PATH）" : st.path ? "：" + st.path : ""}`, "ok");
-  } else {
-    setEstateStatus(st.error ? `✗ ${st.error}` : "未检测到贝壳 CLI：点下方按钮下载当前平台的官方二进制（约 32MB）", "err");
-  }
-  const keyEl = $("estate-key") as HTMLInputElement | null;
-  if (keyEl) keyEl.value = "";
-  const keyLink = $("estate-key-link") as HTMLAnchorElement | null;
-  const keyHref = safeHref(st.keyUrl || "");
-  if (keyLink && keyHref) keyLink.href = keyHref;
-  const s2 = $("estate-status2");
-  if (s2) {
-    s2.textContent = st.loginRequired
-      ? "登录已失效：打开官方登录页，重新获取并保存 Key 后才能继续找房"
-      : st.installed ? "CLI 就绪后即可登录并保存 Key 开始找房" : "请先安装 CLI";
-    s2.style.color = st.installed && !st.loginRequired ? "" : "var(--amber)";
-  }
-}
-
-export async function installBeikeCli(): Promise<void> {
-  const btn = $("estate-install") as HTMLButtonElement | null;
-  const s2 = $("estate-status2");
-  if (btn) btn.disabled = true;
-  if (s2) {
-    s2.textContent = "正在下载安装（约 30MB，视网络可能需要 1-2 分钟）…";
-    s2.style.color = "var(--amber)";
-  }
-  try {
-    const res = await api<EstateState>("/api/estate/install", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-    });
-    state.estate = { ...(state.estate || { installed: false }), ...res };
-    refreshPluginCards();
-    renderEstatePanel();
-  } catch (err) {
-    setEstateStatus(`✗ 安装失败：${(err as Error).message}`, "err");
-    if (s2) s2.textContent = "安装失败，请检查安装目录写入权限，或设置 BEIKE_CLI_PATH 指向已安装的官方二进制";
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-export async function pasteEstateKeyFromClipboard(): Promise<void> {
-  const button = $("estate-key-paste") as HTMLButtonElement | null;
-  const status = $("estate-status2");
-  if (!navigator.clipboard?.readText) {
-    if (status) {
-      status.textContent = "✗ 当前环境不允许读取剪贴板，请手动粘贴完整 Key";
-      status.style.color = "var(--red)";
-    }
-    return;
-  }
-  if (button) button.disabled = true;
-  try {
-    const text = (await navigator.clipboard.readText()).trim();
-    if (!text) {
-      if (status) {
-        status.textContent = "✗ 剪贴板为空：请先在官方页面点击 Key 右侧的「复制」";
-        status.style.color = "var(--red)";
-      }
-      return;
-    }
-    const input = $("estate-key") as HTMLInputElement | null;
-    if (input) input.value = text;
-    await saveEstateKey();
-  } catch (err) {
-    if (status) {
-      status.textContent = `✗ 无法读取剪贴板：${(err as Error).message}；请手动粘贴完整 Key`;
-      status.style.color = "var(--red)";
-    }
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-export async function saveEstateKey(): Promise<void> {
-  const value = (($("estate-key") as HTMLInputElement | null)?.value || "").trim();
-  const s2 = $("estate-status2");
-  if (!s2) return;
-  if (!value) { s2.textContent = "✗ 请先粘贴贝壳 Key（building.ke.com 登录后显示）"; s2.style.color = "var(--red)"; return; }
-  if (!state.estate?.installed) {
-    s2.textContent = "✗ 请先安装 CLI 再保存 Key"; s2.style.color = "var(--red)"; return;
-  }
-  s2.textContent = "校验中…";
-  try {
-    const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/estate/key", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: value }),
-    });
-    s2.textContent = res.ok ? "✓ 校验通过，贝壳找房已可用（回到找房对话直接提需求）" : `✗ 校验未通过：${res.message || res.error || "未知错误"}`;
-    s2.style.color = res.ok ? "" : "var(--red)";
-    if (res.ok) {
-      const keyEl = $("estate-key") as HTMLInputElement | null;
-      if (keyEl) keyEl.value = "";
-    }
-  } catch (err) {
-    s2.textContent = `✗ ${(err as Error).message}`;
-    s2.style.color = "var(--red)";
-  }
-}
-
-interface BeikeLoginLaunch {
-  ok: boolean;
-  url: string;
-  opened: boolean;
-  message?: string;
-  error?: string;
-}
-
-async function requestEstateLogin(): Promise<BeikeLoginLaunch> {
-  return api<BeikeLoginLaunch>("/api/estate/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  });
-}
-
-/** 设置页只在系统默认浏览器打开一次官方登录页，后续扫码和复制 Key 都由用户手动完成。 */
-export async function openEstateLogin(): Promise<void> {
-  const button = $("estate-login-open") as HTMLButtonElement | null;
-  const status = $("estate-status2");
-  if (button) button.disabled = true;
-  if (status) {
-    status.textContent = "正在打开贝壳官方登录页…";
-    status.style.color = "var(--amber)";
-  }
-  try {
-    const result = await requestEstateLogin();
-    if (status) {
-      status.textContent = result.ok
-        ? "✓ 登录页已在系统浏览器打开。请扫码，成功后点页面 Key 右侧的「复制」，再回到这里点「从剪贴板读取」"
-        : `✗ ${result.message || result.error || "浏览器未能自动打开"}${result.url ? `；可手动访问：${result.url}` : ""}`;
-      status.style.color = result.ok ? "" : "var(--red)";
-    }
-  } catch (err) {
-    if (status) {
-      status.textContent = `✗ 打开登录页失败：${(err as Error).message}`;
-      status.style.color = "var(--red)";
-    }
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-/* ---------------------------------------------------------------------------
- * 房产 JSON 结果 → 卡片渲染
- * ------------------------------------------------------------------------- */
 interface EstateListing {
   title?: string; community?: string; name?: string; id?: string;
   cover?: string; coverImage?: string; image?: string;
@@ -201,7 +29,6 @@ interface EstateListing {
   links?: Record<string, string>;
   url?: string; detailUrl?: string;
 }
-
 interface EstatePoint {
   name?: string;
   label?: string;
@@ -211,7 +38,6 @@ interface EstatePoint {
   source?: string;
   links?: Record<string, string>;
 }
-
 interface EstateLocation {
   label?: string;
   address?: string;
@@ -222,7 +48,6 @@ interface EstateLocation {
   embedUrl?: string;
   links?: Record<string, string>;
 }
-
 interface EstatePayload {
   error?: string;
   setup?: string;
@@ -251,6 +76,49 @@ interface EstatePayload {
   excelError?: string;
 }
 
+export function setEstateStatus(msg: string, cls = ""): void {
+  const el = $("estate-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "estate-status" + (cls ? " " + cls : "");
+}
+
+/** 启动装载：镜像 core state（插件 readiness / 欢迎语读取）。 */
+export async function loadEstate(): Promise<void> {
+  try {
+    state.estate = await api<EstateState>("/api/estate");
+  } catch {
+    state.estate = null; // 旧服务进程没有该接口 → 静默降级
+  }
+  void import("./settings-plugins.js").then((m) => m.refreshPluginCards()).catch(() => {});
+}
+
+/** 打开贝壳弹窗：挂载组件（幂等）并置开合态。 */
+export async function openEstate(): Promise<void> {
+  void import("../apps/estate-panel-vue.js")
+    .then((m) => m.mountEstatePanelVue())
+    .catch(() => {});
+  const { useEstateStore } = await import("../stores/estate.js");
+  const store = useEstateStore();
+  await store.load();
+  store.estateOpen = true;
+}
+
+export function closeEstate(): void {
+  void import("../stores/estate.js")
+    .then(({ useEstateStore }) => { useEstateStore().estateOpen = false; })
+    .catch(() => {});
+}
+
+/** 供 main.ts 的「检测」按钮复用面板刷新（面板数据经 store 响应式更新）。 */
+export async function renderEstatePanelForUi(): Promise<void> {
+  const { useEstateStore } = await import("../stores/estate.js");
+  await useEstateStore().load();
+}
+
+/* ---------------------------------------------------------------------------
+ * 房产 JSON 结果 → 卡片渲染（4.6 随对话核心迁移）
+ * ------------------------------------------------------------------------- */
 function estateExtra(card: HTMLElement): HTMLElement {
   card.querySelector(".estate-extra")?.remove();
   const extra = document.createElement("div");
@@ -307,6 +175,9 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
     reopen.className = "btn btn-approve";
     reopen.textContent = "打开官方登录页";
     reopen.addEventListener("click", async () => {
+      // 与设置面板共用登录页打开契约（系统默认浏览器打开一次）
+      const requestEstateLogin = async (): Promise<{ ok: boolean; url: string; opened: boolean; message?: string; error?: string }> =>
+        api("/api/estate/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       reopen.disabled = true;
       reopen.textContent = "正在打开…";
       try {
@@ -493,9 +364,4 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
   }
 }
 
-export { uiAlert };
-
 /** 供 main.ts 的「检测」按钮复用面板刷新 */
-export function renderEstatePanelForUi(): void {
-  renderEstatePanel();
-}

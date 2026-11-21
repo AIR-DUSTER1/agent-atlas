@@ -142,8 +142,12 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
   // M4 4.3：pf-api-key 随供应商弹窗迁往 Vue 组件
   const providerForm = await readClientFiles(["views/provider-form-vue.vue"]);
   assert.match(providerForm, /id="pf-api-key"[\s\S]{0,200}type="password"/);
-  assert.match(html, /id="kb-key" type="password"/);
-  assert.match(html, /id="estate-key" type="password"/);
+  // M4 4.4：kb-key 随知识库弹窗迁往 Vue 组件
+  const kbVue = await readClientFiles(["views/kb-panel-vue.vue"]);
+  assert.match(kbVue, /id="kb-key"[\s\S]{0,200}type="password"/);
+  // M4 4.4：estate-key 随贝壳弹窗迁往 Vue 组件
+  const estateVue = await readClientFiles(["views/estate-panel-vue.vue"]);
+  assert.match(estateVue, /id="estate-key"[\s\S]{0,200}type="password"/);
   assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);
   // M4 4.1：命令名错误改由 Vue 组件就地呈现（aria-invalid + role=alert）
   assert.match(forms, /errors\.name/);

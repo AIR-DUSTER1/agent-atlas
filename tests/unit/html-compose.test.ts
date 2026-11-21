@@ -4,7 +4,7 @@
  * 守：入口能组合出完整页面；include 不能越界、不能跟随符号链接、不能循环。
  */
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -28,8 +28,14 @@ test("源码入口可组装出完整页面且不保留 include 标记", async ()
   assert.match(html, /<title>agentatlas<\/title>/);
   assert.match(html, /id="settings-page"/);
   assert.match(html, /id="plugin-list"/);
-  assert.match(html, /id="kb-modal"/);
-  assert.match(html, /id="job-fix-hint"/);
+  // M4 4.4：kb-modal 由 Vue 组件渲染（骨架保留 #kb-mask 挂载容器）
+  assert.match(html, /id="kb-mask"/);
+  const kbVue = await readFile(new URL("../../src/client/views/kb-panel-vue.vue", import.meta.url), "utf8");
+  assert.match(kbVue, /id="kb-modal"/);
+  // M4 4.4：job-fix-hint 随求职弹窗迁往 Vue 组件
+  assert.match(html, /id="job-mask"/);
+  const jobVue = await readFile(new URL("../../src/client/views/job-panel-vue.vue", import.meta.url), "utf8");
+  assert.match(jobVue, /id="job-fix-hint"/);
   assert.doesNotMatch(html, /<!--\s*@include\s+/);
 });
 

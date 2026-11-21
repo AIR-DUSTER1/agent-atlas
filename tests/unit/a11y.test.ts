@@ -34,10 +34,13 @@ test("表单控件具有可访问名称，消息流与状态点使用 live regio
   const html = await readClientIndexHtml();
   // M4 4.1/4.2：迁往 Vue 组件的面板，字段可访问名称在组件模板上断言
   for (const id of [
-    "input", "kb-query", "ui-dialog-input",
+    "input", "ui-dialog-input",
   ]) {
     assert.match(html, new RegExp(`(?:input|textarea) id="${id}"[^>]*aria-label=`), id);
   }
+  // M4 4.4：kb-query 随知识库弹窗迁往 Vue 组件
+  const kbVue = await read("views/kb-panel-vue.vue");
+  assert.match(kbVue, /id="kb-query"[^>]*aria-label="知识库检索问题"/, "kb-query");
   const mcpVue = await read("views/settings-mcp-vue.vue");
   assert.match(mcpVue, /id="mcp-id"[\s\S]{0,300}aria-label="MCP 服务器标识"/, "mcp-id");
   assert.match(mcpVue, /id="mcp-command"[\s\S]{0,300}aria-label="MCP 启动命令"/, "mcp-command");

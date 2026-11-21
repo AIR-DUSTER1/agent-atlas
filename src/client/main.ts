@@ -35,9 +35,8 @@ import { addExternalFlow, bindCreateSession as bindExtCreate, loadExternalAgents
 import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
 } from "./views/attachments.js";
-import { loadRag, openKb, closeKb, saveKbConfig, testKb, ingestKbFolder, pasteKbText, searchKbTest, clearKb, renderRagHitsInToolCard } from "./views/rag.js";
-import { closeEstate, installBeikeCli, openEstate, openEstateLogin, pasteEstateKeyFromClipboard, saveEstateKey, loadEstate, renderEstateInToolCard } from "./views/estate.js";
-import { bindJob } from "./views/job.js";
+import { loadRag, openKb, closeKb, renderRagHitsInToolCard } from "./views/rag.js";
+import { closeEstate, openEstate, loadEstate, renderEstateInToolCard } from "./views/estate.js";
 
 import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
 import { bindTracingSettings } from "./views/settings-tracing.js";
@@ -299,40 +298,21 @@ async function init(): Promise<void> {
   setupDragDrop();
 
   // 知识库（外部 RAG）：配置 / 测试 / 入库 / 检索 / 清空
-  on("kb-close", "click", closeKb);
-  on("kb-mask", "click", (e) => { if (e.target === $("kb-mask")) closeKb(); });
-  on("kb-save", "click", () => { void saveKbConfig(); });
-  on("kb-test", "click", () => { void testKb(); });
-  on("kb-key-toggle", "click", () => toggleSecretInput("kb-key-toggle", "kb-key"));
-  on("kb-ingest", "click", () => { void ingestKbFolder(); });
-  on("kb-paste", "click", () => { void pasteKbText(); });
-  on("kb-search-btn", "click", () => { void searchKbTest(); });
-  on("kb-query", "keydown", (e) => {
-    const ke = e as KeyboardEvent;
-    if (ke.key === "Enter") { ke.preventDefault(); void searchKbTest(); }
-  });
-  on("kb-clear", "click", () => { void clearKb(); });
+  // M4 4.4：知识库弹窗事件全部由 Vue 组件接管（stores/rag 驱动）
 
-  // 房产数据源（贝壳 CLI）：面板开关 / 检测 / 安装 / 保存 Key
-  on("estate-close", "click", closeEstate);
-  on("estate-mask", "click", (e) => { if (e.target === $("estate-mask")) closeEstate(); });
-  on("estate-check", "click", async () => {
-    const { setEstateStatus, renderEstatePanelForUi } = await import("./views/estate.js");
-    setEstateStatus("探测中…");
-    try { state.estate = await api("/api/estate"); }
-    catch (err) { state.estate = { installed: false, error: (err as Error).message }; }
-    renderEstatePanelForUi();
-  });
-  on("estate-install", "click", () => { void installBeikeCli(); });
-  on("estate-login-open", "click", () => { void openEstateLogin(); });
-  on("estate-key-paste", "click", () => { void pasteEstateKeyFromClipboard(); });
-  on("estate-key-save", "click", () => { void saveEstateKey(); });
-  on("estate-key-toggle", "click", () => toggleSecretInput("estate-key-toggle", "estate-key"));
+  // M4 4.4：贝壳弹窗事件全部由 Vue 组件接管（stores/estate 驱动）
+  // 弹窗遮罩点击空白关闭（mount 容器在组件模板之外，原生挂监听）
+  void import("./apps/estate-panel-vue.js").then((m) => {
+    m.mountEstatePanelVue();
+    const mask = $("estate-mask");
+    mask?.addEventListener("click", (e) => { if (e.target === mask) void closeEstate(); });
+  }).catch(() => {});
 
   bindBrowserDock();
 
   // 求职数据源（内置采集）：面板开关 / 数据目录 / 登录 / 自检
-  bindJob();
+  // M4 4.4：求职弹窗启动即挂载（默认隐藏，开关由 store.jobOpen 驱动）
+  void import("./apps/job-panel-vue.js").then((m) => m.mountJobPanelVue()).catch(() => {});
 
   on("send-btn", "click", () => { void send(); });
   on("stop-btn", "click", stopStreaming);
@@ -390,10 +370,6 @@ async function init(): Promise<void> {
       closeEstate();
       setSidebarOpen(false);
       closeCmMenus();
-    }
-    if (e.key === "Enter" && ["kb-url", "kb-collection", "kb-topk"].includes(target.id)) {
-      e.preventDefault();
-      void saveKbConfig();
     }
   });
 
