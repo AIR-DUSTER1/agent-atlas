@@ -4,7 +4,7 @@
  * 列表 / 自动候选确认与拒绝 / 导出导入都只依赖统一 Slot；
  * profileId 在三类 Agent 之间强隔离，任何路由都不能跨 scope 查找或删除。
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import type { MemoryProfileId } from "../../memory/provider.js";
 import { memoryScope, isMemoryProfileId } from "../../memory/scope.js";
 import { memorySlot } from "../../memory/slot.js";
@@ -132,11 +132,7 @@ export async function handleImportMemories(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as {
-      profileId?: unknown;
-      mode?: unknown;
-      snapshot?: unknown;
-    };
+    const body = parsedJsonOf<{ profileId?: unknown; snapshot?: unknown; mode?: unknown }>(req)!;
     const profileId = profileIdOf(typeof body.profileId === "string" ? body.profileId : undefined);
     if (!profileId) return respondInvalidScope(res);
     const config = await readMemoryConfig();

@@ -46,6 +46,14 @@ import {
 } from "./routes/config.js";
 import { handleGetTracing, handleSaveTracing } from "./routes/tracing.js";
 import { cacheParsedJson, readBody } from "./http-body.js";
+import {
+  handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
+  handleTestMemory, handleUpdateMemoryConfig,
+} from "./routes/memory.js";
+import {
+  handleConfirmMemory, handleDeleteMemory, handleExportMemories, handleImportMemories,
+  handleListMemories, handleListMemoryCandidates, handleRejectMemory,
+} from "./routes/memories.js";
 import { AUTH_ENABLED, EXPOSED_NOAUTH_ERR, LOOPBACK_HOST, PORT } from "./http-context.js";
 
 // 「响应已直写」标记统一在 already-sent.ts（M2 的 validation.ts 也要用）。
@@ -374,6 +382,23 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/models", jsonRaw, withBody(async (c) => { await handleModels(c.env.outgoing, c.env.incoming); }));
   app.get("/api/tracing", withBody(async (c) => { handleGetTracing(c.env.outgoing); }));
   app.put("/api/tracing", jsonRaw, withBody(async (c) => { await handleSaveTracing(c.env.outgoing, c.env.incoming); }));
+
+  // ── 15d. M2 批次 4（记忆域）：原生挂载；dispatch.ts 对应分支已摘除 ──
+  // 校验边界在 memory-slot / memory-config 服务层（同批 3 理由，路由层不重复 schema）。
+  // 查询参数 profileId / history 与平移前 searchParams 语义一致（缺失 = 默认 general）。
+  app.get("/api/memory/config", withBody(async (c) => { await handleGetMemoryConfig(c.env.outgoing); }));
+  app.put("/api/memory/config", jsonRaw, withBody(async (c) => { await handleUpdateMemoryConfig(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/memory/test", jsonRaw, withBody(async (c) => { await handleTestMemory(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/memory/embedding/test", jsonRaw, withBody(async (c) => { await handleTestEmbeddingMemory(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/memory/reindex", jsonRaw, withBody(async (c) => { await handleReindexMemory(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/memory/status", withBody(async (c) => { await handleMemoryStatus(c.env.outgoing, c.req.query("profileId")); }));
+  app.get("/api/memories", withBody(async (c) => { await handleListMemories(c.env.outgoing, c.req.query("profileId"), c.req.query("history") === "1"); }));
+  app.get("/api/memories/candidates", withBody(async (c) => { await handleListMemoryCandidates(c.env.outgoing, c.req.query("profileId")); }));
+  app.get("/api/memories/export", withBody(async (c) => { await handleExportMemories(c.env.outgoing, c.req.query("profileId"), c.req.query("history") === "1"); }));
+  app.post("/api/memories/import", jsonRaw, withBody(async (c) => { await handleImportMemories(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/memories/:id/confirm", withBody(async (c) => { await handleConfirmMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
+  app.post("/api/memories/:id/reject", withBody(async (c) => { await handleRejectMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
+  app.delete("/api/memories/:id", withBody(async (c) => { await handleDeleteMemory(c.env.outgoing, c.req.param("id") as string, c.req.query("profileId")); }));
 
   // ── 16. 兜底分发：GET 非 /api 走静态文件；其余原样透传 legacy 顺序分发 ──
   app.all("*", async (c) => {

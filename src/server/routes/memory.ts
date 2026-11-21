@@ -8,7 +8,7 @@
  * POST /api/memory/reindex         重建当前 Agent 的向量索引
  * GET  /api/memory/status           Provider、本地存储与语义索引状态
  */
-import { readBody, respondBadRequest } from "../http-body.js";
+import { parsedJsonOf, respondBadRequest } from "../http-body.js";
 import { writeAudit } from "../audit.js";
 import { memorySlot } from "../../memory/slot.js";
 import { localMemoryStoreStatus, readLocalRecords } from "../../memory/providers/local-store.js";
@@ -49,7 +49,7 @@ export async function handleUpdateMemoryConfig(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as MemoryConfigPatch;
+    const body = parsedJsonOf<MemoryConfigPatch>(req)!;
     const saved = await saveMemoryConfig(body);
     const runtime = await applyMemoryRuntime(saved);
     writeAudit("memory.config.updated", {
@@ -80,8 +80,7 @@ export async function handleTestMemory(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   try {
-    const raw = (await readBody(req)) || "{}";
-    const parsed = raw.trim() ? JSON.parse(raw) as MemoryConfigPatch : {};
+    const parsed = parsedJsonOf<MemoryConfigPatch>(req)!;
     const current = await readMemoryConfig();
     const candidate = mergeMemoryConfigPatch(current, parsed);
     if (!candidate.http.enabled || !candidate.http.baseURL) {
@@ -101,7 +100,7 @@ export async function handleTestEmbeddingMemory(
 ): Promise<void> {
   const previous = semanticMemoryConfig();
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as MemoryConfigPatch;
+    const body = parsedJsonOf<MemoryConfigPatch>(req)!;
     const current = await readMemoryConfig();
     const candidate = mergeMemoryConfigPatch(current, body);
     if (!candidate.embedding.enabled) throw new Error("请先启用语义召回");
@@ -120,7 +119,7 @@ export async function handleReindexMemory(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as { profileId?: unknown };
+    const body = parsedJsonOf<{ profileId?: unknown }>(req)!;
     const raw = typeof body.profileId === "string" ? body.profileId : "general";
     if (!isMemoryProfileId(raw)) throw new Error("profileId 只能是 general、estate 或 job");
     const config = await readMemoryConfig();

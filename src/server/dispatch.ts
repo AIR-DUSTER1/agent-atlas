@@ -46,15 +46,6 @@ import {
   handleSaveRagConfig,
   handleTestRag,
 } from "./routes/rag.js";
-import {
-  handleConfirmMemory,
-  handleDeleteMemory,
-  handleExportMemories,
-  handleImportMemories,
-  handleListMemories,
-  handleListMemoryCandidates,
-  handleRejectMemory,
-} from "./routes/memories.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import { handleCreateSubagent, handleDeleteSubagent, handleListSubagents, handleUpdateSubagent } from "./routes/subagents.js";
 import {
@@ -93,14 +84,6 @@ import {
 } from "./routes/estate.js";
 import { handleFsList, handleFsOpenRemote, handleFsRead, handleFsSearch, handleUpload } from "./routes/files.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
-import {
-  handleGetMemoryConfig,
-  handleMemoryStatus,
-  handleReindexMemory,
-  handleTestEmbeddingMemory,
-  handleTestMemory,
-  handleUpdateMemoryConfig,
-} from "./routes/memory.js";
 import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleStaticMap } from "./map-static.js";
@@ -252,39 +235,6 @@ export async function dispatchApi(req: IncomingMessage, res: ServerResponse, ctx
     }
 
     // 记忆插槽配置 / 连接测试 / 运行状态
-    if (pathname === "/api/memory/config" && req.method === "GET") { await handleGetMemoryConfig(res); return; }
-    if (pathname === "/api/memory/config" && req.method === "PUT") { await handleUpdateMemoryConfig(res, req); return; }
-    if (pathname === "/api/memory/test" && req.method === "POST") { await handleTestMemory(res, req); return; }
-    if (pathname === "/api/memory/embedding/test" && req.method === "POST") { await handleTestEmbeddingMemory(res, req); return; }
-    if (pathname === "/api/memory/reindex" && req.method === "POST") { await handleReindexMemory(res, req); return; }
-    if (pathname === "/api/memory/status" && req.method === "GET") {
-      await handleMemoryStatus(res, url.searchParams.get("profileId"));
-      return;
-    }
-
-    // 跨会话长期记忆（设置页「记忆」弹窗；Agent 侧走同一 Memory Slot）
-    if (pathname === "/api/memories" && req.method === "GET") { await handleListMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1"); return; }
-    if (pathname === "/api/memories/candidates" && req.method === "GET") {
-      await handleListMemoryCandidates(res, url.searchParams.get("profileId"));
-      return;
-    }
-    if (pathname === "/api/memories/export" && req.method === "GET") {
-      await handleExportMemories(res, url.searchParams.get("profileId"), url.searchParams.get("history") === "1");
-      return;
-    }
-    if (pathname === "/api/memories/import" && req.method === "POST") { await handleImportMemories(res, req); return; }
-    const memoryActionMatch = pathname.match(/^\/api\/memories\/([\w-]+)\/(confirm|reject)$/);
-    if (memoryActionMatch && req.method === "POST") {
-      if (memoryActionMatch[2] === "confirm") {
-        await handleConfirmMemory(res, memoryActionMatch[1], url.searchParams.get("profileId"));
-      } else {
-        await handleRejectMemory(res, memoryActionMatch[1], url.searchParams.get("profileId"));
-      }
-      return;
-    }
-    const memoryDelMatch = pathname.match(/^\/api\/memories\/([\w-]+)$/);
-    if (memoryDelMatch && req.method === "DELETE") { await handleDeleteMemory(res, memoryDelMatch[1], url.searchParams.get("profileId")); return; }
-
     // 用户自定义命令（提示词模板；前端斜杠菜单与设置页共用）
     if (pathname === "/api/commands" && req.method === "GET") { await handleListCommands(res); return; }
     if (pathname === "/api/commands" && req.method === "POST") { await handleSaveCommand(res, req); return; }
