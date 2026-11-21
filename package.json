@@ -41,7 +41,8 @@
     "coverage:security": " c8 --include=src/server/security/**/*.ts --check-coverage --lines 90 --functions 85 --branches 80 node --import tsx --test tests/unit/auth-session.test.ts",
     "coverage:persistence": " c8 --include=src/server/persistence/migrations.ts --include=src/server/persistence/ndjson-health.ts --check-coverage --lines 90 --functions 80 --branches 80 node --import tsx --test tests/unit/persistence-migrations.test.ts",
     "test:postgres": "tsx --test --test-concurrency=1 tests/integration/postgres.test.ts",
-    "coverage:routes": " c8 --include=src/server/routes/auth.ts --check-coverage --lines 80 --functions 75 --branches 65 node --import tsx tests/coverage/auth-routes.ts"
+    "coverage:routes": " c8 --include=src/server/routes/auth.ts --check-coverage --lines 80 --functions 75 --branches 65 node --import tsx tests/coverage/auth-routes.ts",
+    "test:vue": "vitest run"
   },
   "keywords": [
     "langgraph",
@@ -65,21 +66,26 @@
     "pg": "^8.23.1",
     "playwright-core": "1.64.1",
     "tsx": "4.23.15",
+    "vue": "^3.5.46",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "@vue/test-utils": "^2.6.0",
     "c8": "^12.0.0",
     "chart.js": "^4.6.1",
     "dompurify": "^3.4.17",
     "electron": "^44.8.0",
     "esbuild": "0.28.2",
+    "happy-dom": "^21.0.4",
     "highlight.js": "^11.12.0",
     "lucide": "^1.61.0",
     "marked": "^18.1.1",
     "typescript": "^7.0.2",
-    "vite": "^6.4.6"
+    "vite": "^6.4.6",
+    "vitest": "^5.1.1"
   }
 }

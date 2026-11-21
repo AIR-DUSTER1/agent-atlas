@@ -16,6 +16,7 @@
  */
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
 // rollup 的相对 input 按 CWD 解析而不是 vite root —— 必须给绝对路径
@@ -23,6 +24,8 @@ const CONFIG_DIR = dirname(fileURLToPath(import.meta.url));
 const COMPOSED_ENTRY = resolve(CONFIG_DIR, "src/client/index.vite.html");
 
 export default defineConfig({
+  // M4 起引入 Vue：插件只处理 .vue SFC（预编译满足 CSP），存量 h()/TS 源码不受影响
+  plugins: [vue()],
   root: "src/client",
   publicDir: false,
   base: "./",

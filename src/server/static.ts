@@ -26,7 +26,7 @@ const MIME: Record<string, string> = {
 /** 允许的一层子目录（字面量白名单；不含用户可控段） */
 const ALLOWED_DIRS = new Set([
   // assets：M3 起 Vite 打包产物目录（assets/app.js 等）；vendor 已随三段式构建退役
-  "assets", "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles", "observability",
+  "assets", "apps", "modules", "core", "composer", "render", "stream", "views", "actions", "ui", "vendor", "styles", "observability",
 ]);
 
 /** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */

@@ -85,6 +85,9 @@ import {
 } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import { handleStaticMap } from "./map-static.js";
+import {
+  handleAddExternalAgent, handleDeleteExternalAgent, handleListExternalAgents, handleUpdateExternalAgent,
+} from "./routes/external.js";
 import { parsedJsonOf } from "./http-body.js";
 import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
@@ -569,6 +572,12 @@ export function createApp(): Hono<AppEnv> {
     const url = new URL(c.env.incoming.url ?? "/", `http://localhost:${PORT}`);
     await handleStaticMap(c.env.outgoing, url);
   }));
+
+  // ── 15n. 外部 Agent 注册域（M2 遗漏补挂）：原生挂载 ──
+  app.get("/api/external-agents", withBody(async (c) => { await handleListExternalAgents(c.env.outgoing); }));
+  app.post("/api/external-agents", jsonRaw, withBody(async (c) => { await handleAddExternalAgent(c.env.outgoing, c.env.incoming); }));
+  app.post("/api/external-agents/:id", jsonRaw, withBody(async (c) => { await handleUpdateExternalAgent(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.delete("/api/external-agents/:id", jsonRaw, withBody(async (c) => { await handleDeleteExternalAgent(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
 
   // ── 15l. M2 批次 10（SSE 核心，最后一批）：原生挂载；dispatch.ts 整体退役 ──
   // chat/resume 保持「解析后透传」形态：handler 自己把 SSE 写到原生 res，

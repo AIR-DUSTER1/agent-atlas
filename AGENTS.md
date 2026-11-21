@@ -145,6 +145,7 @@ npm run typecheck
 npm run build:client
 npm run build:desktop
 npm test
+npm run test:vue
 ```
 
 前端、部署或发布相关改动按 Skill 指引补充 E2E、审计、数据检查与镜像 smoke。存在阻断项时必须如实报告，不能用静态检查冒充运行验证。
