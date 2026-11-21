@@ -142,6 +142,11 @@ export async function loadPluginState(): Promise<void> {
 
 /** 设置页插件分区懒加载：各接口互不阻塞，任一失败保留其它状态。 */
 export async function refreshPluginPanel(): Promise<void> {
+  // M4 批次 4.1：Vue+antdv-next 试点挂载（动态加载，不进首屏闭包）；
+  // 1:1 过渡树里本动态 import 会因 .vue 缺失而拒绝，降级不影响 h() 面板。
+  void import("../apps/settings-plugins-vue.js")
+    .then((m) => m.mountPluginsVue())
+    .catch(() => {});
   const [rag, estate, job, browser, plugins] = await Promise.allSettled([
     api<RagState>("/api/rag"),
     api<EstateState>("/api/estate"),

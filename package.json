@@ -60,6 +60,7 @@
     "@langchain/google-genai": "^2.3.2",
     "@langchain/langgraph": "^1.4.9",
     "@langchain/openai": "^1.5.6",
+    "antdv-next": "^1.8.2",
     "dotenv": "^17.4.2",
     "hono": "^4.13.19",
     "langsmith": "^0.8.10",
@@ -70,6 +71,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@antdv-next/cli": "^0.0.0-beta.1",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
