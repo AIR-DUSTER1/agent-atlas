@@ -369,3 +369,98 @@ button > .ui-icon { pointer-events: none; }
   white-space: normal;
   line-height: 1.35;
 }
+
+
+/* ------------------------------------------------------------
+   antdv Button 的「造型复位」（组件库批次）
+   ------------------------------------------------------------
+   ant-btn 带三组会影响项目既有视觉的默认值，下面按用途复位：
+
+   (a) box-shadow: 0 2px 0 0 rgba(255,255,255,.04)
+       → 在浅色主题下变成列表项底部一条亮弧线。凡是被当作「平铺列表项」
+         用的按钮（导航、卡片、行内动作）都要清掉。
+
+   (b) padding: 0 15px
+       → 纯图标按钮（宽高由类名固定为 22-30px）会被 padding 撑成畸形，
+         图标看着偏出框。必须 padding: 0。
+
+   (c) justify-content: center
+       → 「图标 + 文案 + 后缀」的项目选择器 / 下拉触发器需要左对齐。
+   ------------------------------------------------------------ */
+
+/* (a) 平铺列表项 / 卡片：去掉 ant-btn 的立体感 */
+.settings-nav-item.ant-btn,
+.demo-card.ant-btn,
+.project-btn.ant-btn,
+.provider-nav-item.ant-btn,
+.stats-window-card.ant-btn,
+.command-card-main.ant-btn,
+.ex-chip.ant-btn,
+.skill-card.ant-btn,
+.subagent-card.ant-btn {
+  box-shadow: none;
+}
+.settings-nav-item.ant-btn:hover,
+.demo-card.ant-btn:hover,
+.project-btn.ant-btn:hover,
+.provider-nav-item.ant-btn:hover,
+.stats-window-card.ant-btn:hover,
+.command-card-main.ant-btn:hover,
+.ex-chip.ant-btn:hover {
+  box-shadow: none;
+}
+
+/* (b) 纯图标按钮：宽度由类名固定，padding 必须归零，图标才真正居中 */
+.s-action.ant-btn,
+.commands-icon-btn.ant-btn,
+.skill-delete-btn.ant-btn,
+.mcp-icon-btn.ant-btn,
+.browser-dock-close.ant-btn,
+.c-del.ant-btn,
+.ext-del.ant-btn,
+.m-del.ant-btn,
+.m-edit.ant-btn,
+.m-pick.ant-btn {
+  padding: 0;
+  min-width: 0;
+}
+/* 行内图标按钮：透明底 + 无边框（ant-btn-default 自带边框与白底，
+   放在会话卡/列表行里会显示成一个个小方块） */
+.s-action.ant-btn,
+.commands-icon-btn.ant-btn,
+.skill-delete-btn.ant-btn,
+.mcp-icon-btn.ant-btn,
+.browser-dock-close.ant-btn,
+.m-del.ant-btn,
+.m-edit.ant-btn,
+.m-pick.ant-btn,
+.c-del.ant-btn,
+.ext-del.ant-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+}
+/* 行内图标小按钮统一成正方形容器，图标自然居中 */
+.s-action.ant-btn,
+.commands-icon-btn.ant-btn,
+.skill-delete-btn.ant-btn,
+.mcp-icon-btn.ant-btn,
+.browser-dock-close.ant-btn,
+.m-del.ant-btn,
+.m-edit.ant-btn,
+.m-pick.ant-btn,
+.c-del.ant-btn,
+.ext-del.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* (c) 下拉触发器 / 带后缀的选择器：内容左对齐，后缀贴右 */
+.project-btn.ant-btn {
+  justify-content: flex-start;
+  text-align: left;
+}
+.project-btn.ant-btn > .chevron-down {
+  margin-left: auto;
+}
