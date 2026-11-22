@@ -313,3 +313,59 @@ button > .ui-icon { pointer-events: none; }
 }
 /* Slider 与阈值数字回显并排时留出呼吸 */
 .routing-field > .ant-slider { margin: 6px 0; }
+
+
+/* ------------------------------------------------------------
+   当 antdv Button 被用作「内容容器」时的布局复位（组件库批次）
+   ------------------------------------------------------------
+   Button 自带 inline-flex / row / nowrap / 固定高度。若项目把它当卡片、
+   导航项这类「多行内容块」用，这些默认值会把内容压成一行并溢出。
+   下面的选择器覆盖项目里所有「容器型按钮」，只复位布局、不动交互与配色：
+     .demo-card        欢迎页 / 新会话 Agent 卡片
+     .settings-nav-item 设置页左侧分区导航
+     .command-card-main 命令列表卡片主体
+     .ex-chip          示例 chips（允许换行）
+   ------------------------------------------------------------ */
+/* 多行内容块：纵向堆叠 */
+.demo-card.ant-btn,
+.command-card-main.ant-btn,
+.stats-window-card.ant-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  min-height: 0;
+  white-space: normal;
+  line-height: normal;
+}
+/* 横排内容块（图标 + 文案两列）：只需解除固定高度与 nowrap */
+.settings-nav-item.ant-btn,
+.project-btn.ant-btn,
+.provider-nav-item.ant-btn,
+.skills-filter-tab.ant-btn,
+.subagents-filter-tab.ant-btn,
+.subagent-edit-btn.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  min-height: 0;
+  white-space: nowrap;
+  line-height: normal;
+}
+/* 导航项是横排（图标 + 文案两列），只需解除高度与 nowrap */
+.settings-nav-item.ant-btn {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+}
+/* 命令卡主体同理：横排三行文本，靠内部 .command-card-* 的层叠排布 */
+.command-card-main.ant-btn {
+  flex-direction: column;
+  align-items: flex-start;
+}
+/* chips 允许文字换行，且不撑满父容器 */
+.ex-chip.ant-btn {
+  height: auto;
+  white-space: normal;
+  line-height: 1.35;
+}

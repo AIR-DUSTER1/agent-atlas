@@ -44,7 +44,10 @@
   background: rgba(63,185,111,.15); color: var(--green);
   vertical-align: 1px;
 }
+/* 卡片的「容器布局复位」统一在 styles/ui.css 的
+   「当 antdv Button 被用作内容容器时」一节维护，这里只留视觉样式。 */
 .demo-card {
+  width: 100%;
   text-align: left;
   padding: 16px;
   background: var(--bg-elev);
