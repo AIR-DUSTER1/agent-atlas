@@ -72,8 +72,21 @@ async function save(): Promise<void> {
   }
 }
 
+/**
+ * 各平台登录方式不同，不能统一说「扫码」。
+ * 智联只有「手机号 + 短信验证码」，页面上并没有二维码；上游实测已有用户
+ * 因为找二维码干等 5 分钟。这里按平台给出准确指引。
+ */
+const LOGIN_METHOD_HINT: Record<string, string> = {
+  boss: "请在浏览器窗口里用手机扫码",
+  zhilian: "智联没有二维码：请在浏览器窗口里填写手机号并获取短信验证码",
+  job51: "请在浏览器窗口里用手机号 + 密码或验证码登录",
+  liepin: "请在浏览器窗口里用手机号 + 验证码登录，或扫码",
+};
+
 async function login(platform: { id: string; label: string }): Promise<void> {
-  store.setStatus(`正在打开 ${platform.label} 登录页：请在浏览器里扫码，最长等待 5 分钟…`);
+  const hint = LOGIN_METHOD_HINT[platform.id] ?? "请在浏览器窗口里完成登录";
+  store.setStatus(`正在打开 ${platform.label} 登录页：${hint}，最长等待 5 分钟…`);
   try {
     const result = await store.login(platform.id);
     store.setStatus(result.summary, result.ok ? "ok" : "err");

@@ -7,16 +7,30 @@
 import { promises as fsp } from "node:fs";
 import { join } from "node:path";
 import type { JobManifest, JobRecord } from "./job-model.js";
-import { JOB_STATUS_OPTIONS } from "./job-model.js";
+import { JOB_STATUS_OPTIONS, jobIdentity } from "./job-model.js";
 
 const HEADERS = [
   "平台", "岗位名称", "公司名称", "薪资", "地区", "经验要求", "学历要求", "综合得分",
   "是否外包", "外包判定理由", "上架时间", "HR最近活跃", "公司规模", "行业", "融资阶段",
-  "单双休", "上下班时间", "岗位福利", "工作地址", "投递状态", "投递链接", "招呼语", "备注", "得分拆解", "岗位方向", "采集时间",
+  "单双休", "上下班时间", "岗位福利", "工作地址", "投递状态", "投递链接", "招呼语",
+  "职位描述", "岗位ID", "备注", "得分拆解", "岗位方向", "采集时间",
 ] as const;
-const WIDTHS = [14, 28, 28, 14, 18, 12, 10, 10, 10, 26, 18, 20, 14, 18, 12, 12, 18, 34, 34, 12, 40, 36, 20, 42, 18, 20];
-const STATUS_COLUMN = 20;
-const APPLY_LINK_COLUMN = 21;
+const WIDTHS = [14, 28, 28, 14, 18, 12, 10, 10, 10, 26, 18, 20, 14, 18, 12, 12, 18, 34, 34, 12, 40, 36, 80, 42, 20, 42, 18, 20];
+/** 需要换行显示的列：按列名取下标，不写死数字——插列后硬编码必错（本项目踩过）。 */
+const WRAP_COLUMNS = ["岗位福利", "工作地址", "招呼语", "职位描述", "得分拆解"] as const;
+/** 含 JD 的行固定行高（磅）。不固定的话 wrap 会把行撑到几百磅、整张表没法看。 */
+const JD_ROW_HEIGHT = 90;
+/** Excel 单格文本上限；JD 全文保留但避免异常超长内容拖垮文件。 */
+const JD_CELL_MAX_CHARS = 3_000;
+
+function columnIndexByHeader(name: (typeof HEADERS)[number]): number {
+  return HEADERS.indexOf(name) + 1;
+}
+
+const STATUS_COLUMN = columnIndexByHeader("投递状态");
+const APPLY_LINK_COLUMN = columnIndexByHeader("投递链接");
+const JD_COLUMN = columnIndexByHeader("职位描述");
+const WRAP_INDEXES = new Set(WRAP_COLUMNS.map((name) => HEADERS.indexOf(name)));
 
 function xml(value: unknown): string {
   return String(value ?? "")
@@ -52,18 +66,21 @@ function rowXml(rowNumber: number, job: JobRecord): string {
     job.platform, job.title, job.company, job.salary, job.city, job.experience, job.education, job.score,
     job.isOutsourcing, job.outsourcingReason, job.published, job.hrActive, job.companySize, job.companyIndustry,
     job.companyFinancing, job.workRest, job.workHours, job.welfare, job.address, job.status, job.applyUrl,
-    job.greeting, job.remark, job.scoreDetail, job.direction, job.fetchedAt,
+    job.greeting, job.jdText.slice(0, JD_CELL_MAX_CHARS), jobIdentity(job), job.remark, job.scoreDetail,
+    job.direction, job.fetchedAt,
   ];
+  const applyIndex = APPLY_LINK_COLUMN - 1;
   const cells = values.map((value, index) => {
     const ref = `${columnName(index + 1)}${rowNumber}`;
     if (typeof value === "number") return numberCell(ref, value);
-    if (index === APPLY_LINK_COLUMN - 1 && value) return inlineCell(ref, "点击投递", 3);
+    if (index === applyIndex && value) return inlineCell(ref, "点击投递", 3);
     if (index === HEADERS.length - 1 && value) return inlineCell(ref, value, 2);
-    // 换行列：岗位福利 / 工作地址 / 招呼语 / 得分拆解（招呼语插入后备注前移，索引按 values 下标）
-    if (index === 17 || index === 18 || index === 21 || index === 23) return inlineCell(ref, value, 2);
+    if (WRAP_INDEXES.has(index)) return inlineCell(ref, value, 2);
     return inlineCell(ref, value);
   });
-  return `<row r="${rowNumber}">${cells.join("")}</row>`;
+  // 含 JD 的行固定行高：单元格里的完整文本仍保留，只是不按内容自动撑高
+  const height = values[JD_COLUMN - 1] ? ` ht="${JD_ROW_HEIGHT}" customHeight="1"` : "";
+  return `<row r="${rowNumber}"${height}>${cells.join("")}</row>`;
 }
 
 function sheetXml(manifest: JobManifest): string {
@@ -72,13 +89,16 @@ function sheetXml(manifest: JobManifest): string {
   const maxRow = Math.max(2, manifest.jobs.length + 1);
   const cols = WIDTHS.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
   const statusValues = JOB_STATUS_OPTIONS.join(",");
+  // 状态列与投递链接列的列字母按表头下标算，插列后不会错位
+  const statusLetters = columnName(STATUS_COLUMN);
+  const linkLetters = columnName(APPLY_LINK_COLUMN);
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>
 <sheetFormatPr defaultRowHeight="18"/><cols>${cols}</cols><sheetData>${header}${rows}</sheetData>
 <autoFilter ref="A1:${columnName(HEADERS.length)}${maxRow}"/>
-<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="投递状态" error="请选择清单中的投递状态" sqref="T2:T${maxRow}"><formula1>"${statusValues}"</formula1></dataValidation></dataValidations>
-${manifest.jobs.length ? `<hyperlinks>${manifest.jobs.map((job, index) => job.applyUrl ? `<hyperlink ref="U${index + 2}" r:id="rId${index + 1}" display="点击投递"/>` : "").join("")}</hyperlinks>` : ""}
+<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="投递状态" error="请选择清单中的投递状态" sqref="${statusLetters}2:${statusLetters}${maxRow}"><formula1>"${statusValues}"</formula1></dataValidation></dataValidations>
+${manifest.jobs.length ? `<hyperlinks>${manifest.jobs.map((job, index) => job.applyUrl ? `<hyperlink ref="${linkLetters}${index + 2}" r:id="rId${index + 1}" display="点击投递"/>` : "").join("")}</hyperlinks>` : ""}
 <pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>
 </worksheet>`;
 }

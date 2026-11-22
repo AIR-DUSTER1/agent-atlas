@@ -12,11 +12,12 @@ import { parseNativeCard, parseZhilianRecords, readZhilianVueRecords } from "./j
 import { inferCardCandidates, normalizeSelector, readCandidateCards, readCardsFromSelector, type RawJobCard } from "./job-dom.js";
 import { loadJobSelectorRuntime, type JobSelectorRuntime } from "./job-selectors.js";
 import {
-  JOB_CITY_CODES, JOB_PLATFORM_LABELS, detectOutsourcing,
+  JOB_CITY_CODES, JOB_PLATFORM_LABELS, applyCollectionFilters, detectOutsourcing,
   parseWorkHours, parseWorkRest, scoreJob,
-  type JobPlatform, type JobRecord, type JobSearchProfile,
+  type CollectionFilterOutcome, type JobPlatform, type JobRecord, type JobSearchProfile,
 } from "./job-model.js";
 import { checkJobListHealth } from "./job-health.js";
+import { cleanJd } from "./job-jdtext.js";
 
 const PROFILE_DIR_NAME = ".profile";
 const NAV_TIMEOUT_MS = 30_000;
@@ -44,6 +45,97 @@ class PlatformBlockedError extends Error {
     super(message);
     this.name = "PlatformBlockedError";
   }
+}
+
+/**
+ * 必须登录才有可用数据的平台：未登录时 BOSS 薪资全部为空、智联薪资显示 `**-**`，
+ * 采出来的分数和排序都不可信，所以预检不通过就不该开跑。
+ */
+const REQUIRED_LOGIN: readonly JobPlatform[] = ["boss", "zhilian"];
+
+/** 各平台未登录时会缺什么——预检报告里用来说明「为什么值得先登录」。 */
+const LOGIN_VALUE_HINT: Record<JobPlatform, string> = {
+  boss: "未登录时薪资全部为空，部分岗位不出现",
+  zhilian: "未登录时薪资显示为 **-**，字段大量缺失",
+  liepin: "未登录时字段不全，且易触发短信验证",
+  job51: "未登录也有大部分字段，登录后更完整",
+};
+
+/**
+ * 各站点「必须登录才能访问」的探针页：(探针 URL, 未登录时会被踢去的特征)。
+ *
+ * 这是唯一可靠的登录判据。cookie 可能是过期残留——服务端已失效但浏览器仍存着，
+ * 只看 cookie 会把未登录误判成已登录（上游 2026-11-20 实测记录）。
+ */
+const LOGIN_PROBE: Record<JobPlatform, { url: string; kickMarker: string }> = {
+  boss: { url: "https://www.zhipin.com/web/geek/recommend", kickMarker: "/web/user" },
+  zhilian: { url: "https://i.zhaopin.com/resume/", kickMarker: "passport.zhaopin.com" },
+  job51: { url: "https://i.51job.com/resume/resume_list.php", kickMarker: "/in/missing" },
+  liepin: { url: "https://c.liepin.com/", kickMarker: "loginBackUrl" },
+};
+
+/** 各站点主域：用来确认探针后仍停在该站，而不是被重定向到别处。 */
+const SITE_HOST: Record<JobPlatform, string> = {
+  boss: "zhipin.com",
+  zhilian: "zhaopin.com",
+  job51: "51job.com",
+  liepin: "liepin.com",
+};
+
+/** 单个平台的登录探针超时与等待时间。 */
+const LOGIN_PROBE_TIMEOUT_MS = 20_000;
+const LOGIN_PROBE_SETTLE_MS = 2_500;
+
+export interface JobLoginStatus {
+  /** 逐平台登录态；探针失败（超时/网络错误）按未登录处理，宁可让用户确认一次。 */
+  platforms: Record<string, boolean>;
+  /** 必须登录却未登录的平台。 */
+  needsLogin: JobPlatform[];
+  /** 逐平台的可读说明。 */
+  details: string[];
+}
+
+/**
+ * 逐平台探测登录态（访问需登录页面，看是否被踢回登录页）。
+ *
+ * 只应在采集开始前调用：每个平台都会导航一次，属于额外请求，不要放进循环里。
+ * 探针异常不抛错——网络抖动时按「未登录」处理，由调用方决定是否中止。
+ */
+export async function checkJobLoginStatus(
+  dataDir: string,
+  platforms: readonly JobPlatform[],
+): Promise<JobLoginStatus> {
+  if (!platforms.length) return { platforms: {}, needsLogin: [], details: [] };
+  return withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
+    const page = context.pages()[0] ?? await context.newPage();
+    const result: Record<string, boolean> = {};
+    const details: string[] = [];
+    for (const platform of platforms) {
+      const probe = LOGIN_PROBE[platform];
+      let loggedIn = false;
+      try {
+        await enqueue(async () => {
+          await page.goto(probe.url, { waitUntil: "domcontentloaded", timeout: LOGIN_PROBE_TIMEOUT_MS });
+          await page.waitForTimeout(LOGIN_PROBE_SETTLE_MS);
+          const current = (page.url() ?? "").toLowerCase();
+          if (!current || !current.includes(SITE_HOST[platform])) return;
+          // 被踢到 probe.kickMarker 说明未登录；停在站内其它页面说明登录有效
+          loggedIn = !current.includes(probe.kickMarker.toLowerCase());
+        });
+      } catch {
+        loggedIn = false;
+      }
+      result[platform] = loggedIn;
+      if (!loggedIn) {
+        details.push(`${JOB_PLATFORM_LABELS[platform]}未登录：${LOGIN_VALUE_HINT[platform]}`);
+      }
+      await sleep(PLATFORM_GAP_MS);
+    }
+    const needsLogin = platforms.filter(
+      (platform) => REQUIRED_LOGIN.includes(platform) && result[platform] !== true,
+    );
+    return { platforms: result, needsLogin: [...needsLogin], details };
+  });
 }
 
 /** 诊断和采集共用的列表页地址；平台顺序不影响调用方。 */
@@ -386,17 +478,46 @@ function dedupeJobs(jobs: JobRecord[]): JobRecord[] {
   return output;
 }
 
+export interface CollectNativeOptions {
+  /** 跳过采集前的登录预检（用户明确接受残缺数据时才用）。 */
+  skipLoginCheck?: boolean;
+}
+
+export interface CollectNativeResult {
+  jobs: JobRecord[];
+  warnings: string[];
+  login: JobLoginStatus | null;
+  filter: CollectionFilterOutcome;
+}
+
 export async function collectNativeJobs(
   dataDir: string,
   profile: JobSearchProfile,
   platforms: readonly JobPlatform[],
   pages: number,
-): Promise<{ jobs: JobRecord[]; warnings: string[] }> {
+  options: CollectNativeOptions = {},
+): Promise<CollectNativeResult> {
+  // 登录预检单独开一次浏览器会话：采集本身要复用同一登录态，但预检的探针会
+  // 把页面导航到「需登录页」，混在采集循环里会污染当前页状态。
+  const login = options.skipLoginCheck ? null : await checkJobLoginStatus(dataDir, platforms);
+  if (login?.needsLogin.length) {
+    // 必需平台未登录：直接中止，不浪费 3-5 分钟去采一批薪资全空的数据
+    return {
+      jobs: [],
+      warnings: [
+        ...login.details,
+        "未登录时采出来的薪资与排序不可信，已中止。请到「设置 → 插件 → 求职岗位」登录后再采集；确需强采可传 skipLoginCheck。",
+      ],
+      login,
+      filter: { kept: [], droppedIrrelevant: 0, droppedCity: 0, jdCleaned: 0 },
+    };
+  }
   return withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
     const page = context.pages()[0] ?? await context.newPage();
     const runtime = await loadJobSelectorRuntime(dataDir);
     const jobs: JobRecord[] = [];
     const warnings: string[] = runtime.warning ? [runtime.warning] : [];
+    if (login?.details.length) warnings.push(...login.details);
     for (const platform of platforms) {
       try {
         const batch = platform === "boss" ? await collectBoss(page, runtime, profile, pages)
@@ -411,11 +532,20 @@ export async function collectNativeJobs(
       }
       await sleep(PLATFORM_GAP_MS);
     }
-    const scored = dedupeJobs(jobs).map((job) => {
+    // 先过滤（相关性/城市/方向）再打分：避免给注定丢弃的岗位白算分。
+    // 过滤同时会清洗 JD，保证快照与 Excel 里不含页面 UI 文案。
+    const filter = applyCollectionFilters(dedupeJobs(jobs), profile);
+    if (filter.droppedIrrelevant || filter.droppedCity) {
+      warnings.push(
+        `过滤掉 ${filter.droppedIrrelevant + filter.droppedCity} 条不相关岗位` +
+        `（关键词 ${filter.droppedIrrelevant} / 城市 ${filter.droppedCity}）`,
+      );
+    }
+    const scored = filter.kept.map((job) => {
       const outsourcing = detectOutsourcing(job.title, job.company, job.jdText, job.companyIndustry);
       return scoreJob({ ...job, ...outsourcing }, profile);
     });
-    return { jobs: scored, warnings };
+    return { jobs: scored, warnings, login, filter };
   });
 }
 
@@ -483,7 +613,7 @@ export async function enrichJobInPage(page: Page, job: JobRecord, runtime: JobSe
     const selector = normalizeSelector(runtime.primary("liepin", "jd_box"));
     jdText = selector ? await page.locator(selector).first().innerText({ timeout: 1_500 }).catch(() => "") : "";
   }
-  job.jdText = jdText.trim() || extractSection(text);
+  job.jdText = cleanJd(jdText.trim() || extractSection(text));
   job.address ||= text.match(/(?:工作地址|上班地址|职位地址|地图完整地址)[：:]?\s*([^\n]{5,100})/)?.[1]?.trim() ?? "";
   job.hrActive ||= text.match(/(刚刚活跃|今日活跃|本周活跃|\d+\s*(?:分钟|小时|天)前活跃|\d+\s*(?:分钟|小时|天)前在线|一周前在线)/)?.[1] ?? "";
   job.hrName ||= text.match(/([\u4e00-\u9fa5]{1,3})(先生|女士)/)?.[0] ?? "";

@@ -3,7 +3,14 @@
  * ============================================================
  * 把原技能中的岗位字段、评分、外包识别和增量合并规则收进应用运行时；
  * 招聘站点适配、浏览器生命周期和交付物写入各自独立，模型只看到结构化工具结果。
+ *
+ * 关键词展开与方向族在 job-keywords.ts，JD 清洗在 job-jdtext.ts；
+ * 本文件只负责「字段 + 规则编排」，不再自己维护第三套词表。
  */
+import { cleanJobsInPlace } from "./job-jdtext.js";
+import {
+  expandKeyword, isNonDevTitle, isRelevantTitle, matchDirection,
+} from "./job-keywords.js";
 
 export const JOB_PLATFORMS = ["boss", "zhilian", "job51", "liepin"] as const;
 export type JobPlatform = (typeof JOB_PLATFORMS)[number];
@@ -184,38 +191,45 @@ function parseExperienceRange(text: string, years: number): [number, number] | n
   return years >= 0 ? null : null;
 }
 
-/** 常见岗位方向的同义词组；内置流程不依赖模型临时扩词。 */
-const KEYWORD_SYNONYMS: Record<string, string[]> = {
-  agent开发: ["agent", "智能体", "ai应用", "ai开发", "大模型应用", "llm应用"],
-  大模型应用: ["大模型", "llm", "agent", "智能体", "ai应用"],
-  大模型开发: ["大模型", "llm", "agent", "智能体", "ai开发"],
-  前端开发: ["前端", "web", "react", "vue", "javascript"],
-  后端开发: ["后端", "java", "python", "go", "node"],
-  数据分析: ["数据分析", "bi", "sql", "数据仓库", "数据开发"],
-};
+/** 关键词展开统一走 job-keywords（筛选与打分同一份词表，见模块注释）。 */
+export const keywordVariants = expandKeyword;
 
-export function keywordVariants(keyword: string): string[] {
-  const normalized = keyword.trim().toLowerCase().replace(/\s+/g, "");
-  if (!normalized) return [];
-  const direct = KEYWORD_SYNONYMS[normalized] ?? [];
-  return [...new Set([normalized, ...direct.map((item) => item.replace(/\s+/g, ""))])];
-}
-
+/**
+ * 岗位名匹配度，0-35。
+ *
+ * 口径与上游 core/scoring.py::score_title 对齐：
+ *   - 用户原话命中 → 35（位置靠前）/ 30
+ *   - 同义叫法命中 → 30 + min(5, 最长命中词长 / 2)，越长越可信（「大模型」比「rag」更能说明是这类岗）
+ *   - 分词部分命中 → 按命中比例 × 0.8
+ * 这样「AI智能体开发工程师」能被搜到也能被打分，不会方向对了却得低分。
+ */
 function scoreTitle(title: string, keywords: string[]): number {
   const target = title.toLowerCase().replace(/\s+/g, "");
+  if (!target) return 0;
   let best = 0;
   for (const keyword of keywords) {
-    for (const token of keywordVariants(keyword)) {
-      if (!token) continue;
-      const index = target.indexOf(token);
-      if (index >= 0) best = Math.max(best, index < 12 ? 35 : 30);
-      const parts = token.split(/[\s/、,，]+/).filter((part) => part.length > 1);
-      if (!parts.length) continue;
-      const hits = parts.filter((part) => target.includes(part)).length;
-      if (hits) best = Math.max(best, 35 * hits / parts.length * 0.8);
+    const key = keyword.trim().toLowerCase().replace(/\s+/g, "");
+    if (!key) continue;
+    // 1) 用户原话命中
+    const index = target.indexOf(key);
+    if (index >= 0) {
+      best = Math.max(best, index < 12 ? 35 : 30);
+      continue;
     }
+    // 2) 同义叫法命中（排除原话自身，它已在上面处理）
+    const synonymHits = expandKeyword(keyword).filter((token) => token !== key && target.includes(token));
+    if (synonymHits.length) {
+      const longest = Math.max(...synonymHits.map((token) => token.length));
+      best = Math.max(best, 30 + Math.min(5, longest / 2));
+      continue;
+    }
+    // 3) 分词部分命中
+    const parts = key.split(/[\s/、,，]+/).filter((part) => part.length > 1);
+    if (!parts.length) continue;
+    const hits = parts.filter((part) => target.includes(part)).length;
+    if (hits) best = Math.max(best, 35 * hits / parts.length * 0.8);
   }
-  return best;
+  return Math.min(35, best);
 }
 
 function scoreSalary(salaryK: number, low: number, high: number): number {
@@ -319,6 +333,48 @@ function to24h(hours: number, afternoon: boolean): number {
 
 /** 下午语义前缀：下午/晚上（含单字「晚」）都算 PM 时段，「晚6点」= 18 点。 */
 const AFTERNOON_PREFIX = /下午|晚上|晚/;
+
+/** 采集结果过滤统计，供采集摘要如实展示「筛掉了多少、洗了多少」。 */
+export interface CollectionFilterOutcome {
+  kept: JobRecord[];
+  droppedIrrelevant: number;
+  droppedCity: number;
+  jdCleaned: number;
+}
+
+/**
+ * 采集结果的统一后处理：相关性过滤 → 城市兜底过滤 → 方向标注 → JD 清洗。
+ *
+ * 为什么放在模型层而不是浏览器层：这是纯函数、可单测，且补详情路径也会复用
+ * 同一份过滤与清洗口径（上游 collect.py::process 的对应实现）。
+ *
+ * 外包判定与打分不在这里做——它们需要 profile 的薪资/年限，由调用方接力，
+ * 顺序必须是「先过滤再打分」，否则会给注定被删的岗位白算分。
+ */
+export function applyCollectionFilters(jobs: readonly JobRecord[], profile: JobSearchProfile): CollectionFilterOutcome {
+  const kept: JobRecord[] = [];
+  let droppedIrrelevant = 0;
+  let droppedCity = 0;
+  for (const job of jobs) {
+    if (!isRelevantTitle(job.title, profile.keywords)) {
+      droppedIrrelevant += 1;
+      continue;
+    }
+    // 城市兜底：站点偶尔会串城市，按用户目标城市再过滤一次
+    if (job.city && !job.city.includes(profile.city)) {
+      droppedCity += 1;
+      continue;
+    }
+    const direction = matchDirection(job.title, profile.keywords);
+    kept.push({ ...job, direction: direction || job.direction || "其他" });
+  }
+  // 入库前洗掉 JD 尾部的页面 UI 文案（去App / 工作地址 / 相似职位），
+  // 否则它会一路带进快照、Excel 和招呼语。必须在过滤之后——避免给丢弃的岗位白洗。
+  const jdCleaned = cleanJobsInPlace(kept);
+  return { kept, droppedIrrelevant, droppedCity, jdCleaned };
+}
+
+export { expandKeyword, isNonDevTitle, isRelevantTitle, matchDirection };
 
 function buildWorkHours(startH: number, startM: number, endH: number, endM: number): string {
   const span = (endH * 60 + endM) - (startH * 60 + startM);

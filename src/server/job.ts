@@ -137,6 +137,8 @@ async function writeManifest(jobs: JobRecord[], dataDirHint?: string): Promise<J
 export interface CollectInput extends JobSearchProfile {
   pages?: number;
   platforms?: JobPlatform[];
+  /** 跳过采集前的登录预检：仅在用户明确接受数据残缺时使用。 */
+  skipLoginCheck?: boolean;
 }
 
 export interface JobDiagnoseInput {
@@ -164,6 +166,8 @@ export interface CliOutcome {
   htmlPath?: string;
   htmlError?: string;
   xlsxPath?: string;
+  /** 未登录导致中止时，需要用户去登录的平台中文名（供工具层给模型直接指向动作）。 */
+  needsLogin?: string[];
 }
 
 function normalizeCollectInput(input: CollectInput): { profile: JobSearchProfile; pages: number; platforms: JobPlatform[] } {
@@ -203,10 +207,26 @@ export async function collectJobs(input: CollectInput): Promise<CliOutcome> {
   const previous = (await readManifest().catch(() => null))?.jobs ?? [];
   let result;
   try {
-    result = await collectNativeJobs(resolveJobDataDir(), normalized.profile, normalized.platforms, normalized.pages);
+    result = await collectNativeJobs(
+      resolveJobDataDir(), normalized.profile, normalized.platforms, normalized.pages,
+      { skipLoginCheck: input.skipLoginCheck === true },
+    );
   } catch (err) {
     recordDependency("job", "down", "岗位采集失败");
     return { ok: false, summary: `采集失败：${err instanceof Error ? err.message : String(err)}` };
+  }
+  // 必需平台未登录时采集器直接中止（不返回岗位），这里要把「该去登录」讲清楚，
+  // 而不是让用户以为是站点改版或没岗位。
+  if (result.login?.needsLogin.length) {
+    recordDependency("job", "degraded", "岗位采集被登录预检拦截");
+    return {
+      ok: false,
+      summary: `已中止采集：${result.login.needsLogin.map((platform) => JOB_PLATFORM_LABELS[platform]).join("、")}未登录。` +
+        `${result.login.details.join("；")}。请到「设置 → 插件 → 求职岗位」登录后再采集；` +
+        "如果只想要残缺数据，可传 skipLoginCheck=true 强行采集。",
+      output: tail(result.warnings.join("\n")),
+      needsLogin: result.login.needsLogin.map((platform) => JOB_PLATFORM_LABELS[platform]),
+    };
   }
   if (!result.jobs.length) {
     recordDependency("job", "degraded", "岗位采集未返回数据");
@@ -234,9 +254,15 @@ export async function collectJobs(input: CollectInput): Promise<CliOutcome> {
   for (const job of result.jobs) byPlatform.set(job.platform, (byPlatform.get(job.platform) ?? 0) + 1);
   const counts = [...byPlatform.entries()].map(([name, count]) => `${name} ${count}`).join(" · ");
   const warningText = result.warnings.length ? `；注意：${result.warnings.join("；")}` : "";
+  // 过滤与清洗结果要如实报出来：用户看到「采到 60 条只剩 38 条」时需要知道原因
+  const filter = result.filter;
+  const filterText = filter.droppedIrrelevant || filter.droppedCity || filter.jdCleaned
+    ? `；过滤 ${filter.droppedIrrelevant + filter.droppedCity} 条不相关（关键词 ${filter.droppedIrrelevant} / 城市 ${filter.droppedCity}）` +
+      `${filter.jdCleaned ? `；JD 清洗 ${filter.jdCleaned} 条` : ""}`
+    : "";
   return {
     ok: true,
-    summary: `采集完成：新增 ${merged.added} 条、更新 ${merged.updated} 条、保留 ${merged.carried} 条，共 ${manifest.jobs.length} 条（${counts}）${warningText}`,
+    summary: `采集完成：新增 ${merged.added} 条、更新 ${merged.updated} 条、保留 ${merged.carried} 条，共 ${manifest.jobs.length} 条（${counts}）${filterText}${warningText}`,
     output: tail([...result.warnings, `Excel: ${deliverables.xlsxPath ?? "未生成"}`, `HTML: ${deliverables.htmlPath ?? "未生成"}`].join("\n")),
     manifest,
     ...deliverables,
@@ -344,6 +370,10 @@ export interface JobGreetExport {
   maxLen: number;
   remaining: number;
   exported: number;
+  /** 其中有多少条带 JD（能写贴合版），其余只能写简版。 */
+  withJd: number;
+  /** 跨平台去重合并掉的重复岗位数（同公司同名岗）。 */
+  deduped: number;
   items: JobGreetExportItem[];
   note: string;
 }
@@ -389,6 +419,36 @@ function slimGreetTarget(job: JobRecord): JobGreetExportItem {
   };
 }
 
+/** 公司名/岗位名归一，用于跨平台查重（去掉标点与空格，中文保持原样）。 */
+function normalizeNameKey(text: string): string {
+  return text.replace(/[^\w\u4e00-\u9fa5]/g, "").toLowerCase();
+}
+
+/**
+ * 跨平台去重：同一公司在 BOSS 和猎聘各发一份时其实是同一个岗位。
+ *
+ * 不去重的话会给同一岗位写两份几乎一样的招呼语，纯属浪费。
+ * 保留策略：有 JD 的优先（能写贴合版），其次分数高的。
+ */
+function dedupeAcrossPlatforms(jobs: readonly JobRecord[]): { jobs: JobRecord[]; deduped: number } {
+  const best = new Map<string, JobRecord>();
+  const order: string[] = [];
+  for (const job of jobs) {
+    const key = `${normalizeNameKey(job.company)}|${normalizeNameKey(job.title)}`;
+    const existing = best.get(key);
+    if (!existing) {
+      best.set(key, job);
+      order.push(key);
+      continue;
+    }
+    const existingHasJd = Boolean(existing.jdText.trim());
+    const nextHasJd = Boolean(job.jdText.trim());
+    // 先比有无 JD（true 更大），再比分数
+    if (nextHasJd !== existingHasJd ? nextHasJd : job.score > existing.score) best.set(key, job);
+  }
+  return { jobs: order.map((key) => best.get(key)!), deduped: jobs.length - order.length };
+}
+
 /** 导出待写招呼语清单（默认按分数取前 10 条；overwrite 重写已写过的）。dataDirHint 供测试使用。 */
 export async function exportJobGreetTargets(
   input: { top?: number; overwrite?: boolean } = {},
@@ -399,7 +459,12 @@ export async function exportJobGreetTargets(
   if (!manifest?.jobs.length) throw new Error("还没有岗位清单：请先 job_collect。");
   const top = Math.max(1, Math.min(GREET_EXPORT_MAX_TOP, Math.round(input.top ?? GREET_EXPORT_DEFAULT_TOP)));
   const pool = input.overwrite ? manifest.jobs : manifest.jobs.filter((job) => !job.greeting.trim());
-  const ordered = [...pool].sort((a, b) => b.score - a.score).slice(0, top);
+  // 去重在三件事之前：否则「剩余条数」和「导出条数」都会偏大
+  const { jobs: unique, deduped } = dedupeAcrossPlatforms(pool);
+  // 有 JD 的排前面（能写贴合版），同组内按分数降序
+  const ordered = [...unique]
+    .sort((a, b) => Number(Boolean(b.jdText.trim())) - Number(Boolean(a.jdText.trim())) || b.score - a.score)
+    .slice(0, top);
   const profile = await readGreetProfile(dataDirHint);
   return {
     ok: true,
@@ -407,13 +472,16 @@ export async function exportJobGreetTargets(
     hasProfile: Boolean(profile.trim()),
     profile,
     maxLen: JOB_GREETING_MAX_LEN,
-    remaining: pool.length,
+    remaining: unique.length,
     exported: ordered.length,
+    withJd: ordered.filter((job) => Boolean(job.jdText.trim())).length,
+    deduped,
     items: ordered.map(slimGreetTarget),
     note:
       "逐条撰写招呼语后用 job_greet_save 写回，JSON 数组格式 [{\"key\":\"…\",\"greeting\":\"…\"}]。" +
       `每条不超过 ${JOB_GREETING_MAX_LEN} 字：开头直点岗位名，只引用画像里真实存在的内容，优先量化数字，` +
       "岗位要求超出时坦诚说明，不写薪资期望、不编造。" +
+      (deduped ? `已合并 ${deduped} 条跨平台重复岗位（同公司同名岗）。` : "") +
       (profile.trim() ? "" : "注意：画像还不存在，请先让用户确认后用 job_greet action=init 生成并补全，再撰写。"),
   };
 }
@@ -423,8 +491,35 @@ export interface JobGreetSaveOutcome {
   summary: string;
   saved: number;
   truncated: number;
+  /** 质量存疑但仍写入的条目（标题 + 问题列表）；只提示不拦截，最终由人判断。 */
+  flagged: Array<{ title: string; problems: string[] }>;
   xlsxPath?: string;
   htmlPath?: string;
+}
+
+/** 招呼语过短阈值（字符数）：低于这个长度基本没有信息量。 */
+const GREETING_MIN_LEN = 20;
+
+/** JD 页面文案特征：混进招呼语会直接暴露「这是抄的」。 */
+const JD_UI_TEXT_PATTERN = /去App|去APP|点击查看地图|查看更多信息|随时沟通|BOSS直聘|kanzhun|招聘者/;
+/** 敬语开头：招呼语应该直接点岗位，而不是「您好，我是…」。 */
+const HONORIFIC_PATTERN = /^\s*(您好|你好|尊敬的|各位)/;
+/** 薪资期望的各种说法；后面紧跟着数字或「面议/不低于」才算命中。 */
+const SALARY_EXPECTATION_PATTERN = /(期望薪资|薪资期望|薪资范围|待遇要求|月薪|年薪|工资|薪资)[^。；\n]{0,8}?(\d|面议|不低于|左右|以上)/;
+
+/**
+ * 招呼语质量检查：返回问题列表，空数组表示通过。
+ *
+ * 只提示不拦截——是否采用最终由人判断，但问题必须可见。这四类都是上游实测
+ * 会真实发生的错误（把 JD 页面文案抄进去、开头堆敬语、写了薪资、太短没内容）。
+ */
+export function greetingProblems(text: string): string[] {
+  const problems: string[] = [];
+  if ([...text].length < GREETING_MIN_LEN) problems.push(`过短（<${GREETING_MIN_LEN} 字），信息量不足`);
+  if (JD_UI_TEXT_PATTERN.test(text)) problems.push("混入了 JD 页面文案（如「去App」「随时沟通」）");
+  if (HONORIFIC_PATTERN.test(text)) problems.push("以敬语开头（建议直接点岗位名）");
+  if (SALARY_EXPECTATION_PATTERN.test(text)) problems.push("写了薪资期望（应留到沟通时谈）");
+  return problems;
 }
 
 /** 校验并写回招呼语：key 对不上逐条报错（不静默丢弃），超长截断并计数。dataDirHint 供测试使用。 */
@@ -443,20 +538,28 @@ export async function saveJobGreetings(
   const applied = items.filter((item) => typeof item.greeting === "string" && item.greeting.trim());
   if (!applied.length) throw new Error("没有可写回的招呼语：每条都需要非空的 greeting 字段。");
   let truncated = 0;
+  const flagged: Array<{ title: string; problems: string[] }> = [];
   for (const item of applied) {
-    const text = [...item.greeting.trim()];
-    if (text.length > JOB_GREETING_MAX_LEN) truncated += 1;
-    byKey.get(item.key)!.greeting = text.slice(0, JOB_GREETING_MAX_LEN).join("");
+    const chars = [...item.greeting.trim()];
+    if (chars.length > JOB_GREETING_MAX_LEN) truncated += 1;
+    const text = chars.slice(0, JOB_GREETING_MAX_LEN).join("");
+    const target = byKey.get(item.key)!;
+    target.greeting = text;
+    // 质量校验用**截断后**的文本：截断可能正好切掉某个问题特征
+    const problems = greetingProblems(text);
+    if (problems.length) flagged.push({ title: target.title, problems });
   }
   const updatedManifest = await writeManifest(manifest.jobs, dataDirHint);
   const deliverables = await refreshDeliverables(updatedManifest);
-  writeAudit("job.greet", { action: "save", saved: applied.length, truncated });
+  writeAudit("job.greet", { action: "save", saved: applied.length, truncated, flagged: flagged.length });
   return {
     ok: true,
-    summary: `招呼语已写回 ${applied.length} 条${truncated ? `，超长截断 ${truncated} 条` : ""}。` +
+    summary: `招呼语已写回 ${applied.length} 条${truncated ? `，超长截断 ${truncated} 条` : ""}` +
+      `${flagged.length ? `，${flagged.length} 条质量存疑（已写入，建议人工过一遍）` : ""}。` +
       `Excel：${deliverables.xlsxPath ?? "未生成"}；HTML：${deliverables.htmlPath ?? "未生成"}`,
     saved: applied.length,
     truncated,
+    flagged,
     ...(deliverables.xlsxPath ? { xlsxPath: deliverables.xlsxPath } : {}),
     ...(deliverables.htmlPath ? { htmlPath: deliverables.htmlPath } : {}),
   };

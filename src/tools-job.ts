@@ -76,7 +76,7 @@ function summarizeJob(job: JobRecord): Record<string, unknown> {
 // 1. job_collect：四平台采集 + 打分 + 导出 Excel（重操作 → 审批）
 // ---------------------------------------------------------------------------
 export const jobCollectTool = tool(
-  async ({ keywords, city, salaryMin, salaryMax, years, pages, platforms }) => {
+  async ({ keywords, city, salaryMin, salaryMax, years, pages, platforms, skipLoginCheck }) => {
     const off = pluginOff();
     if (off) return badArgs(off);
     // 四个关键字段都先做「缺什么」检查，再谈有效性：先告诉模型该问用户什么，
@@ -107,9 +107,16 @@ export const jobCollectTool = tool(
       years: years!,
       ...(typeof pages === "number" ? { pages } : {}),
       ...(platforms?.length ? { platforms } : {}),
+      ...(skipLoginCheck === true ? { skipLoginCheck: true } : {}),
     });
     if (!outcome.ok) {
-      return payload({ ok: false, summary: outcome.summary, output: outcome.output });
+      return payload({
+        ok: false,
+        summary: outcome.summary,
+        output: outcome.output,
+        // 未登录中止时把「该去做哪一步」直接给模型，避免它反复重试采集
+        ...(outcome.needsLogin?.length ? { needsLogin: outcome.needsLogin } : {}),
+      });
     }
     const jobs = outcome.manifest?.jobs ?? [];
     const top = [...jobs].sort((a, b) => b.score - a.score).slice(0, MAX_JOBS_IN_RESULT);
@@ -135,11 +142,12 @@ export const jobCollectTool = tool(
     name: "job_collect",
     description:
       "使用内置浏览器流程从 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘采集岗位，按匹配度打分、自动识别外包，并导出 Excel 与同名 HTML 报告；不依赖外部 Skill 或 Python。" +
+      "采集前会自动做登录预检：BOSS直聘与智联招聘未登录时直接中止并返回 needsLogin，不要反复重试，引导用户去「设置 → 插件 → 求职岗位」登录。" +
       "何时用：用户想找工作、想筛岗位，且已明确「岗位方向 + 城市 + 期望月薪 + 工作年限」四项。" +
       "何时不用：用户只想看已有清单用 job_query；只想补 JD 详情用 job_enrich。" +
       "注意：这是重操作（3-5 分钟，会访问招聘站点），执行前系统会人工审批。",
     schema: z.object({
-      keywords: z.array(z.string()).optional().describe("目标岗位方向，可多个，如 [\"Agent开发\", \"大模型应用\"]"),
+      keywords: z.array(z.string()).optional().describe("目标岗位方向，可多个，如 [\"Agent开发\", \"大模型应用\"]；同义方向会自动归并为一族"),
       city: z.string().optional().describe(`目标城市，支持：${JOB_SUPPORTED_CITIES.join("、")}`),
       // 四个关键字段都设为可选：缺字段时由工具返回「还缺什么、该怎么问」的中文提示，
       // 比 zod 直接抛 Invalid input 对模型有用得多（模型读不懂 schema 报错）。
@@ -148,6 +156,9 @@ export const jobCollectTool = tool(
       years: z.number().optional().describe("工作年限，如 2；应届填 0"),
       pages: z.number().int().min(1).max(3).optional().describe("每个关键词翻页数，默认 1；最多 3 页，翻越多越容易触发风控"),
       platforms: z.array(z.enum(JOB_PLATFORMS)).optional().describe("只跑指定平台；不填表示四平台全跑"),
+      skipLoginCheck: z.boolean().optional().describe(
+        "跳过采集前登录预检，默认 false。只在用户明确接受「薪资可能大量为空」的残缺数据时才设为 true。",
+      ),
     }),
   }
 );
@@ -263,6 +274,8 @@ export const jobGreetTool = tool(
           maxLen: result.maxLen,
           remaining: result.remaining,
           exported: result.exported,
+          withJd: result.withJd,
+          dedupedAcrossPlatforms: result.deduped,
           items: result.items,
           note: result.note,
         });
@@ -321,9 +334,13 @@ export const jobGreetSaveTool = tool(
         summary: result.summary,
         saved: result.saved,
         truncated: result.truncated,
+        ...(result.flagged.length ? { flagged: result.flagged } : {}),
         ...(result.xlsxPath ? { xlsxPath: result.xlsxPath } : {}),
         ...(result.htmlPath ? { htmlPath: result.htmlPath } : {}),
-        note: "招呼语已进入清单与 Excel；再次采集或补详情都不会被覆盖。写超长的部分被截断到 " + JOB_GREETING_MAX_LEN + " 字。",
+        note: "招呼语已进入清单与 Excel；再次采集或补详情都不会被覆盖。写超长的部分被截断到 " + JOB_GREETING_MAX_LEN + " 字。" +
+          (result.flagged.length
+            ? "flagged 里的条目已写入但质量存疑（混入 JD 页面文案 / 敬语开头 / 写了薪资 / 过短），请如实转述给用户并建议人工过一遍。"
+            : ""),
       });
     } catch (err) {
       return badArgs(err instanceof Error ? err.message : String(err));
