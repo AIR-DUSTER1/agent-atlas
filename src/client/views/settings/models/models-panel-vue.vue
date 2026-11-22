@@ -18,7 +18,7 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { Button, Input } from "antdv-next";
+import { Button, Checkbox, Input, Select } from "antdv-next";
 import { useModelsStore } from "../../../stores/models.js";
 import {
   activateModel, addModelByName, fetchGatewayModelChips, removeModel, removeProvider,
@@ -57,6 +57,13 @@ const levelOptions = computed(() => {
   const d = dialects.value.find((x) => x.id === effectiveDialect.value);
   return d?.levels || [{ id: "default", label: "供应商默认", desc: "" }];
 });
+/** 下拉选项：antdv Select 用 options 数组（不再写 <option>）。 */
+const dialectSelectOptions = computed(() => [
+  { value: "auto", label: "自动识别（按网关地址 / 模型名判断）" },
+  ...dialects.value.map((d) => ({ value: d.id, label: `${d.label} —— ${d.vendor}` })),
+]);
+const levelSelectOptions = computed(() =>
+  levelOptions.value.map((lv) => ({ value: lv.id, label: lv.label })));
 const dialectHint = computed(() => {
   if (mfForm.value.dialect === "auto") {
     return `当前自动识别为「${store.config?.reasoning?.dialectLabel || "—"}」`;
@@ -354,27 +361,19 @@ onMounted(() => {
           <label class="field">
             <span class="field-label">能力与上下文</span>
             <div class="cap-row">
-              <label class="cap-check" title="勾选后可附加图片（多模态模型才支持图片输入）">
-                <input id="mf-vision" v-model="mfForm.vision" type="checkbox" />
-                <span>多模态（支持图片输入）</span>
-              </label>
+              <Checkbox id="mf-vision" v-model:checked="mfForm.vision" title="勾选后可附加图片（多模态模型才支持图片输入）">多模态（支持图片输入）</Checkbox>
               <Input id="mf-ctx" v-model:value="mfForm.ctx" class="cap-ctx" type="number" :min="1024" :step="1" placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
             </div>
           </label>
 
           <label class="field">
             <span class="field-label">思考等级划分方式 <em id="mf-dialect-hint" class="key-state">{{ dialectHint }}</em></span>
-            <select id="mf-dialect" v-model="mfForm.dialect" class="pf-select">
-              <option value="auto">自动识别（按网关地址 / 模型名判断）</option>
-              <option v-for="d in dialects" :key="d.id" :value="d.id" :title="d.scheme">{{ d.label }} —— {{ d.vendor }}</option>
-            </select>
+            <Select id="mf-dialect" v-model:value="mfForm.dialect" :options="dialectSelectOptions" />
           </label>
 
           <label class="field">
             <span class="field-label">思考等级 <em class="key-state">档位随「划分方式」变化 —— 每家供应商的划分并不一样</em></span>
-            <select id="mf-level" v-model="mfForm.level" class="pf-select">
-              <option v-for="lv in levelOptions" :key="lv.id" :value="lv.id" :title="lv.desc">{{ lv.label }}</option>
-            </select>
+            <Select id="mf-level" v-model:value="mfForm.level" :options="levelSelectOptions" />
           </label>
 
           <Input.TextArea

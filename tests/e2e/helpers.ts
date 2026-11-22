@@ -42,3 +42,22 @@ export async function sendMessage(page: Page, message: string): Promise<void> {
   await page.locator("#input").fill(message);
   await page.locator("#send-btn").click();
 }
+
+/**
+ * 选择 antdv Select 的选项。
+ * 为什么需要 helper：antdv Select 渲染的是 `<input role="combobox">` + 浮层，
+ * 不是原生 `<select>` —— Playwright 的 `selectOption()` 完全用不了。
+ * `id` 落在内部 input 上，直接点它即可展开（真实浏览器实测可行）；
+ * 选项是 `.ant-select-item-option`，用 `title` 文本定位最稳（含中文/括号）。
+ */
+export async function selectAntdvOption(page: Page, selectId: string, optionText: string): Promise<void> {
+  const id = selectId.startsWith("#") ? selectId.slice(1) : selectId;
+  await page.locator(`#${id}`).click();
+  await page.locator(`.ant-select-item-option[title="${optionText}"]`).click();
+}
+
+/** 读取 antdv Select 当前显示文案（它没有原生 value 可读，只能读展示层）。 */
+export async function antdvSelectText(page: Page, selectId: string): Promise<string> {
+  const id = selectId.startsWith("#") ? selectId.slice(1) : selectId;
+  return (await page.locator(`#${id}`).locator("xpath=..").getAttribute("title")) ?? "";
+}

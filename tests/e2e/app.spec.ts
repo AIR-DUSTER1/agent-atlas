@@ -5,7 +5,7 @@
  * 人工审批折叠且只保留一个头像、停止流与退出登录。
  */
 import { expect, test } from "@playwright/test";
-import { createChat, login, sendMessage } from "./helpers.js";
+import { createChat, login, sendMessage, selectAntdvOption, antdvSelectText } from "./helpers.js";
 
 test("本机直连静默建立设备会话，不再弹出令牌框", async ({ page }) => {
   await page.goto("/");
@@ -57,14 +57,17 @@ test("静默会话、设置分区、供应商弹窗与设备隔离提示", async
   await expect(page.locator("#plugins-panel")).toBeVisible();
   await expect(page.locator("#plugin-list")).toContainText(/RAG|Computer Use/);
   await expect(page.locator('[data-plugin-id="browser"]')).toContainText("Browser Use");
-  await expect(page.locator('[data-plugin-id="browser"] .plugin-switch input')).not.toBeChecked();
+  await expect(page.locator('[data-plugin-id="browser"] .plugin-switch')).not.toBeChecked();
   await expect(page.locator('[data-plugin-id="computer"]')).toContainText("电脑控制");
-  const computerSwitch = page.locator('[data-plugin-id="computer"] .plugin-switch input');
+  const computerSwitch = page.locator('[data-plugin-id="computer"] .plugin-switch');
   await expect(computerSwitch).not.toBeChecked();
   if (process.platform === "win32") {
-    await computerSwitch.check();
+    // antdv Switch 是 <button role="switch">，用 click（check/uncheck 只认 input）
+    await computerSwitch.click();
+    await expect(computerSwitch).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
     await expect(page.locator('[data-plugin-id="computer"]')).toContainText("已启用");
-    await page.locator('[data-plugin-id="computer"] .plugin-switch input').uncheck();
+    await computerSwitch.click();
+    await expect(computerSwitch).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
     await expect(page.locator('[data-plugin-id="computer"]')).toContainText("已停用");
   } else {
     await expect(computerSwitch).toBeDisabled();
@@ -73,12 +76,12 @@ test("静默会话、设置分区、供应商弹窗与设备隔离提示", async
 
   await page.locator('[data-settings-view="tracing"]').click();
   await expect(page.locator("#tracing-panel")).toBeVisible();
-  await expect(page.locator("#tracing-backend")).toHaveValue("off");
+  expect(await antdvSelectText(page, "#tracing-backend")).toBe("关闭（默认）");
   await expect(page.locator("#tracing-enabled")).not.toBeChecked();
-  await page.locator("#tracing-backend").selectOption("langsmith");
+  await selectAntdvOption(page, "#tracing-backend", "LangSmith 云端");
   await expect(page.locator("#tracing-enabled")).toBeChecked();
   await expect(page.locator("#tracing-warning")).toContainText("保存后开始向 LangSmith 上报");
-  await page.locator("#tracing-backend").selectOption("off");
+  await selectAntdvOption(page, "#tracing-backend", "关闭（默认）");
   await page.locator("#settings-back-btn").click();
   await expect(page.locator("#settings-page")).toBeHidden();
 
@@ -365,8 +368,8 @@ test("记忆与个性化：默认上下文、scope 隔离、导出导入与 HTTP
   await page.locator('[data-settings-view="memories"]').click();
   await expect(page.locator("#memories-modal")).toBeVisible();
   await expect(page.locator("#mem-health-badge")).toHaveText("可用", { timeout: 15_000 });
-  await expect(page.locator("#mem-active-provider")).toHaveValue("local");
-  await expect(page.locator("#mem-distill-mode")).toHaveValue("smart");
+  expect(await antdvSelectText(page, "#mem-active-provider")).toBe("内置本地记忆");
+  expect(await antdvSelectText(page, "#mem-distill-mode")).toBe("智能沉淀");
   await expect(page.locator("#mem-retention-active")).toHaveValue("2000");
   await expect(page.locator("#mem-semantic-status")).toContainText("语义召回未启用");
   await expect(page.locator("#mem-add-btn")).toHaveCount(0);
@@ -387,7 +390,7 @@ test("记忆与个性化：默认上下文、scope 隔离、导出导入与 HTTP
     text: "称呼我为老王；回答先给结论，默认使用中文。",
   });
 
-  await page.locator("#mem-import-mode").selectOption("replace");
+  await selectAntdvOption(page, "#mem-import-mode", "替换当前 scope");
   await page.locator("#mem-import-file").setInputFiles({
     name: "e2e-memories.json",
     mimeType: "application/json",
@@ -406,7 +409,7 @@ test("记忆与个性化：默认上下文、scope 隔离、导出导入与 HTTP
   expect(download.suggestedFilename()).toMatch(/^memories-general-\d{4}-\d{2}-\d{2}\.json$/);
   expect(await download.path()).toBeTruthy();
 
-  await page.locator("#mem-profile-filter").selectOption("estate");
+  await selectAntdvOption(page, "#mem-profile-filter", "租房 / 房产 Agent");
   await expect(page.locator("#memories-list")).not.toContainText("E2E 记忆偏好", { timeout: 10_000 });
 
   await page.locator("#mem-http-enabled").check();
@@ -543,7 +546,7 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   const row = page.locator(".skill-card").filter({ hasText: "E2E 上传技能" });
   await expect(row).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#skills-pagination")).toBeVisible();
-  const toggle = page.getByRole("checkbox", { name: "启用技能 E2E 上传技能" });
+  const toggle = page.getByRole("switch", { name: "启用技能 E2E 上传技能" });
   await expect(toggle).toBeChecked();
   await toggle.click();
   await page.locator('[data-skill-filter="disabled"]').click();
@@ -566,7 +569,7 @@ test("技能文件可上传、禁用并在刷新后保持状态", async ({ page 
   await page.locator('[data-skill-filter="disabled"]').click();
   const reloadedRow = page.locator(".skill-card").filter({ hasText: "E2E 上传技能" });
   await expect(reloadedRow).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("checkbox", { name: "启用技能 E2E 上传技能" })).not.toBeChecked();
+  await expect(page.getByRole("switch", { name: "启用技能 E2E 上传技能" })).not.toBeChecked();
   await reloadedRow.getByRole("button", { name: "删除技能 E2E 上传技能" }).click();
   await expect(page.locator("#ui-dialog-ok")).toBeVisible();
   await page.locator("#ui-dialog-ok").click();

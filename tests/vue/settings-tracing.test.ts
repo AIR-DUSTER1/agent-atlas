@@ -5,7 +5,7 @@
  * fetch 全部打桩，不触网。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import SettingsTracingVue from "../../src/client/views/settings/tracing/settings-tracing-vue.vue";
 import { useTracingStore } from "../../src/client/stores/tracing.js";
@@ -36,11 +36,30 @@ beforeEach(() => {
 });
 
 /** 预置快照后挂载（onMounted 的 store.load 会拉同一份快照，保持幂等）。 */
-async function mountPanel(snapshot: TraceSettingsSnapshot = SNAPSHOT): Promise<void> {
+async function mountPanel(snapshot: TraceSettingsSnapshot = SNAPSHOT): Promise<VueWrapper> {
   fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ...snapshot }) });
   const store = useTracingStore();
   store.snapshot = snapshot;
-  mount(SettingsTracingVue, { attachTo: document.body, global: { plugins: [pinia] } });
+  const wrapper = mount(SettingsTracingVue, { attachTo: document.body, global: { plugins: [pinia] } });
+  await flushPromises();
+  return wrapper;
+}
+
+/**
+ * 驱动 antdv Select：渲染 input[role=combobox] + 浮层，不是原生 select。
+ * 实测 happy-dom 下「点 input 打开 → 点 .ant-select-item-option」可以完整走通
+ * （含 @change 触发），所以测试走真实交互路径而不是直接 emit。
+ */
+async function pickSelect(selectId: string, optionText: string): Promise<void> {
+  const input = document.getElementById(selectId) as HTMLElement;
+  expect(input, `#${selectId} 不存在`).toBeTruthy();
+  input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const option = [...document.querySelectorAll<HTMLElement>(".ant-select-item-option")]
+    .find((node) => node.textContent?.trim() === optionText);
+  expect(option, `选项「${optionText}」未渲染`).toBeTruthy();
+  option!.click();
   await flushPromises();
 }
 
@@ -55,29 +74,30 @@ describe("链路追踪面板", () => {
     ]) {
       expect(document.getElementById(id), id).not.toBeNull();
     }
-    expect(document.getElementById("tracing-backend")?.getAttribute("aria-label")).toBe("追踪后端");
+    // antdv Select 把 aria-label 落在最外层 .ant-select 容器上（内部 input 是 combobox 角色）
+    expect(document.getElementById("tracing-backend")?.closest(".ant-select")?.getAttribute("aria-label")).toBe("追踪后端");
+    // antdv Switch 渲染 <button role="switch">，状态看 aria-checked
     expect(document.getElementById("tracing-enabled")?.getAttribute("role")).toBe("switch");
+    expect(document.getElementById("tracing-enabled")?.getAttribute("aria-checked")).toBe("false");
     expect(document.getElementById("tracing-enabled-label")?.textContent).toBe("已停用");
   });
 
   it("后端下拉切到 langsmith 时开关同步勾选并给出出网警示", async () => {
     await mountPanel();
-    const backend = document.getElementById("tracing-backend") as HTMLSelectElement;
-    backend.value = "langsmith";
-    backend.dispatchEvent(new Event("change"));
-    await flushPromises();
-    expect((document.getElementById("tracing-enabled") as HTMLInputElement).checked).toBe(true);
+    await pickSelect("tracing-backend", "LangSmith 云端");
+    expect(document.getElementById("tracing-enabled")?.getAttribute("aria-checked")).toBe("true");
     expect(document.getElementById("tracing-enabled-label")?.textContent).toBe("已启用");
     expect(document.getElementById("tracing-warning")?.textContent).toContain("保存后开始向 LangSmith 上报");
   });
 
   it("开关本身也能反向驱动后端值", async () => {
-    await mountPanel();
-    const enabled = document.getElementById("tracing-enabled") as HTMLInputElement;
-    enabled.checked = true;
-    enabled.dispatchEvent(new Event("change"));
+    const wrapper = await mountPanel();
+    (document.getElementById("tracing-enabled") as HTMLElement).click();
     await flushPromises();
-    expect((document.getElementById("tracing-backend") as HTMLSelectElement).value).toBe("langsmith");
+    // 开关 → backend 的联动看 Select 是否变成 langsmith
+    const select = wrapper.findAllComponents({ name: "ASelect" })[0];
+    expect((select?.props() as { value?: string }).value).toBe("langsmith");
+    expect(document.getElementById("tracing-enabled-label")?.textContent).toBe("已启用");
   });
 
   it("已配置 Key 时占位显示掩码且输入框为空", async () => {
@@ -93,8 +113,8 @@ describe("链路追踪面板", () => {
     const key = document.getElementById("tracing-api-key") as HTMLInputElement;
     const clear = document.getElementById("tracing-clear-key") as HTMLInputElement;
     key.value = "should-be-dropped";
-    clear.checked = true;
-    clear.dispatchEvent(new Event("change"));
+    // antdv Checkbox 渲染真实 <input type="checkbox">，原生 click 可驱动 v-model
+    clear.click();
     await flushPromises();
     expect(key.disabled).toBe(true);
     expect(key.value).toBe("");
@@ -122,7 +142,7 @@ describe("链路追踪面板", () => {
     });
     document.getElementById("tracing-save-btn")!.dispatchEvent(new Event("click", { bubbles: true }));
     await flushPromises();
-    expect((document.getElementById("tracing-enabled") as HTMLInputElement).checked).toBe(true);
+    expect(document.getElementById("tracing-enabled")?.getAttribute("aria-checked")).toBe("true");
     expect(document.getElementById("tracing-status")?.textContent).toContain("追踪配置已保存");
     expect(document.getElementById("tracing-status")?.className).toContain("ok");
   });

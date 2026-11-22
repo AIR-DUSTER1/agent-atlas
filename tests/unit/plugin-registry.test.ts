@@ -47,10 +47,12 @@ test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插
   assert.match(html, /id="plugin-list"/);
   assert.match(html, /id="plugin-status"/);
   assert.doesNotMatch(html, /id="kb-btn"|id="estate-btn"/);
-  // Vue 卡片 DOM 契约（e2e 依赖）：data-plugin-id / role=switch / 状态文案 / 传输类型标识
+  // Vue 卡片 DOM 契约（e2e 依赖）：data-plugin-id / 启停开关 / 状态文案 / 传输类型标识
   assert.match(pluginPanel, /:data-plugin-id="row\.plugin\.id"/);
   assert.match(pluginPanel, /:data-transport="row\.transport\.id"/);
-  assert.match(pluginPanel, /role="switch"/);
+  // 启停开关改 antdv Switch：role="switch" 是它运行时输出的，源码里只剩组件标签。
+  // 断言组件存在且受控于 row.enabled（受控 = 状态只有一个来源）。
+  assert.match(pluginPanel, /<Switch[\s\S]{0,300}:checked="row\.enabled"/);
   assert.match(pluginPanel, /plugin-switch/);
   assert.match(pluginPanel, /已启用|已停用/);
   assert.match(pluginPanel, /readinessOf/);

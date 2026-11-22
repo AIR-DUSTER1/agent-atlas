@@ -7,7 +7,7 @@
  */
 import { expect, test } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { login } from "./helpers.js";
+import { login, selectAntdvOption, antdvSelectText } from "./helpers.js";
 
 const ECHO_FIXTURE = fileURLToPath(new URL("./fixtures/echo-mcp.mjs", import.meta.url));
 
@@ -40,10 +40,10 @@ test("MCP 页面：列表、全局暂停、编辑弹窗、添加与导入", asyn
   await expect(page.locator("#mcp-summary")).toContainText("共 3 个服务器");
   await expect(page.locator("#mcp-global-enabled")).toBeChecked();
 
-  const mysqlToggle = page.getByRole("checkbox", { name: "启用 MCP 服务器 MySQL" });
+  const mysqlToggle = page.getByRole("switch", { name: "启用 MCP 服务器 MySQL" });
   await expect(mysqlToggle).not.toBeChecked();
   await mysqlToggle.click();
-  await expect(page.getByRole("checkbox", { name: "启用 MCP 服务器 MySQL" })).toBeChecked();
+  await expect(page.getByRole("switch", { name: "启用 MCP 服务器 MySQL" })).toBeChecked();
 
   await page.getByRole("button", { name: "编辑 MCP 服务器 PostgreSQL" }).click();
   await expect(page.locator("#mcp-editor")).toBeVisible();
@@ -65,8 +65,8 @@ test("MCP 页面：列表、全局暂停、编辑弹窗、添加与导入", asyn
   await expect(page.locator(".mcp-server-row").filter({ hasText: "Chrome DevTools MCP" })).toBeVisible();
 
   const chromeRow = page.locator(".mcp-server-row").filter({ hasText: "Chrome DevTools MCP" });
-  await chromeRow.getByRole("checkbox", { name: "启用 MCP 服务器 Chrome DevTools MCP" }).click();
-  await expect(chromeRow.getByRole("checkbox", { name: "启用 MCP 服务器 Chrome DevTools MCP" })).not.toBeChecked();
+  await chromeRow.getByRole("switch", { name: "启用 MCP 服务器 Chrome DevTools MCP" }).click();
+  await expect(chromeRow.getByRole("switch", { name: "启用 MCP 服务器 Chrome DevTools MCP" })).not.toBeChecked();
 
   await page.locator("#mcp-import-file").setInputFiles({
     name: "mcp.json",

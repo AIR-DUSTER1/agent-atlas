@@ -20,10 +20,16 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { Alert, Button, Checkbox, Input } from "antdv-next";
+import { Alert, Button, Checkbox, Input, Select, Switch } from "antdv-next";
 import { useTracingStore } from "../../../stores/tracing.js";
 import type { TraceBackend } from "../../../modules/types-api.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
+
+/** 上报后端选项：antdv Select 用 options 数组（不再写 <option> 子元素）。 */
+const BACKEND_OPTIONS: Array<{ value: TraceBackend; label: string }> = [
+  { value: "off", label: "关闭（默认）" },
+  { value: "langsmith", label: "LangSmith 云端" },
+];
 
 const store = useTracingStore();
 
@@ -146,19 +152,15 @@ async function save(): Promise<void> {
         <span class="routing-kicker"><i class="ui-icon" data-icon="Activity" aria-hidden="true"></i> Observability</span>
         <h2 id="tracing-title"><i class="ui-icon" data-icon="Activity" aria-hidden="true"></i> 链路追踪</h2>
       </div>
-      <!-- 原生 checkbox + role=switch：e2e 依赖 toBeChecked()/uncheck() -->
-      <label class="routing-switch" title="启用 LangSmith 链路追踪">
-        <input
+      <span class="routing-switch" title="启用 LangSmith 链路追踪">
+        <Switch
           id="tracing-enabled"
-          v-model="enabled"
-          type="checkbox"
-          role="switch"
+          v-model:checked="enabled"
           aria-label="启用 LangSmith 链路追踪"
           @change="warnFor(enabled)"
         />
-        <span class="routing-switch-track" aria-hidden="true"></span>
         <span class="routing-switch-label" id="tracing-enabled-label">{{ enabled ? "已启用" : "已停用" }}</span>
-      </label>
+      </span>
     </div>
 
     <div class="routing-grid">
@@ -167,11 +169,13 @@ async function save(): Promise<void> {
         <p class="routing-card-sub">开启后，每轮 Agent 的节点、工具和模型调用会异步上报到 LangSmith 云端。默认关闭，开启前请确认数据出网边界。</p>
         <label class="routing-field">
           <span>上报后端</span>
-          <!-- 原生 select：e2e 用 selectOption("langsmith") 断言 -->
-          <select id="tracing-backend" v-model="form.backend" aria-label="追踪后端" @change="warnFor(enabled)">
-            <option value="off">关闭（默认）</option>
-            <option value="langsmith">LangSmith 云端</option>
-          </select>
+          <Select
+            id="tracing-backend"
+            v-model:value="form.backend"
+            aria-label="追踪后端"
+            :options="BACKEND_OPTIONS"
+            @change="warnFor(enabled)"
+          />
         </label>
         <label class="routing-field">
           <span>项目名</span>

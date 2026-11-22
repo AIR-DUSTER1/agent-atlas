@@ -9,6 +9,8 @@
   - provider 选项与子代理设置页同一数据源（store.config）。
 -->
 <script setup lang="ts">
+import { Select, Switch } from "antdv-next";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoutingStore } from "../../../stores/routing.js";
 import type { RoutingBackendId } from "../../../modules/types.js";
@@ -86,6 +88,21 @@ onMounted(async () => {
 const providers = computed(() => store.config?.providers ?? []);
 const selectedProvider = computed(() => providers.value.find((item) => item.id === form.providerId));
 const modelOptions = computed(() => selectedProvider.value?.models ?? []);
+
+/** 下拉选项：antdv Select 用 options 数组；空值项表达「沿用当前」语义。 */
+const BACKEND_OPTIONS = [
+  { value: "openai-compat", label: "API 模型（推荐，本机零占用）" },
+  { value: "systemone", label: "systemone 决策服务（数据不出本机）" },
+  { value: "rules-only", label: "纯规则（完全不调模型）" },
+];
+const providerOptions = computed(() => [
+  { value: "", label: "沿用当前模型" },
+  ...providers.value.map((provider) => ({ value: provider.id, label: provider.name })),
+]);
+const routingModelOptions = computed(() => [
+  { value: "", label: form.providerId ? "沿用该供应商的默认模型" : "沿用当前模型" },
+  ...modelOptions.value.map((model) => ({ value: model.id, label: `${model.displayName} · ${model.name}` })),
+]);
 const systemoneKeyPlaceholder = computed(() =>
   store.snapshot?.hasSystemoneKey ? "已设置，留空保持不变" : "未设置（可选）");
 
@@ -191,13 +208,14 @@ async function runTest(): Promise<void> {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="routing-head">
     <div>
       <span class="routing-kicker"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> Agent routing</span>
       <h2 id="routing-title"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> 路由决策</h2>
     </div>
     <label class="routing-switch" title="启用路由决策">
-      <input id="routing-enabled" v-model="form.enabled" type="checkbox" role="switch" aria-label="启用路由决策" />
+      <Switch id="routing-enabled" v-model:checked="form.enabled" aria-label="启用路由决策" />
       <span class="routing-switch-track" aria-hidden="true"></span>
       <span class="routing-switch-label" id="routing-enabled-label">{{ form.enabled ? "已启用" : "已停用" }}</span>
     </label>
@@ -209,26 +227,16 @@ async function runTest(): Promise<void> {
       <p class="routing-card-sub">三层里只有第三层需要模型。默认复用你已配置的「供应商 × 模型」，本机零内存占用。</p>
       <label class="routing-field">
         <span>后端</span>
-        <select id="routing-backend" v-model="form.backend" aria-label="决策后端">
-          <option value="openai-compat">API 模型（推荐，本机零占用）</option>
-          <option value="systemone">systemone 决策服务（数据不出本机）</option>
-          <option value="rules-only">纯规则（完全不调模型）</option>
-        </select>
+        <Select id="routing-backend" v-model:value="form.backend" :options="BACKEND_OPTIONS" aria-label="决策后端" />
       </label>
       <div v-if="form.backend === 'openai-compat'" id="routing-llm-fields">
         <label class="routing-field">
           <span>路由供应商</span>
-          <select id="routing-llm-provider" v-model="form.providerId" aria-label="路由供应商">
-            <option value="">沿用当前模型</option>
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
-          </select>
+          <Select id="routing-llm-provider" v-model:value="form.providerId" :options="providerOptions" aria-label="路由供应商" />
         </label>
         <label class="routing-field">
           <span>路由模型</span>
-          <select id="routing-llm-model" v-model="form.modelId" aria-label="路由模型" :disabled="!form.providerId">
-            <option value="">{{ form.providerId ? "沿用该供应商的默认模型" : "沿用当前模型" }}</option>
-            <option v-for="model in modelOptions" :key="model.id" :value="model.id">{{ model.displayName }} · {{ model.name }}</option>
-          </select>
+          <Select id="routing-llm-model" v-model:value="form.modelId" :options="routingModelOptions" aria-label="路由模型" :disabled="!form.providerId" />
         </label>
         <p class="routing-hint">两者都选「沿用当前模型」时，使用聊天当前启用的供应商与模型。</p>
       </div>
@@ -327,4 +335,5 @@ async function runTest(): Promise<void> {
     <div id="routing-status" class="settings-status" :class="statusKind" role="status" aria-live="polite">{{ statusText }}</div>
     <button id="routing-save-btn" type="button" class="ui-button ui-button-primary" :disabled="saving" @click="save">保存路由配置</button>
   </div>
+  </AntdvProvider>
 </template>

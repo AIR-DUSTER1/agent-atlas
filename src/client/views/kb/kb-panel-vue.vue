@@ -4,13 +4,18 @@
   职责：RAG 配置 / 入库 / 检索测试 / 登记文档列表。DOM 契约与静态版逐 id
   一致（kb-*），a11y 断言（kb-query/kb-key aria-label）与主入口绑定依赖这些锚点。
   立场：入库只允许授权路径（服务端 files.ts 校验），前端不做二次拼路径。
+
+  antdv 接入说明：入库根目录用 Select（选项随 store.roots 变化，文案带 💻 / ☁️ 前缀）。
+  改接组件库后**不能再从 DOM 读 value** —— 选中值改由 kbRoot ref 承载。
 -->
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { Select } from "antdv-next";
 import { useRagStore } from "../../stores/rag.js";
 import { setKbStatus } from "./rag.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../../ui/dialog.js";
 import { refreshPluginCards } from "../settings/plugins/settings-plugins.js";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 
 const store = useRagStore();
 
@@ -18,9 +23,22 @@ const form = ref({ url: "", collection: "", topk: "", key: "" });
 const saving = ref(false);
 const testing = ref(false);
 const ingesting = ref(false);
+/** 入库目标根目录：改 antdv Select 后必须由 ref 承载（不再从 DOM 读 value）。 */
+const kbRoot = ref("");
 const keyVisible = ref(false);
 
 const keyStateText = ref("");
+/** 根目录选项：antdv Select 用 options 数组。 */
+const rootOptions = computed(() =>
+  (store.roots ?? []).map((root) => ({
+    value: root.path,
+    label: `${root.type === "cloud" ? "☁️" : "💻"} ${root.name}`,
+  })));
+/** 根目录变化或首次拿到列表时，把选中值对齐到有效项。 */
+watch(rootOptions, (options) => {
+  if (!options.length) { kbRoot.value = ""; return; }
+  if (!options.some((item) => item.value === kbRoot.value)) kbRoot.value = options[0]?.value ?? "";
+}, { immediate: true });
 const keyStateOk = ref(false);
 
 /** 打开弹窗时回填（watch kbOpen，可反复开关）。 */
@@ -111,7 +129,7 @@ async function ingestFolder(): Promise<void> {
   if (!store.rag?.configured) { setKbStatus("✗ 请先保存外部 RAG 服务配置", "err"); return; }
   ingesting.value = true;
   try {
-    const s = await store.ingest((document.getElementById("kb-root") as HTMLSelectElement | null)?.value || "");
+    const s = await store.ingest(kbRoot.value);
     setKbStatus(`✓ 已入库 ${s.ingested ?? "?"} 个文本文件${s.chunks != null ? `，外部服务返回 ${s.chunks} 个切块` : ""}`, "ok");
   } catch (err) {
     setKbStatus(`✗ ${(err as Error).message}`, "err");
@@ -179,6 +197,7 @@ function close(): void {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-title">
     <h2 id="kb-title"><i class="ui-icon" data-icon="BookOpen" aria-hidden="true"></i> 知识库（外部 RAG）</h2>
     <p class="settings-sub">向量存储 / 切块 / embedding 全部由外部 RAG 服务完成，agentatlas 按通用 HTTP 契约调用 ingest / search</p>
@@ -215,9 +234,7 @@ function close(): void {
 
     <div class="field-label ext-head"><i class="ui-icon" data-icon="Download" aria-hidden="true"></i> 文档入库 <em class="key-state">扫描授权文件夹内的文本文件（跳过 node_modules / .git / 密钥 / 锁文件）</em></div>
     <div class="fs-toolbar kb-toolbar">
-      <select id="kb-root" class="fs-root-select" title="选择入库位置">
-        <option v-for="root in store.roots" :key="root.path" :value="root.path">{{ root.type === "cloud" ? "☁️" : "💻" }} {{ root.name }}</option>
-      </select>
+      <Select id="kb-root" v-model:value="kbRoot" :options="rootOptions" title="选择入库位置" />
       <button id="kb-ingest" class="ghost-btn small" :disabled="ingesting" @click="ingestFolder">
         <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> {{ ingesting ? "⏳ 扫描入库中…（最长 90s）" : "全量入库" }}
       </button>
@@ -273,4 +290,5 @@ function close(): void {
     </div>
     <p class="settings-note">契约：POST <code>{RAG_URL}/ingest</code>（{collection, documents}）、<code>/search</code>（{query, topK} → {hits:[{text, score, name?}]}）、<code>/reset</code>；鉴权头 <code>Authorization: Bearer</code>。聊天中通用 Agent 会自动调用 <code>retrieve_docs</code> 工具检索。</p>
   </div>
+  </AntdvProvider>
 </template>

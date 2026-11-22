@@ -11,7 +11,7 @@
   - 领域提示词按下拉实际取值透传（曾硬编码只认 estate 的坑不复现）。
 -->
 <script setup lang="ts">
-import { Button, Input } from "antdv-next";
+import { Button, Checkbox, Input, Select, Switch } from "antdv-next";
 import { computed, onUnmounted, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { onMounted } from "vue";
@@ -98,6 +98,30 @@ const filterCounts = computed<Record<SubagentFilter, number>>(() => ({
 const providers = computed(() => store.config?.providers ?? []);
 const selectedProviderModels = computed(() =>
   providers.value.find((item) => item.id === form.value.provider)?.models ?? []);
+
+/** 下拉选项：antdv Select 用 options 数组；失效项仍列出来但标记不可用。 */
+const MODEL_MODE_OPTIONS = [
+  { value: "inherit", label: "继承当前主对话模型（推荐）" },
+  { value: "fixed", label: "固定供应商与模型" },
+];
+const ROUTING_DOMAIN_OPTIONS = [
+  { value: "", label: "通用后台子代理提示词" },
+  { value: "estate", label: "继承房产顾问提示词与领域规则" },
+  { value: "job", label: "继承求职顾问提示词与领域规则" },
+];
+/** 供应商选项：空配置时给占位项，失效供应商也列出来以便用户改选。 */
+const providerOptions = computed(() => {
+  const rows = providers.value.map((item) => ({ value: item.id, label: item.name }));
+  if (!rows.length) return [{ value: "", label: "尚未配置供应商" }];
+  if (invalidProvider.value) rows.push({ value: invalidProvider.value, label: `已失效：${invalidProvider.value}` });
+  return rows;
+});
+const modelOptions = computed(() => {
+  const rows = selectedProviderModels.value.map((item) => ({ value: item.id, label: `${item.displayName} · ${item.name}` }));
+  if (!rows.length) return [{ value: "", label: "该供应商没有可用模型" }];
+  if (invalidModel.value) rows.push({ value: invalidModel.value, label: `已失效：${invalidModel.value}` });
+  return rows;
+});
 
 const editorModelHint = computed(() => form.value.mode === "fixed"
   ? "执行时固定使用所选供应商模型；若模型被删除或停用，卡片会标记为不可用。"
@@ -257,15 +281,12 @@ function trapEditorFocus(event: KeyboardEvent): void {
 
 const togglingId = ref<string | null>(null);
 
-async function toggleAgent(agent: SubagentEntry, event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
+async function toggleAgent(agent: SubagentEntry, next: boolean): Promise<void> {
   togglingId.value = agent.id;
   try {
-    await store.setEnabled(agent.id, input.checked);
-    status(`${agent.name}已${input.checked ? "启用" : "停用"}，下一条消息生效`, "ok");
+    await store.setEnabled(agent.id, next);
+    status(`${agent.name}已${next ? "启用" : "停用"}，下一条消息生效`, "ok");
   } catch (err) {
-    // store 未变更，Vue 不会自动回滚 DOM checked，手动回滚
-    input.checked = !input.checked;
     status(`保存失败：${(err as Error).message}`, "err");
   } finally {
     togglingId.value = null;
@@ -445,15 +466,13 @@ const invalidModel = ref("");
             <small>{{ agent.enabled ? "点击停用" : "点击启用" }}</small>
           </span>
           <span class="subagent-switch-control">
-            <input
-              type="checkbox"
-              role="switch"
+            <Switch
               :aria-label="`${agent.enabled ? '停用' : '启用'}${agent.name}`"
               :checked="agent.enabled"
               :disabled="togglingId === agent.id"
-              @change="toggleAgent(agent, $event)"
+              :loading="togglingId === agent.id"
+              @update:checked="(next: boolean) => toggleAgent(agent, next)"
             />
-            <span class="subagent-switch-track" aria-hidden="true"></span>
           </span>
         </label>
         <button
@@ -527,28 +546,17 @@ const invalidModel = ref("");
         </div>
         <label class="field">
           <span class="field-label">模型策略</span>
-          <select id="subagent-model-mode" v-model="form.mode" @change="onModeChange">
-            <option value="inherit">继承当前主对话模型（推荐）</option>
-            <option value="fixed">固定供应商与模型</option>
-          </select>
+          <Select id="subagent-model-mode" v-model:value="form.mode" :options="MODEL_MODE_OPTIONS" @change="onModeChange" />
           <small id="subagent-model-hint" class="subagent-field-hint">{{ editorModelHint }}</small>
         </label>
         <div id="subagent-model-picker" class="subagent-model-picker" :class="{ hidden: form.mode !== 'fixed' }">
           <label class="field">
             <span class="field-label">供应商</span>
-            <select id="subagent-provider" v-model="form.provider" @change="form.model = selectedProviderModels[0]?.id ?? ''">
-              <option v-if="!providers.length" value="">尚未配置供应商</option>
-              <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
-              <option v-if="invalidProvider" :value="invalidProvider">已失效：{{ invalidProvider }}</option>
-            </select>
+            <Select id="subagent-provider" v-model:value="form.provider" :options="providerOptions" @change="form.model = selectedProviderModels[0]?.id ?? ''" />
           </label>
           <label class="field">
             <span class="field-label">模型</span>
-            <select id="subagent-model" v-model="form.model">
-              <option v-if="!selectedProviderModels.length" value="">该供应商没有可用模型</option>
-              <option v-for="model in selectedProviderModels" :key="model.id" :value="model.id">{{ model.displayName }} · {{ model.name }}</option>
-              <option v-if="invalidModel" :value="invalidModel">已失效：{{ invalidModel }}</option>
-            </select>
+            <Select id="subagent-model" v-model:value="form.model" :options="modelOptions" />
           </label>
         </div>
         <div class="subagent-runtime-note">
@@ -580,11 +588,7 @@ const invalidModel = ref("");
         </label>
         <label class="field">
           <span class="field-label">领域提示词</span>
-          <select id="subagent-routing-domain" v-model="form.domain">
-            <option value="">通用后台子代理提示词</option>
-            <option value="estate">继承房产顾问提示词与领域规则</option>
-            <option value="job">继承求职顾问提示词与领域规则</option>
-          </select>
+          <Select id="subagent-routing-domain" v-model:value="form.domain" :options="ROUTING_DOMAIN_OPTIONS" />
           <small class="subagent-field-hint">只继承提示词与领域规则；工具仍由主 Agent 本次显式授予。</small>
         </label>
       </section>
@@ -597,7 +601,7 @@ const invalidModel = ref("");
         <label class="subagent-enable-row">
           <span><strong>允许主 Agent 委派此子代理</strong><small>保存或切换后，下一条消息生效。</small></span>
           <span class="subagent-switch">
-            <input id="subagent-enabled" v-model="form.enabled" type="checkbox" aria-label="启用子代理" />
+            <Checkbox id="subagent-enabled" v-model:checked="form.enabled" aria-label="启用子代理" />
             <span class="subagent-switch-track" aria-hidden="true"></span>
           </span>
         </label>

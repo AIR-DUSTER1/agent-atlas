@@ -6,12 +6,22 @@
   立场：API Key 只写不读，留空 = 保持不变；保存走 stores/models + model-actions。
 -->
 <script setup lang="ts">
+import { Select } from "antdv-next";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useModelsStore } from "../../../stores/models.js";
 import { addPendingModelByName, fetchGatewayModelChips, saveProvider } from "./model-actions.js";
 import { setProviderModalStatus } from "./model-status.js";
 
 const store = useModelsStore();
+
+/** 请求协议选项：antdv Select 用 options 数组。 */
+const PROTOCOL_OPTIONS = [
+  { value: "openai", label: "OpenAI Chat Completions（默认 · /chat/completions）" },
+  { value: "openai-responses", label: "OpenAI Responses API（/responses）" },
+  { value: "anthropic", label: "Anthropic Messages 原生（/v1/messages）" },
+  { value: "gemini", label: "Gemini 原生 generateContent（/v1beta）" },
+];
 
 const form = ref({ name: "", baseURL: "", apiKey: "", protocol: "openai" });
 const newModelName = ref("");
@@ -108,6 +118,7 @@ function toggleKeyVisible(): void {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="provider-modal" role="dialog" aria-modal="true" aria-labelledby="provider-modal-title">
     <div class="provider-modal-head">
       <div>
@@ -146,12 +157,7 @@ function toggleKeyVisible(): void {
 
       <label class="field">
         <span class="field-label">请求协议 <em class="key-state">中转站多协议路由时按此决定请求路径</em></span>
-        <select id="pf-protocol" v-model="form.protocol" class="pf-select">
-          <option value="openai">OpenAI Chat Completions（默认 · /chat/completions）</option>
-          <option value="openai-responses">OpenAI Responses API（/responses）</option>
-          <option value="anthropic">Anthropic Messages 原生（/v1/messages）</option>
-          <option value="gemini">Gemini 原生 generateContent（/v1beta）</option>
-        </select>
+        <Select id="pf-protocol" v-model:value="form.protocol" :options="PROTOCOL_OPTIONS" />
       </label>
 
       <div id="pf-initial-models" class="pf-initial-models" :class="{ hidden: !isCreate }">
@@ -198,4 +204,5 @@ function toggleKeyVisible(): void {
       <div id="provider-modal-status" class="settings-status" role="status" aria-live="polite"></div>
     </div>
   </div>
+  </AntdvProvider>
 </template>

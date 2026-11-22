@@ -116,6 +116,68 @@ test("不得使用 antdv-next 已废弃的 Input API", async () => {
   assert.deepEqual(violations, [], `组件库废弃 API：\n${violations.join("\n")}`);
 });
 
+test("antdv 组件的模板标签必须能在 script setup 里解析到", async () => {
+  // ⚠ 实测踩过的坑：
+  //  (1) 小写标签名（<switch> / <select> 之类）被 Vue 视为原生 HTML 元素，
+  //      组件完全不生效，DOM 里出现 <switch class="..."> 这种幽灵节点；
+  //  (2) `import { Switch as ASwitch }` 后模板写 <ASwitch> 也解析不到 ——
+  //      <script setup> 只把导入的**原始名**暴露给模板，别名不参与 resolveComponent。
+  // 所以规则是：组件必须按**原具名导入**，模板里用首字母大写的同名标签。
+  // 只有「与 antdv 组件同名、但小写会退化成原生元素」的标签才要管。
+  // <input> / <button> / <textarea> / <select> 本身都是合法原生标签，不在此列。
+  const SINGLE_WORD = ["Switch", "Select", "Checkbox", "Alert", "Empty", "Tag", "Segmented", "Modal", "Drawer", "Tooltip"];
+  const violations: string[] = [];
+  for (const file of await walk(CLIENT, [".vue"])) {
+    const source = stripComments(await readFile(file, "utf8"));
+    if (!importsAntdv(source)) continue;
+    // 1) 别名字面：import { X as Y } —— Y 在模板里解析不到
+    for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']antdv-next["']/g)) {
+      const body = match[1] ?? "";
+      for (const part of body.split(",")) {
+        const alias = /\b(\w+)\s+as\s+(\w+)/.exec(part.trim());
+        if (alias) violations.push(`${rel(file)}: import 别名 ${alias[1]} as ${alias[2]} 在模板里解析不到，用原名`);
+      }
+    }
+    // 2) 小写单标签：<switch / <select / <checkbox …（含自闭合与带属性两种）
+    for (const name of SINGLE_WORD) {
+      const lower = name.toLowerCase();
+      if (name === "Input") continue; // <input> 是原生控件，允许
+      const re = new RegExp(`<${lower}(\\s|/|>)`, "g");
+      if (re.test(source)) {
+        violations.push(`${rel(file)}: <${lower}> 会被当成原生元素，请写 <${name}>`);
+      }
+    }
+  }
+  assert.deepEqual(violations, [], `组件标签解析问题：\n${violations.join("\n")}`);
+});
+
+test("引用 antdv 组件标签的 SFC 必须真的 import 了它", async () => {
+  // ⚠ 真实事故：settings-skills-vue.vue 的模板写了 <Switch> 但忘了 import，
+  // Vue 把它当原生 <switch> 元素渲染，面板整块白屏。
+  // 上面几条规则都靠 `if (!importsAntdv(source)) continue` 过滤，
+  // 恰好会跳过这种「有标签无 import」的文件 —— 必须单独守一条。
+  const KNOWN_COMPONENTS = [
+    "Alert", "Button", "Checkbox", "Empty", "Form", "FormItem", "Input", "Select",
+    "Space", "Switch", "Table", "Tag", "Segmented", "Modal", "Tooltip", "TextArea",
+  ];
+  const violations: string[] = [];
+  for (const file of await walk(CLIENT, [".vue"])) {
+    if (rel(file) === PROVIDER_FILE) continue;
+    const source = stripComments(await readFile(file, "utf8"));
+    for (const component of KNOWN_COMPONENTS) {
+      // <Switch ...> 或 <Switch>（首字母大写才算组件；小写是原生标签，由另一条规则管）
+      const used = new RegExp(`<${component}(\\s|/|>)`).test(source);
+      if (!used) continue;
+      // Input.Password / Input.TextArea 只要求 import 了 Input
+      const importName = component === "TextArea" ? "Input" : component;
+      const imported = new RegExp(`\\b${importName}\\b[^}]*\\}\\s*from\\s*["']antdv-next["']`).test(source)
+        || new RegExp(`import\\s+${importName}\\s+from`).test(source);
+      if (!imported) violations.push(`${rel(file)}: 模板用了 <${component}> 但没从 antdv-next import`);
+    }
+  }
+  assert.deepEqual(violations, [], `组件标签缺少 import（会被当原生元素渲染）：\n${violations.join("\n")}`);
+});
+
 test("主题种子色必须与 styles/tokens.css 同源", async () => {
   const themeSource = await readFile(join(CLIENT, THEME_FILE), "utf8");
   const tokens = await readFile(join(STYLES, "tokens.css"), "utf8");

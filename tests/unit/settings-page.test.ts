@@ -278,8 +278,9 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   ]) assert.match(source, new RegExp(`id="${id}"`), id);
   const navSrc = await readClientFiles(["stores/settings.ts"]);
   assert.match(navSrc, /view: "subagents"/);
-  assert.match(source, /value="inherit"/);
-  assert.match(source, /value="fixed"/);
+  // 模型模式下拉改 antdv Select：选项定义在 MODEL_MODE_OPTIONS 常量里
+  assert.match(source, /value: "inherit", label: "继承当前主对话模型（推荐）"/);
+  assert.match(source, /value: "fixed", label: "固定供应商与模型"/);
   assert.match(source, /\/api\/subagents/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /method: "DELETE"/);

@@ -1,6 +1,6 @@
 /** subagents.spec.ts — 子代理设置页真实浏览器回归 */
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers.js";
+import { login, selectAntdvOption, antdvSelectText } from "./helpers.js";
 
 test("子代理：搜索筛选、样式产物、继承模型创建、固定模型、启停、编辑与删除", async ({ page }) => {
   await login(page);
@@ -55,11 +55,13 @@ test("子代理：搜索筛选、样式产物、继承模型创建、固定模�
   expect(descriptionLayout.resize).toBe("vertical");
   await page.locator("#subagent-name").fill("E2E 研究代理");
   await page.locator("#subagent-description").fill("用于 E2E 验证的独立研究任务");
-  await expect(page.locator("#subagent-model-mode")).toHaveValue("inherit");
-  await page.locator("#subagent-model-mode").selectOption("fixed");
+  expect(await antdvSelectText(page, "#subagent-model-mode")).toBe("继承当前主对话模型（推荐）");
+  await selectAntdvOption(page, "#subagent-model-mode", "固定供应商与模型");
   await expect(page.locator("#subagent-model-picker")).toBeVisible();
-  await expect(page.locator("#subagent-provider option")).not.toHaveCount(0);
-  await expect(page.locator("#subagent-model option")).not.toHaveCount(0);
+  // antdv Select 的选项在浮层里（点开才渲染），断言「已有可用选中值」
+  // —— 与原 not.toHaveCount(0) 的意图一致：下拉不是空的。
+  expect(await antdvSelectText(page, "#subagent-provider")).not.toBe("");
+  expect(await antdvSelectText(page, "#subagent-model")).not.toBe("");
   await page.locator("#subagent-save-btn").click();
   await expect(page.locator("#subagent-editor")).toBeHidden();
 
@@ -67,9 +69,14 @@ test("子代理：搜索筛选、样式产物、继承模型创建、固定模�
   await expect(card).toBeVisible();
   await expect(card).toContainText("固定 ·");
   await expect(card).toContainText("运行时授权工具");
-  await card.locator(".subagent-switch input").uncheck();
+  // 子代理启停改 antdv Switch（<button role="switch">），用 click 而不是 uncheck/check。
+  // Switch 是受控组件：点击后要等 PATCH 回来、store 更新，aria-checked 才翻转。
+  const agentSwitch = card.locator('.subagent-switch [role="switch"]');
+  await agentSwitch.click();
+  await expect(agentSwitch).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
   await expect(card).toContainText("已停用");
-  await card.locator(".subagent-switch input").check();
+  await agentSwitch.click();
+  await expect(agentSwitch).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
   await expect(card).toContainText("已启用");
 
   await card.locator("button", { hasText: "配置" }).click();

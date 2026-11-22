@@ -49,10 +49,11 @@ describe("插件面板卡片契约", () => {
     expect(rag?.textContent).toContain("知识库（RAG）");
     const browser = document.querySelector('[data-plugin-id="browser"]');
     expect(browser?.textContent).toContain("Browser Use");
-    const browserSwitch = document.querySelector<HTMLInputElement>('[data-plugin-id="browser"] input[role="switch"]');
-    expect(browserSwitch?.checked).toBe(false);
-    const ragSwitch = document.querySelector<HTMLInputElement>('[data-plugin-id="rag"] input[role="switch"]');
-    expect(ragSwitch?.checked).toBe(true);
+    // antdv Switch 渲染 <button role="switch" aria-checked>，状态读 aria-checked
+    const browserSwitch = document.querySelector('[data-plugin-id="browser"] [role="switch"]');
+    expect(browserSwitch?.getAttribute("aria-checked")).toBe("false");
+    const ragSwitch = document.querySelector('[data-plugin-id="rag"] [role="switch"]');
+    expect(ragSwitch?.getAttribute("aria-checked")).toBe("true");
     expect(ragSwitch?.getAttribute("aria-label")).toBe("停用知识库（RAG）");
   });
 
@@ -60,7 +61,7 @@ describe("插件面板卡片契约", () => {
     mountPanel({}, "linux");
     const computer = document.querySelector('[data-plugin-id="computer"]');
     expect(computer?.textContent).toContain("仅支持 Windows");
-    const computerSwitch = document.querySelector<HTMLInputElement>('[data-plugin-id="computer"] input[role="switch"]');
+    const computerSwitch = document.querySelector<HTMLButtonElement>('[data-plugin-id="computer"] [role="switch"]');
     expect(computerSwitch?.disabled).toBe(true);
     expect(computerSwitch?.getAttribute("aria-label")).toBe("电脑控制（Computer Use）仅支持 Windows");
   });
@@ -88,10 +89,9 @@ describe("插件启停写回", () => {
     vi.stubGlobal("fetch", vi.fn(impl as unknown as typeof fetch));
     mountPanel();
     const store = usePluginsStore();
-    const browserSwitch = document.querySelector<HTMLInputElement>('[data-plugin-id="browser"] input[role="switch"]')!;
-    expect(browserSwitch.checked).toBe(false);
-    browserSwitch.checked = true;
-    browserSwitch.dispatchEvent(new Event("change"));
+    const browserSwitch = document.querySelector<HTMLButtonElement>('[data-plugin-id="browser"] [role="switch"]')!;
+    expect(browserSwitch.getAttribute("aria-checked")).toBe("false");
+    browserSwitch.click();
     await vi.waitFor(() => expect(store.plugins?.enabled.browser).toBe(true));
     expect(patchBodies[0]?.body).toEqual({ enabled: true });
     // legacy 镜像同步（shell 欢迎语 / Agent 卡读取 core state）
@@ -108,11 +108,11 @@ describe("插件启停写回", () => {
     };
     vi.stubGlobal("fetch", vi.fn(impl as unknown as typeof fetch));
     mountPanel();
-    const browserSwitch = document.querySelector<HTMLInputElement>('[data-plugin-id="browser"] input[role="switch"]')!;
-    browserSwitch.checked = true;
-    browserSwitch.dispatchEvent(new Event("change"));
+    const browserSwitch = document.querySelector<HTMLButtonElement>('[data-plugin-id="browser"] [role="switch"]')!;
+    browserSwitch.click();
     await vi.waitFor(() => {
-      expect(browserSwitch.checked).toBe(false);
+      // 失败回滚后 aria-checked 回到 false（store 未变，受控渲染复位）
+      expect(browserSwitch.getAttribute("aria-checked")).toBe("false");
       expect(document.getElementById("plugin-status")?.textContent).toContain("服务端拒绝");
     });
   });

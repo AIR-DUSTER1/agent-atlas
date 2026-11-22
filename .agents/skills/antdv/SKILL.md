@@ -81,3 +81,23 @@ npx antdv semantic Table              # class / styles 语义结构
 
 收尾：体积登记进工程规范 §3.1，用法变化写 `.plans/development-docs/agent-wiki.md`；
 不提交 `src/server/public/`、截图或测试报告。
+
+## 三个已踩过的陷阱（务必先看）
+
+1. **`<Switch>` 必须首字母大写、且不能 import 别名**
+   `<switch>` 会被当原生元素（DOM 里出现幽灵 `<switch>`，组件完全不生效）；
+   `import { Switch as ASwitch }` 后写 `<ASwitch>` 也解析不到 —— `<script setup>`
+   只把**原始名**暴露给模板。正确：`import { Switch }` + `<Switch>`。
+2. **Select 的 `aria-label` 落在最外层 `.ant-select` 容器**，不在内部 combobox input 上。
+3. **数字输入不要用 antdv `Input`**：实测 `v-model.number` 不生效（值是字符串）。
+   项目里 17 个数字字段保持原生 `<input type="number">`。
+
+## e2e 驱动方式
+
+```ts
+await selectAntdvOption(page, "#tracing-backend", "LangSmith 云端");  // Select
+expect(await antdvSelectText(page, "#tracing-backend")).toBe("关闭（默认）");
+await page.locator('[role="switch"]').click();                       // Switch
+await expect(locator).toHaveAttribute("aria-checked", "true");
+```
+`selectOption()` / `toHaveValue()` / `uncheck()` 对 antdv 组件全部无效。

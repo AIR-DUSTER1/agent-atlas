@@ -10,13 +10,11 @@
   - 行选中态由组件内 selectedId 管理（不再是 list.dataset）。
 
   antdv 接入说明：文本/数字/密码输入用 Input 与 Input.Password，动作按钮用 Button。
-  `#users-new-role` / `#users-token-user` **保留原生 <select>**：面板测试与既有交互
-  依赖原生 select 语义（`.value` / `selectOption()`），antdv Select 渲染的是
-  input[role=combobox]+浮层，换掉等于废掉断言。
+  两个下拉（角色 / 令牌目标用户）已改 antdv Select；e2e 用 #id 点击 + 选项文本定位。
 -->
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Button, Input } from "antdv-next";
+import { Button, Input, Select } from "antdv-next";
 import { postJson } from "../../../core/api.js";
 import { useUsersStore, type ManagedUser } from "../../../stores/users.js";
 import { uiConfirm, uiAlert } from "../../../ui/dialog.js";
@@ -32,9 +30,16 @@ const lockStatusText = ref("");
 const lockStatusKind = ref<"ok" | "err" | "">("");
 const tokenOut = ref("");
 
+/** 下拉选项：antdv Select 用 options 数组。 */
+const ROLE_OPTIONS = [
+  { value: "member", label: "成员（member）" },
+  { value: "admin", label: "管理员（admin）" },
+];
 const selectedId = ref("");
 const selectedUser = computed(() => store.users.find((user) => user.userId === selectedId.value) ?? null);
 const tokenPickerModel = ref("");
+/** 令牌目标用户选项：随 store.users 变化。 */
+const tokenUserOptions = computed(() => store.users.map((user) => ({ value: user.userId, label: userLabel(user) })));
 
 // 创建用户表单
 const newUsername = ref("");
@@ -300,10 +305,7 @@ async function clearLocalLock(): Promise<void> {
       </label>
       <label class="routing-field">
         <span>角色</span>
-        <select id="users-new-role" v-model="newRole" aria-label="新用户角色">
-          <option value="member">成员（member）</option>
-          <option value="admin">管理员（admin）</option>
-        </select>
+        <Select id="users-new-role" v-model:value="newRole" :options="ROLE_OPTIONS" aria-label="新用户角色" />
       </label>
       <div class="routing-actions">
         <Button id="users-create-btn" type="primary" @click="createUser">创建用户</Button>
@@ -315,9 +317,7 @@ async function clearLocalLock(): Promise<void> {
       <p class="routing-card-sub">给脚本 / 自动化用的一次性展示令牌；对应所选用户的 <code>auth_tokens</code>。</p>
       <label class="routing-field">
         <span>目标用户</span>
-        <select id="users-token-user" v-model="tokenPickerModel" aria-label="令牌目标用户" @change="onTokenUserChange">
-          <option v-for="user in store.users" :key="user.userId" :value="user.userId">{{ userLabel(user) }}</option>
-        </select>
+        <Select id="users-token-user" v-model:value="tokenPickerModel" :options="tokenUserOptions" aria-label="令牌目标用户" @change="onTokenUserChange" />
       </label>
       <label class="routing-field">
         <span>备注</span>

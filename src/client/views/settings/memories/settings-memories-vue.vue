@@ -10,7 +10,7 @@
   - API Key 输入框清空 + placeholder 显示掩码（留空 = 保持不变）。
 -->
 <script setup lang="ts">
-import { Button, Input } from "antdv-next";
+import { Button, Checkbox, Input, Select } from "antdv-next";
 import { computed, onMounted, reactive, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useMemoriesStore, type MemoryProfile } from "../../../stores/memories.js";
@@ -30,6 +30,34 @@ const reindexing = ref(false);
 const savingPersonalization = ref(false);
 const searchQuery = ref("");
 const importMode = ref<"merge" | "replace">("merge");
+
+/** 下拉选项：antdv Select 用 options 数组，不再写 <option> 子元素。 */
+const PROVIDER_OPTIONS = [
+  { value: "local", label: "内置本地记忆" },
+  { value: "http", label: "HTTP 外部记忆" },
+];
+const HTTP_PRESET_OPTIONS = [
+  { value: "generic", label: "Generic HTTP" },
+  { value: "hindsight", label: "Hindsight" },
+];
+const HTTP_AUTH_OPTIONS = [
+  { value: "bearer", label: "Bearer Token" },
+  { value: "none", label: "无认证" },
+];
+const DISTILL_MODE_OPTIONS = [
+  { value: "off", label: "关闭" },
+  { value: "confirm", label: "每次确认" },
+  { value: "smart", label: "智能沉淀" },
+];
+const IMPORT_MODE_OPTIONS = [
+  { value: "merge", label: "合并导入" },
+  { value: "replace", label: "替换当前 scope" },
+];
+const PROFILE_FILTER_OPTIONS = [
+  { value: "general", label: "通用 Agent" },
+  { value: "estate", label: "租房 / 房产 Agent" },
+  { value: "job", label: "求职岗位 Agent" },
+];
 
 const httpStatusText = ref("");
 const httpStatusKind = ref<"ok" | "warn" | "err" | "">("");
@@ -523,7 +551,7 @@ async function importMemories(event: Event): Promise<void> {
         <h3 id="memory-personalization-title">个性化上下文</h3>
         <p>填写稳定的个人背景、协作偏好与输出要求；启用后每轮对话默认注入，不占用记忆条目；请勿填写密钥或敏感凭据</p>
       </div>
-      <label class="cap-check"><input id="mem-personalization-enabled" v-model="form.personalizationEnabled" type="checkbox" /><span>默认启用</span></label>
+      <Checkbox id="mem-personalization-enabled" v-model:checked="form.personalizationEnabled">默认启用</Checkbox>
     </div>
     <label class="field">
       <span class="field-label">默认上下文</span>
@@ -546,10 +574,7 @@ async function importMemories(event: Event): Promise<void> {
       </div>
       <label class="field">
         <span class="field-label">当前 Provider</span>
-        <select id="mem-active-provider" v-model="form.activeProvider" class="pf-select" @change="onProviderChange">
-          <option value="local">内置本地记忆</option>
-          <option value="http">HTTP 外部记忆</option>
-        </select>
+        <Select id="mem-active-provider" v-model:value="form.activeProvider" :options="PROVIDER_OPTIONS" @change="onProviderChange" />
       </label>
       <div class="memory-stat-grid">
         <div><span>active</span><strong id="mem-local-active">{{ localActive }}</strong></div>
@@ -559,7 +584,7 @@ async function importMemories(event: Event): Promise<void> {
       </div>
       <p id="mem-provider-detail" class="settings-note">{{ providerDetail }}</p>
       <label class="cap-check memory-check">
-        <input id="mem-allow-pii" v-model="form.allowPII" type="checkbox" />
+        <Checkbox id="mem-allow-pii" v-model:checked="form.allowPII" />
         <span>允许保存明显 PII（手机号 / 身份证；密钥仍永远拒绝）</span>
       </label>
     </section>
@@ -570,23 +595,17 @@ async function importMemories(event: Event): Promise<void> {
           <h3 id="memory-http-title">HTTP 外部记忆</h3>
           <p>故障时自动降级为“无记忆可注入”，不阻塞聊天与 /readyz</p>
         </div>
-        <label class="cap-check"><input id="mem-http-enabled" v-model="form.httpEnabled" type="checkbox" /><span>启用</span></label>
+        <Checkbox id="mem-http-enabled" v-model:checked="form.httpEnabled">启用</Checkbox>
       </div>
       <fieldset id="memory-http-fields" class="memory-http-fields" :disabled="!form.httpEnabled">
         <div class="memory-form-grid">
           <label class="field">
             <span class="field-label">协议预设</span>
-            <select id="mem-http-preset" v-model="form.httpPreset" class="pf-select">
-              <option value="generic">Generic HTTP</option>
-              <option value="hindsight">Hindsight</option>
-            </select>
+            <Select id="mem-http-preset" v-model:value="form.httpPreset" :options="HTTP_PRESET_OPTIONS" />
           </label>
           <label class="field">
             <span class="field-label">认证方式</span>
-            <select id="mem-http-auth-mode" v-model="form.httpAuthMode" class="pf-select">
-              <option value="bearer">Bearer Token</option>
-              <option value="none">无认证</option>
-            </select>
+            <Select id="mem-http-auth-mode" v-model:value="form.httpAuthMode" :options="HTTP_AUTH_OPTIONS" />
           </label>
           <label class="field memory-span-2">
             <span class="field-label">Base URL</span>
@@ -596,7 +615,7 @@ async function importMemories(event: Event): Promise<void> {
             <span class="field-label">API Key <em id="mem-http-key-state" class="key-state">{{ httpKeyStateText() }}</em></span>
             <Input.Password id="mem-http-api-key" v-model:value="form.httpApiKey" spellcheck="false" autocomplete="new-password" :placeholder="httpKeyPlaceholder(store.config?.http.hasApiKey, store.config?.http.keyMasked)" />
           </label>
-          <label class="cap-check memory-span-2"><input id="mem-http-clear-key" v-model="form.httpClearKey" type="checkbox" /><span>清除已保存的 API Key</span></label>
+          <Checkbox id="mem-http-clear-key" v-model:checked="form.httpClearKey">清除已保存的 API Key</Checkbox>
           <label class="field">
             <span class="field-label">超时（毫秒）</span>
             <input id="mem-http-timeout" v-model.number="form.httpTimeoutMs" type="number" min="500" max="30000" step="500" />
@@ -620,7 +639,7 @@ async function importMemories(event: Event): Promise<void> {
             <Input id="mem-http-bank-job" v-model:value="form.httpBankJob" type="text" spellcheck="false" placeholder="例如 job-local" />
           </label>
         </div>
-        <label class="cap-check"><input id="mem-http-write" v-model="form.httpWriteEnabled" type="checkbox" /><span>允许 Agent 工具写入外部记忆</span></label>
+        <Checkbox id="mem-http-write" v-model:checked="form.httpWriteEnabled">允许 Agent 工具写入外部记忆</Checkbox>
       </fieldset>
       <div class="settings-actions memory-config-actions">
         <Button id="mem-test-http-btn" size="small" :loading="testingHttp" @click="testHttp">测试连接</Button>
@@ -641,11 +660,7 @@ async function importMemories(event: Event): Promise<void> {
       <div class="memory-form-grid">
         <label class="field">
           <span class="field-label">沉淀模式</span>
-          <select id="mem-distill-mode" v-model="form.distillMode" class="pf-select">
-            <option value="off">关闭</option>
-            <option value="confirm">每次确认</option>
-            <option value="smart">智能沉淀</option>
-          </select>
+          <Select id="mem-distill-mode" v-model:value="form.distillMode" :options="DISTILL_MODE_OPTIONS" />
         </label>
         <label class="field">
           <span class="field-label">每轮最多候选</span>
@@ -692,7 +707,7 @@ async function importMemories(event: Event): Promise<void> {
           <h3 id="memory-semantic-title">语义召回</h3>
           <p>OpenAI 兼容 Embedding；失败时自动降级词法召回，不阻塞聊天</p>
         </div>
-        <label class="cap-check"><input id="mem-embedding-enabled" v-model="form.embeddingEnabled" type="checkbox" /><span>启用</span></label>
+        <Checkbox id="mem-embedding-enabled" v-model:checked="form.embeddingEnabled">启用</Checkbox>
       </div>
       <div class="memory-form-grid">
         <label class="field memory-span-2">
@@ -719,7 +734,7 @@ async function importMemories(event: Event): Promise<void> {
           <span class="field-label">最低相似度</span>
           <input id="mem-embedding-similarity" v-model.number="form.embeddingMinSimilarity" type="number" min="0" max="1" step="0.01" />
         </label>
-        <label class="cap-check memory-span-2"><input id="mem-embedding-clear-key" v-model="form.embeddingClearKey" type="checkbox" /><span>清除已保存的 Embedding API Key</span></label>
+        <Checkbox id="mem-embedding-clear-key" v-model:checked="form.embeddingClearKey">清除已保存的 Embedding API Key</Checkbox>
       </div>
       <p id="mem-embedding-key-state" class="settings-note">{{ embeddingKeyStateText() }}</p>
       <p id="mem-semantic-status" class="settings-note">{{ semanticStatus }}</p>
@@ -740,10 +755,7 @@ async function importMemories(event: Event): Promise<void> {
       <div class="memory-manage-actions">
         <Button id="mem-export-btn" size="small" @click="exportMemories">导出本地快照</Button>
         <label class="ghost-btn small memory-file-btn" for="mem-import-file">导入本地快照</label>
-        <select id="mem-import-mode" v-model="importMode" class="pf-select memory-import-mode" aria-label="导入模式">
-          <option value="merge">合并导入</option>
-          <option value="replace">替换当前 scope</option>
-        </select>
+        <Select id="mem-import-mode" v-model:value="importMode" class="memory-import-mode" :options="IMPORT_MODE_OPTIONS" aria-label="导入模式" />
         <input id="mem-import-file" class="hidden" type="file" accept="application/json,.json" @change="importMemories" />
       </div>
     </div>
@@ -751,17 +763,13 @@ async function importMemories(event: Event): Promise<void> {
     <div class="memory-filter-row">
       <label class="field">
         <span class="field-label">Agent 范围</span>
-        <select id="mem-profile-filter" v-model="store.profileFilter" class="pf-select" aria-label="记忆所属 Agent 范围" @change="onProfileFilterChange">
-          <option value="general">通用 Agent</option>
-          <option value="estate">租房 / 房产 Agent</option>
-          <option value="job">求职岗位 Agent</option>
-        </select>
+        <Select id="mem-profile-filter" v-model:value="store.profileFilter" :options="PROFILE_FILTER_OPTIONS" aria-label="记忆所属 Agent 范围" @change="onProfileFilterChange" />
       </label>
       <label class="field memory-search-field">
         <span class="field-label">筛选当前列表</span>
         <Input id="mem-search" v-model:value="searchQuery" type="search" spellcheck="false" placeholder="按主题、内容或标签筛选" />
       </label>
-      <label class="cap-check memory-history-check"><input id="mem-history-toggle" v-model="store.showHistory" type="checkbox" @change="reloadEntries" /><span>显示历史版本</span></label>
+      <Checkbox id="mem-history-toggle" v-model:checked="store.showHistory" @change="reloadEntries">显示历史版本</Checkbox>
     </div>
 
     <div class="memory-candidate-block">

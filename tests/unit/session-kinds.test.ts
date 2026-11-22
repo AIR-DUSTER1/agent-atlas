@@ -151,7 +151,8 @@ test("求职子代理与房产子代理的关键词名片不重叠", async () =>
 test("设置页领域下拉提供 job 选项，且提交时不被静默丢弃", async () => {
   // M4 4.2：子代理编辑器迁往 Vue 组件，领域下拉在组件模板上断言
   const form = await readFile(join(SRC, "client", "views", "settings", "subagents", "settings-subagents-vue.vue"), "utf8");
-  assert.match(form, /<option value="job">/, "领域下拉必须有 job 选项");
+  // 领域下拉改 antdv Select：选项定义在 ROUTING_DOMAIN_OPTIONS 常量里
+  assert.match(form, /value: "job", label: "继承求职顾问提示词与领域规则"/, "领域下拉必须有 job 选项");
   // 曾硬编码只认 estate，选 job 会被静默丢成「通用后台子代理提示词」
   assert.match(form, /picked === "job"/);
 });

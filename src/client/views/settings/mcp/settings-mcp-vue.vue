@@ -10,7 +10,7 @@
   - 测试连接前就地给出「测试中」（spawn 握手可达一分钟）。
 -->
 <script setup lang="ts">
-import { Button, Input } from "antdv-next";
+import { Button, Input, Switch } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useMcpStore, type McpServerStatus } from "../../../stores/mcp.js";
@@ -43,6 +43,10 @@ const editor = reactive({
 });
 const saving = ref(false);
 const testingId = ref<string | null>(null);
+/** 正在切换启停的服务器 id（antdv Switch 改为受控，用它做 loading 与禁用）。 */
+const togglingId = ref<string | null>(null);
+/** 全局开关的切换中标记。 */
+const togglingGlobal = ref(false);
 const importFileInput = ref<HTMLInputElement | null>(null);
 const editorMask = ref<HTMLElement | null>(null);
 const editorEl = ref<HTMLElement | null>(null);
@@ -77,33 +81,33 @@ function toggleExpanded(server: McpServerStatus): void {
   expanded[server.id] = !expanded[server.id];
 }
 
-async function toggleServer(server: McpServerStatus, event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const next = input.checked;
-  input.disabled = true;
+/**
+ * 切换单个 MCP 服务器。
+ * 改接 antdv Switch 后不再从 `event.target.checked` 取值 —— 组件库的开关是
+ * `<button role="switch">`，没有原生 checked；状态一律由 v-model 驱动，
+ * handler 只接收目标值。失败时界面靠 togglingId 复位，store 仍是权威状态。
+ */
+async function toggleServer(server: McpServerStatus, next: boolean): Promise<void> {
+  togglingId.value = server.id;
   try {
     await store.toggleServer(server, next);
     showMcpStatus(`${next ? "已启用" : "已停用"} MCP 服务器「${server.name}」`, "ok");
   } catch (err) {
-    input.checked = !next;
     showMcpStatus(`✗ ${(err as Error).message}`, "err");
   } finally {
-    input.disabled = false;
+    togglingId.value = null;
   }
 }
 
-async function toggleGlobal(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const next = input.checked;
-  input.disabled = true;
+async function toggleGlobal(next: boolean): Promise<void> {
+  togglingGlobal.value = true;
   try {
     await store.toggleGlobal(next);
     showMcpStatus(next ? "MCP 工具已恢复" : "MCP 工具已暂停，配置保持不变", "ok");
   } catch (err) {
-    input.checked = !next;
     showMcpStatus(`✗ ${(err as Error).message}`, "err");
   } finally {
-    input.disabled = false;
+    togglingGlobal.value = false;
   }
 }
 
@@ -368,10 +372,13 @@ onUnmounted(() => {
       <button id="mcp-import-btn" type="button" class="ghost-btn small" @click="pickImportFile">
         <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 导入 .mcp.json
       </button>
-      <label class="mcp-switch" title="全局启用或暂停 MCP">
-        <input id="mcp-global-enabled" type="checkbox" aria-label="启用 MCP 工具" :checked="store.enabled" @change="toggleGlobal" />
-        <span class="mcp-switch-track" aria-hidden="true"></span>
-      </label>
+      <Switch
+        id="mcp-global-enabled"
+        aria-label="启用 MCP 工具"
+        :checked="store.enabled"
+        :loading="togglingGlobal"
+        @update:checked="toggleGlobal"
+      />
     </div>
   </section>
   <input id="mcp-import-file" ref="importFileInput" class="hidden" type="file" accept=".json,application/json" aria-label="选择 MCP JSON 配置" @change="importFromFile" />
@@ -450,10 +457,12 @@ onUnmounted(() => {
             >
               <i class="ui-icon" data-icon="Settings" aria-hidden="true" style="--icon-size: 15px"></i>
             </button>
-            <label class="mcp-switch" title="启用或停用服务器">
-              <input type="checkbox" :aria-label="`启用 MCP 服务器 ${server.name}`" :checked="server.enabled" @change="toggleServer(server, $event)" />
-              <span class="mcp-switch-track" aria-hidden="true"></span>
-            </label>
+            <Switch
+              :aria-label="`启用 MCP 服务器 ${server.name}`"
+              :checked="server.enabled"
+              :loading="togglingId === server.id"
+              @update:checked="(next: boolean) => toggleServer(server, next)"
+            />
           </div>
           <div class="mcp-server-details" :class="{ hidden: !expanded[server.id] }">
             <div class="mcp-command-row">
@@ -572,10 +581,7 @@ onUnmounted(() => {
           <strong>调用前需要审批</strong>
           <small>推荐开启。关闭后该服务器的工具会直接执行，风险由你承担。</small>
         </span>
-        <span class="mcp-switch">
-          <input id="mcp-approval" v-model="editor.approval" type="checkbox" aria-label="MCP 调用前需要审批" />
-          <span class="mcp-switch-track" aria-hidden="true"></span>
-        </span>
+        <Switch id="mcp-approval" v-model:checked="editor.approval" aria-label="MCP 调用前需要审批" />
       </label>
       <div id="mcp-editor-status" class="settings-status" role="status" aria-live="polite"></div>
       <div class="mcp-editor-actions">

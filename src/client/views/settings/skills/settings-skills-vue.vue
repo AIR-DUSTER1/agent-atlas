@@ -6,10 +6,12 @@
   立场：
   - 技能新建/修改统一走 skill-creator，页面不做手写 frontmatter 表单；
   - 上传走 filechooser（#skill-upload-btn 触发隐藏 file input）；
-  - 启停失败手动回滚 input.checked（store 未变更，Vue 不会自动回滚 DOM）。
+  - 启停开关是 antdv Switch（受控组件）：状态只看 store，失败时不会残留在半途状态。
 -->
 <script setup lang="ts">
+import { Switch } from "antdv-next";
 import { computed, onMounted, ref } from "vue";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useSkillsStore, type SkillFilter, type SkillItem } from "../../../stores/skills.js";
 import { showSkillStatus } from "./settings-skills.js";
 import { uiConfirm } from "../../../ui/dialog.js";
@@ -84,15 +86,12 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function toggleEnabled(skill: SkillItem, event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const next = input.checked;
+async function toggleEnabled(skill: SkillItem, next: boolean): Promise<void> {
   togglingId.value = skill.id;
   try {
     await store.setEnabled(skill.id, next);
     showSkillStatus(`${next ? "已启用" : "已禁用"}技能「${skill.name}」`, "ok");
   } catch (err) {
-    input.checked = !next;
     showSkillStatus(`✗ ${(err as Error).message}`, "err");
   } finally {
     togglingId.value = null;
@@ -172,6 +171,7 @@ async function importFiles(event: Event): Promise<void> {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="skills-page-head">
     <h2 id="skills-title">技能</h2>
     <button
@@ -264,17 +264,14 @@ async function importFiles(event: Event): Promise<void> {
         <div class="skill-card-meta">{{ skillMeta(skill) }}</div>
       </div>
       <div class="skill-card-actions">
-        <label class="skill-switch" title="启用或禁用技能">
-          <input
-            class="skill-enabled-toggle"
-            type="checkbox"
-            :aria-label="`启用技能 ${skill.name}`"
-            :checked="skill.enabled"
-            :disabled="togglingId === skill.id"
-            @change="toggleEnabled(skill, $event)"
-          />
-          <span class="skill-switch-track" aria-hidden="true"></span>
-        </label>
+        <Switch
+          class="skill-enabled-toggle"
+          :aria-label="`启用技能 ${skill.name}`"
+          :checked="skill.enabled"
+          :disabled="togglingId === skill.id"
+          :loading="togglingId === skill.id"
+          @update:checked="(next: boolean) => toggleEnabled(skill, next)"
+        />
         <button
           class="skill-delete-btn"
           type="button"
@@ -319,4 +316,5 @@ async function importFiles(event: Event): Promise<void> {
       >›</button>
     </template>
   </nav>
+  </AntdvProvider>
 </template>
