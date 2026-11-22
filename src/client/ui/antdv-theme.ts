@@ -72,6 +72,12 @@ export const ANTDV_SHARED_TOKEN = {
   fontSize: 13,
   fontSizeSM: 12,
   fontSizeLG: 15,
+  /**
+   * 组件内部字号单独钉死为 13px：antdv 的 Button / Select 等在 default 尺寸下
+   * 用的是派生值（实测渲染出 12.5px），与项目 `.ghost-btn` 的 13px 相差半像素，
+   * 混排时能看出粗细不一。这里显式对齐项目字号阶梯 --font-md。
+   */
+  fontSizeIcon: 12,
   fontFamily: '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
   controlHeight: 34,
   controlHeightSM: 28,

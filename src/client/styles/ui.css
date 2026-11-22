@@ -464,3 +464,31 @@ button > .ui-icon { pointer-events: none; }
 .project-btn.ant-btn > .chevron-down {
   margin-left: auto;
 }
+
+
+/* ------------------------------------------------------------
+   antdv 按钮字号对齐项目阶梯（组件库批次）
+   ------------------------------------------------------------
+   实测 antdv Button/default 渲染出 12.5px（由 token 派生），而项目的
+   .ghost-btn / .btn 一直是 13px（--font-md）。两者混排在同一行时能看出
+   粗细不完全一致。这里把 antdv 按钮显式钉到 13px，与项目既有按钮统一。
+   ------------------------------------------------------------ */
+.ant-btn {
+  font-size: 13px;
+  font-family: var(--sans);
+}
+.ant-btn.ant-btn-sm {
+  font-size: 12px;
+}
+/* 纯图标按钮不继承文字字号 */
+.ant-btn.s-action,
+.ant-btn.commands-icon-btn,
+.ant-btn.skill-delete-btn,
+.ant-btn.mcp-icon-btn,
+.ant-btn.m-del,
+.ant-btn.m-edit,
+.ant-btn.m-pick,
+.ant-btn.c-del,
+.ant-btn.ext-del {
+  font-size: 0;
+}
