@@ -152,12 +152,15 @@ npm run build:client
 npm run build:desktop
 npm test
 npm run test:vue
-npx vitest run tests/vue/antdv-usage.test.ts   # antdv 退化 API 与首屏闭包断言
 ```
 
 > `npx antdv lint ./src` 已从质量门移除：该子命令在 `@antdv-next/cli@0.0.0-beta.1`
 > 里是空壳（只打印 `Parsed args` 后退出 0），永远绿等于假覆盖；职能由
-> `tests/unit/antdv-usage.test.ts` 与 `tests/vue/antdv-usage.test.ts` 接管。
+> `tests/unit/antdv-usage.test.ts`（node:test，已并入 `npm test`）接管。
+>
+> **`tests/unit/` 下每个 `*.test.ts` 都必须登记在 `npm test` 的文件清单里**：
+> 未登记的文件既不跑也不报错，等于守门静默失效（本项目真发生过，见
+> `tests/unit/test-inventory.test.ts` 的断言）。
 
 前端、部署或发布相关改动按 Skill 指引补充 E2E、审计、数据检查与镜像 smoke。存在阻断项时必须如实报告，不能用静态检查冒充运行验证。
 

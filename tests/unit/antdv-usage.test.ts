@@ -179,9 +179,25 @@ test("引用 antdv 组件标签的 SFC 必须真的 import 了它", async () => 
   assert.deepEqual(violations, [], `组件标签缺少 import（会被当原生元素渲染）：\n${violations.join("\n")}`);
 });
 
-test("主题种子色必须与 styles/tokens.css 同源", async () => {
+/**
+ * 在 styles/ 下按 basename 查找 CSS 全文。styles 已按页面分到 base/ 等子目录，
+ * 写死 styles/tokens.css 会在分类后静默指向不存在的路径（本项目真发生过）。
+ * 命中数必须恰好为 1：0 说明文件丢了，>1 说明同名文件已经分不清该断言谁。
+ */
+async function readStyle(cssName: string): Promise<string> {
+  const matches = (await walk(STYLES, [".css"]))
+    .filter((path) => path.replaceAll("\\", "/").split("/").pop() === cssName);
+  assert.equal(
+    matches.length,
+    1,
+    `styles/ 下应恰好有一个 ${cssName}，实际 ${matches.length} 个：${matches.map((p) => relative(STYLES, p)).join("、")}`,
+  );
+  return await readFile(matches[0] as string, "utf8");
+}
+
+test("主题种子色必须与 styles 下的 tokens.css 同源", async () => {
   const themeSource = await readFile(join(CLIENT, THEME_FILE), "utf8");
-  const tokens = await readFile(join(STYLES, "tokens.css"), "utf8");
+  const tokens = await readStyle("tokens.css");
   /** 取 tokens.css 里某个 CSS 变量的第一个十六进制值。 */
   const tokenValue = (name: string): string => {
     const match = new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{6})`).exec(tokens);
