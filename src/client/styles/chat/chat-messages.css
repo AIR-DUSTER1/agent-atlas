@@ -2,7 +2,12 @@
    chat-messages.css — 消息流与消息级操作
    ============================================================ */
 /* ============================== 消息流 ============================== */
-#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+/* 注意：这里**不能**写 scroll-behavior: smooth。
+   CSS 级 smooth 会把所有 JS 的 `scrollTop = ...` 赋值也变成动画：流式输出每来
+   一块就发起一次新动画，上个动画没跑完时用户的滚轮会被持续覆盖，表现为
+   「滚轮往上滚，过一会儿又被拽回底部」。平滑只给用户主动点「回到底部」那一次，
+   由 ui/scroll-to-bottom.ts 显式传 behavior，跟随类滚动一律保持瞬时。 */
+#chat-scroll { flex: 1; overflow-y: auto; }
 
 .welcome { max-width: var(--content-w); margin: 0 auto; padding: 7vh 24px 30px; }
 .welcome-hero { text-align: center; margin-bottom: 34px; }
