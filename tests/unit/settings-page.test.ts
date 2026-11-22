@@ -185,7 +185,10 @@ test("记忆与个性化：默认上下文、本地 / HTTP 配置、scope 与导
   assert.match(source, /id="mem-personalization-text"[^>]*placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。"/);
   assert.doesNotMatch(source, /例如：我在青岛从事前端开发/);
   assert.match(source, /请勿填写密钥或敏感凭据/);
-  assert.match(source, /id="mem-http-api-key"[\s\S]{0,200}type="password"/);
+  // 密钥字段必须是「密码型控件」：antdv 面板用 Input.Password（自带显示切换，
+  // 组件名在前），原生面板用 type="password"（属性在后）。两种写法都接受，
+  // 断言意图（不得是明文输入）而不是绑定写法。
+  assert.match(source, /(?:<Input\.Password[^>]*id="mem-http-api-key"|id="mem-http-api-key"[\s\S]{0,60}type="password")/);
   assert.match(source, /refreshSettings/);
   assert.match(source, /testHttp/);
   assert.match(source, /savePersonalization/);

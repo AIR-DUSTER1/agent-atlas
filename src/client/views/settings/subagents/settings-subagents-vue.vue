@@ -11,7 +11,9 @@
   - 领域提示词按下拉实际取值透传（曾硬编码只认 estate 的坑不复现）。
 -->
 <script setup lang="ts">
+import { Button, Input } from "antdv-next";
 import { computed, onUnmounted, ref } from "vue";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { onMounted } from "vue";
 import { useSubagentsStore, type SubagentFilter, type SubagentSavePayload } from "../../../stores/subagents.js";
 import { registerSubagentEditorOpenHook } from "./settings-subagents.js";
@@ -338,6 +340,7 @@ const invalidModel = ref("");
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="subagents-head">
     <div class="subagents-heading">
       <span class="subagents-kicker"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i> Runtime delegation</span>
@@ -378,7 +381,7 @@ const invalidModel = ref("");
   <div class="subagents-toolbar">
     <label class="subagents-search" for="subagent-search">
       <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
-      <input id="subagent-search" v-model="searchTerm" type="search" autocomplete="off" placeholder="搜索名称、用途或 ID" aria-label="搜索子代理" />
+      <Input id="subagent-search" v-model:value="searchTerm" type="search" autocomplete="off" placeholder="搜索名称、用途或 ID" aria-label="搜索子代理" />
     </label>
     <div class="subagents-filters" role="group" aria-label="筛选子代理">
       <button
@@ -509,11 +512,11 @@ const invalidModel = ref("");
         </div>
         <label class="field">
           <span class="field-label">名称 <em class="key-state">60 字以内</em></span>
-          <input id="subagent-name" v-model="form.name" type="text" maxlength="60" autocomplete="off" placeholder="例如：代码审查员" />
+          <Input id="subagent-name" v-model:value="form.name" type="text" :maxlength="60" autocomplete="off" placeholder="例如：代码审查员" />
         </label>
         <label class="field">
           <span class="field-label">用途说明 <em class="key-state">写清适用与不适用场景</em></span>
-          <textarea id="subagent-description" v-model="form.description" rows="4" maxlength="500" placeholder="例如：适合审查改动、定位回归风险并给出可验证的修复建议。"></textarea>
+          <Input.TextArea id="subagent-description" v-model:value="form.description" :rows="4" :maxlength="500" placeholder="例如：适合审查改动、定位回归风险并给出可验证的修复建议。" />
         </label>
       </section>
 
@@ -561,19 +564,19 @@ const invalidModel = ref("");
         </div>
         <label class="field">
           <span class="field-label">关键词 <em class="key-state">逗号分隔，命中即加分</em></span>
-          <input id="subagent-routing-keywords" v-model="form.keywords" type="text" autocomplete="off" placeholder="例如：租房, 买房, 房源, 小区" maxlength="600" />
+          <Input id="subagent-routing-keywords" v-model:value="form.keywords" type="text" autocomplete="off" placeholder="例如：租房, 买房, 房源, 小区" :maxlength="600" />
         </label>
         <label class="field">
           <span class="field-label">类别 <em class="key-state">用于多意图分层归并</em></span>
-          <input id="subagent-routing-category" v-model="form.category" type="text" autocomplete="off" placeholder="例如：居住 / 研发 / 数据" maxlength="20" />
+          <Input id="subagent-routing-category" v-model:value="form.category" type="text" autocomplete="off" placeholder="例如：居住 / 研发 / 数据" :maxlength="20" />
         </label>
         <label class="field">
           <span class="field-label">适用场景 <em class="key-state">每行一条，最多 8 条</em></span>
-          <textarea id="subagent-routing-suitable" v-model="form.suitable" rows="2" maxlength="1000" placeholder="按城市/预算/区域检索房源并给出对比结论"></textarea>
+          <Input.TextArea id="subagent-routing-suitable" v-model:value="form.suitable" :rows="2" :maxlength="1000" placeholder="按城市/预算/区域检索房源并给出对比结论" />
         </label>
         <label class="field">
           <span class="field-label">不适用场景 <em class="key-state">负向信号，能显著压低误派</em></span>
-          <textarea id="subagent-routing-not-suitable" v-model="form.notSuitable" rows="2" maxlength="1000" placeholder="天气查询, 数学计算, 写代码"></textarea>
+          <Input.TextArea id="subagent-routing-not-suitable" v-model:value="form.notSuitable" :rows="2" :maxlength="1000" placeholder="天气查询, 数学计算, 写代码" />
         </label>
         <label class="field">
           <span class="field-label">领域提示词</span>
@@ -602,11 +605,12 @@ const invalidModel = ref("");
 
       <div id="subagent-editor-status" class="settings-status" :class="editorStatusKind" role="status" aria-live="polite">{{ editorStatusText }}</div>
       <div class="subagent-editor-actions">
-        <button id="subagent-delete-btn" type="button" class="ghost-btn small danger-text" :class="{ hidden: !editingId }" :disabled="busy" @click="deleteEditing">删除子代理</button>
+        <Button id="subagent-delete-btn" size="small" danger :class="{ hidden: !editingId }" :disabled="busy" @click="deleteEditing">删除子代理</Button>
         <span class="subagent-editor-spacer"></span>
-        <button id="subagent-cancel-btn" type="button" class="ghost-btn small" :disabled="busy" @click="requestCloseEditor">取消</button>
-        <button id="subagent-save-btn" type="submit" class="ui-button ui-button-primary" :disabled="busy">{{ busy ? "保存中…" : "保存配置" }}</button>
+        <Button id="subagent-cancel-btn" size="small" :disabled="busy" @click="requestCloseEditor">取消</Button>
+        <Button id="subagent-save-btn" type="primary" html-type="submit" :loading="busy">{{ busy ? "保存中…" : "保存配置" }}</Button>
       </div>
     </form>
   </div>
+  </AntdvProvider>
 </template>

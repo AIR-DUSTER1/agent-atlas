@@ -10,6 +10,8 @@
   - 测试连接前就地给出「测试中」（spawn 握手可达一分钟）。
 -->
 <script setup lang="ts">
+import { Button, Input } from "antdv-next";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useMcpStore, type McpServerStatus } from "../../../stores/mcp.js";
 import { showMcpStatus, registerMcpEditorOpenHook, registerMcpCloseHook } from "./settings-mcp.js";
@@ -345,6 +347,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="mcp-page-head">
     <div>
       <h2 id="mcp-title"><i class="ui-icon" data-icon="Server" aria-hidden="true"></i> MCP Servers</h2>
@@ -522,9 +525,9 @@ onUnmounted(() => {
         <label class="field">
           <span id="mcp-quick-command-label" class="field-label">完整启动命令 <em class="key-state">粘贴后自动拆分，支持 $ 前缀与引号</em></span>
           <div class="mcp-command-parse-row">
-            <input
+            <Input
               id="mcp-command-line"
-              v-model="editor.commandLine"
+              v-model:value="editor.commandLine"
               aria-label="完整 MCP 启动命令"
               type="text"
               spellcheck="false"
@@ -548,20 +551,20 @@ onUnmounted(() => {
       <div class="mcp-form-grid">
         <label class="field">
           <span class="field-label">服务器标识</span>
-          <input id="mcp-id" v-model="editor.id" :readonly="Boolean(editor.editingId)" aria-label="MCP 服务器标识" type="text" spellcheck="false" placeholder="例如 filesystem" @keydown.enter.prevent="saveEditor" />
+          <Input id="mcp-id" v-model:value="editor.id" :readonly="Boolean(editor.editingId)" aria-label="MCP 服务器标识" type="text" spellcheck="false" placeholder="例如 filesystem" @keydown.enter.prevent="saveEditor" />
         </label>
         <label class="field">
           <span class="field-label">显示名称</span>
-          <input id="mcp-name" v-model="editor.name" aria-label="MCP 服务器名称" type="text" spellcheck="false" placeholder="留空则使用标识" @keydown.enter.prevent="saveEditor" />
+          <Input id="mcp-name" v-model:value="editor.name" aria-label="MCP 服务器名称" type="text" spellcheck="false" placeholder="留空则使用标识" @keydown.enter.prevent="saveEditor" />
         </label>
       </div>
       <label class="field">
         <span class="field-label">可执行命令</span>
-        <input id="mcp-command" v-model="editor.command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="例如 npx、node、uvx" @keydown.enter.prevent="saveEditor" @change="syncCommandLineFromFields" />
+        <Input id="mcp-command" v-model:value="editor.command" aria-label="MCP 启动命令" type="text" spellcheck="false" placeholder="例如 npx、node、uvx" @keydown.enter.prevent="saveEditor" @change="syncCommandLineFromFields" />
       </label>
       <label class="field">
         <span class="field-label">命令参数 <em class="key-state">空格分隔；含空格的参数请用双引号包住</em></span>
-        <input id="mcp-args" v-model="editor.args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder='例如 -y @modelcontextprotocol/server-filesystem "D:\data"' @keydown.enter.prevent="saveEditor" @change="syncCommandLineFromFields" />
+        <Input id="mcp-args" v-model:value="editor.args" aria-label="MCP 启动参数" type="text" spellcheck="false" placeholder='例如 -y @modelcontextprotocol/server-filesystem "D:\data"' @keydown.enter.prevent="saveEditor" @change="syncCommandLineFromFields" />
       </label>
       <div id="mcp-cwd-note" class="mcp-advanced-note" :class="{ hidden: !editor.cwdNote }">高级配置：{{ editor.cwdNote }}。网页编辑不会修改这些字段。</div>
       <label class="mcp-approval-row">
@@ -576,11 +579,12 @@ onUnmounted(() => {
       </label>
       <div id="mcp-editor-status" class="settings-status" role="status" aria-live="polite"></div>
       <div class="mcp-editor-actions">
-        <button id="mcp-editor-delete" type="button" class="ghost-btn small mcp-danger-btn" :class="{ hidden: !editor.editingId }" @click="deleteFromEditor">删除服务器</button>
+        <Button id="mcp-editor-delete" size="small" danger :class="{ hidden: !editor.editingId }" @click="deleteFromEditor">删除服务器</Button>
         <span class="mcp-editor-spacer"></span>
-        <button id="mcp-editor-cancel" type="button" class="ghost-btn small" @click="closeEditor">取消</button>
-        <button id="mcp-editor-save" type="button" class="ghost-btn small mcp-add-btn" :disabled="saving" @click="saveEditor">保存服务器</button>
+        <Button id="mcp-editor-cancel" size="small" @click="closeEditor">取消</Button>
+        <Button id="mcp-editor-save" size="small" type="primary" :loading="saving" @click="saveEditor">保存服务器</Button>
       </div>
     </div>
   </div>
+  </AntdvProvider>
 </template>

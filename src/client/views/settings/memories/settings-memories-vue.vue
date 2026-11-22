@@ -10,7 +10,9 @@
   - API Key 输入框清空 + placeholder 显示掩码（留空 = 保持不变）。
 -->
 <script setup lang="ts">
+import { Button, Input } from "antdv-next";
 import { computed, onMounted, reactive, ref } from "vue";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useMemoriesStore, type MemoryProfile } from "../../../stores/memories.js";
 import type { MemoryEntry, MemorySlotConfig } from "../../../modules/types.js";
 import { memStatus } from "./settings-memories.js";
@@ -507,11 +509,12 @@ async function importMemories(event: Event): Promise<void> {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="settings-section-heading">
     <div>
       <h2 id="memories-title"><i class="ui-icon" data-icon="Brain" aria-hidden="true"></i> 记忆与个性化</h2>
     </div>
-    <button id="mem-refresh-btn" type="button" class="ghost-btn small" title="刷新记忆插槽状态" @click="reloadSettings">刷新状态</button>
+    <Button id="mem-refresh-btn" size="small" title="刷新记忆插槽状态" @click="reloadSettings">刷新状态</Button>
   </div>
 
   <section class="settings-card memory-personalization-card" aria-labelledby="memory-personalization-title">
@@ -524,10 +527,10 @@ async function importMemories(event: Event): Promise<void> {
     </div>
     <label class="field">
       <span class="field-label">默认上下文</span>
-      <textarea id="mem-personalization-text" v-model="form.personalizationText" maxlength="4000" rows="5" spellcheck="false" placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。"></textarea>
+      <Input.TextArea id="mem-personalization-text" v-model:value="form.personalizationText" :maxlength="4000" :rows="5" spellcheck="false" placeholder="例如：我常驻上海，负责产品研发；回答先给结论，复杂任务分步骤说明；默认中文，方案优先保证可维护性。" />
     </label>
     <div class="settings-actions memory-personalization-actions">
-      <button id="mem-personalization-save-btn" type="button" class="ghost-btn small btn-approve" :disabled="savingPersonalization" @click="savePersonalization">保存个性化上下文</button>
+      <Button id="mem-personalization-save-btn" size="small" type="primary" :loading="savingPersonalization" @click="savePersonalization">保存个性化上下文</Button>
       <span id="mem-personalization-status" class="settings-status" :class="personalizationStatusKind" role="status" aria-live="polite">{{ personalizationStatusText }}</span>
     </div>
   </section>
@@ -587,11 +590,11 @@ async function importMemories(event: Event): Promise<void> {
           </label>
           <label class="field memory-span-2">
             <span class="field-label">Base URL</span>
-            <input id="mem-http-base-url" v-model="form.httpBaseURL" type="url" spellcheck="false" placeholder="https://memory.example.com" />
+            <Input id="mem-http-base-url" v-model:value="form.httpBaseURL" type="url" spellcheck="false" placeholder="https://memory.example.com" />
           </label>
           <label class="field memory-span-2">
             <span class="field-label">API Key <em id="mem-http-key-state" class="key-state">{{ httpKeyStateText() }}</em></span>
-            <input id="mem-http-api-key" v-model="form.httpApiKey" type="password" spellcheck="false" autocomplete="new-password" :placeholder="httpKeyPlaceholder(store.config?.http.hasApiKey, store.config?.http.keyMasked)" />
+            <Input.Password id="mem-http-api-key" v-model:value="form.httpApiKey" spellcheck="false" autocomplete="new-password" :placeholder="httpKeyPlaceholder(store.config?.http.hasApiKey, store.config?.http.keyMasked)" />
           </label>
           <label class="cap-check memory-span-2"><input id="mem-http-clear-key" v-model="form.httpClearKey" type="checkbox" /><span>清除已保存的 API Key</span></label>
           <label class="field">
@@ -606,22 +609,22 @@ async function importMemories(event: Event): Promise<void> {
         <div id="mem-http-banks" class="memory-form-grid memory-banks" :class="{ hidden: form.httpPreset !== 'hindsight' }">
           <label class="field">
             <span class="field-label">通用 Agent Bank</span>
-            <input id="mem-http-bank-general" v-model="form.httpBankGeneral" type="text" spellcheck="false" placeholder="例如 general-local" />
+            <Input id="mem-http-bank-general" v-model:value="form.httpBankGeneral" type="text" spellcheck="false" placeholder="例如 general-local" />
           </label>
           <label class="field">
             <span class="field-label">租房 Agent Bank</span>
-            <input id="mem-http-bank-estate" v-model="form.httpBankEstate" type="text" spellcheck="false" placeholder="例如 estate-local" />
+            <Input id="mem-http-bank-estate" v-model:value="form.httpBankEstate" type="text" spellcheck="false" placeholder="例如 estate-local" />
           </label>
           <label class="field">
             <span class="field-label">求职 Agent Bank</span>
-            <input id="mem-http-bank-job" v-model="form.httpBankJob" type="text" spellcheck="false" placeholder="例如 job-local" />
+            <Input id="mem-http-bank-job" v-model:value="form.httpBankJob" type="text" spellcheck="false" placeholder="例如 job-local" />
           </label>
         </div>
         <label class="cap-check"><input id="mem-http-write" v-model="form.httpWriteEnabled" type="checkbox" /><span>允许 Agent 工具写入外部记忆</span></label>
       </fieldset>
       <div class="settings-actions memory-config-actions">
-        <button id="mem-test-http-btn" type="button" class="ghost-btn small" :disabled="testingHttp" @click="testHttp">测试连接</button>
-        <button id="mem-save-config-btn" type="button" class="ghost-btn small btn-approve" :disabled="saving" @click="saveConfig">保存并切换</button>
+        <Button id="mem-test-http-btn" size="small" :loading="testingHttp" @click="testHttp">测试连接</Button>
+        <Button id="mem-save-config-btn" size="small" type="primary" :loading="saving" @click="saveConfig">保存并切换</Button>
       </div>
       <p id="mem-http-status" class="settings-status" :class="httpStatusKind" role="status" aria-live="polite">{{ httpStatusText }}</p>
     </section>
@@ -694,15 +697,15 @@ async function importMemories(event: Event): Promise<void> {
       <div class="memory-form-grid">
         <label class="field memory-span-2">
           <span class="field-label">Base URL（可填 /v1 或完整 /embeddings）</span>
-          <input id="mem-embedding-base-url" v-model="form.embeddingBaseURL" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
+          <Input id="mem-embedding-base-url" v-model:value="form.embeddingBaseURL" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
         </label>
         <label class="field">
           <span class="field-label">模型名</span>
-          <input id="mem-embedding-model" v-model="form.embeddingModel" type="text" spellcheck="false" placeholder="text-embedding-3-small" />
+          <Input id="mem-embedding-model" v-model:value="form.embeddingModel" type="text" spellcheck="false" placeholder="text-embedding-3-small" />
         </label>
         <label class="field">
           <span class="field-label">API Key</span>
-          <input id="mem-embedding-api-key" v-model="form.embeddingApiKey" type="password" autocomplete="off" :placeholder="httpKeyPlaceholder(store.config?.embedding.hasApiKey, store.config?.embedding.keyMasked)" />
+          <Input.Password id="mem-embedding-api-key" v-model:value="form.embeddingApiKey" autocomplete="off" :placeholder="httpKeyPlaceholder(store.config?.embedding.hasApiKey, store.config?.embedding.keyMasked)" />
         </label>
         <label class="field">
           <span class="field-label">超时（ms）</span>
@@ -721,8 +724,8 @@ async function importMemories(event: Event): Promise<void> {
       <p id="mem-embedding-key-state" class="settings-note">{{ embeddingKeyStateText() }}</p>
       <p id="mem-semantic-status" class="settings-note">{{ semanticStatus }}</p>
       <div class="settings-actions memory-config-actions">
-        <button id="mem-test-embedding-btn" type="button" class="ghost-btn small" :disabled="testingEmbedding" @click="testEmbedding">测试 Embedding</button>
-        <button id="mem-reindex-btn" type="button" class="ghost-btn small" :disabled="reindexing" @click="reindex">重建当前 Agent 索引</button>
+        <Button id="mem-test-embedding-btn" size="small" :loading="testingEmbedding" @click="testEmbedding">测试 Embedding</Button>
+        <Button id="mem-reindex-btn" size="small" :loading="reindexing" @click="reindex">重建当前 Agent 索引</Button>
       </div>
       <p id="mem-embedding-status" class="settings-status" :class="embeddingStatusKind" role="status" aria-live="polite">{{ embeddingStatusText }}</p>
     </section>
@@ -735,7 +738,7 @@ async function importMemories(event: Event): Promise<void> {
         <p>列表只显示当前 Agent scope；删除前会二次确认</p>
       </div>
       <div class="memory-manage-actions">
-        <button id="mem-export-btn" type="button" class="ghost-btn small" @click="exportMemories">导出本地快照</button>
+        <Button id="mem-export-btn" size="small" @click="exportMemories">导出本地快照</Button>
         <label class="ghost-btn small memory-file-btn" for="mem-import-file">导入本地快照</label>
         <select id="mem-import-mode" v-model="importMode" class="pf-select memory-import-mode" aria-label="导入模式">
           <option value="merge">合并导入</option>
@@ -756,7 +759,7 @@ async function importMemories(event: Event): Promise<void> {
       </label>
       <label class="field memory-search-field">
         <span class="field-label">筛选当前列表</span>
-        <input id="mem-search" v-model="searchQuery" type="search" spellcheck="false" placeholder="按主题、内容或标签筛选" />
+        <Input id="mem-search" v-model:value="searchQuery" type="search" spellcheck="false" placeholder="按主题、内容或标签筛选" />
       </label>
       <label class="cap-check memory-history-check"><input id="mem-history-toggle" v-model="store.showHistory" type="checkbox" @change="reloadEntries" /><span>显示历史版本</span></label>
     </div>
@@ -804,4 +807,5 @@ async function importMemories(event: Event): Promise<void> {
 
     <div id="memories-status" class="settings-status" role="status" aria-live="polite"></div>
   </section>
+  </AntdvProvider>
 </template>

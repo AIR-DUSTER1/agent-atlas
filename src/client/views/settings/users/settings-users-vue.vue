@@ -8,12 +8,19 @@
   - 文件模式整块隐藏管理面，不渲染无意义的 404 交互；
   - 临时密码 / 新令牌只展示一次，组件不留存；
   - 行选中态由组件内 selectedId 管理（不再是 list.dataset）。
+
+  antdv 接入说明：文本/数字/密码输入用 Input 与 Input.Password，动作按钮用 Button。
+  `#users-new-role` / `#users-token-user` **保留原生 <select>**：面板测试与既有交互
+  依赖原生 select 语义（`.value` / `selectOption()`），antdv Select 渲染的是
+  input[role=combobox]+浮层，换掉等于废掉断言。
 -->
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { Button, Input } from "antdv-next";
 import { postJson } from "../../../core/api.js";
 import { useUsersStore, type ManagedUser } from "../../../stores/users.js";
 import { uiConfirm, uiAlert } from "../../../ui/dialog.js";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 
 const store = useUsersStore();
 
@@ -232,6 +239,7 @@ async function clearLocalLock(): Promise<void> {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="routing-head">
     <div>
       <span class="routing-kicker"><i class="ui-icon" data-icon="User" aria-hidden="true"></i> Access</span>
@@ -280,15 +288,15 @@ async function clearLocalLock(): Promise<void> {
       <p class="routing-card-sub">用户名 3-32 位字母数字；初始密码至少 10 位，用户首登时会被强制修改。</p>
       <label class="routing-field">
         <span>用户名</span>
-        <input id="users-new-username" v-model="newUsername" type="text" maxlength="32" spellcheck="false" autocomplete="off" placeholder="alice" aria-label="新用户用户名" />
+        <Input id="users-new-username" v-model:value="newUsername" type="text" :maxlength="32" spellcheck="false" autocomplete="off" placeholder="alice" aria-label="新用户用户名" />
       </label>
       <label class="routing-field">
         <span>显示名</span>
-        <input id="users-new-display" v-model="newDisplay" type="text" maxlength="60" spellcheck="false" placeholder="张三" aria-label="新用户显示名" />
+        <Input id="users-new-display" v-model:value="newDisplay" type="text" :maxlength="60" spellcheck="false" placeholder="张三" aria-label="新用户显示名" />
       </label>
       <label class="routing-field">
         <span>初始密码</span>
-        <input id="users-new-password" v-model="newPassword" type="password" autocomplete="new-password" placeholder="至少 10 位" aria-label="新用户初始密码" />
+        <Input.Password id="users-new-password" v-model:value="newPassword" autocomplete="new-password" placeholder="至少 10 位" aria-label="新用户初始密码" />
       </label>
       <label class="routing-field">
         <span>角色</span>
@@ -298,7 +306,7 @@ async function clearLocalLock(): Promise<void> {
         </select>
       </label>
       <div class="routing-actions">
-        <button id="users-create-btn" type="button" class="ui-button ui-button-primary" @click="createUser">创建用户</button>
+        <Button id="users-create-btn" type="primary" @click="createUser">创建用户</Button>
       </div>
     </section>
 
@@ -313,20 +321,18 @@ async function clearLocalLock(): Promise<void> {
       </label>
       <label class="routing-field">
         <span>备注</span>
-        <input id="users-token-label" v-model="tokenLabel" type="text" maxlength="60" placeholder="agent-bench" aria-label="令牌备注" />
+        <Input id="users-token-label" v-model:value="tokenLabel" type="text" :maxlength="60" placeholder="agent-bench" aria-label="令牌备注" />
       </label>
       <label class="routing-field">
         <span>有效期（天，留空 = 永久）</span>
-        <input id="users-token-days" v-model="tokenDays" type="number" min="1" max="3650" placeholder="90" aria-label="令牌有效天数" />
+        <Input id="users-token-days" v-model:value="tokenDays" type="number" :min="1" :max="3650" placeholder="90" aria-label="令牌有效天数" />
       </label>
       <div class="routing-actions">
-        <button id="users-token-create-btn" type="button" class="ui-button ui-button-primary" @click="createToken">生成令牌</button>
-        <button
+        <Button id="users-token-create-btn" type="primary" @click="createToken">生成令牌</Button>
+        <Button
           id="users-token-refresh-btn"
-          type="button"
-          class="ui-button"
           @click="store.loadTokens(tokenPickerModel).catch((err) => { tokenOut = `✗ ${(err as Error).message}`; })"
-        >刷新列表</button>
+        >刷新列表</Button>
       </div>
       <div id="users-token-out" class="settings-note" role="status" aria-live="polite">{{ tokenOut }}</div>
       <div id="users-token-list" role="table" aria-label="令牌列表">
@@ -348,18 +354,18 @@ async function clearLocalLock(): Promise<void> {
       <p class="routing-card-sub">修改密码后所有会话与设备免登都会失效，需要重新登录。</p>
       <label class="routing-field">
         <span>当前密码（未设过密码可留空）</span>
-        <input id="users-pass-current" v-model="passCurrent" type="password" autocomplete="current-password" aria-label="当前密码" />
+        <Input.Password id="users-pass-current" v-model:value="passCurrent" autocomplete="current-password" aria-label="当前密码" />
       </label>
       <label class="routing-field">
         <span>新密码（至少 10 位）</span>
-        <input id="users-pass-new" v-model="passNew" type="password" autocomplete="new-password" aria-label="新密码" />
+        <Input.Password id="users-pass-new" v-model:value="passNew" autocomplete="new-password" aria-label="新密码" />
       </label>
       <label class="routing-field">
         <span>确认新密码</span>
-        <input id="users-pass-confirm" v-model="passConfirm" type="password" autocomplete="new-password" aria-label="确认新密码" />
+        <Input.Password id="users-pass-confirm" v-model:value="passConfirm" autocomplete="new-password" aria-label="确认新密码" />
       </label>
       <div class="routing-actions">
-        <button id="users-pass-save-btn" type="button" class="ui-button ui-button-primary" @click="changeOwnPassword">修改密码</button>
+        <Button id="users-pass-save-btn" type="primary" @click="changeOwnPassword">修改密码</Button>
       </div>
       <div id="users-pass-status" class="settings-status" :class="passStatusKind" role="status" aria-live="polite">{{ passStatusText }}</div>
     </section>
@@ -372,17 +378,18 @@ async function clearLocalLock(): Promise<void> {
       </div>
       <label class="routing-field">
         <span>当前密码（未设锁可留空）</span>
-        <input id="users-lock-current" v-model="lockCurrent" type="password" autocomplete="current-password" aria-label="当前访问密码" />
+        <Input.Password id="users-lock-current" v-model:value="lockCurrent" autocomplete="current-password" aria-label="当前访问密码" />
       </label>
       <label class="routing-field">
         <span>新访问密码（至少 10 位）</span>
-        <input id="users-lock-new" v-model="lockNew" type="password" autocomplete="new-password" aria-label="新访问密码" />
+        <Input.Password id="users-lock-new" v-model:value="lockNew" autocomplete="new-password" aria-label="新访问密码" />
       </label>
       <div class="routing-actions">
-        <button id="users-lock-set-btn" type="button" class="ui-button ui-button-primary" @click="setLocalLock">设置 / 更新密码锁</button>
-        <button id="users-lock-clear-btn" type="button" class="ui-button ui-button-danger" @click="clearLocalLock">清除密码锁</button>
+        <Button id="users-lock-set-btn" type="primary" @click="setLocalLock">设置 / 更新密码锁</Button>
+        <Button id="users-lock-clear-btn" danger @click="clearLocalLock">清除密码锁</Button>
       </div>
       <div id="users-lock-status" class="settings-status" :class="lockStatusKind" role="status" aria-live="polite">{{ lockStatusText }}</div>
     </section>
   </div>
+  </AntdvProvider>
 </template>

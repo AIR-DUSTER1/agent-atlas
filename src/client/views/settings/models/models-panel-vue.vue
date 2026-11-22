@@ -8,9 +8,17 @@
   - 左栏只放导航，右栏放详情 —— 首次配置时认知负担最小；
   - 每行模型自带「启用 / 编辑 / 删除」三个动作，不做二级菜单；
   - 空供应商 / 空模型时降级显示引导文案。
+
+  antdv 接入说明：单模型编辑面板的文本/数字/JSON 输入用 Input 与 Input.TextArea，
+  「获取列表 / 添加 / 保存 / 删除」等动作按钮用 Button。
+  **保留原生**的三处：`#mf-vision` checkbox（行内紧凑勾选）、`#mf-dialect` 与
+  `#mf-level` 两个 <select>（依赖原生 select 语义与 `.pf-select` 样式），
+  以及列表行内的 `.m-pick` / `.m-edit` / `.m-del` 图标小按钮（antdv Button 的
+  内边距会撑开行高）。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { Button, Input } from "antdv-next";
 import { useModelsStore } from "../../../stores/models.js";
 import {
   activateModel, addModelByName, fetchGatewayModelChips, removeModel, removeProvider,
@@ -19,6 +27,7 @@ import { setSettingsStatus } from "./model-status.js";
 import { PROTOCOL_LABEL } from "../../chat/composer-bar.js";
 import { fmtTokens } from "../../../modules/format.js";
 import type { ModelEntry, ProviderEntry } from "../../../modules/types.js";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 
 const store = useModelsStore();
 
@@ -212,6 +221,7 @@ onMounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="provider-workspace">
     <aside class="provider-picker" aria-label="供应商列表">
       <div class="provider-picker-head">
@@ -306,9 +316,9 @@ onMounted(() => {
           </div>
 
           <div class="key-row model-add-row">
-            <input id="pf-model-new" v-model="newModelName" aria-label="输入模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" @keydown.enter.prevent="addModelFromInput" />
-            <button id="pf-fetch-models" type="button" class="ghost-btn small" title="从网关拉取可用模型列表" @click="fetchGatewayModelChips('detail')">获取列表</button>
-            <button id="pf-model-add-btn" type="button" class="ghost-btn small" @click="addModelFromInput">＋ 添加</button>
+            <Input id="pf-model-new" v-model:value="newModelName" aria-label="输入模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" @keydown.enter.prevent="addModelFromInput" />
+            <Button id="pf-fetch-models" size="small" title="从网关拉取可用模型列表" @click="fetchGatewayModelChips('detail')">获取列表</Button>
+            <Button id="pf-model-add-btn" size="small" @click="addModelFromInput">＋ 添加</Button>
           </div>
           <div id="gateway-models" class="gw-models">
             <template v-if="store.gatewayModels.length">
@@ -333,12 +343,12 @@ onMounted(() => {
 
           <label class="field">
             <span class="field-label">模型名 MODEL <em class="key-state">真正发给网关的 model 字段</em></span>
-            <input id="mf-name" v-model="mfForm.name" type="text" spellcheck="false" placeholder="例如 deepseek-v4-pro" @keydown.enter.prevent="saveModelForm" />
+            <Input id="mf-name" v-model:value="mfForm.name" type="text" spellcheck="false" placeholder="例如 deepseek-v4-pro" @keydown.enter.prevent="saveModelForm" />
           </label>
 
           <label class="field">
             <span class="field-label">显示名 <em class="key-state">可选，留空则显示模型名</em></span>
-            <input id="mf-label" v-model="mfForm.label" type="text" spellcheck="false" placeholder="例如 V4 Pro（强推理）" @keydown.enter.prevent="saveModelForm" />
+            <Input id="mf-label" v-model:value="mfForm.label" type="text" spellcheck="false" placeholder="例如 V4 Pro（强推理）" @keydown.enter.prevent="saveModelForm" />
           </label>
 
           <label class="field">
@@ -348,7 +358,7 @@ onMounted(() => {
                 <input id="mf-vision" v-model="mfForm.vision" type="checkbox" />
                 <span>多模态（支持图片输入）</span>
               </label>
-              <input id="mf-ctx" v-model="mfForm.ctx" class="cap-ctx" type="number" min="1024" step="1" placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
+              <Input id="mf-ctx" v-model:value="mfForm.ctx" class="cap-ctx" type="number" :min="1024" :step="1" placeholder="上下文窗口 tokens（留空 = 自动获取，无法获取时默认 200k）" />
             </div>
           </label>
 
@@ -367,23 +377,23 @@ onMounted(() => {
             </select>
           </label>
 
-          <textarea
+          <Input.TextArea
             id="mf-custom"
-            v-model="mfForm.custom"
+            v-model:value="mfForm.custom"
             aria-label="自定义 JSON 请求参数"
             class="reason-custom"
             :class="{ hidden: !showCustom }"
-            rows="2"
+            :rows="2"
             spellcheck="false"
             placeholder='自定义 JSON，例如 {"reasoning": {"effort": "high"}}'
-          ></textarea>
+          />
           <p id="mf-scheme" class="reason-scheme">{{ schemeText }}</p>
 
           <div class="settings-actions">
-            <button id="mf-activate" class="ghost-btn" type="button" @click="activateEditingModel">设为启用模型</button>
+            <Button id="mf-activate" @click="activateEditingModel">设为启用模型</Button>
             <div class="spacer"></div>
-            <button id="mf-delete" class="ghost-btn" type="button" @click="deleteEditingModel">删除模型</button>
-            <button id="mf-save" class="btn btn-approve" type="button" :disabled="savingModel" @click="saveModelForm">保存模型</button>
+            <Button id="mf-delete" @click="deleteEditingModel">删除模型</Button>
+            <Button id="mf-save" type="primary" :loading="savingModel" @click="saveModelForm">保存模型</Button>
           </div>
         </div>
       </div>
@@ -392,4 +402,5 @@ onMounted(() => {
   <div id="settings-status" class="settings-status"></div>
 
   <!-- 备份与恢复分区由 settings-backup-vue 独立挂载，静态骨架保留在 models.html -->
+  </AntdvProvider>
 </template>
