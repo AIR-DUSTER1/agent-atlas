@@ -12,7 +12,7 @@ import { saveLocal } from "../../core/state.js";
 import type { WorkflowPlanSnapshot } from "../../modules/types-api.js";
 
 async function store() {
-  const { useWorkflowPlanStore } = await import("../../stores/workflow-plan.js");
+  const { useWorkflowPlanStore } = await import("../../stores/chat/workflow-plan.js");
   return useWorkflowPlanStore();
 }
 

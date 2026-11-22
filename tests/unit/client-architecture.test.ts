@@ -152,13 +152,15 @@ test("index.html 引用的样式全部进入构建产物", async () => {
   const html = await readClientIndexHtml();
   const linked = [...html.matchAll(/href=["']\/styles\/([^"'?#]+\.css)(?:[?#][^"']*)?["']/g)]
     .map((match) => match[1] ?? "");
-  assert.ok(linked.includes("subagents.css"), "子代理页样式必须由 index.html 显式引用");
+  // styles 已按页面分到子目录：断言「文件名在引用列表里」，不苛求位置
+  assert.ok(linked.some((n) => n.endsWith("subagents.css")), "子代理页样式必须由 index.html 显式引用");
   for (const name of linked) {
     const built = await readFile(join(ROOT, "src", "server", "public", "styles", name), "utf8").catch(() => "");
     assert.ok(built.trim().length > 0, `缺少构建样式产物：${name}`);
   }
   const buildScript = await readFile(join(ROOT, "scripts", "build-client.ts"), "utf8");
-  assert.match(buildScript, /readdir\(STYLE_DIR/);
+  // 样式按目录自动发现（递归收集，支持 base/ chat/ settings/<view>/ 子目录）
+  assert.match(buildScript, /collect\(STYLE_DIR\)|readdir\(STYLE_DIR/);
   assert.match(buildScript, /index\.html 引用了未找到的样式/);
 });
 test("委派卡覆盖运行中与完成态且不拼 HTML", async () => {
@@ -214,7 +216,7 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
   assert.match(events, /u\.contextWindow = ev\.contextWindow/);
   const composer = await readFile(join(CLIENT, "views", "chat", "composer-bar.ts"), "utf8");
   // M4 4.6：容量条派生计算迁往 stores/context-meter.ts（组件只消费）
-  const meter = await readFile(join(CLIENT, "stores", "context-meter.ts"), "utf8");
+  const meter = await readFile(join(CLIENT, "stores", "chat", "context-meter.ts"), "utf8");
   assert.match(meter, /const scale = s\.inputBudget \?\? s\.contextWindow/);
   assert.match(composer, /inputBudget: u\.contextInputBudget/);
   assert.match(composer, /contextInputBudget = cfg\.contextBudget\?\.inputBudgetTokens/);

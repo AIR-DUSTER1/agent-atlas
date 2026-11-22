@@ -270,7 +270,7 @@ test("子代理设置页支持列表、启停、新增编辑删除与继承/固�
   const html = await readClientIndexHtml();
   // M4 4.2：子代理面板迁往 Vue 组件，id/结构契约在组件模板上断言
   const source = await readClientFiles(["views/settings-subagents-vue.vue", "stores/subagents.ts"]);
-  const css = await readFile(new URL("styles/subagents.css", root), "utf8");
+  const css = await readFile(new URL("styles/settings/subagents/subagents.css", root), "utf8");
   for (const id of [
     "subagents-list", "subagents-empty", "subagents-empty-title", "subagents-empty-copy",
     "subagent-add-btn", "subagent-status", "subagent-stat-total", "subagent-stat-enabled",

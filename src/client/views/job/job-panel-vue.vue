@@ -9,7 +9,7 @@
 import { Button, Input } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, watch } from "vue";
-import { JOB_PLATFORMS, useJobStore } from "../../stores/job.js";
+import { JOB_PLATFORMS, useJobStore } from "../../stores/job/job.js";
 import { registerJobOpenHook, registerJobCloseHook } from "./job.js";
 
 const store = useJobStore();

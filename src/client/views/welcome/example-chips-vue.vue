@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
-import { useShellStore } from "../../stores/shell.js";
+import { useShellStore } from "../../stores/welcome/shell.js";
 
 const store = useShellStore();
 

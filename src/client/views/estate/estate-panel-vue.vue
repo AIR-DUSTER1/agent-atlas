@@ -9,7 +9,7 @@
 import { Button, Input } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, ref, watch } from "vue";
-import { useEstateStore } from "../../stores/estate.js";
+import { useEstateStore } from "../../stores/estate/estate.js";
 import { setEstateStatus } from "./estate.js";
 import { safeHref } from "../../modules/format.js";
 import { refreshPluginCards } from "../settings/plugins/settings-plugins.js";

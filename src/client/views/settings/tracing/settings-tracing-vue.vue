@@ -21,7 +21,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { Alert, Button, Checkbox, Input, Select, Switch } from "antdv-next";
-import { useTracingStore } from "../../../stores/tracing.js";
+import { useTracingStore } from "../../../stores/settings/tracing/tracing.js";
 import type { TraceBackend } from "../../../modules/types-api.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 

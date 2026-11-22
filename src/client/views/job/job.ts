@@ -29,12 +29,12 @@ export async function openJob(): Promise<void> {
   void import("./job-panel-vue.js")
     .then((m) => m.mountJobPanelVue())
     .catch(() => {});
-  const { useJobStore } = await import("../../stores/job.js");
+  const { useJobStore } = await import("../../stores/job/job.js");
   useJobStore().jobOpen = true;
 }
 
 export function closeJob(): void {
-  void import("../../stores/job.js")
+  void import("../../stores/job/job.js")
     .then(({ useJobStore }) => { useJobStore().jobOpen = false; })
     .catch(() => {});
 }

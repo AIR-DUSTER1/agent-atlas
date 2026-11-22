@@ -13,7 +13,7 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { useSettingsStore } from "../../stores/settings.js";
+import { useSettingsStore } from "../../stores/settings/settings.js";
 import { showSettingsView, isSettingsPageOpen } from "./settings.js";
 
 const store = useSettingsStore();

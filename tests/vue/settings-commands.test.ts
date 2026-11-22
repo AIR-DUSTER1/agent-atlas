@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import SettingsCommandsVue from "../../src/client/views/settings/commands/settings-commands-vue.vue";
-import { useCommandsStore } from "../../src/client/stores/commands.js";
+import { useCommandsStore } from "../../src/client/stores/settings/commands/commands.js";
 import { uiConfirm } from "../../src/client/ui/dialog.js";
 import type { UserCommandItem } from "../../src/client/composer/menu.js";
 

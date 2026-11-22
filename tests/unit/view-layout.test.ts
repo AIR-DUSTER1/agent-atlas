@@ -158,7 +158,7 @@ test("叶子页面之间不得互相 import，跨页共享须上移到 core/modu
 });
 
 test("设置页分区的目录名与 settings store 的分区 key 一一对应", async () => {
-  const settingsSource = await readFile(join(CLIENT, "stores", "settings.ts"), "utf8");
+  const settingsSource = await readFile(join(CLIENT, "stores", "settings", "settings.ts"), "utf8");
   const keys = [...settingsSource.matchAll(/view:\s*"([a-z-]+)"/g)].map((match) => match[1] as string);
   assert.ok(keys.length >= 10, `settings store 的分区 key 数量异常：${keys.length}`);
   const dirNames = (await entries(SETTINGS_DIR))

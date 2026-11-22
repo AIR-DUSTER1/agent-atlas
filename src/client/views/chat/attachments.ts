@@ -44,7 +44,7 @@ export async function mountAttachChips(): Promise<void> {
 }
 
 export function renderAttachChips(): void {
-  void import("../../stores/attachments.js")
+  void import("../../stores/chat/attachments.js")
     .then(({ useAttachmentsStore }) => useAttachmentsStore().syncFromState())
     .catch(() => {});
 }

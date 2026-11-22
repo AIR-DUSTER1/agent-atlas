@@ -35,7 +35,7 @@ export async function loadExternalAgents(): Promise<void> {
     .then((m) => m.mountExternalCardsVue())
     .catch(() => {});
   try {
-    const { useExternalStore } = await import("../../stores/external.js");
+    const { useExternalStore } = await import("../../stores/external/external.js");
     await useExternalStore().load();
   } catch {
     state.externalAgents = []; // 旧服务进程没有该接口 → 静默降级
@@ -50,7 +50,7 @@ export async function addExternalFlow(): Promise<void> {
   );
   if (typeof url !== "string" || !url.trim()) return;
   try {
-    const { useExternalStore } = await import("../../stores/external.js");
+    const { useExternalStore } = await import("../../stores/external/external.js");
     const store = useExternalStore();
     const { agent, hint } = await store.add(url.trim());
     if (agent.command) {
@@ -81,7 +81,7 @@ export async function completeExternalAgent(agent: ExternalAgent): Promise<void>
   if (typeof cmdLine !== "string" || !cmdLine.trim()) return;
   const parts = cmdLine.trim().split(/\s+/);
   try {
-    const { useExternalStore } = await import("../../stores/external.js");
+    const { useExternalStore } = await import("../../stores/external/external.js");
     await useExternalStore().saveCommand(agent.id, parts[0] ?? "", parts.slice(1));
     await createSessionFn("external", null, null, agent.id);
   } catch (err) {

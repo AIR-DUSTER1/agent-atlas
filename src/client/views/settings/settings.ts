@@ -53,7 +53,7 @@ export function showSettingsView(view: string): void {
   const next = SETTINGS_VIEWS.has(view) ? view : "models";
   state.settingsView = next;
   // 同步 store（Vue 导航据此渲染 active / aria-selected）
-  void import("../../stores/settings.js")
+  void import("../../stores/settings/settings.js")
     .then(({ useSettingsStore }) => { useSettingsStore().show(next); })
     .catch(() => {});
   document.querySelectorAll<HTMLElement>(".settings-view").forEach((panel) => {
@@ -88,7 +88,7 @@ export function showSettingsView(view: string): void {
     void refreshUsers()
       .then((visible) => {
         if (visible) return;
-        void import("../../stores/settings.js").then(({ useSettingsStore }) => {
+        void import("../../stores/settings/settings.js").then(({ useSettingsStore }) => {
           useSettingsStore().setHidden("users", true);
         });
         showSettingsView("models");

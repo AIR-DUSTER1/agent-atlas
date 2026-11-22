@@ -12,7 +12,7 @@
 import { Button, Input, InputNumber, Select, Slider, Switch } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRoutingStore } from "../../../stores/routing.js";
+import { useRoutingStore } from "../../../stores/settings/routing/routing.js";
 import type { RoutingBackendId } from "../../../modules/types.js";
 
 const store = useRoutingStore();

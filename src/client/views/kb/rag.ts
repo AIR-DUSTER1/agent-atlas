@@ -40,14 +40,14 @@ export async function openKb(): Promise<void> {
   void import("./kb-panel-vue.js")
     .then((m) => m.mountKbPanelVue())
     .catch(() => {});
-  const { useRagStore } = await import("../../stores/rag.js");
+  const { useRagStore } = await import("../../stores/kb/rag.js");
   const store = useRagStore();
   await store.load();
   store.kbOpen = true;
 }
 
 export function closeKb(): void {
-  void import("../../stores/rag.js")
+  void import("../../stores/kb/rag.js")
     .then(({ useRagStore }) => { useRagStore().kbOpen = false; })
     .catch(() => {});
 }

@@ -144,7 +144,8 @@ test("右侧 Browser Use 面板、样式与工具卡增强已接线", async () =
   const dockVue = await readFile("src/client/views/browser/browser-dock-vue.vue", "utf8");
   const serverIndex = await readFile("src/server/app.ts", "utf8");
   assert.match(html, /id="browser-dock-mount"/);
-  assert.match(html, /href="\/styles\/browser-use\.css"/);
+  // styles 已按页面分到子目录（styles/browser/browser-use.css）
+  assert.match(html, /href="\/styles\/browser\/browser-use\.css"/);
   assert.match(dockVue, /id="browser-dock"/);
   assert.match(dockVue, /id="browser-dock-screen"/);
   assert.match(dockVue, /id="browser-dock-close"[^>]*aria-label="关闭 Browser Use 浏览器"/);

@@ -12,7 +12,7 @@
  */
 
 async function store() {
-  const { useModelsStore } = await import("../../../stores/models.js");
+  const { useModelsStore } = await import("../../../stores/settings/models/models.js");
   return useModelsStore();
 }
 

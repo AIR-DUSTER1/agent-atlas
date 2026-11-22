@@ -69,4 +69,4 @@ export function openModal(): void { $("modal-mask")?.classList.remove("hidden");
 export function closeModal(): void { $("modal-mask")?.classList.add("hidden"); }
 
 /** 兼容既有 import：示例文案常量已迁到 stores/shell.ts，这里转发。 */
-export { GENERAL_EXAMPLES } from "../../stores/shell.js";
+export { GENERAL_EXAMPLES } from "../../stores/welcome/shell.js";

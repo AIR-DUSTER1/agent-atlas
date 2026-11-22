@@ -502,17 +502,12 @@ test("静态分发：index 引用 module 脚本，分目录产物可达且 MIME 
   assert.doesNotMatch(html, /<script type="importmap">/);
   assert.doesNotMatch(html, /vendor\/[a-z-]+-lib\.js/);
 
-  for (const file of [
-    "/styles/tokens.css", "/styles/reset.css", "/styles/layout.css", "/styles/typography.css",
-    "/styles/chat-messages.css", "/styles/chat-runtime.css", "/styles/chat-tools.css",
-    "/styles/chat-approval.css", "/styles/chat-feedback.css", "/styles/chat-routing.css",
-    "/styles/composer.css", "/styles/modals.css",
-    "/styles/settings-shell.css", "/styles/settings-models.css", "/styles/settings-memories.css",
-    "/styles/settings-skills.css", "/styles/settings-stats.css", "/styles/settings-backup.css",
-    "/styles/settings-models-editor.css", "/styles/settings-stats-v2.css", "/styles/settings-nav.css",
-    "/styles/settings-memories-slot.css", "/styles/settings-routing.css", "/styles/settings-job.css",
-    "/styles/plugins.css", "/styles/responsive.css", "/styles/desktop.css", "/styles/ui.css",
-  ]) {
+  // styles/ 已按页面分到 base/ chat/ settings/<view>/ 等子目录：
+  // 从 index.html 反查真实 href，而不是维护第二份路径清单
+  // （清单式断言在目录重组后会静默失效，只测到"旧的 404"而非"新的 200"）。
+  const styleLinks = [...html.matchAll(/href="(\/styles\/[^"]+\.css)"/g)].map((m) => m[1] as string);
+  assert.ok(styleLinks.length >= 25, `index.html 应引用至少 25 个样式，实际 ${styleLinks.length}`);
+  for (const file of styleLinks) {
     const res = await fetch(srv.base + file);
     assert.equal(res.status, 200, file);
     assert.match(res.headers.get("content-type") ?? "", /text\/css/, file);

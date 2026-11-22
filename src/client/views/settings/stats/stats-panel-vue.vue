@@ -16,7 +16,7 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
-import { useStatsStore } from "../../../stores/stats.js";
+import { useStatsStore } from "../../../stores/settings/stats/stats.js";
 import { fmtPercent, fmtTokens } from "../../../modules/format.js";
 import { CHART_SPECS, destroyStatsCharts, renderCharts } from "./charts.js";
 import type { StatsRange } from "../../../modules/types-api.js";

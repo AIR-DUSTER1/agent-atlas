@@ -35,7 +35,7 @@ test("新建会话：不选择项目和全部项目都落到内部 default", () 
 
 test("侧栏渲染复用统一过滤函数，不选择项目能显示 default 会话", async () => {
   // M4 4.5：过滤发生在 stores/sessions.ts 的 filtered getter
-  const source = await readFile(new URL("../../src/client/stores/sessions.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../src/client/stores/app/sessions.ts", import.meta.url), "utf8");
   assert.match(source, /sessionMatchesProjectView\(state\.projectView, session\.projectId\)/);
   assert.doesNotMatch(source, /state\.projectView === "all" \|\| session\.projectId === state\.projectView/);
 });

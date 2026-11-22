@@ -14,7 +14,7 @@ import { Button, Switch } from "antdv-next";
 import { computed, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { BUILTIN_PLUGINS, pluginTransportMeta, type BuiltinPlugin } from "../../../modules/plugin-registry.js";
-import { usePluginsStore } from "../../../stores/plugins.js";
+import { usePluginsStore } from "../../../stores/settings/plugins/plugins.js";
 import { openPluginManage, pluginStatus } from "./settings-plugins.js";
 import { refreshAgentCards } from "../../welcome/shell.js";
 

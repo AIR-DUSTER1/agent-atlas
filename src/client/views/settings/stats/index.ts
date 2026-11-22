@@ -14,7 +14,7 @@ export function refreshStats(): void {
   void import("./stats-panel-vue.js")
     .then((m) => m.mountStatsVue())
     .catch(() => {});
-  void import("../../../stores/stats.js")
+  void import("../../../stores/settings/stats/stats.js")
     .then(({ useStatsStore }) => { useStatsStore().refreshTick += 1; })
     .catch(() => {});
 }

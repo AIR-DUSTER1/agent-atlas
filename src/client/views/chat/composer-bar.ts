@@ -70,7 +70,7 @@ export function applyConfigState(cfg: AppConfig): void {
   renderComposerBar();
   updateContextBar();
   // M4 4.3：模型管理面板（Vue）随配置刷新（动态 import 保 1:1 静态图干净）
-  void import("../../stores/models.js")
+  void import("../../stores/settings/models/models.js")
     .then(({ useModelsStore }) => useModelsStore().syncConfig(cfg))
     .catch(() => {});
 }
@@ -254,7 +254,7 @@ export function updateContextBar(): void {
     taskActiveMs: u.taskActiveMs ?? 0,
     contextPending: Boolean(u.contextPending),
   };
-  void import("../../stores/context-meter.js")
+  void import("../../stores/chat/context-meter.js")
     .then(({ publishContextMeter }) => publishContextMeter(snapshot))
     .catch(() => {});
 }

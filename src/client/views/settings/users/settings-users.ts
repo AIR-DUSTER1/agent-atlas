@@ -18,7 +18,7 @@ export async function refreshUsers(): Promise<boolean> {
   void import("./settings-users-vue.js")
     .then((m) => m.mountUsersVue())
     .catch(() => {});
-  const { useUsersStore } = await import("../../../stores/users.js");
+  const { useUsersStore } = await import("../../../stores/settings/users/users.js");
   const store = useUsersStore();
   await store.init();
   const isPg = store.mode === "postgres";

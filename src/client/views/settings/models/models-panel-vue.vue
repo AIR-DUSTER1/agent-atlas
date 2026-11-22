@@ -19,7 +19,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { Button, Checkbox, Input, Select } from "antdv-next";
-import { useModelsStore } from "../../../stores/models.js";
+import { useModelsStore } from "../../../stores/settings/models/models.js";
 import {
   activateModel, addModelByName, fetchGatewayModelChips, removeModel, removeProvider,
 } from "./model-actions.js";

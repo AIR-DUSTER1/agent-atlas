@@ -14,7 +14,7 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useBrowserDockStore } from "../../stores/browser-dock.js";
+import { useBrowserDockStore } from "../../stores/browser/browser-dock.js";
 
 const store = useBrowserDockStore();
 const screenReady = ref(false);

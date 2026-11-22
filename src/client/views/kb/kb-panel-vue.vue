@@ -11,7 +11,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Button, Input, InputNumber, Select } from "antdv-next";
-import { useRagStore } from "../../stores/rag.js";
+import { useRagStore } from "../../stores/kb/rag.js";
 import { setKbStatus } from "./rag.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../../ui/dialog.js";
 import { refreshPluginCards } from "../settings/plugins/settings-plugins.js";

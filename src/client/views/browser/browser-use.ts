@@ -13,7 +13,7 @@
 import { api } from "../../core/api.js";
 import { $ } from "../../core/dom.js";
 import { state } from "../../core/state.js";
-import type { BrowserDockSnapshot } from "../../stores/browser-dock.js";
+import type { BrowserDockSnapshot } from "../../stores/browser/browser-dock.js";
 import type { BrowserPageState, ToolPart } from "../../modules/types.js";
 
 const POLL_INTERVAL_MS = 1_200;

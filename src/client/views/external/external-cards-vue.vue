@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
-import { useExternalStore } from "../../stores/external.js";
+import { useExternalStore } from "../../stores/external/external.js";
 import { uiAlert, uiConfirm } from "../../ui/dialog.js";
 import { completeExternalAgent, getCreateSessionFn } from "./external.js";
 

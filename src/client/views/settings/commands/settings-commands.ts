@@ -48,7 +48,7 @@ export async function refreshCommands(): Promise<UserCommandItem[]> {
   void import("./settings-commands-vue.js")
     .then((m) => m.mountCommandsVue())
     .catch(() => {});
-  const { useCommandsStore } = await import("../../../stores/commands.js");
+  const { useCommandsStore } = await import("../../../stores/settings/commands/commands.js");
   const commands = await useCommandsStore().refresh();
   commandsResetHook?.();
   cmdStatus("", "");

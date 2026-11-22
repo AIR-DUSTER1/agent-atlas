@@ -8,7 +8,7 @@
 <script setup lang="ts">
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
-import { useAttachmentsStore, refKey } from "../../stores/attachments.js";
+import { useAttachmentsStore, refKey } from "../../stores/chat/attachments.js";
 import { renderFsSelection } from "./attachments.js";
 
 const store = useAttachmentsStore();

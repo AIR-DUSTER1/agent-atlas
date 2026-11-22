@@ -17,8 +17,8 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
-import { useSessionsStore } from "../../stores/sessions.js";
-import type { SessionTreeNode } from "../../stores/sessions.js";
+import { useSessionsStore } from "../../stores/app/sessions.js";
+import type { SessionTreeNode } from "../../stores/app/sessions.js";
 
 const store = useSessionsStore();
 

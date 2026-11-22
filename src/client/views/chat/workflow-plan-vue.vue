@@ -11,7 +11,7 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useWorkflowPlanStore } from "../../stores/workflow-plan.js";
+import { useWorkflowPlanStore } from "../../stores/chat/workflow-plan.js";
 import type { WorkflowPlanStep, WorkflowStepStatus } from "../../modules/types-api.js";
 
 const STEP_STATUS_LABEL: Record<WorkflowStepStatus, string> = {

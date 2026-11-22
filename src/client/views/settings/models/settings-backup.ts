@@ -17,14 +17,14 @@ export async function refreshBackups(): Promise<void> {
   void import("./settings-backup-vue.js")
     .then((m) => m.mountBackupVue())
     .catch(() => {});
-  const { useBackupStore } = await import("../../../stores/backup.js");
+  const { useBackupStore } = await import("../../../stores/settings/models/backup.js");
   await useBackupStore().refresh();
 }
 
 /** 创建备份（#backup-create-btn）：成功 toast，失败对话框。 */
 export async function createBackup(): Promise<void> {
   try {
-    const { useBackupStore } = await import("../../../stores/backup.js");
+    const { useBackupStore } = await import("../../../stores/settings/models/backup.js");
     const res = await useBackupStore().create();
     toast(res.hint || `备份已创建：${res.name}`, "success");
   } catch (err) {

@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { useContextMeterStore } from "../../stores/context-meter.js";
+import { useContextMeterStore } from "../../stores/chat/context-meter.js";
 
 const store = useContextMeterStore();
 

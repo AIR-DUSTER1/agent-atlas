@@ -13,7 +13,7 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
-import { useTopbarStore } from "../../stores/topbar.js";
+import { useTopbarStore } from "../../stores/app/topbar.js";
 
 const props = withDefaults(defineProps<{ section?: "hero" | "cards" }>(), { section: "hero" });
 

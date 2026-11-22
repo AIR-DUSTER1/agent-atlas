@@ -43,7 +43,7 @@ describe("顶栏会话头", () => {
   it("会话态显示标题、项目面包屑与示例徽标", async () => {
     mount(TopbarVue, { attachTo: document.body, global: { plugins: [pinia] } });
     await flushPromises();
-    const topbar = await import("../../src/client/stores/topbar.js").then((m) => m.useTopbarStore());
+    const topbar = await import("../../src/client/stores/app/topbar.js").then((m) => m.useTopbarStore());
     topbar.applySession(makeSession());
     await flushPromises();
     expect(document.getElementById("session-title")?.textContent).toBe("会话甲");
@@ -55,7 +55,7 @@ describe("顶栏会话头", () => {
 
   it("未归属项目的会话面包屑显示「未归属项目」", async () => {
     mount(TopbarVue, { attachTo: document.body, global: { plugins: [pinia] } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applySession(makeSession({ projectId: "missing" }));
     await flushPromises();
     expect(document.getElementById("breadcrumb-project")?.textContent).toBe("未归属项目");
@@ -64,7 +64,7 @@ describe("顶栏会话头", () => {
   it("外部 Agent 会话徽标显示「外部 · 名称」", async () => {
     state.externalAgents = [{ id: "ext-1", name: "外部助手" }] as never;
     mount(TopbarVue, { attachTo: document.body, global: { plugins: [pinia] } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applySession(makeSession({ kind: "external", agentId: "ext-1" }));
     await flushPromises();
     expect(document.getElementById("demo-badge")?.textContent).toContain("外部助手");
@@ -74,7 +74,7 @@ describe("顶栏会话头", () => {
 describe("欢迎页标题区", () => {
   it("默认欢迎态显示产品名与副标题", async () => {
     mount(WelcomeHeadVue, { attachTo: document.body, global: { plugins: [pinia] }, props: { section: "hero" } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applyWelcome("default");
     await flushPromises();
     expect(document.getElementById("welcome-title")?.textContent).toBe("agentatlas");
@@ -84,7 +84,7 @@ describe("欢迎页标题区", () => {
 
   it("无项目 Agent 选择页：标题切换、示例标签隐藏、副标题含项目提示", async () => {
     mount(WelcomeHeadVue, { attachTo: document.body, global: { plugins: [pinia] }, props: { section: "hero" } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applyWelcome("agent-picker");
     await flushPromises();
     expect(document.getElementById("welcome-title")?.textContent).toBe("选择一个 Agent 开始新会话");
@@ -101,7 +101,7 @@ describe("欢迎页标题区", () => {
 
   it("插件停用后 Agent 选择页副标题不再提找房 Agent", async () => {
     mount(WelcomeHeadVue, { attachTo: document.body, global: { plugins: [pinia] }, props: { section: "hero" } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applyWelcome("agent-picker");
     await flushPromises();
     expect(document.getElementById("welcome-subtitle")?.textContent).toContain("通用 Agent 或租房 / 房产 Agent");
@@ -115,7 +115,7 @@ describe("欢迎页标题区", () => {
 describe("权限 chip", () => {
   it("求职会话（job）必须有权限入口并显示「权限·审批」", async () => {
     mount(PermChipVue, { attachTo: document.body, global: { plugins: [pinia] } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applySession(makeSession({ kind: "job", permissionMode: "approve" }));
     await flushPromises();
     expect(document.getElementById("perm-group")?.classList.contains("hidden")).toBe(false);
@@ -125,7 +125,7 @@ describe("权限 chip", () => {
 
   it("demo 会话与历史失效会话没有权限入口", async () => {
     mount(PermChipVue, { attachTo: document.body, global: { plugins: [pinia] } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applyWelcome("default");
     await flushPromises();
     expect(document.getElementById("perm-group")?.classList.contains("hidden")).toBe(true);
@@ -137,7 +137,7 @@ describe("权限 chip", () => {
 
   it("模式切换后文案跟随（审批 → 只读）", async () => {
     mount(PermChipVue, { attachTo: document.body, global: { plugins: [pinia] } });
-    const topbar = (await import("../../src/client/stores/topbar.js")).useTopbarStore();
+    const topbar = (await import("../../src/client/stores/app/topbar.js")).useTopbarStore();
     topbar.applySession(makeSession({ kind: "agent", permissionMode: "approve" }));
     await flushPromises();
     expect(document.querySelector("#cm-perm .cm-text")?.textContent).toBe("权限·审批");

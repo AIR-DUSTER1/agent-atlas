@@ -16,7 +16,7 @@
 import { computed, ref } from "vue";
 import { Button, Input, Select } from "antdv-next";
 import { postJson } from "../../../core/api.js";
-import { useUsersStore, type ManagedUser } from "../../../stores/users.js";
+import { useUsersStore, type ManagedUser } from "../../../stores/settings/users/users.js";
 import { uiConfirm, uiAlert } from "../../../ui/dialog.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 

@@ -59,7 +59,7 @@ test("表单控件具有可访问名称，消息流与状态点使用 live regio
 });
 
 test("全局焦点环与 reduced-motion 由设计 token 提供", async () => {
-  const css = await read("styles/tokens.css");
+  const css = await read("styles/base/tokens.css");
   assert.match(css, /:where\(button, a, input, textarea, select, \[tabindex\]\):focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /outline: 2px solid var\(--border-focus\)/);

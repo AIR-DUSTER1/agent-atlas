@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import SettingsTracingVue from "../../src/client/views/settings/tracing/settings-tracing-vue.vue";
-import { useTracingStore } from "../../src/client/stores/tracing.js";
+import { useTracingStore } from "../../src/client/stores/settings/tracing/tracing.js";
 import type { TraceSettingsSnapshot } from "../../src/client/modules/types-api.js";
 
 const SNAPSHOT: TraceSettingsSnapshot = {

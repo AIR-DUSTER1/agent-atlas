@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { Button, Empty, Tag } from "antdv-next";
-import { useBackupStore } from "../../../stores/backup.js";
+import { useBackupStore } from "../../../stores/settings/models/backup.js";
 import { uiAlert, uiConfirm } from "../../../ui/dialog.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 

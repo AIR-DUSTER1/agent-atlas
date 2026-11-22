@@ -15,7 +15,7 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useProjectsStore } from "../../stores/projects.js";
+import { useProjectsStore } from "../../stores/app/projects.js";
 
 /** legacy 桥注册的命令面（避免组件静态依赖 views/projects.ts）。 */
 export interface ProjectSwitcherCommands {

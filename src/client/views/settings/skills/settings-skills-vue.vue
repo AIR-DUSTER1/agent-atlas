@@ -12,7 +12,7 @@
 import { Button, Input, Switch, Upload } from "antdv-next";
 import { computed, onMounted, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
-import { useSkillsStore, type SkillFilter, type SkillItem } from "../../../stores/skills.js";
+import { useSkillsStore, type SkillFilter, type SkillItem } from "../../../stores/settings/skills/skills.js";
 import { showSkillStatus } from "./settings-skills.js";
 import { uiConfirm } from "../../../ui/dialog.js";
 

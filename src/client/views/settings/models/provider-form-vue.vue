@@ -9,7 +9,7 @@
 import { Button, Input, Select } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
-import { useModelsStore } from "../../../stores/models.js";
+import { useModelsStore } from "../../../stores/settings/models/models.js";
 import { addPendingModelByName, fetchGatewayModelChips, saveProvider } from "./model-actions.js";
 import { setProviderModalStatus } from "./model-status.js";
 

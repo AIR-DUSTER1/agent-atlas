@@ -28,20 +28,30 @@ const STYLE_DIR = join(SRC, "styles");
 const COMPOSED_ENTRY = join(SRC, "index.vite.html");
 
 /**
- * 样式按目录自动发现，禁止再维护第二份手写白名单。
+ * 样式按目录自动发现（递归），禁止再维护第二份手写白名单。
  * 历史上 subagents.css 因为漏登记而 404，页面虽然能加载，交互却退化成裸文本。
+ *
+ * M6：styles/ 已按页面分到 base/ chat/ settings/<view>/ 等子目录，
+ * 这里必须递归收集，并且**保留相对子路径**（index.html 的 href 已带子目录）。
  */
 async function copyStyles(indexHtml: string): Promise<void> {
-  const entries = await readdir(STYLE_DIR, { withFileTypes: true });
-  const names = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".css"))
-    .map((entry) => entry.name)
-    .sort();
+  /** 递归收集 styles/ 下的 CSS，返回相对 styles/ 的路径（含子目录）。 */
+  const collect = async (dir: string, prefix = ""): Promise<string[]> => {
+    const out: string[] = [];
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) out.push(...await collect(join(dir, entry.name), rel));
+      else if (entry.isFile() && entry.name.endsWith(".css")) out.push(rel);
+    }
+    return out;
+  };
+  const names = (await collect(STYLE_DIR)).sort();
   if (!names.length) throw new Error("styles/ 下没有可发布的 CSS 文件");
 
-  await mkdir(join(OUT, "styles"), { recursive: true });
   for (const name of names) {
-    await copyFile(join(STYLE_DIR, name), join(OUT, "styles", name));
+    const target = join(OUT, "styles", name);
+    await mkdir(dirname(target), { recursive: true });
+    await copyFile(join(STYLE_DIR, name), target);
   }
 
   const linked = [...indexHtml.matchAll(/href=["']\/styles\/([^"'?#]+\.css)(?:[?#][^"']*)?["']/g)]
@@ -62,7 +72,16 @@ async function main(): Promise<void> {
   const buildInfo = await createBuildInfo({ root: ROOT });
   const indexHtml = injectBuildInfoHtml(await readFile(join(SRC, "index.html"), "utf8"), buildInfo);
   assertCspHashHtml(indexHtml);
-  await writeFile(COMPOSED_ENTRY, indexHtml, "utf8");
+
+  // ⚠ styles/ 的 <link> 不能被 Vite 接管。
+  // styles/ 按页面分到 base/ chat/ settings/<view>/ 子目录后，Vite 能解析到这些
+  // 相对路径，于是把 31 个 CSS 打包成单个 assets/index.css，并改写 index.html 的
+  // <link>。那样既丢失了「每个 CSS 由入口显式加载一次」的契约，也让
+  // styles/ 的独立分发失效（它们本来由 copyStyles 单独拷贝）。
+  // 做法：写给 Vite 的副本里把 href 换成不会被解析的占位符，构建后再还原。
+  const STYLE_TOKEN = "@@STYLE_HREF@@";
+  const viteEntryHtml = indexHtml.replace(/href="(\/styles\/[^"]+\.css)"/g, `href="${STYLE_TOKEN}$1"`);
+  await writeFile(COMPOSED_ENTRY, viteEntryHtml, "utf8");
 
   try {
     await viteBuild({
@@ -79,6 +98,12 @@ async function main(): Promise<void> {
   // vite 以 input 文件名输出（index.vite.html）→ 重命名为 index.html（vite 版本，
   // 脚本引用已改写为 ./assets/app.js —— 不能再用 composed 文本覆盖回去）
   await rename(join(OUT, "index.vite.html"), join(OUT, "index.html"));
+
+  // 还原被占位符替换的样式 href（Vite 不会动它们，原样还原即可）
+  const builtHtml = await readFile(join(OUT, "index.html"), "utf8");
+  if (builtHtml.includes(STYLE_TOKEN)) {
+    await writeFile(join(OUT, "index.html"), builtHtml.split(STYLE_TOKEN).join(""), "utf8");
+  }
 
   // M4 4.6：1:1 过渡树与 vendor 自包含库都已退役。
   //  - 1:1 树：e2e 不再 import("/render/parts.js") 等内部模块（4.6-A 改为真实 UI 驱动）；

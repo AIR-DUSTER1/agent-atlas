@@ -44,16 +44,19 @@ function isInside(root: string, target: string): boolean {
 
 export async function serveStatic(pathname: string, res: ServerResponse): Promise<boolean> {
   const raw = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  // 单层文件，或「已登记子目录/单层文件」两种形态
+  // 形态一：根目录单文件（index.html / favicon 等）
   const single = raw.match(/^(\w[\w.-]*)$/);
-  const nested = raw.match(/^([a-z]+)\/(\w[\w.-]*)$/);
+  // 形态二：「白名单首段目录」下的任意深度路径。
+  // styles/ 按页面分到 base/ chat/ settings/<view>/ 等子目录后是两层相对路径，
+  // 这里必须支持多级（安全边界仍由首段白名单 + realpath 越界校验兜住）。
+  const nested = raw.match(/^([a-z][a-z0-9-]*)\/((?:[\w.-]+\/)*[\w.-]+)$/);
   if (!single && !nested) return false;
 
   let rel: string;
   if (nested) {
-    const [, dir, file] = nested;
-    if (!ALLOWED_DIRS.has(dir)) return false;
-    rel = join(dir, file ?? "");
+    const [, dir, rest] = nested;
+    if (!ALLOWED_DIRS.has(dir as string)) return false;
+    rel = join(dir as string, rest as string);
   } else {
     rel = single?.[1] ?? "";
   }

@@ -13,8 +13,8 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
-import { useShellStore } from "../../stores/shell.js";
-import type { AgentCardModel } from "../../stores/shell.js";
+import { useShellStore } from "../../stores/welcome/shell.js";
+import type { AgentCardModel } from "../../stores/welcome/shell.js";
 import type { SessionKind } from "../../modules/types.js";
 
 const store = useShellStore();

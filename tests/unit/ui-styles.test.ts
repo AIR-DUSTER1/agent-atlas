@@ -13,14 +13,27 @@ import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const CLIENT = join(fileURLToPath(new URL("../../src/client/", import.meta.url)));
 
+/** 递归收集 styles/ 下的 CSS 相对路径（styles 已按页面分到子目录）。 */
+async function collectCss(dir: string, prefix = ""): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...await collectCss(join(dir, entry.name), rel));
+    else if (entry.isFile() && entry.name.endsWith(".css")) out.push(rel);
+  }
+  return out;
+}
+
 test("index 样式全部位于 styles 且构建文件存在", async () => {
   const html = await readClientIndexHtml();
-  const links = [...html.matchAll(/<link rel="stylesheet" href="\/styles\/([a-z0-9-]+\.css)"/g)].map((match) => match[1] ?? "");
+  const links = [...html.matchAll(/<link rel="stylesheet" href="\/styles\/([a-z0-9/-]+\.css)"/g)].map((match) => match[1] ?? "");
   assert.ok(links.length >= 10);
-  assert.deepEqual(links.slice(0, 2), ["tokens.css", "reset.css"]);
-  assert.equal(links.at(-1), "ui.css");
-  const actual = (await readdir(join(CLIENT, "styles"))).filter((name) => name.endsWith(".css")).sort();
-  assert.deepEqual([...new Set(links)].sort(), actual);
+  // 层叠顺序契约：tokens 最先、ui 最后（分类后仍在同一顺序链里）
+  assert.ok(links[0]?.endsWith("tokens.css"), `首个样式应为 tokens.css，实际 ${links[0]}`);
+  assert.ok(links[1]?.endsWith("reset.css"), `第二个样式应为 reset.css，实际 ${links[1]}`);
+  assert.ok(links.at(-1)?.endsWith("ui.css"), `最后一个样式应为 ui.css，实际 ${links.at(-1)}`);
+  const actual = (await collectCss(join(CLIENT, "styles"))).sort();
+  assert.deepEqual([...new Set(links)].sort(), actual, "每个 CSS 必须且只能由入口引用一次");
   assert.doesNotMatch(html, /href="\/style\.css"/);
 });
 
@@ -38,8 +51,7 @@ test("拆分后的 CSS 花括号平衡且无 @import 隐式依赖", async () => 
 test("CSS 变量要么在样式里定义，要么由运行时内联注入", async () => {
   const dir = join(CLIENT, "styles");
   const css = (await Promise.all(
-    (await readdir(dir)).filter((name) => name.endsWith(".css"))
-      .map((name) => readFile(join(dir, name), "utf8")),
+    (await collectCss(dir)).map((rel) => readFile(join(dir, rel), "utf8")),
   )).join("\n");
   const defined = new Set([...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1] ?? ""));
   const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1] ?? ""));
@@ -50,7 +62,7 @@ test("CSS 变量要么在样式里定义，要么由运行时内联注入", asyn
 });
 
 test("配置表单公共组件共享高度、焦点环与占位样式", async () => {
-  const css = await readFile(join(CLIENT, "styles", "ui.css"), "utf8");
+  const css = await readFile(join(CLIENT, "styles", "base", "ui.css"), "utf8");
   assert.match(css, /配置表单公共组件：ui\/config-control\.ts/);
   assert.match(css, /\.ui-config-control\s*\{\s*min-height:\s*38px/s);
   assert.match(css, /\.ui-config-textarea\s*\{[^}]*resize:\s*vertical/s);
@@ -58,27 +70,27 @@ test("配置表单公共组件共享高度、焦点环与占位样式", async ()
   assert.match(css, /\.ui-config-control::placeholder[\s\S]*?color:\s*var\(--text-3\)/s);
 });
 test("房产弹窗操作按钮统一高度并对齐，状态独占下一行", async () => {
-  const css = await readFile(join(CLIENT, "styles", "plugins.css"), "utf8");
+  const css = await readFile(join(CLIENT, "styles", "settings", "plugins", "plugins.css"), "utf8");
   assert.match(css, /#estate-modal \.kb-actions[^}]*align-items:\s*stretch[^}]*flex-wrap:\s*wrap/s);
   assert.match(css, /#estate-modal \.kb-actions > button[^}]*min-height:\s*36px[^}]*margin-top:\s*0/s);
   assert.match(css, /#estate-modal \.kb-actions > \.settings-status[^}]*flex:\s*1 1 100%/s);
 });
 
 test("知识库操作按钮统一高度并对齐，避免测试连接被默认上边距推偏", async () => {
-  const css = await readFile(join(CLIENT, "styles", "plugins.css"), "utf8");
+  const css = await readFile(join(CLIENT, "styles", "settings", "plugins", "plugins.css"), "utf8");
   assert.match(css, /\.kb-actions > button[^}]*display:\s*inline-flex[^}]*min-height:\s*36px[^}]*margin-top:\s*0/s);
   assert.match(css, /\.kb-actions > button[^}]*box-sizing:\s*border-box/s);
 });
 
 test("求职登录提示使用高对比警示底色，避免黄底灰字看不清", async () => {
-  const css = await readFile(join(CLIENT, "styles", "settings-job.css"), "utf8");
+  const css = await readFile(join(CLIENT, "styles", "settings", "job", "settings-job.css"), "utf8");
   assert.match(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--warning-bg\)[^}]*color:\s*var\(--content-1\)[^}]*font-size:\s*var\(--font-md\)/s);
   assert.doesNotMatch(css, /\.job-fix-hint\s*\{[^}]*background:\s*var\(--amber-soft\)/s);
 });
 
 test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
   const [css, estate] = await Promise.all([
-    readFile(join(CLIENT, "styles", "chat-tools.css"), "utf8"),
+    readFile(join(CLIENT, "styles", "chat", "chat-tools.css"), "utf8"),
     readFile(join(CLIENT, "views", "estate", "estate.ts"), "utf8"),
   ]);
   assert.match(css, /\.tool-card\.needs-approval,[\s\S]*?\.tool-card\.needs-action\s*\{[^}]*border-left-color:\s*var\(--amber\)/s);

@@ -14,7 +14,7 @@
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
-import { useTopbarStore } from "../../stores/topbar.js";
+import { useTopbarStore } from "../../stores/app/topbar.js";
 
 const store = useTopbarStore();
 const visible = computed(() => store.permVisible);

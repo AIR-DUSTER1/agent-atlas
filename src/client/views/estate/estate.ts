@@ -98,21 +98,21 @@ export async function openEstate(): Promise<void> {
   void import("./estate-panel-vue.js")
     .then((m) => m.mountEstatePanelVue())
     .catch(() => {});
-  const { useEstateStore } = await import("../../stores/estate.js");
+  const { useEstateStore } = await import("../../stores/estate/estate.js");
   const store = useEstateStore();
   await store.load();
   store.estateOpen = true;
 }
 
 export function closeEstate(): void {
-  void import("../../stores/estate.js")
+  void import("../../stores/estate/estate.js")
     .then(({ useEstateStore }) => { useEstateStore().estateOpen = false; })
     .catch(() => {});
 }
 
 /** 供 main.ts 的「检测」按钮复用面板刷新（面板数据经 store 响应式更新）。 */
 export async function renderEstatePanelForUi(): Promise<void> {
-  const { useEstateStore } = await import("../../stores/estate.js");
+  const { useEstateStore } = await import("../../stores/estate/estate.js");
   await useEstateStore().load();
 }
 

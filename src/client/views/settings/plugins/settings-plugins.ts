@@ -73,7 +73,7 @@ export function openPluginManage(plugin: BuiltinPlugin): void {
 
 /** 首次初始化只需要启停状态（main 启动时调用一次）。 */
 export async function loadPluginState(): Promise<void> {
-  const { usePluginsStore } = await import("../../../stores/plugins.js");
+  const { usePluginsStore } = await import("../../../stores/settings/plugins/plugins.js");
   await usePluginsStore().loadEnabled();
 }
 
@@ -84,13 +84,13 @@ export async function refreshPluginPanel(): Promise<void> {
   void import("./settings-plugins-vue.js")
     .then((m) => m.mountPluginsVue())
     .catch(() => {});
-  const { usePluginsStore } = await import("../../../stores/plugins.js");
+  const { usePluginsStore } = await import("../../../stores/settings/plugins/plugins.js");
   await usePluginsStore().refreshAll();
 }
 
 /** legacy 侧（rag / estate 配置流）改写状态后刷新插件卡片：同步回 store，Vue 卡片自动重渲染。 */
 export function refreshPluginCards(): void {
-  void import("../../../stores/plugins.js")
+  void import("../../../stores/settings/plugins/plugins.js")
     .then(({ usePluginsStore }) => usePluginsStore().syncFromLegacyState())
     .catch(() => {});
 }

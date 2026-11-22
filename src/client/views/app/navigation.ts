@@ -31,7 +31,7 @@ export type WelcomeMode = "default" | "agent-picker";
 
 /** 顶部与欢迎页文案统一经 store 发布（core state 非响应式，靠 window 通知）。 */
 function publishTopbar(action: "welcome" | "session" | "plugin" | "perm", payload?: unknown): void {
-  void import("../../stores/topbar.js")
+  void import("../../stores/app/topbar.js")
     .then(({ useTopbarStore, publishTopbar: publish }) => {
       const store = useTopbarStore();
       if (action === "welcome") store.applyWelcome(payload as WelcomeMode);

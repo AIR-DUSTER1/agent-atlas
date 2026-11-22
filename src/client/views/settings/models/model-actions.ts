@@ -31,7 +31,7 @@ interface ProviderFormValues {
 
 /** store 经动态 import 进入：model-actions 在 1:1 过渡树链上（composer-bar 引用），静态图不得出现 pinia。 */
 async function store() {
-  const { useModelsStore } = await import("../../../stores/models.js");
+  const { useModelsStore } = await import("../../../stores/settings/models/models.js");
   return useModelsStore();
 }
 

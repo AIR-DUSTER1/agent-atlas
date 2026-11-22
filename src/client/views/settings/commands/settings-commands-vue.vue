@@ -20,7 +20,7 @@ import { computed, nextTick, onUnmounted, reactive, ref } from "vue";
 import { onMounted } from "vue";
 import { Button, Input } from "antdv-next";
 import type { UserCommandItem } from "../../../composer/menu.js";
-import { useCommandsStore, type CommandPayload } from "../../../stores/commands.js";
+import { useCommandsStore, type CommandPayload } from "../../../stores/settings/commands/commands.js";
 import { cmdStatus, registerCommandsReset } from "./settings-commands.js";
 import { uiConfirm } from "../../../ui/dialog.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";

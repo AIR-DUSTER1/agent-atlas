@@ -13,7 +13,7 @@
 import { Button, Input, Switch, Upload } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { useMcpStore, type McpServerStatus } from "../../../stores/mcp.js";
+import { useMcpStore, type McpServerStatus } from "../../../stores/settings/mcp/mcp.js";
 import { showMcpStatus, registerMcpEditorOpenHook, registerMcpCloseHook } from "./settings-mcp.js";
 import { uiConfirm } from "../../../ui/dialog.js";
 import {

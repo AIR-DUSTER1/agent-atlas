@@ -15,7 +15,7 @@ import { Button, Checkbox, Input, Select, Switch } from "antdv-next";
 import { computed, onUnmounted, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { onMounted } from "vue";
-import { useSubagentsStore, type SubagentFilter, type SubagentSavePayload } from "../../../stores/subagents.js";
+import { useSubagentsStore, type SubagentFilter, type SubagentSavePayload } from "../../../stores/settings/subagents/subagents.js";
 import { registerSubagentEditorOpenHook } from "./settings-subagents.js";
 import type { SubagentEntry, SubagentRouting } from "../../../modules/types.js";
 import { uiConfirm } from "../../../ui/dialog.js";

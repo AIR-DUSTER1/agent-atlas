@@ -13,7 +13,7 @@
 import { Button, Checkbox, Input, InputNumber, Select, Upload } from "antdv-next";
 import { computed, onMounted, reactive, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
-import { useMemoriesStore, type MemoryProfile } from "../../../stores/memories.js";
+import { useMemoriesStore, type MemoryProfile } from "../../../stores/settings/memories/memories.js";
 import type { MemoryEntry, MemorySlotConfig } from "../../../modules/types.js";
 import { memStatus } from "./settings-memories.js";
 import { authFetch } from "../../../core/api.js";

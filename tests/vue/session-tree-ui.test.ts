@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import SessionTreeVue from "../../src/client/views/app/session-tree-vue.vue";
-import { useSessionsStore } from "../../src/client/stores/sessions.js";
+import { useSessionsStore } from "../../src/client/stores/app/sessions.js";
 import { state } from "../../src/client/core/state.js";
 import type { ProjectEntry, Session } from "../../src/client/modules/types.js";
 

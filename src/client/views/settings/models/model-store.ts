@@ -9,6 +9,6 @@
 
 /** openSettings 深链：菜单「编辑」进来时高亮定位供应商（面板挂载后消费）。 */
 export async function setSettingsFocus(id: string | null): Promise<void> {
-  const { useModelsStore } = await import("../../../stores/models.js");
+  const { useModelsStore } = await import("../../../stores/settings/models/models.js");
   useModelsStore().setSettingsFocus(id);
 }
