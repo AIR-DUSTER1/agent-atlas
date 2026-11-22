@@ -282,7 +282,7 @@ export const houseLookupTool = tool(
       }
       const r = await houseInfo(mode === "rent" ? "rent" : "buy", "detail", city, houseId);
       if (!r.ok) return finalize(r);
-      return JSON.stringify(normalizeEstateDetail(r.data, houseId.trim(), city.trim()));
+      return JSON.stringify(normalizeEstateDetail(r.data, houseId.trim(), city.trim(), mode === "buy" ? "buy" : "rent"));
     }
     if (action === "resolve") {
       if (!query?.trim()) return badArgs("resolve 需要 query（待消歧文本）");

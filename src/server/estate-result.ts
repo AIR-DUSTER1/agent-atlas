@@ -271,7 +271,7 @@ export function extractEstateLocation(data: unknown, city: string): EstateLocati
   };
 }
 
-export function normalizeEstateDetail(data: unknown, houseId: string, city: string): Record<string, unknown> {
+export function normalizeEstateDetail(data: unknown, houseId: string, city: string, mode: "rent" | "buy" = "rent"): Record<string, unknown> {
   const location = extractEstateLocation(data, city);
   const images = extractEstateImageUrls(data);
   const vr = extractEstateVrUrl(data);
@@ -279,6 +279,8 @@ export function normalizeEstateDetail(data: unknown, houseId: string, city: stri
     action: "detail",
     houseId,
     city,
+    // 租买方向决定前端详情页链接走 /zufang/ 还是 /ershoufang/，必须随结果下发。
+    mode,
     ...(location ? { location } : {}),
     ...(images.length ? { images } : {}),
     ...(vr ? { vr } : {}),

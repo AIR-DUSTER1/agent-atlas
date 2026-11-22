@@ -571,6 +571,11 @@ html[data-theme="light"] .pf-select { background: var(--bg-input); }
 .conclusion-vr-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 4px 9px; border: 1px solid var(--green); border-radius: 999px; color: var(--green-soft); font-size: 11.5px; font-weight: 650; text-decoration: none; background: color-mix(in srgb, var(--green) 9%, transparent); }
 .conclusion-vr-link:hover { color: var(--text); background: color-mix(in srgb, var(--green) 18%, transparent); }
 .conclusion-vr-pending { display: inline-flex; align-items: center; margin-top: 8px; padding: 4px 9px; border: 1px dashed var(--border); border-radius: 999px; color: var(--text-3); font-size: 11px; line-height: 1.35; background: var(--tag-bg); }
+/* 「在贝壳查看该房源」：有 VR 标记但素材接口没给全景地址时的替代出口。
+   刻意用中性色而不是 VR 的绿色 —— 它跳的是房源详情页，不是全景入口，
+   绿色会被误读成「点这里看 VR」。贝壳网页端强制登录，跳过去可能要登录。 */
+.conclusion-listing-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 4px 9px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-2); font-size: 11.5px; font-weight: 600; text-decoration: none; background: var(--tag-bg); }
+.conclusion-listing-link:hover { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .conclusion-export-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--green) 5%, var(--bg-elev)); }
 .conclusion-export-link { display: inline-flex; align-items: center; gap: 9px; padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--green) 45%, var(--border)); border-radius: 9px; color: var(--text); text-decoration: none; background: var(--bg-elev); }
 .conclusion-export-link:hover { border-color: var(--green); background: color-mix(in srgb, var(--green) 8%, var(--bg-elev)); }

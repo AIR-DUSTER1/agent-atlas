@@ -56,6 +56,10 @@ export interface ConclusionProperty {
   images: ConclusionImage[];
   location?: ConclusionPoint;
   vrUrl?: string;
+  /** 城市中文名（来自 detail payload）；用于拼详情页链接，未收录城市时不生成。 */
+  city?: string;
+  /** 租 / 买：决定详情页是 /zufang/ 还是 /ershoufang/。缺省按租房处理。 */
+  listingKind?: "rent" | "buy";
 }
 
 export interface ConclusionExport {
@@ -422,11 +426,14 @@ function mergeProperty(
     rows.set(houseId, row);
     order.push(houseId);
   }
-  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address", "vrUrl"] as const) {
+  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address", "vrUrl", "city"] as const) {
     const value = text(patch[key]);
     if (value) row[key] = value;
   }
   if (typeof patch.hasVr === "boolean") row.hasVr = patch.hasVr;
+  // 租买方向决定详情页路径（/zufang/ 还是 /ershoufang/），不进白名单会被丢掉，
+  // 导致「在贝壳查看该房源」永远拼不出来。
+  if (patch.listingKind) row.listingKind = patch.listingKind;
   if (patch.location) row.location = patch.location;
 }
 
@@ -502,10 +509,16 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
     if (action === "search") {
       const listings = parseListingObjects(payload.listings);
       const parsed = listings.length ? listings : parseSearchRaw(payload.data);
+      // search payload 自带 city 与 mode：结论表里多数房源只有 search 记录，
+      // 不在这里带上就会因为缺城市而拼不出详情页链接。
+      const searchCity = text(payload.city);
+      const searchMode = text(payload.mode);
       for (const item of parsed) {
         mergeProperty(propertyRows, propertyOrder, item.houseId, {
           ...item,
           title: text(item.title) || propertyTitle(text(item.community), text(item.layout), text(item.area)),
+          ...(searchCity ? { city: searchCity } : {}),
+          ...(searchMode ? { listingKind: searchMode === "buy" ? "buy" as const : "rent" as const } : {}),
         });
       }
       continue;
@@ -528,10 +541,15 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
       if (houseId) {
         examinedHouseIds.add(houseId);
         const vrUrl = safeVrUrl(payload.vr) || vrUrlFrom(payload);
+        const city = text(payload.city);
+        const mode = text(payload.mode);
         mergeProperty(propertyRows, propertyOrder, houseId, {
           ...factsFromDetail(payload.data),
           ...(vrUrl ? { vrUrl } : {}),
           ...(point ? { location: point, address: point.address } : {}),
+          // city + 租买方向用于「在贝壳查看该房源」链接；两者缺一就不拼链接。
+          ...(city ? { city } : {}),
+          ...(mode ? { listingKind: mode === "buy" ? "buy" as const : "rent" as const } : {}),
         });
       }
       const detailImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);
