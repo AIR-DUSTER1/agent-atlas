@@ -132,6 +132,32 @@ test("有 VR 亮点但无真实链接时不拼旧模板入口", () => {
   assert.equal(rows[0]?.vr, undefined);
 });
 
+test("裸「全景」不算有 VR：普通房源描述不得被标成有 VR 标记", () => {
+  // 回归：VR_POSITIVE_RE 曾把裸「全景」算作正向信号，房源文案里
+  // 「小区实景全景拍摄」「楼栋全景展示」会让普通房源全被标成
+  // 「有 VR 标记 · 专属入口未返回」。全景必须与看房/链接/漫游等 VR 语境共现。
+  const plain = ["小区实景全景拍摄于 2023 年", "楼栋全景展示", "周边全景：地铁/商圈/学校"];
+  for (const [index, text] of plain.entries()) {
+    const raw = `<10010${index}>` + JSON.stringify({ 摘要信息: {
+      户型信息: "2室1厅，出租面积88㎡",
+      房源亮点: text,
+      租赁价格: "3000元/月",
+    } }) + `</10010${index}>`;
+    const rows = extractEstateSearchListings(raw);
+    assert.equal(rows[0]?.hasVr, false, `「${text}」不应判定为有 VR`);
+    assert.equal(rows[0]?.vr, undefined);
+  }
+  // 真阳性不能丢：VR 语境下的全景仍然算
+  for (const [index, text] of ["全景看房", "VR看房", "有VR"].entries()) {
+    const raw = `<10020${index}>` + JSON.stringify({ 摘要信息: {
+      户型信息: "2室1厅，出租面积88㎡",
+      房源亮点: text,
+      租赁价格: "3000元/月",
+    } }) + `</10020${index}>`;
+    assert.equal(extractEstateSearchListings(raw)[0]?.hasVr, true, `「${text}」应判定为有 VR`);
+  }
+});
+
 test("VR 提取只接受 HTTPS 官方真实域名，拒绝旧 houseid 模板", () => {
   const nested = JSON.stringify({ 房源资料: { VR链接: { pcUrl: "//realsee.com/vr/tour-10002" } } });
   assert.equal(extractEstateVrUrl(nested), "https://realsee.com/vr/tour-10002");
@@ -156,5 +182,27 @@ test("精确坐标不会触发二次 geocode，单点地图保留 marker", async
     assert.equal(map.geoMissing.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("服务端与前端两份 VR 正向正则必须一致（禁止分裂出两套判定）", async () => {
+  // 同一个「有 VR」判断在 server 归一和 client 渲染各有一份实现（前者决定
+  // 工具结果里的 hasVr，后者决定结论表是否显示「有 VR 标记」）。两份口径一旦
+  // 分叉，就会出现「服务端说有、前端说没有」或反之的鬼影。这里直接比对正则源文。
+  const { readFile } = await import("node:fs/promises");
+  const pick = (source: string): string => {
+    const match = source.match(/VR_POSITIVE_RE = (\/.*?\/i);/s);
+    assert.ok(match?.[1], "未找到 VR_POSITIVE_RE 定义");
+    return match[1];
+  };
+  const server = pick(await readFile(new URL("../../src/server/estate-result.ts", import.meta.url), "utf8"));
+  const client = pick(await readFile(new URL("../../src/client/modules/conclusion-media.ts", import.meta.url), "utf8"));
+  assert.equal(client, server, "两份 VR 正向正则必须逐字一致，改一处必须同步另一处");
+  // 裸「全景」是已经踩过的坑，两边都不许把 全景 当成独立的顶层分支。
+  // 注意 `VR\s*(?:看房|全景|链接)` 里的 |全景| 是合法共现（VR + 全景），
+  // 不能按子串判；这里只拒绝「顶层 → 全景」与「全景 → 顶层」两种裸分支形态。
+  const barePanorama = /\)\s*\|全景\)|\|全景\|\s*\(|^\(\?:\|全景|\)\|全景\/i$/;
+  for (const [name, re] of [["server", server], ["client", client]] as const) {
+    assert.doesNotMatch(re, barePanorama, `${name} 的 VR 正向正则不得把「全景」当独立顶层分支`);
   }
 });

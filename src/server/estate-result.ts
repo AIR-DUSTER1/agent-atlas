@@ -17,7 +17,14 @@ const IMAGE_URL_RE = /https:\/\/[^\s"'<>\\]+?\.(?:jpe?g|png|webp|gif|avif)(?:[!?
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
 const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
-const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
+/**
+ * 「这套房有 VR」的正向判定。
+ * 注意不能把裸「全景」算进来：贝壳房源文案里「小区实景全景拍摄」「楼栋全景展示」
+ * 这类描述与 VR 入口无关，裸词会把普通房源误标成「有 VR 标记 · 专属入口未返回」。
+ * 因此中文全景必须与 VR 语境共现（VR/虚拟看房/全景看房/全景链接/全景漫游），
+ * 「有VR」「带VR看房」等直接写法照旧命中。
+ */
+const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*(?:VR|虚拟看房|全景看房)|VR\s*(?:看房|全景|链接)|虚拟看房|全景\s*(?:看房|链接|漫游|房源)/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
 const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com", "realsee.com", "realsee-cdn.cn"] as const;
 /** 旧模板会跳到如视营销首页，不能当成房源全景入口。 */

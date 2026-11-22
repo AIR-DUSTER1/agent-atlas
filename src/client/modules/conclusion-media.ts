@@ -14,7 +14,11 @@ const MAX_CONCLUSION_POINTS = 8;
 const VR_URL_RE = /(?:https?:)?\/\/[^\s"'<>\\]+/gi;
 const VR_KEY_RE = /(?:^|[_-])(?:vr|pano|panorama)(?:$|[_-])|(?:vr|pano|panorama)(?:url|link)|(?:VR|全景)(?:链接|看房|地址)?/i;
 const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
-const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*VR|VR(?:看房|全景|链接)|全景|虚拟看房/i;
+/* 「有 VR」的正向判定与服务端 estate-result.ts 保持同一口径：
+   裸「全景」不算（「小区实景全景拍摄」「楼栋全景展示」与 VR 入口无关），
+   中文全景必须与看房/链接/漫游等 VR 语境共现。两份实现必须同步改，否则会
+   出现服务端判定有、前端判定无（或反之）的分裂。 */
+const VR_POSITIVE_RE = /(?:有|带|支持|含)\s*(?:VR|虚拟看房|全景看房)|VR\s*(?:看房|全景|链接)|虚拟看房|全景\s*(?:看房|链接|漫游|房源)/i;
 const VR_IMAGE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[!?]|$)/i;
 const VR_HOST_SUFFIXES = ["ke.com", "lianjia.com", "beike.com", "ljcdn.com", "realsee.com", "realsee-cdn.cn"] as const;
 const LEGACY_VR_PLACEHOLDER_RE = /^#\/vr\?houseid=/i;
