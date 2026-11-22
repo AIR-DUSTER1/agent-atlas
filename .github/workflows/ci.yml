@@ -54,20 +54,30 @@ jobs:
         run: |
           npm run build:client
           npm run build:desktop
-          test -f src/server/public/main.js
+          # 前端产物：入口是 Vite 原生单文件 HTML + assets/app.js；
+          # 样式按页面分类到 styles/<group>/（tokens 在 styles/base/）。
+          # vendor/ 自包含库已随 1:1 过渡树退役，第三方库改为 assets/ 下的懒加载 chunk。
           test -f src/server/public/index.html
           test -f src/server/public/build-info.json
-          test -f src/server/public/styles/tokens.css
-          test -f src/server/public/styles/ui.css
-          test -f src/server/public/vendor/chart.js
-          test -f src/server/public/vendor/chart-lib.js
-          test -f src/server/public/vendor/icons-lib.js
-          test -f src/server/public/vendor/marked-lib.js
-          test -f src/server/public/vendor/dompurify-lib.js
-          test -f src/server/public/vendor/highlight-lib.js
+          test -f src/server/public/assets/app.js
+          test -f src/server/public/styles/base/tokens.css
+          test -f src/server/public/styles/base/ui.css
+          # 可选能力必须留在懒加载 chunk（不得进首屏 app.js）
+          test -f src/server/public/assets/chart.js
+          test -f src/server/public/assets/markdown.js
+          test -f src/server/public/assets/highlight.js
+          test -f src/server/public/assets/icons.js
+          # 桌面端产物
           test -f desktop/build/main.js
           test -f desktop/build/preload.cjs
-          ! find src/server/public/vendor -name "*.map" -print -quit | grep -q .
+          # 产物里不得残留 sourcemap（泄露源码结构）。注意必须同时覆盖 assets/ 与
+          # 可能重启的 vendor/：find 对不存在的目录会报错，配合 `!` 取反会变成
+          # 永远通过 —— 旧断言正是这样假绿的。这里先判断目录存在再扫。
+          for dir in src/server/public/assets src/server/public/vendor; do
+            if [ -d "$dir" ]; then
+              ! find "$dir" -name "*.map" -print -quit | grep -q .
+            fi
+          done
 
       - name: Tests (unit / integration / security)
         run: npm test

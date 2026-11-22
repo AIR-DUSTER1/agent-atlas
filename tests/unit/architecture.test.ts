@@ -143,17 +143,21 @@ test("Agent 与工具只依赖 Memory Slot，不直接触碰具体 Provider/旧�
 const OWNER_DISK_BOUNDARIES: Array<{ file: string; max: number; reason: string }> = [
   {
     file: "src/server/session-store.ts",
-    max: 11,
+    // 17 = session 记录与 journal 行两处各读一次旧键（`diskSession.ownerId` /
+    // `diskLine.ownerId`，每处出现 2 次）+ 写回时把 userId 落到历史键名。
+    max: 17,
     reason: "journal 是 append-only 历史，磁盘行键 ownerId 必须永久可读（见该文件头序列化边界说明）",
   },
   {
     file: "src/server/projects.ts",
-    max: 4,
+    // 5 = 类型声明 + `legacy.ownerId` 判空与取值各一次 + 注释里的历史键名。
+    max: 5,
     reason: ".web-config.json 的项目项读旧 ownerId 键做兼容，写出统一 userId",
   },
   {
     file: "src/server/security/session.ts",
-    max: 3,
+    // 4 = 类型声明 + 注释 + `legacy.ownerId` 判空与赋值各一次。
+    max: 4,
     reason: "旧会话 Cookie 载荷键 ownerId 的平滑兼容读；新签发一律写 userId",
   },
 ];
