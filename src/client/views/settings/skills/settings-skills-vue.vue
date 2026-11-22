@@ -9,7 +9,7 @@
   - 启停开关是 antdv Switch（受控组件）：状态只看 store，失败时不会残留在半途状态。
 -->
 <script setup lang="ts">
-import { Input, Switch, Upload } from "antdv-next";
+import { Button, Input, Switch, Upload } from "antdv-next";
 import { computed, onMounted, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useSkillsStore, type SkillFilter, type SkillItem } from "../../../stores/skills.js";
@@ -199,17 +199,9 @@ async function importFiles(payloads: Array<{ name: string; content: string }>): 
   <AntdvProvider>
   <div class="skills-page-head">
     <h2 id="skills-title">技能</h2>
-    <button
-      id="skills-refresh-btn"
-      type="button"
-      class="skills-icon-btn"
-      aria-label="刷新技能列表"
-      title="刷新技能列表"
-      :disabled="refreshing"
-      @click="refresh"
-    >
+    <Button id="skills-refresh-btn" class="skills-icon-btn" aria-label="刷新技能列表" title="刷新技能列表" :disabled="refreshing" @click="refresh">
       <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i>
-    </button>
+    </Button>
   </div>
 
   <label class="skills-search-box">
@@ -223,9 +215,9 @@ async function importFiles(payloads: Array<{ name: string; content: string }>): 
       <p>技能是一组基于上下文触发的指令集，用于稳定执行专业任务。启用后仅在消息命中触发词或技能名称时载入，每轮最多 2 个。</p>
     </div>
     <div class="skills-overview-actions">
-      <button id="skill-upload-btn" type="button" class="ghost-btn small skills-primary-btn" @click="triggerSkillUpload">
+      <Button id="skill-upload-btn" class="ghost-btn small skills-primary-btn" @click="triggerSkillUpload">
         <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传技能
-      </button>
+      </Button>
     </div>
   </section>
   <!-- antdv Upload 不透传 class：外层 div 承载 hidden，同时作为触发作用域 -->
@@ -243,20 +235,10 @@ async function importFiles(payloads: Array<{ name: string; content: string }>): 
 
   <div class="skills-list-toolbar">
     <div class="skills-filter-tabs" role="tablist" aria-label="技能状态筛选">
-      <button
-        v-for="tab in (['all', 'enabled', 'disabled'] as const)"
-        :key="tab"
-        type="button"
-        class="skills-filter-tab"
-        :class="{ active: currentFilter === tab }"
-        :data-skill-filter="tab"
-        role="tab"
-        :aria-selected="String(currentFilter === tab)"
-        @click="setFilter(tab)"
-      >
+      <Button v-for="tab in (['all', 'enabled', 'disabled'] as const)" :key="tab" class="skills-filter-tab" :class="{ active: currentFilter === tab }" :data-skill-filter="tab" role="tab" :aria-selected="String(currentFilter === tab)" @click="setFilter(tab)">
         {{ tab === "all" ? "全部" : tab === "enabled" ? "已启用" : "已禁用" }}
         <span :id="`skills-count-${tab}`">{{ counts[tab] }}</span>
-      </button>
+      </Button>
     </div>
     <div class="skills-list-summary">
       <span id="skills-count">{{ summaryText }}</span>
@@ -298,48 +280,24 @@ async function importFiles(payloads: Array<{ name: string; content: string }>): 
           :loading="togglingId === skill.id"
           @update:checked="(next: boolean) => toggleEnabled(skill, next)"
         />
-        <button
-          class="skill-delete-btn"
-          type="button"
-          title="删除技能"
-          :aria-label="`删除技能 ${skill.name}`"
-          :disabled="deletingId === skill.id"
-          @click="removeSkill(skill)"
-        >
+        <Button class="skill-delete-btn" title="删除技能" :aria-label="`删除技能 ${skill.name}`" :disabled="deletingId === skill.id" @click="removeSkill(skill)">
           <i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i>
-        </button>
+        </Button>
       </div>
       </article>
     </template>
   </div>
   <nav id="skills-pagination" class="skills-pagination" :class="{ hidden: totalPages <= 1 }" aria-label="技能分页">
     <template v-if="totalPages > 1">
-      <button
-        type="button"
-        class="skills-page-btn"
-        :disabled="currentPage <= 1"
-        :aria-label="`第 ${currentPage - 1} 页`"
-        @click="currentPage--"
-      >‹</button>
+      <Button class="skills-page-btn" :disabled="currentPage <= 1" :aria-label="`第 ${currentPage - 1} 页`" @click="currentPage--">‹</Button>
       <template v-for="(token, index) in paginationTokens" :key="`${token}-${index}`">
         <span v-if="token === 'ellipsis'" class="skills-page-ellipsis">…</span>
-        <button
-          v-else
-          type="button"
-          class="skills-page-btn"
-          :class="{ active: token === currentPage }"
-          :aria-label="`第 ${token} 页`"
-          :aria-current="token === currentPage ? 'page' : undefined"
-          @click="currentPage = token"
-        >{{ token }}</button>
+        <Button v-else class="skills-page-btn" :class="{ active: token === currentPage }" :aria-label="`第 ${token} 页`" :aria-current="token === currentPage ? 'page' : undefined" @click="currentPage = token">{{ token }}</Button>
       </template>
-      <button
-        type="button"
-        class="skills-page-btn"
-        :disabled="currentPage >= totalPages"
+      <Button class="skills-page-btn" :disabled="currentPage>= totalPages"
         :aria-label="`第 ${currentPage + 1} 页`"
         @click="currentPage++"
-      >›</button>
+      >›</Button>
     </template>
   </nav>
   </AntdvProvider>

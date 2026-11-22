@@ -7,6 +7,8 @@
   立场：接入 = 在服务器上运行第三方代码；凭证注入默认关闭且二次确认（右键）。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { useExternalStore } from "../../stores/external.js";
 import { uiAlert, uiConfirm } from "../../ui/dialog.js";
 import { completeExternalAgent, getCreateSessionFn } from "./external.js";
@@ -60,24 +62,18 @@ async function openAgent(agent: { id: string; name: string; command?: string }):
 </script>
 
 <template>
+  <AntdvProvider>
   <div v-if="!store.agents.length" class="ext-empty">还没有接入外部 Agent —— 粘贴一个 Git 仓库地址即可（仓库里放一份 agent.json 说明如何启动效果最佳）</div>
   <template v-else>
-    <button
-      v-for="a in store.agents"
-      :key="a.id"
-      type="button"
-      class="demo-card ext-card"
-      :class="{ 'ext-incomplete': !a.command }"
-      @click="openAgent(a)"
-      @contextmenu.prevent.stop="toggleCredentials(a)"
-    >
+    <Button v-for="a in store.agents" :key="a.id" class="demo-card ext-card" :class="{ 'ext-incomplete': !a.command }" @click="openAgent(a)" @contextmenu.prevent.stop="toggleCredentials(a)">
       <div class="d-head">
         <span class="d-num">🔌</span>
         <span class="d-name">{{ a.name }}</span>
-        <button class="ext-del" title="移除该外部 Agent" @click.stop="removeAgent(a)">✕</button>
+        <Button class="ext-del" title="移除该外部 Agent" @click.stop="removeAgent(a)">✕</Button>
       </div>
       <div class="d-desc">{{ a.description || a.url }}</div>
       <div class="d-eg">{{ a.command ? `$ ${a.command} ${a.args.join(" ")}` : "⚠ 待补全启动命令" }}</div>
-    </button>
+    </Button>
   </template>
+  </AntdvProvider>
 </template>

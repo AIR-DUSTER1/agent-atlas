@@ -6,6 +6,8 @@
   立场：附件本体在 core state（发送流程读它），本组件只负责展示与移除。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { useAttachmentsStore, refKey } from "../../stores/attachments.js";
 import { renderFsSelection } from "./attachments.js";
 
@@ -18,6 +20,7 @@ function remove(key: string): void {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="attach-chips" class="attach-chips" :class="{ hidden: !store.visible }">
     <span
       v-for="file in store.files"
@@ -29,7 +32,8 @@ function remove(key: string): void {
       <template v-else>📎</template>
       <span class="c-name">{{ file.name }}</span>
       <span class="c-src">{{ store.sourceLabel(file) }}</span>
-      <button class="c-del" title="移除" @click="remove(refKey(file))">✕</button>
+      <Button class="c-del" title="移除" @click="remove(refKey(file))">✕</Button>
     </span>
   </div>
+  </AntdvProvider>
 </template>

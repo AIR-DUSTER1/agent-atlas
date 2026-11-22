@@ -131,7 +131,9 @@ describe("使用统计面板", () => {
     const degraded = document.querySelector("#stats-charts .stats-degraded");
     expect(degraded?.getAttribute("role")).toBe("alert");
     expect(degraded?.textContent).toContain("统计暂不可用");
-    expect(degraded?.querySelector("button")?.textContent).toBe("重试");
+    // antdv Button 的 autoInsertSpace 默认在两个汉字间插空格（"重 试"），
+    // 断言文案时只关心词本身，不关心排版空格。
+    expect(degraded?.querySelector("button")?.textContent?.replace(/\s+/g, "")).toBe("重试");
   });
 
   it("区间卡与表格在无数据时给出空态文案", async () => {

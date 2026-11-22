@@ -264,9 +264,9 @@ function onFormKeydown(event: KeyboardEvent): void {
     <div class="commands-page-copy">
       <h2 id="commands-title"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i> 自定义命令</h2>
     </div>
-    <button id="cmd-new-btn" type="button" class="ui-button ui-button-primary commands-new-btn" @click="openCreateEditor">
+    <Button id="cmd-new-btn" class="ui-button ui-button-primary commands-new-btn" @click="openCreateEditor">
       <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 新建命令
-    </button>
+    </Button>
   </div>
 
   <div id="commands-status" class="settings-status" role="status" aria-live="polite"></div>
@@ -299,12 +299,7 @@ function onFormKeydown(event: KeyboardEvent): void {
           <p>{{ store.commands.length > 0
             ? "调整搜索词，或清空搜索查看全部命令。"
             : "把常用提示词保存成斜杠命令，之后在输入框敲 / 就能快速填入。" }}</p>
-          <button
-            v-if="!store.commands.length"
-            type="button"
-            class="ghost-btn small"
-            @click="openCreateEditor"
-          >新建第一条命令</button>
+          <Button v-if="!store.commands.length" class="ghost-btn small" @click="openCreateEditor">新建第一条命令</Button>
         </div>
         <template v-else>
           <article
@@ -313,37 +308,19 @@ function onFormKeydown(event: KeyboardEvent): void {
             class="command-card"
             :class="{ active: editorMode === 'edit' && editingOriginalName === command.name }"
           >
-          <button
-            type="button"
-            class="command-card-main"
-            :aria-label="`打开命令 /${command.name}`"
-            @click="openEditEditor(command)"
-          >
+          <Button class="command-card-main" :aria-label="`打开命令 /${command.name}`" @click="openEditEditor(command)">
             <span class="command-card-syntax">/{{ command.name }}</span>
             <span class="command-card-title">{{ command.title || "未设置菜单显示名" }}</span>
             <span class="command-card-desc">{{ command.description || "未填写命令说明" }}</span>
             <span class="command-card-meta">{{ command.template.length }} 字符</span>
-          </button>
+          </Button>
           <div class="command-card-actions">
-            <button
-              type="button"
-              class="command-card-action"
-              :title="`编辑 /${command.name}`"
-              :aria-label="`编辑命令 /${command.name}`"
-              @click="openEditEditor(command)"
-            >
+            <Button class="command-card-action" :title="`编辑 /${command.name}`" :aria-label="`编辑命令 /${command.name}`" @click="openEditEditor(command)">
               <i class="ui-icon" data-icon="Pencil" aria-hidden="true" style="--icon-size: 14px"></i>
-            </button>
-            <button
-              type="button"
-              class="command-card-action delete"
-              :title="`删除 /${command.name}`"
-              :aria-label="`删除命令 /${command.name}`"
-              :disabled="deletingName === command.name"
-              @click="deleteCommand(command)"
-            >
+            </Button>
+            <Button class="command-card-action delete" :title="`删除 /${command.name}`" :aria-label="`删除命令 /${command.name}`" :disabled="deletingName === command.name" @click="deleteCommand(command)">
               <i class="ui-icon" data-icon="Trash2" aria-hidden="true" style="--icon-size: 14px"></i>
-            </button>
+            </Button>
           </div>
         </article>
         </template>
@@ -355,7 +332,7 @@ function onFormKeydown(event: KeyboardEvent): void {
         <span class="commands-empty-icon"><i class="ui-icon" data-icon="Command" aria-hidden="true"></i></span>
         <h3>管理你的斜杠命令</h3>
         <p>从左侧选择一条命令进行编辑，或创建一个新的提示词模板。</p>
-        <button id="cmd-empty-new-btn" type="button" class="ghost-btn small" @click="openCreateEditor">新建命令</button>
+        <Button id="cmd-empty-new-btn" class="ghost-btn small" @click="openCreateEditor">新建命令</Button>
       </div>
 
       <form
@@ -372,17 +349,9 @@ function onFormKeydown(event: KeyboardEvent): void {
             <div id="cmd-editor-mode" class="command-editor-eyebrow">{{ editorMode === 'create' ? "新建命令" : "编辑命令" }}</div>
             <h3 id="cmd-editor-title">{{ editorMode === 'create' ? "命令详情" : `/${editingOriginalName}` }}</h3>
           </div>
-          <button
-            id="cmd-editor-close"
-            type="button"
-            class="commands-icon-btn"
-            aria-label="关闭命令编辑器"
-            title="关闭编辑器"
-            :disabled="saving"
-            @click="closeEditor"
-          >
+          <Button id="cmd-editor-close" class="commands-icon-btn" aria-label="关闭命令编辑器" title="关闭编辑器" :disabled="saving" @click="closeEditor">
             <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-          </button>
+          </Button>
         </div>
 
         <div class="command-form-grid">
@@ -462,8 +431,8 @@ function onFormKeydown(event: KeyboardEvent): void {
         </label>
         <div class="command-template-footer">
           <span class="command-token-label">插入变量</span>
-          <button type="button" class="command-token-btn" data-command-token="selection" v-text="'{{selection}} · 当前输入'" @click="insertTemplateToken('selection')"></button>
-          <button type="button" class="command-token-btn" data-command-token="date" v-text="'{{date}} · 今天日期'" @click="insertTemplateToken('date')"></button>
+          <Button class="command-token-btn" data-command-token="selection" v-text="'{{selection}} · 当前输入'" @click="insertTemplateToken('selection')"></Button>
+          <Button class="command-token-btn" data-command-token="date" v-text="'{{date}} · 今天日期'" @click="insertTemplateToken('date')"></Button>
           <span id="cmd-template-count" class="command-template-count">{{ form.template.length }} / {{ MAX_TEMPLATE_CHARS }}</span>
         </div>
 

@@ -11,6 +11,8 @@
   - 截图 img 的 ready 类由 load/error 事件驱动（CSS 用 display 控制可见性）。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useBrowserDockStore } from "../../stores/browser-dock.js";
 
@@ -54,6 +56,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <aside
     v-show="visible"
     id="browser-dock"
@@ -69,9 +72,9 @@ onUnmounted(() => {
         </div>
       </div>
       <span id="browser-dock-state" class="browser-dock-state" :class="store.stateTone" role="status" aria-live="polite">{{ stateText }}</span>
-      <button id="browser-dock-close" type="button" class="browser-dock-close" aria-label="关闭 Browser Use 浏览器" title="关闭浏览器" @click="close">
+      <Button id="browser-dock-close" class="browser-dock-close" aria-label="关闭 Browser Use 浏览器" title="关闭浏览器" @click="close">
         <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-      </button>
+      </Button>
     </header>
     <div class="browser-dock-toolbar">
       <span class="browser-dock-dot" aria-hidden="true"></span>
@@ -98,4 +101,5 @@ onUnmounted(() => {
       <span>Chrome / Edge</span>
     </footer>
   </aside>
+  </AntdvProvider>
 </template>

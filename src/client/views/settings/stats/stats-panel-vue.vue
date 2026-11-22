@@ -13,6 +13,8 @@
   - 所有数字都过 safeNumber，旧服务缺字段时显示 0，不出现 NaN/Infinity。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useStatsStore } from "../../../stores/stats.js";
 import { fmtPercent, fmtTokens } from "../../../modules/format.js";
@@ -113,26 +115,18 @@ async function retry(): Promise<void> {
 </script>
 
 <template>
+  <AntdvProvider>
   <div class="stats-page-head">
     <div>
       <h2 id="stats-title"><i class="ui-icon" data-icon="BarChart3" aria-hidden="true"></i> 使用统计</h2>
     </div>
-    <button id="stats-refresh" type="button" class="ghost-btn small" :aria-busy="String(store.loading)" :disabled="store.loading" @click="retry">
+    <Button id="stats-refresh" class="ghost-btn small" :aria-busy="String(store.loading)" :disabled="store.loading" @click="retry">
       <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i> 刷新
-    </button>
+    </Button>
   </div>
 
   <div id="stats-window-overview" class="stats-window-overview" aria-label="统计时间区间">
-    <button
-      v-for="range in store.ranges"
-      :key="range.id"
-      type="button"
-      class="stats-window-card"
-      :class="{ active: range.id === store.activeRangeId }"
-      :data-stats-range="range.id"
-      :aria-pressed="String(range.id === store.activeRangeId)"
-      @click="selectRange(range.id)"
-    >
+    <Button v-for="range in store.ranges" :key="range.id" class="stats-window-card" :class="{ active: range.id === store.activeRangeId }" :data-stats-range="range.id" :aria-pressed="String(range.id === store.activeRangeId)" @click="selectRange(range.id)">
       <span class="sw-top">
         <span class="sw-label">{{ range.label }}</span>
         <span class="sw-arrow">查看明细 →</span>
@@ -140,7 +134,7 @@ async function retry(): Promise<void> {
       <strong class="sw-turns">{{ safeNumber(range.totals.turns) }} 轮</strong>
       <span class="sw-tokens">{{ fmtTokens(rangeTokens(range)) }} tokens</span>
       <span class="sw-sub">{{ safeNumber(range.totals.sessions) }} 个会话 · {{ safeNumber(range.totals.modelCalls) }} 次模型调用 · {{ range.startDate.slice(5) }} ~ {{ range.endDate.slice(5) }}</span>
-    </button>
+    </Button>
   </div>
 
   <div class="stats-selected-head">
@@ -165,7 +159,7 @@ async function retry(): Promise<void> {
     <section v-if="store.error" class="stats-card stats-degraded" role="alert">
       <h3>统计暂不可用</h3>
       <p>{{ store.error }}</p>
-      <button type="button" class="ghost-btn small" @click="retry">重试</button>
+      <Button class="ghost-btn small" @click="retry">重试</Button>
     </section>
     <template v-else-if="chartsFallback">
       <section class="stats-card stats-degraded" role="status">
@@ -209,7 +203,7 @@ async function retry(): Promise<void> {
             <h3>{{ spec.title }}</h3>
             <p class="key-state">{{ spec.subtitle }}</p>
           </div>
-          <button type="button" class="ghost-btn small stats-chart-export" disabled>存为 PNG</button>
+          <Button class="ghost-btn small stats-chart-export" disabled>存为 PNG</Button>
         </div>
         <div class="stats-chart-canvas-wrap">
           <canvas role="img" :aria-label="spec.title"></canvas>
@@ -233,10 +227,10 @@ async function retry(): Promise<void> {
           <tr>
             <th>会话</th>
             <th class="num">
-              <button type="button" class="stats-sort" :class="{ active: sessionSort === 'turns' }" @click="sessionSort = 'turns'">轮次</button>
+              <Button class="stats-sort" :class="{ active: sessionSort === 'turns' }" @click="sessionSort = 'turns'">轮次</Button>
             </th>
             <th class="num">
-              <button type="button" class="stats-sort" :class="{ active: sessionSort === 'tokens' }" @click="sessionSort = 'tokens'">Tokens</button>
+              <Button class="stats-sort" :class="{ active: sessionSort === 'tokens' }" @click="sessionSort = 'tokens'">Tokens</Button>
             </th>
           </tr>
         </thead>
@@ -272,4 +266,5 @@ async function retry(): Promise<void> {
       </table>
     </section>
   </div>
+  </AntdvProvider>
 </template>

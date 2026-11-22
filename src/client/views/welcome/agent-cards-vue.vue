@@ -10,6 +10,8 @@
   - 组件可多处挂载（同一 pinia，各自 mount 实例）。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
 import { useShellStore } from "../../stores/shell.js";
 import type { AgentCardModel } from "../../stores/shell.js";
@@ -34,12 +36,14 @@ function create(card: AgentCardModel): void {
 </script>
 
 <template>
-  <button v-for="card in cards" :key="card.key" type="button" class="demo-card" @click="create(card)">
+  <AntdvProvider>
+  <Button v-for="card in cards" :key="card.key" class="demo-card" @click="create(card)">
     <div class="d-head">
       <span class="d-num">{{ card.icon }}</span>
       <span class="d-name">{{ card.name }}<span v-if="card.badge" class="d-default">{{ card.badge }}</span></span>
     </div>
     <div class="d-desc">{{ card.description }}</div>
     <div class="d-eg">示例：{{ card.example }}</div>
-  </button>
+  </Button>
+  </AntdvProvider>
 </template>

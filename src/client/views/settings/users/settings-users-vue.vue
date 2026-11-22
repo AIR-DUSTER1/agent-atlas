@@ -274,14 +274,9 @@ async function clearLocalLock(): Promise<void> {
             <small>{{ badgesOf(user) }} · 创建 {{ formatDate(user.createdAt) }} · 最近登录 {{ formatDate(user.lastLoginAt) }}</small>
           </div>
           <div class="users-row-actions">
-            <button
-              type="button"
-              class="ui-button ui-button-ghost ui-button-sm"
-              :title="user.status === 'active' ? '禁用该用户' : '启用该用户'"
-              @click.stop="toggleUser(user)"
-            >{{ user.status === "active" ? "禁用" : "启用" }}</button>
-            <button type="button" class="ui-button ui-button-ghost ui-button-sm" title="生成一次性临时密码" @click.stop="resetPassword(user)">重置密码</button>
-            <button type="button" class="ui-button ui-button-danger ui-button-sm" title="软删除（数据保留）" @click.stop="deleteUser(user)">删除</button>
+            <Button class="ui-button ui-button-ghost ui-button-sm" :title="user.status === 'active' ? '禁用该用户' : '启用该用户'" @click.stop="toggleUser(user)">{{ user.status === "active" ? "禁用" : "启用" }}</Button>
+            <Button class="ui-button ui-button-ghost ui-button-sm" title="生成一次性临时密码" @click.stop="resetPassword(user)">重置密码</Button>
+            <Button class="ui-button ui-button-danger ui-button-sm" title="软删除（数据保留）" @click.stop="deleteUser(user)">删除</Button>
           </div>
         </div>
       </div>
@@ -343,7 +338,7 @@ async function clearLocalLock(): Promise<void> {
             <small>{{ token.revokedAt ? "已吊销" : "有效" }} · 创建 {{ formatDate(token.createdAt) }} · 过期 {{ formatDate(token.expiresAt) }}</small>
           </div>
           <div v-if="!token.revokedAt" class="users-row-actions">
-            <button type="button" class="ui-button ui-button-danger ui-button-sm" title="吊销该令牌" @click="revokeToken(token.id)">吊销</button>
+            <Button class="ui-button ui-button-danger ui-button-sm" title="吊销该令牌" @click="revokeToken(token.id)">吊销</Button>
           </div>
         </div>
       </div>

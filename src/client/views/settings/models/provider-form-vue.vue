@@ -6,7 +6,7 @@
   立场：API Key 只写不读，留空 = 保持不变；保存走 stores/models + model-actions。
 -->
 <script setup lang="ts">
-import { Select, Input } from "antdv-next";
+import { Button, Input, Select } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useModelsStore } from "../../../stores/models.js";
@@ -127,7 +127,7 @@ function toggleKeyVisible(): void {
           ? "修改连接信息不会影响已配置模型；API Key 留空表示保持原值。"
           : "一套网关凭据可以挂多个模型。" }}</p>
       </div>
-      <button id="provider-modal-close" type="button" class="provider-modal-close" aria-label="关闭供应商弹窗" @click="store.closeProviderForm()">×</button>
+      <Button id="provider-modal-close" class="provider-modal-close" aria-label="关闭供应商弹窗" @click="store.closeProviderForm()">×</Button>
     </div>
 
     <div id="provider-form-wrap" class="provider-form">
@@ -149,9 +149,9 @@ function toggleKeyVisible(): void {
         <span class="field-label">API Key <em id="pf-key-state" class="key-state" :class="{ ok: Boolean(editingProvider?.hasKey) }">{{ keyStateText }}</em></span>
         <div class="key-row">
           <Input.Password id="pf-api-key" v-model:value="form.apiKey" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" @keydown.enter.prevent="onSave" />
-          <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏 API Key" @click="toggleKeyVisible">
+          <Button id="pf-key-toggle" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏 API Key" @click="toggleKeyVisible">
             <i class="ui-icon" data-icon="Eye" aria-hidden="true"></i>
-          </button>
+          </Button>
         </div>
       </label>
 
@@ -168,38 +168,33 @@ function toggleKeyVisible(): void {
             <div v-for="m in store.pendingModels" :key="m.name" class="pending-model-row">
               <span class="pending-model-name">{{ m.name }}</span>
               <span class="pending-model-meta">{{ [m.modality === "vision" ? "多模态" : "文本", m.contextWindow ? `窗口 ${m.contextWindow}` : ""].filter(Boolean).join(" · ") }}</span>
-              <button type="button" class="pending-model-remove" @click="store.removePendingModel(m.name)">移除</button>
+              <Button class="pending-model-remove" @click="store.removePendingModel(m.name)">移除</Button>
             </div>
           </template>
         </div>
         <div class="key-row model-add-row">
           <Input id="pf-new-model-name" v-model:value="newModelName" type="text" aria-label="新模型 ID" spellcheck="false" placeholder="输入模型名，或从网关列表选择" @keydown="onPendingKeydown" />
-          <button id="pf-new-fetch-models" type="button" class="ghost-btn small" @click="onTest">获取列表</button>
-          <button id="pf-new-model-add-btn" type="button" class="ghost-btn small" @click="addPendingFromInput">＋ 添加</button>
+          <Button id="pf-new-fetch-models" class="ghost-btn small" @click="onTest">获取列表</Button>
+          <Button id="pf-new-model-add-btn" class="ghost-btn small" @click="addPendingFromInput">＋ 添加</Button>
         </div>
         <div id="pf-new-gateway-models" class="gw-models">
           <template v-if="store.gatewayModels.length">
             <div class="gw-label">网关返回 {{ store.gatewayModels.length }} 个模型（点一下直接添加）：</div>
             <div class="gw-chips">
-              <button
-                v-for="m in store.gatewayModels"
-                :key="m.id"
-                type="button"
-                class="gw-chip"
-                :class="{ added: store.pendingModels.some((item) => item.name === m.id) }"
+              <Button v-for="m in store.gatewayModels" :key="m.id" class="gw-chip" :class="{ added: store.pendingModels.some((item) => item.name === m.id) }"
                 :title="`${m.id}\n上下文：${m.contextWindow ?? '未知'}\n多模态：${m.supportsVision ? '是' : '未知'} · 支持推理：${m.supportsReasoning ? '是' : '未知'}`"
                 @click="addPendingModelByName(m.id, m)"
-              >{{ gatewayChipLabel(m) }}</button>
+              >{{ gatewayChipLabel(m) }}</Button>
             </div>
           </template>
         </div>
       </div>
 
       <div class="settings-actions provider-modal-actions">
-        <button id="pf-test" class="ghost-btn" type="button" @click="onTest">{{ isCreate ? "测试连接 / 拉取模型" : "测试连接" }}</button>
+        <Button id="pf-test" class="ghost-btn" @click="onTest">{{ isCreate ? "测试连接 / 拉取模型" : "测试连接" }}</Button>
         <div class="spacer"></div>
-        <button id="pf-cancel-edit" class="ghost-btn" type="button" @click="store.closeProviderForm()">取消</button>
-        <button id="pf-save" class="btn btn-approve" type="button" :disabled="saving" @click="onSave">保存供应商</button>
+        <Button id="pf-cancel-edit" class="ghost-btn" @click="store.closeProviderForm()">取消</Button>
+        <Button id="pf-save" class="btn btn-approve" :disabled="saving" @click="onSave">保存供应商</Button>
       </div>
       <div id="provider-modal-status" class="settings-status" role="status" aria-live="polite"></div>
     </div>

@@ -375,9 +375,9 @@ onUnmounted(() => {
       <p>关闭后暂停所有 MCP 连接和工具注入，但保留服务器配置，便于故障时快速止损。</p>
     </div>
     <div class="mcp-import-actions">
-      <button id="mcp-import-btn" type="button" class="ghost-btn small" @click="pickImportFile">
+      <Button id="mcp-import-btn" class="ghost-btn small" @click="pickImportFile">
         <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 导入 .mcp.json
-      </button>
+      </Button>
       <Switch
         id="mcp-global-enabled"
         aria-label="启用 MCP 工具"
@@ -407,19 +407,13 @@ onUnmounted(() => {
         <p>查看连接状态、测试工具，并为每个服务器单独启停。</p>
       </div>
       <div class="mcp-server-actions">
-        <button
-          id="mcp-refresh-btn"
-          type="button"
-          class="mcp-icon-btn"
-          aria-label="刷新 MCP 服务器"
-          title="刷新 MCP 服务器"
-          @click="store.refresh().catch((err: Error) => showMcpStatus(`✗ ${err.message}`, 'err'))"
+        <Button id="mcp-refresh-btn" class="mcp-icon-btn" aria-label="刷新 MCP 服务器" title="刷新 MCP 服务器" @click="store.refresh().catch((err: Error) => showMcpStatus(`✗ ${err.message}`, 'err'))"
         >
           <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i>
-        </button>
-        <button id="mcp-add-btn" type="button" class="ghost-btn small mcp-add-btn" @click="openEditor()">
+        </Button>
+        <Button id="mcp-add-btn" class="ghost-btn small mcp-add-btn" @click="openEditor()">
           <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 添加
-        </button>
+        </Button>
       </div>
     </div>
     <div id="mcp-list" class="mcp-server-list" :class="{ 'global-paused': !store.enabled }">
@@ -428,9 +422,9 @@ onUnmounted(() => {
         <h3>还没有 MCP Servers</h3>
         <p>添加一个 stdio MCP server，或导入现成的 .mcp.json 配置。</p>
         <div class="mcp-empty-actions">
-          <button type="button" class="ghost-btn small mcp-add-btn" @click="openEditor()">
+          <Button class="ghost-btn small mcp-add-btn" @click="openEditor()">
             <i class="ui-icon" data-icon="Plus" aria-hidden="true" style="--icon-size: 14px"></i> 添加第一个服务器
-          </button>
+          </Button>
         </div>
       </div>
       <template v-else>
@@ -441,15 +435,9 @@ onUnmounted(() => {
           :class="{ disabled: !server.enabled, 'globally-paused': !store.enabled }"
           :data-mcp-id="server.id"
         >
-          <button
-            type="button"
-            class="mcp-expand-btn"
-            :aria-label="`${expanded[server.id] ? '收起' : '展开'} MCP 服务器 ${server.name}`"
-            :aria-expanded="String(Boolean(expanded[server.id]))"
-            @click="toggleExpanded(server)"
-          >
+          <Button class="mcp-expand-btn" :aria-label="`${expanded[server.id] ? '收起' : '展开'} MCP 服务器 ${server.name}`" :aria-expanded="String(Boolean(expanded[server.id]))" @click="toggleExpanded(server)">
             <i class="ui-icon" :data-icon="expanded[server.id] ? 'ChevronDown' : 'ChevronRight'" aria-hidden="true" style="--icon-size: 15px"></i>
-          </button>
+          </Button>
           <span class="mcp-server-icon" :class="`tone-${index % 5}`" aria-hidden="true">{{ server.name.slice(0, 1).toUpperCase() || "M" }}</span>
           <div class="mcp-server-main">
             <div class="mcp-server-title-row">
@@ -464,15 +452,9 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="mcp-server-actions">
-            <button
-              type="button"
-              class="mcp-icon-btn"
-              :aria-label="`编辑 MCP 服务器 ${server.name}`"
-              title="编辑服务器"
-              @click.stop="openEditor(server)"
-            >
+            <Button class="mcp-icon-btn" :aria-label="`编辑 MCP 服务器 ${server.name}`" title="编辑服务器" @click.stop="openEditor(server)">
               <i class="ui-icon" data-icon="Settings" aria-hidden="true" style="--icon-size: 15px"></i>
-            </button>
+            </Button>
             <Switch
               :aria-label="`启用 MCP 服务器 ${server.name}`"
               :checked="server.enabled"
@@ -505,18 +487,10 @@ onUnmounted(() => {
                 class="mcp-test-result"
                 :class="store.testFeedback[server.id]?.tone"
               >{{ store.testFeedback[server.id]?.text }}</span>
-              <button
-                type="button"
-                class="ghost-btn small"
-                :aria-label="`测试 MCP 服务器 ${server.name}`"
-                :disabled="testingId === server.id"
-                :aria-busy="testingId === server.id ? 'true' : undefined"
-                :class="{ 'is-busy': testingId === server.id }"
-                @click="testServer(server)"
-              >
+              <Button class="ghost-btn small" :aria-label="`测试 MCP 服务器 ${server.name}`" :disabled="testingId === server.id" :aria-busy="testingId === server.id ? 'true' : undefined" :class="{ 'is-busy': testingId === server.id }" @click="testServer(server)">
                 <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true" style="--icon-size: 13px"></i>
                 <span class="mcp-test-label">{{ testingId === server.id ? "测试中…" : "测试连接" }}</span>
-              </button>
+              </Button>
             </div>
           </div>
         </article>
@@ -541,9 +515,9 @@ onUnmounted(() => {
             ? "只更新当前可见字段；通过 JSON 导入的 env / cwd 会原样保留。"
             : "优先粘贴完整启动命令，自动拆分后保存；也可在下方手动调整。" }}</p>
         </div>
-        <button id="mcp-editor-close" type="button" class="mcp-icon-btn" aria-label="关闭 MCP 编辑器" title="关闭" @click="closeEditor">
+        <Button id="mcp-editor-close" class="mcp-icon-btn" aria-label="关闭 MCP 编辑器" title="关闭" @click="closeEditor">
           <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-        </button>
+        </Button>
       </div>
 
       <section class="mcp-quick-command" aria-labelledby="mcp-quick-command-label">
@@ -562,7 +536,7 @@ onUnmounted(() => {
               @paste="onCommandLinePaste"
               @blur="onCommandLineBlur"
             />
-            <button id="mcp-command-parse" type="button" class="ghost-btn small" @click="applyQuickCommandLine(editor.commandLine, false)">解析</button>
+            <Button id="mcp-command-parse" class="ghost-btn small" @click="applyQuickCommandLine(editor.commandLine, false)">解析</Button>
           </div>
           <small class="mcp-command-hint">只做命令与参数拆分，不执行命令；Windows 下 npx/npm/pnpm 会自动兼容 .cmd。</small>
         </label>

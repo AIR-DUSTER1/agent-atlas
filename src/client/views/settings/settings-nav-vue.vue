@@ -10,6 +10,8 @@
   - 分区懒加载入口留在 views/settings.ts（refreshXxx 桥），组件不直接调面板。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useSettingsStore } from "../../stores/settings.js";
 import { showSettingsView, isSettingsPageOpen } from "./settings.js";
@@ -58,6 +60,7 @@ watch(() => store.current, () => { /* 分区切换由 showSettingsView 处理面
 </script>
 
 <template>
+  <AntdvProvider>
   <nav class="settings-nav" aria-label="设置分类">
     <label class="settings-search">
       <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
@@ -76,22 +79,12 @@ watch(() => store.current, () => { /* 分区切换由 showSettingsView 处理面
     <div class="settings-nav-scroll" role="tablist" aria-label="设置分区">
       <div v-for="group in store.filteredGroups" :key="group.id" class="settings-nav-group" :data-settings-group="group.id">
         <div class="settings-nav-group-title">{{ group.title }}</div>
-        <button
-          v-for="item in group.items"
-          :key="item.view"
-          type="button"
-          class="settings-nav-item"
-          :class="{ active: store.current === item.view, 'search-hit': item.hit }"
-          :data-settings-view="item.view"
-          role="tab"
-          :aria-selected="String(store.current === item.view)"
-          :aria-controls="`settings-view-${item.view}`"
-          @click="activate(item.view)"
-        >
+        <Button v-for="item in group.items" :key="item.view" class="settings-nav-item" :class="{ active: store.current === item.view, 'search-hit': item.hit }" :data-settings-view="item.view" role="tab" :aria-selected="String(store.current === item.view)" :aria-controls="`settings-view-${item.view}`" @click="activate(item.view)">
           <span class="sn-icon"><i class="ui-icon" :data-icon="item.icon" aria-hidden="true"></i></span>
           <span class="sn-copy"><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span>
-        </button>
+        </Button>
       </div>
     </div>
   </nav>
+  </AntdvProvider>
 </template>

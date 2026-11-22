@@ -14,6 +14,8 @@
   - 搜索输入框仍由 main.ts 写值，组件通过 store.term 读取并同步。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
 import { useSessionsStore } from "../../stores/sessions.js";
 import type { SessionTreeNode } from "../../stores/sessions.js";
@@ -89,6 +91,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <template v-for="node in nodes" :key="node.key">
     <div
       v-if="node.kind === 'group'"
@@ -133,15 +136,16 @@ onUnmounted(() => {
         </span>
       </div>
       <div class="s-actions">
-        <button type="button" class="s-action s-export" title="导出为 Markdown" aria-label="导出当前会话为 Markdown" @click="exportSession($event, node.key)">
+        <Button class="s-action s-export" title="导出为 Markdown" aria-label="导出当前会话为 Markdown" @click="exportSession($event, node.key)">
           <i class="ui-icon" data-icon="Download" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="s-action s-del" title="删除会话" aria-label="删除当前会话" @click="removeSession($event, node.key)">
+        </Button>
+        <Button class="s-action s-del" title="删除会话" aria-label="删除当前会话" @click="removeSession($event, node.key)">
           <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-        </button>
+        </Button>
       </div>
     </div>
   </template>
 
   <div v-if="store.isEmpty" class="fs-empty">{{ store.emptyText }}</div>
+  </AntdvProvider>
 </template>

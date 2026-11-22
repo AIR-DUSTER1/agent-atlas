@@ -23,6 +23,8 @@
     modules/clipboard 的 writeClipboardText（含降级路径）。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useMessagesStore } from "../../stores/messages.js";
 import type { MessageBlockView } from "../../stores/messages.js";
@@ -154,6 +156,7 @@ watch(() => store.revision, () => {
 </script>
 
 <template>
+  <AntdvProvider>
   <!--
     ⚠ key 必须落在**实际渲染的根元素**上，不能挂在 <template v-for> 上：
     template + v-if/v-else-if/v-else 组合时 Vue 无法把 key 应用到分支根节点，
@@ -176,16 +179,9 @@ watch(() => store.revision, () => {
         </div>
         <div class="user-message-footer">
           <div class="message-actions user-actions">
-            <button
-              type="button"
-              class="message-action"
-              :class="{ copied: copied[block.key] }"
-              :title="copied[block.key] ? '已复制' : '复制'"
-              :aria-label="copied[block.key] ? '已复制' : '复制'"
-              @click="copy(block)"
-            >
+            <Button class="message-action" :class="{ copied: copied[block.key] }" :title="copied[block.key] ? '已复制' : '复制'" :aria-label="copied[block.key] ? '已复制' : '复制'" @click="copy(block)">
               <i class="ui-icon" :data-icon="copied[block.key] ? 'Check' : 'Copy'" aria-hidden="true"></i>
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -200,16 +196,9 @@ watch(() => store.revision, () => {
         <div class="notice-details-body">
           <pre>{{ block.summary }}</pre>
           <div class="notice-details-actions">
-            <button
-              type="button"
-              class="message-action"
-              :class="{ copied: copied[block.key] }"
-              :title="copied[block.key] ? '摘要已复制' : '复制摘要'"
-              :aria-label="copied[block.key] ? '摘要已复制' : '复制摘要'"
-              @click="copy(block)"
-            >
+            <Button class="message-action" :class="{ copied: copied[block.key] }" :title="copied[block.key] ? '摘要已复制' : '复制摘要'" :aria-label="copied[block.key] ? '摘要已复制' : '复制摘要'" @click="copy(block)">
               <i class="ui-icon" :data-icon="copied[block.key] ? 'Check' : 'Copy'" aria-hidden="true"></i>
-            </button>
+            </Button>
           </div>
         </div>
       </details>
@@ -235,16 +224,9 @@ watch(() => store.revision, () => {
         <div class="assistant-body" v-once></div>
         <div class="assistant-footer" :class="{ 'is-empty': !block.usageCaption && !block.copyVisible }">
           <div class="message-actions assistant-actions" :class="{ hidden: !block.copyVisible }">
-            <button
-              type="button"
-              class="message-action"
-              :class="{ copied: copied[block.key] }"
-              :title="copied[block.key] ? '总结已复制' : '复制总结'"
-              :aria-label="copied[block.key] ? '总结已复制' : '复制总结'"
-              @click="copy(block)"
-            >
+            <Button class="message-action" :class="{ copied: copied[block.key] }" :title="copied[block.key] ? '总结已复制' : '复制总结'" :aria-label="copied[block.key] ? '总结已复制' : '复制总结'" @click="copy(block)">
               <i class="ui-icon" :data-icon="copied[block.key] ? 'Check' : 'Copy'" aria-hidden="true"></i>
-            </button>
+            </Button>
           </div>
           <div class="assistant-footer-meta">
             <div v-if="block.usageCaption" class="usage-caption">{{ block.usageCaption }}</div>
@@ -253,4 +235,5 @@ watch(() => store.revision, () => {
       </div>
     </div>
   </template>
+  </AntdvProvider>
 </template>

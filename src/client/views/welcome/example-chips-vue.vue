@@ -5,6 +5,8 @@
   创建通用 Agent 会话（与 h() 版行为一致）。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { useShellStore } from "../../stores/shell.js";
 
 const store = useShellStore();
@@ -15,5 +17,7 @@ function pick(text: string): void {
 </script>
 
 <template>
-  <button v-for="text in store.examples" :key="text" type="button" class="ex-chip" @click="pick(text)">{{ text }}</button>
+  <AntdvProvider>
+  <Button v-for="text in store.examples" :key="text" class="ex-chip" @click="pick(text)">{{ text }}</Button>
+  </AntdvProvider>
 </template>

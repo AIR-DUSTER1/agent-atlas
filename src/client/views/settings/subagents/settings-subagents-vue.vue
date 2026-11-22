@@ -367,9 +367,9 @@ const invalidModel = ref("");
       <span class="subagents-kicker"><i class="ui-icon" data-icon="Sparkles" aria-hidden="true"></i> Runtime delegation</span>
       <h2 id="subagents-title"><i class="ui-icon" data-icon="Bot" aria-hidden="true"></i> 子代理</h2>
     </div>
-    <button id="subagent-add-btn" type="button" class="ui-button ui-button-primary subagent-add-btn" @click="openEditor()">
+    <Button id="subagent-add-btn" class="ui-button ui-button-primary subagent-add-btn" @click="openEditor()">
       <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i> 新建子代理
-    </button>
+    </Button>
   </div>
 
   <section class="subagents-hero" aria-labelledby="subagents-hero-title">
@@ -405,16 +405,7 @@ const invalidModel = ref("");
       <Input id="subagent-search" v-model:value="searchTerm" type="search" autocomplete="off" placeholder="搜索名称、用途或 ID" aria-label="搜索子代理" />
     </label>
     <div class="subagents-filters" role="group" aria-label="筛选子代理">
-      <button
-        v-for="tab in (['all', 'enabled', 'disabled'] as const)"
-        :key="tab"
-        type="button"
-        class="subagents-filter-tab"
-        :class="{ active: activeFilter === tab }"
-        :data-subagent-filter="tab"
-        :aria-pressed="String(activeFilter === tab)"
-        @click="activeFilter = tab"
-      >{{ tab === "all" ? "全部" : tab === "enabled" ? "已启用" : "已停用" }} <span :data-subagent-count="tab">{{ filterCounts[tab] }}</span></button>
+      <Button v-for="tab in (['all', 'enabled', 'disabled'] as const)" :key="tab" class="subagents-filter-tab" :class="{ active: activeFilter === tab }" :data-subagent-filter="tab" :aria-pressed="String(activeFilter === tab)" @click="activeFilter = tab">{{ tab === "all" ? "全部" : tab === "enabled" ? "已启用" : "已停用" }} <span :data-subagent-count="tab">{{ filterCounts[tab] }}</span></Button>
     </div>
   </div>
 
@@ -475,15 +466,9 @@ const invalidModel = ref("");
             />
           </span>
         </label>
-        <button
-          type="button"
-          class="subagent-edit-btn"
-          :aria-label="`配置子代理 ${agent.name}`"
-          :title="`配置 ${agent.name}`"
-          @click="openEditor(agent)"
-        >
+        <Button class="subagent-edit-btn" :aria-label="`配置子代理 ${agent.name}`" :title="`配置 ${agent.name}`" @click="openEditor(agent)">
           <i class="ui-icon" data-icon="Pencil" aria-hidden="true" style="--icon-size: 13px"></i> 配置
-        </button>
+        </Button>
       </div>
     </article>
   </div>
@@ -519,9 +504,9 @@ const invalidModel = ref("");
           <h3 id="subagent-editor-title">{{ editingId ? "编辑子代理" : "新建子代理" }}</h3>
           <p id="subagent-editor-description" class="subagent-editor-description">定义主 Agent 可以委派的对象；工具和专项提示词不会在这里写死。</p>
         </div>
-        <button id="subagent-editor-close" type="button" class="subagent-icon-btn" aria-label="关闭子代理编辑器" title="关闭" @click="requestCloseEditor">
+        <Button id="subagent-editor-close" class="subagent-icon-btn" aria-label="关闭子代理编辑器" title="关闭" @click="requestCloseEditor">
           <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-        </button>
+        </Button>
       </div>
 
       <section class="subagent-form-section" aria-labelledby="subagent-identity-title">

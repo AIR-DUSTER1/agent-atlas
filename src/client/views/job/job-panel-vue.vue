@@ -6,7 +6,7 @@
   立场：面板只管理浏览器、数据目录和平台登录；采集流程由求职 Agent 内部执行。
 -->
 <script setup lang="ts">
-import { Input } from "antdv-next";
+import { Button, Input } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { JOB_PLATFORMS, useJobStore } from "../../stores/job.js";
@@ -177,14 +177,14 @@ onMounted(() => {
       <Input id="job-data-dir" v-model:value="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
     </label>
     <div class="kb-actions">
-      <button id="job-save-btn" class="btn btn-approve" :disabled="store.saving" @click="save">保存并重新探测</button>
-      <button id="job-doctor-btn" class="ghost-btn" :disabled="store.doctorRunning" @click="runDoctor">运行自检</button>
-      <button id="job-diagnose-btn" class="ghost-btn" title="检查四个平台的页面结构，不写入选择器" :disabled="Boolean(store.diagnosing)" @click="diagnose(false)">
+      <Button id="job-save-btn" class="btn btn-approve" :disabled="store.saving" @click="save">保存并重新探测</Button>
+      <Button id="job-doctor-btn" class="ghost-btn" :disabled="store.doctorRunning" @click="runDoctor">运行自检</Button>
+      <Button id="job-diagnose-btn" class="ghost-btn" title="检查四个平台的页面结构，不写入选择器" :disabled="Boolean(store.diagnosing)" @click="diagnose(false)">
         {{ store.diagnosing === "plain" ? "正在诊断…" : "结构诊断" }}
-      </button>
-      <button id="job-diagnose-apply-btn" class="ghost-btn" title="诊断后仅固化本次真实验证通过的候选选择器" :disabled="Boolean(store.diagnosing)" @click="diagnose(true)">
+      </Button>
+      <Button id="job-diagnose-apply-btn" class="ghost-btn" title="诊断后仅固化本次真实验证通过的候选选择器" :disabled="Boolean(store.diagnosing)" @click="diagnose(true)">
         {{ store.diagnosing === "apply" ? "正在诊断并修复…" : "诊断并修复" }}
-      </button>
+      </Button>
       <span id="job-status" class="settings-status" :class="store.statusKind" role="status" aria-live="polite">{{ store.statusText }}</span>
     </div>
     <pre id="job-doctor-output" class="job-doctor-output">{{ store.doctorOutput }}</pre>
@@ -195,23 +195,15 @@ onMounted(() => {
       之后内置采集流程会复用，不用重复登录。采集时会出现独立浏览器窗口，遇到站点安全验证可在窗口中完成；未登录时 BOSS直聘列表页通常会被拦截。
     </p>
     <div id="job-platforms" class="job-platforms">
-      <button
-        v-for="platform in JOB_PLATFORMS"
-        :key="platform.id"
-        type="button"
-        class="ui-button job-login-btn"
-        :aria-label="`登录 ${platform.label}`"
-        :disabled="store.loggingInPlatform === platform.id"
-        @click="login(platform)"
-      >
+      <Button v-for="platform in JOB_PLATFORMS" :key="platform.id" class="ui-button job-login-btn" :aria-label="`登录 ${platform.label}`" :disabled="store.loggingInPlatform === platform.id" @click="login(platform)">
         <i class="ui-icon" data-icon="ExternalLink" aria-hidden="true" style="--icon-size: 13px"></i>
         {{ store.loggingInPlatform === platform.id ? `${platform.label} 等待扫码…` : `登录 ${platform.label}` }}
-      </button>
+      </Button>
     </div>
 
     <div class="kb-footer-actions">
       <span class="spacer"></span>
-      <button id="job-close" class="ghost-btn" @click="close">关闭</button>
+      <Button id="job-close" class="ghost-btn" @click="close">关闭</Button>
     </div>
     <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary / job_diagnose（人工审批）</code>；执行流程、评分规则、选择器自愈和平台适配均在应用内，Excel / HTML 交付物写入数据目录的 <code>out/</code>。</p>
   </div>

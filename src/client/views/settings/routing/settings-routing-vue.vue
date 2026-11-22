@@ -9,7 +9,7 @@
   - provider 选项与子代理设置页同一数据源（store.config）。
 -->
 <script setup lang="ts">
-import { Select, Switch, InputNumber, Slider, Input } from "antdv-next";
+import { Button, Input, InputNumber, Select, Slider, Switch } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoutingStore } from "../../../stores/routing.js";
@@ -304,7 +304,7 @@ async function runTest(): Promise<void> {
     <p class="routing-card-sub">用一段样例请求看它会派给谁。注意：选了 API 后端时会真的调用一次模型（可能有少量费用）。</p>
     <div class="routing-test-row">
       <Input id="routing-test-input" v-model:value="testText" type="text" placeholder="例如：帮我找北京朝阳区两居室，预算 6000" aria-label="路由测试文本" @keydown.enter="runTest" />
-      <button id="routing-test-btn" type="button" class="ui-button" :disabled="testing" @click="runTest">{{ testing ? "试跑中…" : "试跑一次" }}</button>
+      <Button id="routing-test-btn" class="ui-button" :disabled="testing" @click="runTest">{{ testing ? "试跑中…" : "试跑一次" }}</Button>
     </div>
     <div id="routing-test-result" class="routing-test-result" role="status" aria-live="polite">
       <template v-if="store.testResult">
@@ -326,7 +326,7 @@ async function runTest(): Promise<void> {
 
   <div class="routing-actions">
     <div id="routing-status" class="settings-status" :class="statusKind" role="status" aria-live="polite">{{ statusText }}</div>
-    <button id="routing-save-btn" type="button" class="ui-button ui-button-primary" :disabled="saving" @click="save">保存路由配置</button>
+    <Button id="routing-save-btn" class="ui-button ui-button-primary" :disabled="saving" @click="save">保存路由配置</Button>
   </div>
   </AntdvProvider>
 </template>

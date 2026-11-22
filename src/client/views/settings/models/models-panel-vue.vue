@@ -233,25 +233,17 @@ onMounted(() => {
     <aside class="provider-picker" aria-label="供应商列表">
       <div class="provider-picker-head">
         <div><strong>供应商</strong><span id="provider-count" class="key-state">{{ store.providers.length }} 个</span></div>
-        <button id="add-provider-btn" class="provider-add-btn" type="button" title="添加供应商" @click="store.openProviderForm(null)">＋</button>
+        <Button id="add-provider-btn" class="provider-add-btn" title="添加供应商" @click="store.openProviderForm(null)">＋</Button>
       </div>
       <div id="provider-list" class="provider-nav-list">
-        <button
-          v-for="p in store.providers"
-          :key="p.id"
-          type="button"
-          class="provider-nav-item"
-          :class="{ active: p.id === store.selectedProviderId, 'in-use': p.active }"
-          :title="`${p.name}\n${p.baseURL}`"
-          @click="selectProvider(p)"
-        >
+        <Button v-for="p in store.providers" :key="p.id" class="provider-nav-item" :class="{ active: p.id === store.selectedProviderId, 'in-use': p.active }" :title="`${p.name}\n${p.baseURL}`" @click="selectProvider(p)">
           <span class="provider-nav-dot"></span>
           <span class="provider-nav-copy">
             <span class="provider-nav-name">{{ p.name }}</span>
             <span class="provider-nav-url">{{ p.baseURL }}</span>
           </span>
           <span class="provider-nav-count">{{ (p.models || []).length }} 模型</span>
-        </button>
+        </Button>
       </div>
     </aside>
 
@@ -277,21 +269,14 @@ onMounted(() => {
             </div>
           </div>
           <div class="provider-detail-actions">
-            <button
-              id="provider-use-btn"
-              type="button"
-              class="ghost-btn small"
-              :disabled="selected.active"
-              @click="useProvider(selected)"
-            >{{ selected.active ? "使用中" : "启用" }}</button>
-            <button id="provider-edit-btn" type="button" class="ghost-btn small" @click="store.openProviderForm(selected.id)">编辑连接</button>
-            <button
-              v-if="store.providers.length > 1"
+            <Button id="provider-use-btn" class="ghost-btn small" :disabled="selected.active" @click="useProvider(selected)">{{ selected.active ? "使用中" : "启用" }}</Button>
+            <Button id="provider-edit-btn" class="ghost-btn small" @click="store.openProviderForm(selected.id)">编辑连接</Button>
+            <Button v-if="store.providers.length> 1"
               id="provider-delete-btn"
               type="button"
               class="ghost-btn small danger-text"
               @click="removeProvider(selected.id, selected.name)"
-            >删除</button>
+            >删除</Button>
           </div>
         </div>
 
@@ -309,14 +294,14 @@ onMounted(() => {
               class="model-row"
               :class="{ active: m.active }"
             >
-              <button type="button" class="m-pick" title="设为该供应商的启用模型" @click="!m.active && activateModel(selected.id, m.id)">{{ m.active ? "✓" : "○" }}</button>
+              <Button class="m-pick" title="设为该供应商的启用模型" @click="!m.active && activateModel(selected.id, m.id)">{{ m.active ? "✓" : "○" }}</Button>
               <div class="m-info">
                 <div class="m-name">{{ m.modality === "vision" ? "🖼 " : "" }}{{ m.displayName || m.name }}</div>
                 <div class="m-detail">{{ modelDetail(m) }}</div>
               </div>
               <div class="m-actions">
-                <button type="button" class="m-edit" @click="store.openModelForm(selected.id, m.id)">编辑</button>
-                <button type="button" class="m-del" @click="removeModel(selected.id, m.id, m.name)">删除</button>
+                <Button class="m-edit" @click="store.openModelForm(selected.id, m.id)">编辑</Button>
+                <Button class="m-del" @click="removeModel(selected.id, m.id, m.name)">删除</Button>
               </div>
             </div>
             </template>
@@ -331,15 +316,10 @@ onMounted(() => {
             <template v-if="store.gatewayModels.length">
               <div class="gw-label">网关返回 {{ store.gatewayModels.length }} 个模型（点一下即可添加）：</div>
               <div class="gw-chips">
-                <button
-                  v-for="m in store.gatewayModels"
-                  :key="m.id"
-                  type="button"
-                  class="gw-chip"
-                  :class="{ added: (selected.models || []).some((item) => item.name === m.id) }"
+                <Button v-for="m in store.gatewayModels" :key="m.id" class="gw-chip" :class="{ added: (selected.models || []).some((item) => item.name === m.id) }"
                   :title="gatewayChipTitle(m)"
                   @click="addModelByName(m.id, m)"
-                >{{ gatewayChipLabel(m) }}</button>
+                >{{ gatewayChipLabel(m) }}</Button>
               </div>
             </template>
           </div>

@@ -12,6 +12,8 @@
     写入）留在 views/projects.ts，组件只经命令面发意图。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useProjectsStore } from "../../stores/projects.js";
 
@@ -43,63 +45,51 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <button id="project-btn" class="project-btn" title="选择项目文件夹（本地 / 云端）">
+  <AntdvProvider>
+  <Button id="project-btn" class="project-btn" title="选择项目文件夹（本地 / 云端）">
     <span id="project-btn-icon" class="ui-icon-host">
       <i class="ui-icon" :data-icon="store.buttonIcon" aria-hidden="true"></i>
     </span>
     <span id="project-btn-text">{{ store.buttonText }}</span>
     <i class="ui-icon chevron-down" data-icon="ChevronDown" aria-hidden="true"></i>
-  </button>
+  </Button>
 
   <div id="project-menu" class="project-menu hidden" role="menu">
-    <button type="button" role="menuitem" class="pm-item" :class="{ active: allActive }" @click="commands.choose?.('all')">
+    <Button role="menuitem" class="pm-item" :class="{ active: allActive }" @click="commands.choose?.('all')">
       <span class="pm-ic"><i class="ui-icon" data-icon="FolderTree" aria-hidden="true"></i></span>
       <span class="pm-name">全部项目</span>
       <span class="pm-check">{{ allActive ? "✓" : "" }}</span>
-    </button>
+    </Button>
 
-    <button type="button" role="menuitem" class="pm-item" :class="{ active: noneActive }" title="创建会话时不绑定任何项目" @click="commands.choose?.('__none__')">
+    <Button role="menuitem" class="pm-item" :class="{ active: noneActive }" title="创建会话时不绑定任何项目" @click="commands.choose?.('__none__')">
       <span class="pm-ic"><i class="ui-icon" data-icon="Folder" aria-hidden="true"></i></span>
       <span class="pm-name">不选择项目</span>
       <span class="pm-sub none">无项目上下文</span>
       <span class="pm-check">{{ noneActive ? "✓" : "" }}</span>
-    </button>
+    </Button>
 
     <div v-for="item in store.items" :key="item.id" class="pm-item pm-item-complex" :class="{ active: item.active }">
-      <button type="button" role="menuitem" class="pm-select" :title="item.name" @click="commands.choose?.(item.id)">
+      <Button role="menuitem" class="pm-select" :title="item.name" @click="commands.choose?.(item.id)">
         <span class="pm-ic"><i class="ui-icon" :data-icon="item.type === 'cloud' ? 'Globe' : 'Folder'" aria-hidden="true"></i></span>
         <span class="pm-name">{{ item.name }}</span>
         <span class="pm-sub" :class="item.type">{{ item.type === "cloud" ? "云端" : "本地" }}</span>
-      </button>
-      <button
-        v-if="item.type === 'cloud'"
-        type="button"
-        class="pm-x pm-refresh"
-        title="git pull 刷新缓存"
-        :aria-label="`刷新 ${item.name}`"
-        @click.stop="commands.refreshCloud?.(item.id)"
-      >
+      </Button>
+      <Button v-if="item.type === 'cloud'" class="pm-x pm-refresh" title="git pull 刷新缓存" :aria-label="`刷新 ${item.name}`" @click.stop="commands.refreshCloud?.(item.id)">
         <i class="ui-icon" data-icon="RefreshCw" aria-hidden="true"></i>
-      </button>
-      <button
-        v-if="!item.builtin"
-        type="button"
-        class="pm-x pm-del"
-        title="删除项目"
-        :aria-label="`删除 ${item.name}`"
-        @click.stop="commands.remove?.(item.id)"
-      >
+      </Button>
+      <Button v-if="!item.builtin" class="pm-x pm-del" title="删除项目" :aria-label="`删除 ${item.name}`" @click.stop="commands.remove?.(item.id)">
         <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
-      </button>
+      </Button>
       <span class="pm-check">{{ item.active ? "✓" : "" }}</span>
     </div>
 
     <div class="pm-divider"></div>
-    <button type="button" role="menuitem" class="pm-item pm-manage" @click="commands.addLocal?.()">
+    <Button role="menuitem" class="pm-item pm-manage" @click="commands.addLocal?.()">
       <i class="ui-icon" data-icon="FolderOpen" aria-hidden="true"></i><span>添加本地文件夹（系统选择）</span>
-    </button>
-    <button type="button" role="menuitem" class="pm-item pm-manage" @click="commands.addCloud?.()">
+    </Button>
+    <Button role="menuitem" class="pm-item pm-manage" @click="commands.addCloud?.()">
       <i class="ui-icon" data-icon="Globe" aria-hidden="true"></i><span>添加云端文件夹（Git 仓库）</span>
-    </button>
+    </Button>
   </div>
+  </AntdvProvider>
 </template>

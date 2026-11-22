@@ -6,7 +6,7 @@
   立场：Key 只写不读不落盘回显；外链过 safeHref 白名单。
 -->
 <script setup lang="ts">
-import { Input } from "antdv-next";
+import { Button, Input } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, ref, watch } from "vue";
 import { useEstateStore } from "../../stores/estate.js";
@@ -169,10 +169,10 @@ function close(): void {
     <div class="field-label">第一步 · 安装贝壳 CLI</div>
     <div id="estate-status" class="estate-status" :class="status1Kind">{{ status1Text || "探测中…" }}</div>
     <div class="kb-actions">
-      <button id="estate-check" class="ghost-btn" @click="reload">重新检测</button>
-      <button id="estate-install" class="btn btn-approve" :disabled="installing" @click="install">
+      <Button id="estate-check" class="ghost-btn" @click="reload">重新检测</Button>
+      <Button id="estate-install" class="btn btn-approve" :disabled="installing" @click="install">
         <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> 安装 CLI（自动下载官方二进制）
-      </button>
+      </Button>
     </div>
     <p class="settings-note">安装会按官方 manifest 选择当前平台的二进制并做 sha256 校验：Windows 为 <code>beike.exe</code>，Linux / macOS 为 <code>beike</code>。默认写入 <code>.setting/beike/</code>；容器使用持久化目录。也可通过 <code>BEIKE_CLI_PATH</code> 或系统 PATH 使用已授权版本。</p>
 
@@ -186,24 +186,24 @@ function close(): void {
       <span class="field-label">贝壳 Key（粘贴后保存）</span>
       <div class="key-row">
         <Input.Password id="estate-key" v-model:value="keyValue" spellcheck="false" placeholder="粘贴 building.ke.com 显示的完整凭证" @keydown.enter.prevent="saveKey" />
-        <button id="estate-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏授权 Key" @click="toggleKeyVisible">
+        <Button id="estate-key-toggle" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏授权 Key" @click="toggleKeyVisible">
           <i class="ui-icon" data-icon="Eye" aria-hidden="true"></i>
-        </button>
+        </Button>
       </div>
     </label>
     <div class="kb-actions">
-      <button id="estate-login-open" class="ghost-btn" :disabled="checkingLogin" @click="openLogin">
+      <Button id="estate-login-open" class="ghost-btn" :disabled="checkingLogin" @click="openLogin">
         <i class="ui-icon" data-icon="ExternalLink" aria-hidden="true"></i> 打开官方登录页
-      </button>
-      <button id="estate-key-paste" class="ghost-btn" :disabled="checkingLogin" @click="pasteKeyFromClipboard">从剪贴板读取</button>
-      <button id="estate-key-save" class="btn btn-approve" @click="saveKey">保存 Key</button>
+      </Button>
+      <Button id="estate-key-paste" class="ghost-btn" :disabled="checkingLogin" @click="pasteKeyFromClipboard">从剪贴板读取</Button>
+      <Button id="estate-key-save" class="btn btn-approve" @click="saveKey">保存 Key</Button>
       <span id="estate-status2" class="settings-status" :style="{ color: status2Color }">{{ status2Text }}</span>
     </div>
     <p class="settings-note">使用系统默认浏览器打开官方登录页，只打开一次；页面显示的是掩码，请点 Key 右侧的「复制」，再回到这里点「从剪贴板读取」并保存。不要在短时间内反复扫码或连续重试。</p>
 
     <div class="kb-footer-actions">
       <span class="spacer"></span>
-      <button id="estate-close" class="ghost-btn" @click="close">关闭</button>
+      <Button id="estate-close" class="ghost-btn" @click="close">关闭</Button>
     </div>
     <p class="settings-note">会话里 Agent 自动调用 <code>house_search / house_map（对比区位地图）/ house_lookup（户型图）/ house_agents / house_appoint（人工审批）/ house_contact（人工审批）</code> 等工具；每轮会把用户原话上报给贝壳 <code>beike analyze</code>（官方契约，静默执行）。</p>
   </div>

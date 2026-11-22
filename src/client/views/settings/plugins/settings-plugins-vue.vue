@@ -10,7 +10,7 @@
   - 「管理」入口沿用 legacy 对话框（RAG/贝壳/求职面板与 uiAlert 尚未 Vue 化）。
 -->
 <script setup lang="ts">
-import { Switch } from "antdv-next";
+import { Button, Switch } from "antdv-next";
 import { computed, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { BUILTIN_PLUGINS, pluginTransportMeta, type BuiltinPlugin } from "../../../modules/plugin-registry.js";
@@ -126,11 +126,7 @@ async function onToggle(plugin: BuiltinPlugin, next: boolean): Promise<void> {
         :loading="togglingId === row.plugin.id"
         @update:checked="(next: boolean) => onToggle(row.plugin, next)"
       />
-      <button
-        type="button"
-        class="plugin-manage btn btn-approve"
-        @click="openPluginManage(row.plugin)"
-      >{{ row.plugin.manageLabel }}</button>
+      <Button class="plugin-manage btn btn-approve" @click="openPluginManage(row.plugin)">{{ row.plugin.manageLabel }}</Button>
     </div>
   </article>
   </AntdvProvider>

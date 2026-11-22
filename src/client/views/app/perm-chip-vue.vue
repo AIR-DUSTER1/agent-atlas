@@ -11,6 +11,8 @@
     点击逻辑），本组件只提供空的 #cm-perm-menu 容器。
 -->
 <script setup lang="ts">
+import { Button } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted } from "vue";
 import { useTopbarStore } from "../../stores/topbar.js";
 
@@ -28,10 +30,12 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="perm-group" class="cm-group" :class="{ hidden: !visible }">
-    <button id="cm-perm" class="cm-chip" type="button" :title="store.permTitle">
+    <Button id="cm-perm" class="cm-chip" :title="store.permTitle">
       <span class="cm-ic"><i class="ui-icon" data-icon="ShieldCheck" aria-hidden="true"></i></span><span class="cm-text">{{ store.permText }}</span><i class="ui-icon cm-arr" data-icon="ChevronDown" aria-hidden="true"></i>
-    </button>
+    </Button>
     <div id="cm-perm-menu" class="cm-menu hidden"></div>
   </div>
+  </AntdvProvider>
 </template>

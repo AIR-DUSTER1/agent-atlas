@@ -10,7 +10,7 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Input, InputNumber, Select } from "antdv-next";
+import { Button, Input, InputNumber, Select } from "antdv-next";
 import { useRagStore } from "../../stores/rag.js";
 import { setKbStatus } from "./rag.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../../ui/dialog.js";
@@ -211,20 +211,20 @@ function close(): void {
       </label>
     </div>
     <div class="kb-actions">
-      <button id="kb-save" class="btn btn-approve" :disabled="saving" @click="saveConfig">保存配置</button>
-      <button id="kb-test" class="ghost-btn" :disabled="testing" @click="testConn">测试连接</button>
+      <Button id="kb-save" class="btn btn-approve" :disabled="saving" @click="saveConfig">保存配置</Button>
+      <Button id="kb-test" class="ghost-btn" :disabled="testing" @click="testConn">测试连接</Button>
       <span id="kb-status" class="settings-status"></span>
     </div>
 
     <div class="field-label ext-head"><i class="ui-icon" data-icon="Download" aria-hidden="true"></i> 文档入库 <em class="key-state">扫描授权文件夹内的文本文件（跳过 node_modules / .git / 密钥 / 锁文件）</em></div>
     <div class="fs-toolbar kb-toolbar">
       <Select id="kb-root" v-model:value="kbRoot" :options="rootOptions" title="选择入库位置" />
-      <button id="kb-ingest" class="ghost-btn small" :disabled="ingesting" @click="ingestFolder">
+      <Button id="kb-ingest" class="ghost-btn small" :disabled="ingesting" @click="ingestFolder">
         <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> {{ ingesting ? "⏳ 扫描入库中…（最长 90s）" : "全量入库" }}
-      </button>
-      <button id="kb-paste" class="ghost-btn small" style="min-width: 60px;" @click="pasteText">
+      </Button>
+      <Button id="kb-paste" class="ghost-btn small" style="min-width: 60px;" @click="pasteText">
         <i class="ui-icon" data-icon="Pencil" aria-hidden="true"></i> 粘贴文本
-      </button>
+      </Button>
     </div>
 
     <div class="field-label">已入库文档（本地登记，真实索引在外部服务）</div>
@@ -240,7 +240,7 @@ function close(): void {
           <span class="f-icon">📄</span>
           <span class="f-name">{{ d.name }}</span>
           <span class="f-size">{{ (d.bytes / 1000).toFixed(1) }}k 字 · {{ new Date(d.at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) }} · {{ d.source || "" }}</span>
-          <button class="pm-x kb-doc-del" title="从登记移除（并尝试删除外部对应文档）" @click.stop="removeDoc(d.id)">✕</button>
+          <Button class="pm-x kb-doc-del" title="从登记移除（并尝试删除外部对应文档）" @click.stop="removeDoc(d.id)">✕</Button>
         </div>
       </template>
     </div>
@@ -248,7 +248,7 @@ function close(): void {
     <div class="field-label ext-head"><i class="ui-icon" data-icon="Search" aria-hidden="true"></i> 检索测试</div>
     <div class="kb-search-row">
       <Input id="kb-query" aria-label="知识库检索问题" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" @keydown.enter.prevent="searchTest" />
-      <button id="kb-search-btn" class="btn btn-approve" @click="searchTest">检索</button>
+      <Button id="kb-search-btn" class="btn btn-approve" @click="searchTest">检索</Button>
     </div>
     <div id="kb-hits" class="kb-hits">
       <div v-if="store.hitsState === 'loading'" class="fs-empty">检索中…</div>
@@ -266,11 +266,11 @@ function close(): void {
     </div>
 
     <div class="kb-footer-actions">
-      <button id="kb-clear" class="ghost-btn" title="调用外部服务的 /reset 清空集合，并清掉本地登记" @click="clearAll">
+      <Button id="kb-clear" class="ghost-btn" title="调用外部服务的 /reset 清空集合，并清掉本地登记" @click="clearAll">
         <i class="ui-icon" data-icon="Trash2" aria-hidden="true"></i> 清空集合
-      </button>
+      </Button>
       <span class="spacer"></span>
-      <button id="kb-close" class="ghost-btn" @click="close">关闭</button>
+      <Button id="kb-close" class="ghost-btn" @click="close">关闭</Button>
     </div>
     <p class="settings-note">契约：POST <code>{RAG_URL}/ingest</code>（{collection, documents}）、<code>/search</code>（{query, topK} → {hits:[{text, score, name?}]}）、<code>/reset</code>；鉴权头 <code>Authorization: Bearer</code>。聊天中通用 Agent 会自动调用 <code>retrieve_docs</code> 工具检索。</p>
   </div>

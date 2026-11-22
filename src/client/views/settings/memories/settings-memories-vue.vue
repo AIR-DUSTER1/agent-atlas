@@ -795,8 +795,8 @@ async function importMemories(file: File): Promise<void> {
             <div class="m-meta">{{ candidateMeta(entry) }}</div>
           </div>
           <div class="memory-candidate-actions">
-            <button class="p-del candidate-confirm" type="button" @click="confirmCandidate(entry)">确认</button>
-            <button class="p-del candidate-reject" type="button" @click="rejectCandidate(entry)">拒绝</button>
+            <Button class="p-del candidate-confirm" @click="confirmCandidate(entry)">确认</Button>
+            <Button class="p-del candidate-reject" @click="rejectCandidate(entry)">拒绝</Button>
           </div>
         </div>
       </div>
@@ -820,7 +820,7 @@ async function importMemories(file: File): Promise<void> {
           <div class="m-content">{{ entry.content }}</div>
           <div class="m-meta">{{ entryMeta(entry) }}</div>
         </div>
-        <button class="p-del" type="button" title="删除这条记忆" @click="removeEntry(entry)">删除</button>
+        <Button class="p-del" title="删除这条记忆" @click="removeEntry(entry)">删除</Button>
       </div>
       </template>
     </div>
