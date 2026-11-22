@@ -10,7 +10,7 @@
   - 测试连接前就地给出「测试中」（spawn 握手可达一分钟）。
 -->
 <script setup lang="ts">
-import { Button, Input, Switch } from "antdv-next";
+import { Button, Input, Switch, Upload } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useMcpStore, type McpServerStatus } from "../../../stores/mcp.js";
@@ -309,13 +309,19 @@ async function deleteFromEditor(): Promise<void> {
 }
 
 function pickImportFile(): void {
-  importFileInput.value?.click();
+  document.getElementById("mcp-import-file")?.click();
 }
 
-async function importFromFile(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
+/**
+ * antdv Upload 的 beforeUpload：返回 false 表示「不上传」，只做本地解析。
+ * 与原 @change 版本的区别只是文件来源 —— 不再从 DOM 读 input.files。
+ */
+function beforeImportUpload(file: File): boolean {
+  void importFromFile(file);
+  return false;
+}
+
+async function importFromFile(file: File): Promise<void> {
   if (!file) return;
   try {
     if (file.size > MAX_IMPORT_BYTES) throw new Error("JSON 文件超过 1MB");
@@ -381,7 +387,17 @@ onUnmounted(() => {
       />
     </div>
   </section>
-  <input id="mcp-import-file" ref="importFileInput" class="hidden" type="file" accept=".json,application/json" aria-label="选择 MCP JSON 配置" @change="importFromFile" />
+  <!-- antdv Upload 不透传 class/id 到根元素：用外层 div 隐藏，
+       触发靠 pickImportFile() 点内部 input[type=file] -->
+  <div class="hidden">
+    <Upload
+      id="mcp-import-file"
+      accept=".json,application/json"
+      :show-upload-list="false"
+      :before-upload="beforeImportUpload"
+      aria-label="选择 MCP JSON 配置"
+    />
+  </div>
 
   <div class="field-label mcp-section-label">已配置的 MCP Servers</div>
   <section class="mcp-server-panel" aria-labelledby="mcp-servers-title">

@@ -391,7 +391,7 @@ test("记忆与个性化：默认上下文、scope 隔离、导出导入与 HTTP
   });
 
   await selectAntdvOption(page, "#mem-import-mode", "替换当前 scope");
-  await page.locator("#mem-import-file").setInputFiles({
+  await page.locator("#memories-modal input[type=file]").setInputFiles({
     name: "e2e-memories.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify({

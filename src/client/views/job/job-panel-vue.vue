@@ -6,6 +6,8 @@
   立场：面板只管理浏览器、数据目录和平台登录；采集流程由求职 Agent 内部执行。
 -->
 <script setup lang="ts">
+import { Input } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { JOB_PLATFORMS, useJobStore } from "../../stores/job.js";
 import { registerJobOpenHook, registerJobCloseHook } from "./job.js";
@@ -137,6 +139,7 @@ onMounted(() => {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="job-modal" role="dialog" aria-modal="true" aria-labelledby="job-title">
     <h2 id="job-title"><i class="ui-icon" data-icon="Briefcase" aria-hidden="true"></i> 求职 Agent（内置采集）</h2>
     <p class="settings-sub">采集流程已经内化到求职 Agent：内置驱动 Chrome / Edge 访问 BOSS直聘、智联招聘、前程无忧与猎聘，完成搜索、打分、外包识别、清单合并和 Excel / HTML 交付，不需要安装外部 Skill 或 Python。</p>
@@ -171,7 +174,7 @@ onMounted(() => {
     <div class="field-label">数据目录 <em class="key-state">留空使用应用默认目录</em></div>
     <label class="field">
       <span class="field-label">登录态、岗位清单与 Excel 产出</span>
-      <input id="job-data-dir" v-model="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
+      <Input id="job-data-dir" v-model:value="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
     </label>
     <div class="kb-actions">
       <button id="job-save-btn" class="btn btn-approve" :disabled="store.saving" @click="save">保存并重新探测</button>
@@ -212,4 +215,5 @@ onMounted(() => {
     </div>
     <p class="settings-note">会话里 Agent 会调用 <code>job_collect（人工审批）/ job_query / job_enrich（人工审批）/ job_summary / job_diagnose（人工审批）</code>；执行流程、评分规则、选择器自愈和平台适配均在应用内，Excel / HTML 交付物写入数据目录的 <code>out/</code>。</p>
   </div>
+  </AntdvProvider>
 </template>

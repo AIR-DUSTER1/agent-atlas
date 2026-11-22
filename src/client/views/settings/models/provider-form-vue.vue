@@ -6,7 +6,7 @@
   立场：API Key 只写不读，留空 = 保持不变；保存走 stores/models + model-actions。
 -->
 <script setup lang="ts">
-import { Select } from "antdv-next";
+import { Select, Input } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useModelsStore } from "../../../stores/models.js";
@@ -136,19 +136,19 @@ function toggleKeyVisible(): void {
       <div class="provider-form-grid">
         <label class="field">
           <span class="field-label">名称</span>
-          <input id="pf-name" v-model="form.name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" @keydown.enter.prevent="onSave" />
+          <Input id="pf-name" v-model:value="form.name" type="text" spellcheck="false" placeholder="例如 TokenRhythm / 本地 vLLM" @keydown.enter.prevent="onSave" />
         </label>
 
         <label class="field">
           <span class="field-label">网关地址 BASE_URL</span>
-          <input id="pf-base-url" v-model="form.baseURL" type="text" spellcheck="false" placeholder="https://api.example.com/v1" @keydown.enter.prevent="onSave" />
+          <Input id="pf-base-url" v-model:value="form.baseURL" type="text" spellcheck="false" placeholder="https://api.example.com/v1" @keydown.enter.prevent="onSave" />
         </label>
       </div>
 
       <label class="field">
         <span class="field-label">API Key <em id="pf-key-state" class="key-state" :class="{ ok: Boolean(editingProvider?.hasKey) }">{{ keyStateText }}</em></span>
         <div class="key-row">
-          <input id="pf-api-key" v-model="form.apiKey" type="password" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" @keydown.enter.prevent="onSave" />
+          <Input.Password id="pf-api-key" v-model:value="form.apiKey" spellcheck="false" placeholder="编辑时留空 = 保持当前 Key 不变" @keydown.enter.prevent="onSave" />
           <button id="pf-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏 API Key" @click="toggleKeyVisible">
             <i class="ui-icon" data-icon="Eye" aria-hidden="true"></i>
           </button>
@@ -173,7 +173,7 @@ function toggleKeyVisible(): void {
           </template>
         </div>
         <div class="key-row model-add-row">
-          <input id="pf-new-model-name" v-model="newModelName" aria-label="新模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或从网关列表选择" @keydown="onPendingKeydown" />
+          <Input id="pf-new-model-name" v-model:value="newModelName" type="text" aria-label="新模型 ID" spellcheck="false" placeholder="输入模型名，或从网关列表选择" @keydown="onPendingKeydown" />
           <button id="pf-new-fetch-models" type="button" class="ghost-btn small" @click="onTest">获取列表</button>
           <button id="pf-new-model-add-btn" type="button" class="ghost-btn small" @click="addPendingFromInput">＋ 添加</button>
         </div>

@@ -157,15 +157,18 @@ test("设置表单密钥只显示掩码，必填错误就地呈现", async () =>
   const forms = await readClientFiles([
     "views/settings-memories.ts", "views/settings-commands-vue.vue", "ui/field.ts",
   ]);
-  // M4 4.3：pf-api-key 随供应商弹窗迁往 Vue 组件
+  // antdv 批次：密钥字段必须是「密码型控件」。
+  // antdv 面板用 Input.Password（组件名在 id 前，自带显示切换与 aria-pressed），
+  // 原生面板用 type="password"（属性在 id 后）。两种写法都接受 ——
+  // 断言的是意图（不得是明文输入），不是绑定写法。
+  const isSecretField = (source: string, id: string): boolean =>
+    new RegExp(`(?:<Input\\.Password[^>]*id="${id}"|id="${id}"[^>]{0,60}type="password")`).test(source);
   const providerForm = await readClientFiles(["views/provider-form-vue.vue"]);
-  assert.match(providerForm, /id="pf-api-key"[\s\S]{0,200}type="password"/);
-  // M4 4.4：kb-key 随知识库弹窗迁往 Vue 组件
+  assert.ok(isSecretField(providerForm, "pf-api-key"), "pf-api-key 必须是密码型控件");
   const kbVue = await readClientFiles(["views/kb-panel-vue.vue"]);
-  assert.match(kbVue, /id="kb-key"[\s\S]{0,200}type="password"/);
-  // M4 4.4：estate-key 随贝壳弹窗迁往 Vue 组件
+  assert.ok(isSecretField(kbVue, "kb-key"), "kb-key 必须是密码型控件");
   const estateVue = await readClientFiles(["views/estate-panel-vue.vue"]);
-  assert.match(estateVue, /id="estate-key"[\s\S]{0,200}type="password"/);
+  assert.ok(isSecretField(estateVue, "estate-key"), "estate-key 必须是密码型控件");
   assert.match(forms, /export function setFieldError\(controlId: string, message: string\): void/);
   // M4 4.1：命令名错误改由 Vue 组件就地呈现（aria-invalid + role=alert）
   assert.match(forms, /errors\.name/);

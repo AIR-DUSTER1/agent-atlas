@@ -68,7 +68,7 @@ test("MCP 页面：列表、全局暂停、编辑弹窗、添加与导入", asyn
   await chromeRow.getByRole("switch", { name: "启用 MCP 服务器 Chrome DevTools MCP" }).click();
   await expect(chromeRow.getByRole("switch", { name: "启用 MCP 服务器 Chrome DevTools MCP" })).not.toBeChecked();
 
-  await page.locator("#mcp-import-file").setInputFiles({
+  await page.locator("#mcp-page input[type=file]").setInputFiles({
     name: "mcp.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify({

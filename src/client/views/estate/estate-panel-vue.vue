@@ -6,6 +6,8 @@
   立场：Key 只写不读不落盘回显；外链过 safeHref 白名单。
 -->
 <script setup lang="ts">
+import { Input } from "antdv-next";
+import AntdvProvider from "../../ui/antdv-provider.vue";
 import { computed, ref, watch } from "vue";
 import { useEstateStore } from "../../stores/estate.js";
 import { setEstateStatus } from "./estate.js";
@@ -159,6 +161,7 @@ function close(): void {
 </script>
 
 <template>
+  <AntdvProvider>
   <div id="estate-modal" role="dialog" aria-modal="true" aria-labelledby="estate-title">
     <h2 id="estate-title"><i class="ui-icon" data-icon="House" aria-hidden="true"></i> 房产数据源（贝壳官方 AI）</h2>
     <p class="settings-sub">房源检索 / 板块评测 / 户型图 / 行情来自贝壳官方 <code>beike</code> 命令行工具（本地子进程，无 npm 依赖）。首次使用：安装 CLI → 浏览器登录 → 保存页面显示的 Key</p>
@@ -182,7 +185,7 @@ function close(): void {
     <label class="field">
       <span class="field-label">贝壳 Key（粘贴后保存）</span>
       <div class="key-row">
-        <input id="estate-key" v-model="keyValue" type="password" spellcheck="false" placeholder="粘贴 building.ke.com 显示的完整凭证" @keydown.enter.prevent="saveKey" />
+        <Input.Password id="estate-key" v-model:value="keyValue" spellcheck="false" placeholder="粘贴 building.ke.com 显示的完整凭证" @keydown.enter.prevent="saveKey" />
         <button id="estate-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏授权 Key" @click="toggleKeyVisible">
           <i class="ui-icon" data-icon="Eye" aria-hidden="true"></i>
         </button>
@@ -204,4 +207,5 @@ function close(): void {
     </div>
     <p class="settings-note">会话里 Agent 自动调用 <code>house_search / house_map（对比区位地图）/ house_lookup（户型图）/ house_agents / house_appoint（人工审批）/ house_contact（人工审批）</code> 等工具；每轮会把用户原话上报给贝壳 <code>beike analyze</code>（官方契约，静默执行）。</p>
   </div>
+  </AntdvProvider>
 </template>

@@ -10,7 +10,7 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Select } from "antdv-next";
+import { Input, InputNumber, Select } from "antdv-next";
 import { useRagStore } from "../../stores/rag.js";
 import { setKbStatus } from "./rag.js";
 import { uiAlert, uiConfirm, uiPrompt } from "../../ui/dialog.js";
@@ -19,13 +19,14 @@ import AntdvProvider from "../../ui/antdv-provider.vue";
 
 const store = useRagStore();
 
-const form = ref({ url: "", collection: "", topk: "", key: "" });
+const form = ref({ url: "", collection: "", topk: 5 as number | null, key: "" });
 const saving = ref(false);
 const testing = ref(false);
 const ingesting = ref(false);
 /** 入库目标根目录：改 antdv Select 后必须由 ref 承载（不再从 DOM 读 value）。 */
 const kbRoot = ref("");
-const keyVisible = ref(false);
+/** 检索问题：同理，Input 是受控组件，值必须由 ref 承载。 */
+const query = ref("");
 
 const keyStateText = ref("");
 /** 根目录选项：antdv Select 用 options 数组。 */
@@ -49,10 +50,9 @@ watch(() => store.kbOpen, (open) => {
   form.value = {
     url: rag?.baseURL || "",
     collection: rag?.collection || "default",
-    topk: String(rag?.topK ?? 5),
+    topk: rag?.topK ?? 5,
     key: "",
   };
-  keyVisible.value = false;
   keyStateText.value = rag?.hasKey
     ? `已保存 ${rag.apiKeyMasked || ""}，留空则不修改`
     : (rag?.configured ? "未保存 Key（服务无鉴权可不填）" : "");
@@ -63,17 +63,6 @@ watch(() => store.kbOpen, (open) => {
   requestAnimationFrame(() => document.getElementById("kb-url")?.focus());
 });
 
-function toggleKeyVisible(): void {
-  keyVisible.value = !keyVisible.value;
-  const input = document.getElementById("kb-key") as HTMLInputElement | null;
-  if (input) input.type = keyVisible.value ? "text" : "password";
-  const button = document.getElementById("kb-key-toggle");
-  if (button) {
-    button.setAttribute("aria-label", keyVisible.value ? "隐藏 API Key" : "显示或隐藏 API Key");
-    button.querySelector("i.ui-icon")?.setAttribute("data-icon", keyVisible.value ? "EyeOff" : "Eye");
-  }
-}
-
 async function saveConfig(): Promise<void> {
   const baseURL = form.value.url.trim();
   const apiKeyRaw = form.value.key.trim();
@@ -81,7 +70,7 @@ async function saveConfig(): Promise<void> {
   const body: Record<string, unknown> = {
     baseURL,
     collection: form.value.collection.trim() || "default",
-    topK: form.value.topk || undefined,
+    topK: form.value.topk ?? undefined,
   };
   if (apiKeyRaw) body.apiKey = apiKeyRaw; // 留空 = 不修改已存 Key
   saving.value = true;
@@ -165,7 +154,7 @@ async function removeDoc(id: string): Promise<void> {
 }
 
 async function searchTest(): Promise<void> {
-  const q = (document.getElementById("kb-query") as HTMLInputElement | null)?.value.trim() ?? "";
+  const q = query.value.trim();
   if (!q) { setKbStatus("✗ 请输入检索词", "err"); return; }
   store.hitsState = "loading";
   try {
@@ -205,25 +194,20 @@ function close(): void {
     <div class="field-label">RAG 服务配置</div>
     <label class="field">
       <span class="field-label">服务地址（实现 ingest / search 契约）</span>
-      <input id="kb-url" v-model="form.url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
+      <Input id="kb-url" v-model:value="form.url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
     </label>
     <label class="field">
       <span class="field-label">API Key <em id="kb-key-state" class="key-state" :class="{ ok: keyStateOk }">{{ keyStateText }}</em></span>
-      <div class="key-row">
-        <input id="kb-key" v-model="form.key" type="password" spellcheck="false" placeholder="留空 = 保持不变 / 服务无鉴权" />
-        <button id="kb-key-toggle" type="button" class="ghost-btn small" title="显示/隐藏" aria-label="显示或隐藏 API Key" @click="toggleKeyVisible">
-          <i class="ui-icon" data-icon="Eye" aria-hidden="true"></i>
-        </button>
-      </div>
+      <Input.Password id="kb-key" v-model:value="form.key" spellcheck="false" placeholder="留空 = 保持不变 / 服务无鉴权" />
     </label>
     <div class="kb-row2">
       <label class="field">
         <span class="field-label">集合 collection</span>
-        <input id="kb-collection" v-model="form.collection" type="text" spellcheck="false" placeholder="default" />
+        <Input id="kb-collection" v-model:value="form.collection" type="text" spellcheck="false" placeholder="default" />
       </label>
       <label class="field">
         <span class="field-label">检索条数 topK（1-20）</span>
-        <input id="kb-topk" v-model="form.topk" type="number" min="1" max="20" step="1" placeholder="5" />
+        <InputNumber id="kb-topk" v-model:value="form.topk" :min="1" :max="20" :step="1" placeholder="5" />
       </label>
     </div>
     <div class="kb-actions">
@@ -263,7 +247,7 @@ function close(): void {
 
     <div class="field-label ext-head"><i class="ui-icon" data-icon="Search" aria-hidden="true"></i> 检索测试</div>
     <div class="kb-search-row">
-      <input id="kb-query" aria-label="知识库检索问题" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" @keydown.enter.prevent="searchTest" />
+      <Input id="kb-query" aria-label="知识库检索问题" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" @keydown.enter.prevent="searchTest" />
       <button id="kb-search-btn" class="btn btn-approve" @click="searchTest">检索</button>
     </div>
     <div id="kb-hits" class="kb-hits">

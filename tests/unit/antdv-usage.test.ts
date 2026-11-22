@@ -157,8 +157,9 @@ test("引用 antdv 组件标签的 SFC 必须真的 import 了它", async () => 
   // 上面几条规则都靠 `if (!importsAntdv(source)) continue` 过滤，
   // 恰好会跳过这种「有标签无 import」的文件 —— 必须单独守一条。
   const KNOWN_COMPONENTS = [
-    "Alert", "Button", "Checkbox", "Empty", "Form", "FormItem", "Input", "Select",
-    "Space", "Switch", "Table", "Tag", "Segmented", "Modal", "Tooltip", "TextArea",
+    "Alert", "Button", "Checkbox", "Empty", "Form", "FormItem", "Input", "InputNumber",
+    "Select", "Slider", "Space", "Switch", "Table", "Tag", "Segmented", "Modal",
+    "Tooltip", "TextArea", "Upload",
   ];
   const violations: string[] = [];
   for (const file of await walk(CLIENT, [".vue"])) {

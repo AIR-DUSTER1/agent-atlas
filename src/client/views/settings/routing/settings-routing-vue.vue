@@ -9,7 +9,7 @@
   - provider 选项与子代理设置页同一数据源（store.config）。
 -->
 <script setup lang="ts">
-import { Select, Switch } from "antdv-next";
+import { Select, Switch, InputNumber, Slider, Input } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoutingStore } from "../../../stores/routing.js";
@@ -243,15 +243,15 @@ async function runTest(): Promise<void> {
       <div v-if="form.backend === 'systemone'" id="routing-systemone-fields">
         <label class="routing-field">
           <span>决策服务地址</span>
-          <input id="routing-systemone-url" v-model="form.systemoneBaseURL" type="url" placeholder="http://127.0.0.1:8765" aria-label="决策服务地址" />
+          <Input id="routing-systemone-url" v-model:value="form.systemoneBaseURL" type="url" placeholder="http://127.0.0.1:8765" aria-label="决策服务地址" />
         </label>
         <label class="routing-field">
           <span>期望模型名</span>
-          <input id="routing-systemone-model" v-model="form.systemoneExpectedModel" type="text" placeholder="可选：校验服务跑的是哪个模型" aria-label="期望模型名" />
+          <Input id="routing-systemone-model" v-model:value="form.systemoneExpectedModel" type="text" placeholder="可选：校验服务跑的是哪个模型" aria-label="期望模型名" />
         </label>
         <label class="routing-field">
           <span>访问 Key</span>
-          <input id="routing-systemone-key" v-model="form.systemoneKey" type="password" autocomplete="off" :placeholder="systemoneKeyPlaceholder" aria-label="决策服务访问 Key" />
+          <Input.Password id="routing-systemone-key" v-model:value="form.systemoneKey" autocomplete="off" :placeholder="systemoneKeyPlaceholder" aria-label="决策服务访问 Key" />
         </label>
       </div>
     </section>
@@ -261,19 +261,19 @@ async function runTest(): Promise<void> {
       <p class="routing-card-sub">分数低于阈值、或两个候选太接近时，会转成一张选项卡问你，而不是猜。</p>
       <label class="routing-field">
         <span>规则直接派发 <b id="routing-rule-accept-value">{{ rangeValues.ruleAutoAccept }}</b></span>
-        <input id="routing-rule-accept" v-model.number="form.ruleAutoAccept" type="range" min="0.5" max="1" step="0.01" aria-label="规则自动派发阈值" />
+        <Slider id="routing-rule-accept" v-model:value="form.ruleAutoAccept" :min="0.5" :max="1" :step="0.01" aria-label="规则自动派发阈值" />
       </label>
       <label class="routing-field">
         <span>规则领先幅度 <b id="routing-rule-margin-value">{{ rangeValues.ruleMargin }}</b></span>
-        <input id="routing-rule-margin" v-model.number="form.ruleMargin" type="range" min="0" max="0.8" step="0.01" aria-label="规则分差阈值" />
+        <Slider id="routing-rule-margin" v-model:value="form.ruleMargin" :min="0" :max="0.8" :step="0.01" aria-label="规则分差阈值" />
       </label>
       <label class="routing-field">
         <span>模型置信度 <b id="routing-model-confidence-value">{{ rangeValues.modelConfidence }}</b></span>
-        <input id="routing-model-confidence" v-model.number="form.modelConfidence" type="range" min="0" max="1" step="0.01" aria-label="模型置信度阈值" />
+        <Slider id="routing-model-confidence" v-model:value="form.modelConfidence" :min="0" :max="1" :step="0.01" aria-label="模型置信度阈值" />
       </label>
       <label class="routing-field">
         <span>候选分差 <b id="routing-candidate-margin-value">{{ rangeValues.candidateMargin }}</b></span>
-        <input id="routing-candidate-margin" v-model.number="form.candidateMargin" type="range" min="0" max="0.8" step="0.01" aria-label="候选分差阈值" />
+        <Slider id="routing-candidate-margin" v-model:value="form.candidateMargin" :min="0" :max="0.8" :step="0.01" aria-label="候选分差阈值" />
       </label>
     </section>
 
@@ -282,19 +282,19 @@ async function runTest(): Promise<void> {
       <p class="routing-card-sub">批量请求与转回都需要硬边界，避免一次消息触发几十次模型调用。</p>
       <label class="routing-field">
         <span>转回次数上限</span>
-        <input id="routing-max-handoffs" v-model.number="form.maxHandoffs" type="number" min="0" max="3" step="1" aria-label="最大转回次数" />
+        <InputNumber id="routing-max-handoffs" v-model:value="form.maxHandoffs" :min="0" :max="3" :step="1" aria-label="最大转回次数" />
       </label>
       <label class="routing-field">
         <span>分层触发意图数</span>
-        <input id="routing-hierarchical-above" v-model.number="form.hierarchicalAbove" type="number" min="1" max="200" step="1" aria-label="分层触发意图数" />
+        <InputNumber id="routing-hierarchical-above" v-model:value="form.hierarchicalAbove" :min="1" :max="200" :step="1" aria-label="分层触发意图数" />
       </label>
       <label class="routing-field">
         <span>意图数上限</span>
-        <input id="routing-max-intents" v-model.number="form.maxIntents" type="number" min="5" max="200" step="1" aria-label="意图上限" />
+        <InputNumber id="routing-max-intents" v-model:value="form.maxIntents" :min="5" :max="200" :step="1" aria-label="意图上限" />
       </label>
       <label class="routing-field">
         <span>决策超时（毫秒）</span>
-        <input id="routing-timeout" v-model.number="form.decideTimeoutMs" type="number" min="500" max="120000" step="100" aria-label="决策超时" />
+        <InputNumber id="routing-timeout" v-model:value="form.decideTimeoutMs" :min="500" :max="120000" :step="100" aria-label="决策超时" />
       </label>
     </section>
   </div>
@@ -303,14 +303,7 @@ async function runTest(): Promise<void> {
     <h3>试跑</h3>
     <p class="routing-card-sub">用一段样例请求看它会派给谁。注意：选了 API 后端时会真的调用一次模型（可能有少量费用）。</p>
     <div class="routing-test-row">
-      <input
-        id="routing-test-input"
-        v-model="testText"
-        type="text"
-        placeholder="例如：帮我找北京朝阳区两居室，预算 6000"
-        aria-label="路由测试文本"
-        @keydown.enter="runTest"
-      />
+      <Input id="routing-test-input" v-model:value="testText" type="text" placeholder="例如：帮我找北京朝阳区两居室，预算 6000" aria-label="路由测试文本" @keydown.enter="runTest" />
       <button id="routing-test-btn" type="button" class="ui-button" :disabled="testing" @click="runTest">{{ testing ? "试跑中…" : "试跑一次" }}</button>
     </div>
     <div id="routing-test-result" class="routing-test-result" role="status" aria-live="polite">

@@ -10,7 +10,7 @@
   - API Key 输入框清空 + placeholder 显示掩码（留空 = 保持不变）。
 -->
 <script setup lang="ts">
-import { Button, Checkbox, Input, Select } from "antdv-next";
+import { Button, Checkbox, Input, InputNumber, Select, Upload } from "antdv-next";
 import { computed, onMounted, reactive, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useMemoriesStore, type MemoryProfile } from "../../../stores/memories.js";
@@ -512,10 +512,13 @@ async function exportMemories(): Promise<void> {
   }
 }
 
-async function importMemories(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
+/** antdv Upload 的 beforeUpload：返回 false，只本地解析，不上传。 */
+function beforeImportMemories(file: File): boolean {
+  void importMemories(file);
+  return false;
+}
+
+async function importMemories(file: File): Promise<void> {
   if (!file) return;
   try {
     if (file.size > 1_500_000) throw new Error("导入文件过大（上限 1.5MB）");
@@ -618,11 +621,11 @@ async function importMemories(event: Event): Promise<void> {
           <Checkbox id="mem-http-clear-key" v-model:checked="form.httpClearKey">清除已保存的 API Key</Checkbox>
           <label class="field">
             <span class="field-label">超时（毫秒）</span>
-            <input id="mem-http-timeout" v-model.number="form.httpTimeoutMs" type="number" min="500" max="30000" step="500" />
+            <InputNumber id="mem-http-timeout" v-model:value="form.httpTimeoutMs" :min="500" :max="30000" :step="500" />
           </label>
           <label class="field">
             <span class="field-label">单次召回上限</span>
-            <input id="mem-http-limit" v-model.number="form.httpSearchLimit" type="number" min="1" max="20" step="1" />
+            <InputNumber id="mem-http-limit" v-model:value="form.httpSearchLimit" :min="1" :max="20" :step="1" />
           </label>
         </div>
         <div id="mem-http-banks" class="memory-form-grid memory-banks" :class="{ hidden: form.httpPreset !== 'hindsight' }">
@@ -664,39 +667,39 @@ async function importMemories(event: Event): Promise<void> {
         </label>
         <label class="field">
           <span class="field-label">每轮最多候选</span>
-          <input id="mem-distill-max-turn" v-model.number="form.distillMaxPerTurn" type="number" min="1" max="10" />
+          <InputNumber id="mem-distill-max-turn" v-model:value="form.distillMaxPerTurn" :min="1" :max="10" />
         </label>
         <label class="field">
           <span class="field-label">每小时上限</span>
-          <input id="mem-distill-hourly" v-model.number="form.distillHourlyLimit" type="number" min="1" max="200" />
+          <InputNumber id="mem-distill-hourly" v-model:value="form.distillHourlyLimit" :min="1" :max="200" />
         </label>
         <label class="field">
           <span class="field-label">Stale 宽限（天）</span>
-          <input id="mem-stale-grace-days" v-model.number="form.staleGraceDays" type="number" min="1" max="3650" />
+          <InputNumber id="mem-stale-grace-days" v-model:value="form.staleGraceDays" :min="1" :max="3650" />
         </label>
         <label class="field">
           <span class="field-label">偏好有效期（天）</span>
-          <input id="mem-preference-days" v-model.number="form.preferenceDays" type="number" min="1" max="3650" />
+          <InputNumber id="mem-preference-days" v-model:value="form.preferenceDays" :min="1" :max="3650" />
         </label>
         <label class="field">
           <span class="field-label">项目事实有效期（天）</span>
-          <input id="mem-project-days" v-model.number="form.projectFactDays" type="number" min="1" max="3650" />
+          <InputNumber id="mem-project-days" v-model:value="form.projectFactDays" :min="1" :max="3650" />
         </label>
         <label class="field">
           <span class="field-label">纠错有效期（天）</span>
-          <input id="mem-correction-days" v-model.number="form.correctionDays" type="number" min="1" max="3650" />
+          <InputNumber id="mem-correction-days" v-model:value="form.correctionDays" :min="1" :max="3650" />
         </label>
         <label class="field">
           <span class="field-label">身份信息有效期（天）</span>
-          <input id="mem-identity-days" v-model.number="form.identityDays" type="number" min="1" max="3650" />
+          <InputNumber id="mem-identity-days" v-model:value="form.identityDays" :min="1" :max="3650" />
         </label>
         <label class="field">
           <span class="field-label">每 Agent active 上限</span>
-          <input id="mem-retention-active" v-model.number="form.retentionActive" type="number" min="100" max="50000" />
+          <InputNumber id="mem-retention-active" v-model:value="form.retentionActive" :min="100" :max="50000" />
         </label>
         <label class="field">
           <span class="field-label">每 Agent 历史上限</span>
-          <input id="mem-retention-history" v-model.number="form.retentionHistory" type="number" min="100" max="100000" />
+          <InputNumber id="mem-retention-history" v-model:value="form.retentionHistory" :min="100" :max="100000" />
         </label>
       </div>
     </section>
@@ -724,15 +727,15 @@ async function importMemories(event: Event): Promise<void> {
         </label>
         <label class="field">
           <span class="field-label">超时（ms）</span>
-          <input id="mem-embedding-timeout" v-model.number="form.embeddingTimeoutMs" type="number" min="500" max="30000" />
+          <InputNumber id="mem-embedding-timeout" v-model:value="form.embeddingTimeoutMs" :min="500" :max="30000" />
         </label>
         <label class="field">
           <span class="field-label">维度（0=自动）</span>
-          <input id="mem-embedding-dimensions" v-model.number="form.embeddingDimensions" type="number" min="0" max="16384" />
+          <InputNumber id="mem-embedding-dimensions" v-model:value="form.embeddingDimensions" :min="0" :max="16384" />
         </label>
         <label class="field">
           <span class="field-label">最低相似度</span>
-          <input id="mem-embedding-similarity" v-model.number="form.embeddingMinSimilarity" type="number" min="0" max="1" step="0.01" />
+          <InputNumber id="mem-embedding-similarity" v-model:value="form.embeddingMinSimilarity" :min="0" :max="1" :step="0.01" />
         </label>
         <Checkbox id="mem-embedding-clear-key" v-model:checked="form.embeddingClearKey">清除已保存的 Embedding API Key</Checkbox>
       </div>
@@ -756,7 +759,16 @@ async function importMemories(event: Event): Promise<void> {
         <Button id="mem-export-btn" size="small" @click="exportMemories">导出本地快照</Button>
         <label class="ghost-btn small memory-file-btn" for="mem-import-file">导入本地快照</label>
         <Select id="mem-import-mode" v-model:value="importMode" class="memory-import-mode" :options="IMPORT_MODE_OPTIONS" aria-label="导入模式" />
-        <input id="mem-import-file" class="hidden" type="file" accept="application/json,.json" @change="importMemories" />
+        <!-- antdv Upload 不透传 class：外层 div 承载 hidden -->
+        <div class="hidden">
+          <Upload
+            id="mem-import-file"
+            accept="application/json,.json"
+            :show-upload-list="false"
+            :before-upload="beforeImportMemories"
+            aria-label="选择记忆快照 JSON"
+          />
+        </div>
       </div>
     </div>
 

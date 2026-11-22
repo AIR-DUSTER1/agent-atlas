@@ -9,7 +9,7 @@
   - 启停开关是 antdv Switch（受控组件）：状态只看 store，失败时不会残留在半途状态。
 -->
 <script setup lang="ts">
-import { Switch } from "antdv-next";
+import { Input, Switch, Upload } from "antdv-next";
 import { computed, onMounted, ref } from "vue";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { useSkillsStore, type SkillFilter, type SkillItem } from "../../../stores/skills.js";
@@ -124,8 +124,40 @@ function skillMeta(skill: SkillItem): string {
   return `${skill.enabled ? "已启用" : "已禁用"} · ${triggerText} · ${skill.body.length} 字符`;
 }
 
-function pickFiles(): void {
-  uploadInput.value?.click();
+let pendingUploads: Array<{ name: string; content: string }> = [];
+/** Upload 包裹容器（用于点开系统文件选择框）。 */
+const uploadHost = ref<HTMLElement | null>(null);
+
+/** 点上传按钮 → 打开系统文件选择框（Upload 渲染的真实 input[type=file]）。 */
+/**
+ * 点上传按钮 → 打开系统文件选择框。
+ * ⚠ antdv Upload 不把 id/class 透传到根元素或内部 input，所以不能用
+ * getElementById；改从包裹容器的模板 ref 里找真实 input[type=file]。
+ */
+function triggerSkillUpload(): void {
+  uploadHost.value?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+}
+
+/**
+ * antdv Upload 的 beforeUpload：返回 false 表示「不上传」，只做本地读取。
+ * multiple 模式下每个文件调用一次，用微任务把同批文件攒起来统一处理。
+ */
+function beforeSkillUpload(file: File): boolean {
+  if (file.size > MAX_SKILL_FILE_BYTES) {
+    showSkillStatus(`✗ 「${file.name}」超过 200KB`, "err");
+    return false;
+  }
+  void file.text().then((content) => {
+    pendingUploads.push({ name: file.name, content });
+    // 同一批选中的文件会在同一轮事件循环内到达，nextTick 后统一提交
+    void Promise.resolve().then(() => {
+      if (!pendingUploads.length) return;
+      const batch = pendingUploads;
+      pendingUploads = [];
+      void importFiles(batch);
+    });
+  });
+  return false;
 }
 
 function uploadId(filename: string): string {
@@ -133,19 +165,14 @@ function uploadId(filename: string): string {
   return base.replace(/\.(md|markdown)$/i, "").toLowerCase();
 }
 
-/** 浏览器读取文件文本后走 JSON 导入；同名技能覆盖前确认一次。 */
-async function importFiles(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const files = input.files;
+/**
+ * 处理选中的技能文件；同名技能覆盖前确认一次。
+ * 改接 antdv Upload：文件由 beforeUpload 逐个交过来（返回 false 阻止真实上传），
+ * 这里只收已读好的 payload，不再从 DOM 读 input.files。
+ */
+async function importFiles(payloads: Array<{ name: string; content: string }>): Promise<void> {
   try {
-    if (!files?.length) return;
-    const selected = [...files];
-    const oversized = selected.find((file) => file.size > MAX_SKILL_FILE_BYTES);
-    if (oversized) throw new Error(`「${oversized.name}」超过 200KB`);
-    const payloads = await Promise.all(selected.map(async (file) => ({
-      name: file.name,
-      content: await file.text(),
-    })));
+    if (!payloads.length) return;
     const incomingIds = new Set(payloads.map((file) => uploadId(file.name)));
     const conflicts = store.skills.filter((skill) => incomingIds.has(skill.id.toLowerCase()));
     const overwrite = conflicts.length
@@ -164,8 +191,6 @@ async function importFiles(event: Event): Promise<void> {
     showSkillStatus(`✓ 已导入 ${imported} 个，覆盖 ${overwritten} 个`, "ok");
   } catch (err) {
     showSkillStatus(`✗ ${(err as Error).message}`, "err");
-  } finally {
-    input.value = "";
   }
 }
 </script>
@@ -189,7 +214,7 @@ async function importFiles(event: Event): Promise<void> {
 
   <label class="skills-search-box">
     <i class="ui-icon" data-icon="Search" aria-hidden="true"></i>
-    <input id="skills-search" v-model="searchQuery" type="search" aria-label="搜索技能" placeholder="搜索技能" autocomplete="off" @input="currentPage = 1" />
+    <Input id="skills-search" v-model:value="searchQuery" type="search" aria-label="搜索技能" placeholder="搜索技能" autocomplete="off" @input="currentPage = 1" />
   </label>
 
   <section class="skills-overview-card" aria-labelledby="skills-overview-title">
@@ -198,21 +223,22 @@ async function importFiles(event: Event): Promise<void> {
       <p>技能是一组基于上下文触发的指令集，用于稳定执行专业任务。启用后仅在消息命中触发词或技能名称时载入，每轮最多 2 个。</p>
     </div>
     <div class="skills-overview-actions">
-      <button id="skill-upload-btn" type="button" class="ghost-btn small skills-primary-btn" @click="pickFiles">
+      <button id="skill-upload-btn" type="button" class="ghost-btn small skills-primary-btn" @click="triggerSkillUpload">
         <i class="ui-icon" data-icon="Upload" aria-hidden="true"></i> 上传技能
       </button>
     </div>
   </section>
-  <input
-    id="skill-upload-file"
-    ref="uploadInput"
-    class="hidden"
-    type="file"
-    accept=".md,.markdown,text/markdown"
-    multiple
-    aria-label="选择技能文件"
-    @change="importFiles"
-  />
+  <!-- antdv Upload 不透传 class：外层 div 承载 hidden，同时作为触发作用域 -->
+  <div ref="uploadHost" class="hidden">
+    <Upload
+      id="skill-upload-file"
+      accept=".md,.markdown,text/markdown"
+      multiple
+      :show-upload-list="false"
+      :before-upload="beforeSkillUpload"
+      aria-label="选择技能文件"
+    />
+  </div>
   <div id="skills-status" class="settings-status" role="status" aria-live="polite"></div>
 
   <div class="skills-list-toolbar">
