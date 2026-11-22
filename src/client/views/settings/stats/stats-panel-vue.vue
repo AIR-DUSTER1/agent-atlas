@@ -18,7 +18,7 @@ import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useStatsStore } from "../../../stores/settings/stats/stats.js";
 import { fmtPercent, fmtTokens } from "../../../modules/format.js";
-import { CHART_SPECS, destroyStatsCharts, renderCharts } from "./charts.js";
+import { CHART_SPECS, chartDataFlags, destroyStatsCharts, renderCharts } from "./charts.js";
 import type { StatsRange } from "../../../modules/types-api.js";
 
 const store = useStatsStore();
@@ -72,6 +72,10 @@ const sessionRows = computed(() => {
 });
 
 const toolRows = computed(() => activeRange.value?.toolCalls ?? []);
+
+/** 每张图是否有数据：决定渲染 canvas 还是空态一行文案。 */
+const chartHasData = computed<Record<string, boolean>>(() =>
+  activeRange.value ? chartDataFlags(activeRange.value) : {});
 
 const toolMax = computed(() => Math.max(...toolRows.value.map((row) => row.count), 1));
 
@@ -203,11 +207,15 @@ async function retry(): Promise<void> {
             <h3>{{ spec.title }}</h3>
             <p class="key-state">{{ spec.subtitle }}</p>
           </div>
-          <Button class="ghost-btn small stats-chart-export" disabled>存为 PNG</Button>
+          <!-- 空态不显示「存为 PNG」：一个永远点不动的按钮只是噪音。有数据时
+               才渲染，charts.ts 拿到 canvas 后把 disabled 去掉并挂导出事件。 -->
+          <Button v-if="chartHasData[spec.key]" class="ghost-btn small stats-chart-export" disabled>存为 PNG</Button>
         </div>
-        <div class="stats-chart-canvas-wrap">
+        <!-- 无数据时不渲染 280px 画布区，只留一行提示：空占位比文案更抢眼，
+             用户看到的是一个空框而不是「这里现在没东西」。 -->
+        <p v-if="!chartHasData[spec.key]" class="stats-chart-empty">当前区间暂无数据。</p>
+        <div v-else class="stats-chart-canvas-wrap">
           <canvas role="img" :aria-label="spec.title"></canvas>
-          <p class="stats-chart-empty hidden">当前区间暂无数据。</p>
         </div>
       </section>
     </template>

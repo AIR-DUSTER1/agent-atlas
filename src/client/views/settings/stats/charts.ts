@@ -23,7 +23,6 @@ export interface ChartSpec {
   key: string;
   title: string;
   subtitle: string;
-  hasData: boolean;
   config: ChartConfiguration;
 }
 
@@ -101,6 +100,25 @@ function dailyCacheRate(range: StatsRange): number[] {
   return (range.byDay ?? []).map((day) => day.inputTokens > 0 ? (day.cacheReadTokens / day.inputTokens) * 100 : 0);
 }
 
+/**
+ * 每张图有没有可画的数据。组件据此决定渲染 canvas 还是空态一行文案，
+ * 这里是「哪几张图能画」的唯一判断来源。
+ */
+export function chartDataFlags(range: StatsRange): Record<string, boolean> {
+  const days = range.byDay ?? [];
+  const models = range.byModelShare ?? range.byModel ?? [];
+  const tools = range.toolCalls ?? [];
+  const hours = range.byHour ?? [];
+  return {
+    daily: days.some((day) => day.turns > 0 || day.inputTokens > 0 || day.outputTokens > 0),
+    "model-share": models.length > 0,
+    "model-compare": models.length > 0,
+    hour: hours.some((hour) => hour.turns > 0 || hour.tokens > 0),
+    cache: days.some((day) => day.inputTokens > 0),
+    tools: tools.length > 0,
+  };
+}
+
 /** 六图的静态元信息（标题与顺序），组件据此渲染骨架。 */
 export const CHART_SPECS: ReadonlyArray<{ key: string; title: string; subtitle: string }> = [
   { key: "daily", title: "每日 Token 趋势", subtitle: "输入 / 输出堆叠柱 + 缓存命中率" },
@@ -123,7 +141,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "daily",
       title: "每日 Token 趋势",
       subtitle: "输入 / 输出堆叠柱 + 缓存命中率",
-      hasData: days.some((day) => day.turns > 0 || day.inputTokens > 0 || day.outputTokens > 0),
       config: {
         type: "bar",
         data: {
@@ -150,7 +167,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "model-share",
       title: "模型用量占比",
       subtitle: "按输入 + 输出 token",
-      hasData: models.length > 0,
       config: {
         type: "doughnut",
         data: {
@@ -169,7 +185,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "model-compare",
       title: "模型对比",
       subtitle: "按实际模型调用次数",
-      hasData: models.length > 0,
       config: {
         type: "bar",
         data: {
@@ -191,7 +206,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "hour",
       title: "活动时段分布",
       subtitle: "服务器本地 24 小时",
-      hasData: hours.some((hour) => hour.turns > 0 || hour.tokens > 0),
       config: {
         type: "bar",
         data: {
@@ -210,7 +224,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "cache",
       title: "缓存命中率趋势",
       subtitle: "按自然日",
-      hasData: days.some((day) => day.inputTokens > 0),
       config: {
         type: "line",
         data: {
@@ -240,7 +253,6 @@ function buildConfigs(range: StatsRange, colorMap: Record<string, string>): Char
       key: "tools",
       title: "工具调用 Top",
       subtitle: "流式分片去重后计数",
-      hasData: tools.length > 0,
       config: {
         type: "bar",
         data: {
@@ -313,16 +325,11 @@ export async function renderCharts(
   for (const spec of specs) {
     const card = root.querySelector<HTMLElement>(`[data-chart-key="${spec.key}"]`);
     if (!card) continue;
+    // 无数据的卡片由组件渲染成一行空态文案，压根没有 canvas —— 直接跳过。
+    // 骨架里不再需要「隐藏 canvas + 显示浮层空态」这套运行时切换。
     const canvas = card.querySelector<HTMLCanvasElement>("canvas");
-    const empty = card.querySelector<HTMLElement>(".stats-chart-empty");
     const exportButton = card.querySelector<HTMLButtonElement>(".stats-chart-export");
     if (!canvas) continue;
-    if (!spec.hasData) {
-      empty?.classList.remove("hidden");
-      canvas.classList.add("hidden");
-      continue;
-    }
-    empty?.classList.add("hidden");
     const chart = new mod.Chart(canvas, spec.config);
     charts.push(chart);
     if (exportButton) {

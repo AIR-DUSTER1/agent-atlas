@@ -11,13 +11,12 @@ import StatsPanelVue from "../../src/client/views/settings/stats/stats-panel-vue
 import { useStatsStore } from "../../src/client/stores/settings/stats/stats.js";
 import type { StatsRange, StatsResult } from "../../src/client/modules/types-api.js";
 
-vi.mock("../../src/client/views/stats/charts.js", () => ({
-  CHART_SPECS: [
-    { key: "daily", title: "每日 Token 趋势", subtitle: "输入 / 输出堆叠柱 + 缓存命中率" },
-    { key: "model-share", title: "模型用量占比", subtitle: "按输入 + 输出 token" },
-  ],
-  destroyStatsCharts: vi.fn(),
-  renderCharts: vi.fn(async () => undefined),
+vi.mock("../../src/client/vendor/chart.js", () => ({
+  Chart: class {
+    resize(): void {}
+    destroy(): void {}
+    toBase64Image(): string { return "data:image/png;base64,"; }
+  },
 }));
 
 function makeRange(id: string, label: string, turns: number): StatsRange {
@@ -145,5 +144,68 @@ describe("使用统计面板", () => {
     await mountPanel();
     expect(document.querySelector("#stats-charts .stats-degraded")?.textContent).toContain("统计暂不可用");
     expect(document.querySelectorAll("#stats-window-overview .stats-window-card")).toHaveLength(0);
+  });
+
+  it("图表无数据时只渲染一行文案，不留 canvas 与画布区", async () => {
+    // 全空区间：六张图都没有可画数据
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        generatedAt: Date.now(),
+        ranges: ["7d", "30d"].map((id) => {
+          const range = makeRange(id, id === "7d" ? "近 7 天" : "近 30 天", 0);
+          return {
+            ...range,
+            totals: { ...range.totals, turns: 0, inputTokens: 0, outputTokens: 0 },
+            byDay: [{ date: "2026-11-21", turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }],
+            byModel: [],
+            byModelShare: [],
+            byHour: [{ hour: 9, turns: 0, tokens: 0 }],
+            toolCalls: [],
+          };
+        }),
+      }),
+    });
+    await mountPanel();
+    const cards = [...document.querySelectorAll<HTMLElement>("#stats-charts .stats-chart-card")];
+    expect(cards).toHaveLength(6);
+    for (const card of cards) {
+      // 空态是一行普通文本，不是撑满画布区的容器
+      expect(card.querySelector(".stats-chart-empty")?.textContent).toContain("当前区间暂无数据");
+      expect(card.querySelector("canvas")).toBeNull();
+      expect(card.querySelector(".stats-chart-canvas-wrap")).toBeNull();
+      // 没数据就没有可导出的图，别留一个永远点不动的按钮
+      expect(card.querySelector(".stats-chart-export")).toBeNull();
+    }
+  });
+
+  it("有数据的图渲染 canvas，无数据的图渲染文案（互不串场）", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => {
+        const range = makeRange("7d", "近 7 天", 8);
+        return {
+          generatedAt: Date.now(),
+          ranges: [
+            { ...range, toolCalls: [], byHour: [{ hour: 9, turns: 0, tokens: 0 }] },
+            makeRange("30d", "近 30 天", 20),
+          ],
+        };
+      },
+    });
+    await mountPanel();
+    const card = (key: string): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`#stats-charts [data-chart-key="${key}"]`);
+    // 有数据：canvas 在、空态不在
+    expect(card("daily")?.querySelector("canvas")).not.toBeNull();
+    expect(card("daily")?.querySelector(".stats-chart-empty")).toBeNull();
+    // 无数据：空态在、canvas 与画布区都不在，导出按钮也不在
+    expect(card("tools")?.querySelector(".stats-chart-empty")).not.toBeNull();
+    expect(card("tools")?.querySelector("canvas")).toBeNull();
+    expect(card("tools")?.querySelector(".stats-chart-canvas-wrap")).toBeNull();
+    expect(card("tools")?.querySelector(".stats-chart-export")).toBeNull();
+    expect(card("hour")?.querySelector("canvas")).toBeNull();
   });
 });
