@@ -324,7 +324,7 @@ test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚
   const [html, view] = await Promise.all([
     readClientIndexHtml(),
     // M4 4.4：求职面板迁往 Vue 组件，id/文案契约在组件模板上断言
-    readFile(new URL("../../src/client/views/job-panel-vue.vue", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/job/job-panel-vue.vue", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(html, /job-skill-dir|job-python-bin|技能根目录|Python 解释器/);
   assert.match(view, /job-data-dir/);

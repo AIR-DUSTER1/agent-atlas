@@ -14,7 +14,7 @@ import { state, transcript } from "../core/state.js";
 import { assistantBlockContaining } from "../modules/chat-flow.js";
 import { partEls, saveLocal } from "../core/state.js";
 import { renderApprovalCard, renderClarificationCard, clarificationAnswerLines } from "../render/parts.js";
-import { renderSessions } from "../views/sessions.js";
+import { renderSessions } from "../views/app/sessions.js";
 import { toast } from "../ui/toast.js";
 import { runResume } from "../stream/turn.js";
 import type { ApprovalPart, ClarificationPart } from "../modules/types.js";

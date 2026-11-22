@@ -8,8 +8,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { readClientIndexHtml } from "../helpers/client-html.js";
+import { resolveClientPath } from "../helpers/client-source.js";
 
-const read = (path: string): Promise<string> => readFile(new URL(`../../src/client/${path}`, import.meta.url), "utf8");
+// views/ 已按页面重组进 views/<page>/：统一经 resolveClientPath 解析，
+// 避免每个断言都写死页面目录名。
+const read = async (path: string): Promise<string> =>
+  readFile(new URL(`../../src/client/${await resolveClientPath(path)}`, import.meta.url), "utf8");
 
 function luminance(hex: string): number {
   const channels = hex.match(/[0-9a-f]{2}/gi)?.map((value) => Number.parseInt(value, 16) / 255) ?? [];

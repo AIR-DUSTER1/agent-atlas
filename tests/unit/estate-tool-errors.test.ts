@@ -135,9 +135,9 @@ test("MCP initialize 成功不再被误判为业务 Key 有效", async () => {
 test("贝壳登录只使用系统浏览器且一次点击只打开一次", async () => {
   const [source, client, vue, html] = await Promise.all([
     readFile(new URL("../../src/server/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate.ts", import.meta.url), "utf8"),
     // M4 4.4：面板交互迁往 Vue 组件
-    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate-panel-vue.vue", import.meta.url), "utf8"),
     readClientIndexHtml(),
   ]);
   const start = source.slice(
@@ -213,8 +213,8 @@ test("自装目录可在嵌套路径中找到 Unix beike 与 Windows beike.exe",
 test("房产面板不再限定 Windows，并提示 Linux/macOS 与 BEIKE_CLI_PATH", async () => {
   const [client, vue] = await Promise.all([
     // M4 4.4：面板迁往 Vue 组件，契约断言同时覆盖桥与组件模板
-    readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate-panel-vue.vue", import.meta.url), "utf8"),
   ]);
   const combined = `${client}
 ${vue}`;
@@ -226,9 +226,9 @@ ${vue}`;
 
 test("保存 Key 的失败原因完整展示，不回退成未知错误", async () => {
   const [client, route, vue] = await Promise.all([
-    readFile(new URL("../../src/client/views/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/server/routes/estate.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../src/client/views/estate-panel-vue.vue", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate-panel-vue.vue", import.meta.url), "utf8"),
   ]);
   assert.match(client + vue, /message\?: string; error\?: string/);
   assert.match(vue, /res\.message \|\| res\.error/);

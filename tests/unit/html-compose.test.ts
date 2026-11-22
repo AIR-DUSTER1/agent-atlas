@@ -34,11 +34,11 @@ test("入口包含完整页面结构，且不再使用 include 片段机制", as
   assert.match(html, /id="plugin-list"/);
   // M4 4.4：kb-modal 由 Vue 组件渲染（骨架保留 #kb-mask 挂载容器）
   assert.match(html, /id="kb-mask"/);
-  const kbVue = await readFile(new URL("../../src/client/views/kb-panel-vue.vue", import.meta.url), "utf8");
+  const kbVue = await readFile(new URL("../../src/client/views/kb/kb-panel-vue.vue", import.meta.url), "utf8");
   assert.match(kbVue, /id="kb-modal"/);
   // M4 4.4：job-fix-hint 随求职弹窗迁往 Vue 组件
   assert.match(html, /id="job-mask"/);
-  const jobVue = await readFile(new URL("../../src/client/views/job-panel-vue.vue", import.meta.url), "utf8");
+  const jobVue = await readFile(new URL("../../src/client/views/job/job-panel-vue.vue", import.meta.url), "utf8");
   assert.match(jobVue, /id="job-fix-hint"/);
   // M4 4.5 收尾：include 机制退役 —— 入口里不得再出现 @include 标记
   assert.doesNotMatch(html, /<!--\s*@include\s+/);

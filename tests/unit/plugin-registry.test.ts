@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { resolveClientPath } from "../helpers/client-source.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
 import {
   BUILTIN_PLUGINS,
@@ -30,14 +31,17 @@ test("内置 RAG / 贝壳 / Browser Use / Computer Use 按真实接入类型分�
 test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插件分区并可启停", async () => {
   const root = new URL("../../src/client/", import.meta.url);
   const html = await readClientIndexHtml();
-  const shell = await readFile(new URL("views/shell.ts", root), "utf8");
-  const navigation = await readFile(new URL("views/navigation.ts", root), "utf8");
+  // views/ 已按页面重组，统一经 resolveClientPath 解析（避免写死页面目录）
+  const read = async (name: string): Promise<string> =>
+    readFile(new URL(await resolveClientPath(name), root), "utf8");
+  const shell = await read("views/shell.ts");
+  const navigation = await read("views/navigation.ts");
   // M4 4.1：卡片渲染与启停写回迁往 Vue 组件 + Pinia store，h() 渲染器退役
-  const pluginPanel = await readFile(new URL("views/settings-plugins-vue.vue", root), "utf8");
-  const pluginSettings = await readFile(new URL("views/settings-plugins.ts", root), "utf8");
-  const pluginStore = await readFile(new URL("stores/plugins.ts", root), "utf8");
+  const pluginPanel = await read("views/settings-plugins-vue.vue");
+  const pluginSettings = await read("views/settings-plugins.ts");
+  const pluginStore = await read("stores/plugins.ts");
   // M4 4.5：导航迁往 store（settings-nav-vue 渲染 data-settings-view）
-  const navStore = await readFile(new URL("stores/settings.ts", root), "utf8");
+  const navStore = await read("stores/settings.ts");
   assert.match(navStore, /view: "plugins"/);
   assert.match(html, /id="settings-view-plugins"/);
   assert.match(html, /id="plugin-list"/);

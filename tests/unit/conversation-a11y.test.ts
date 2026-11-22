@@ -59,13 +59,15 @@ test("不再保留并行的旧渲染实现（4.6 回退开关裁定）", async (
   const { fileURLToPath } = await import("node:url");
   // Windows 上 URL.pathname 会带盘符前缀（/E:/…），必须用 fileURLToPath 转换
   const clientDir = fileURLToPath(new URL("../../src/client/", import.meta.url));
-  const forbidden = ["render/messages-legacy.ts", "render/parts-legacy.ts", "views/message-list-legacy.ts"];
+  // 只按 basename 匹配：views 已按页面重组进 views/<page>/，用路径后缀匹配
+  // 会在搬目录后静默失去覆盖（测试仍绿但守门失效，比红更危险）。
+  const forbidden = ["messages-legacy.ts", "message-list-legacy.ts"];
   const found: string[] = [];
   async function walk(dir: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) await walk(path);
-      else if (forbidden.some((name) => path.replaceAll("\\", "/").endsWith(name))) found.push(path);
+      else if (forbidden.includes(entry.name)) found.push(path);
     }
   }
   await walk(clientDir);

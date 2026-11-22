@@ -17,7 +17,7 @@ import { uiAlert } from "../ui/dialog.js";
 import { mountBlock, renderNoticeBlock } from "../render/messages.js";
 import { scrollBottom } from "../core/dom.js";
 import { syncComposerState } from "../stream/turn.js";
-import { updateContextBar } from "../views/composer-bar.js";
+import { updateContextBar } from "../views/chat/composer-bar.js";
 import type { NoticeBlock } from "../modules/types.js";
 
 export async function compactContext(): Promise<boolean> {

@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import SettingsPluginsVue from "../../src/client/views/settings-plugins-vue.vue";
+import SettingsPluginsVue from "../../src/client/views/settings/plugins/settings-plugins-vue.vue";
 import { usePluginsStore } from "../../src/client/stores/plugins.js";
 import { state } from "../../src/client/core/state.js";
 import type { PluginSettingsState } from "../../src/client/modules/types.js";

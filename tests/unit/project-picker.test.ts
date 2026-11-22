@@ -42,9 +42,9 @@ test("Electron 与浏览器两条目录选择链路都已接线", async () => {
   const [main, preload, projectsTs, projectsVue, apiClient, route, index, serverProjects] = await Promise.all([
     readFile(new URL("desktop/main.ts", root), "utf8"),
     readFile(new URL("desktop/preload.ts", root), "utf8"),
-    readFile(new URL("src/client/views/projects.ts", root), "utf8"),
+    readFile(new URL("src/client/views/app/projects.ts", root), "utf8"),
     // M4 4.4：菜单文案迁到 Vue 组件，行为在 .ts、文案在 .vue，两处一起断言
-    readFile(new URL("src/client/views/project-switcher-vue.vue", root), "utf8"),
+    readFile(new URL("src/client/views/app/project-switcher-vue.vue", root), "utf8"),
     readFile(new URL("src/client/core/api.ts", root), "utf8"),
     readFile(new URL("src/server/routes/projects.ts", root), "utf8"),
     readFile(new URL("src/server/index.ts", root), "utf8"),

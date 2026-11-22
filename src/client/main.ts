@@ -23,27 +23,27 @@ import { enhanceConfigFields, installConfigFieldHydration } from "./ui/config-co
 import { bindScrollToBottom } from "./ui/scroll-to-bottom.js";
 import { handleComposerKeydown, refreshComposerMenu, closeComposerMenu, bindCompactAction } from "./composer/menu.js";
 import { exitGoalMode, handleGoalKeydown, syncGoalDraftFromInput } from "./composer/goal.js";
-import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/composer-bar.js";
-import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged, bindProjectCommands } from "./views/projects.js";
-import { renderSessions, loadSessionList, bindSessionCommands } from "./views/sessions.js";
+import { applyConfigState, renderModelMenu, renderThinkingMenu, toggleCmMenu, updateContextBar } from "./views/chat/composer-bar.js";
+import { loadProjects, renderProjectSwitcher, showProjectMenu, addProjectFolder, bindProjectsChanged, bindProjectCommands } from "./views/app/projects.js";
+import { renderSessions, loadSessionList, bindSessionCommands } from "./views/app/sessions.js";
 import {
   closeCmMenus, hydrateFromServer, renderPermChip, renderPermMenu, selectSession, showChatState, showWelcomeState,
-} from "./views/navigation.js";
-import { buildDemoCards, buildExampleChips, closeModal, openModal } from "./views/shell.js";
-import { bindCreateSession as bindShellCreate } from "./views/shell.js";
-import { addExternalFlow, bindCreateSession as bindExtCreate, loadExternalAgents } from "./views/external.js";
+} from "./views/app/navigation.js";
+import { buildDemoCards, buildExampleChips, closeModal, openModal } from "./views/welcome/shell.js";
+import { bindCreateSession as bindShellCreate } from "./views/welcome/shell.js";
+import { addExternalFlow, bindCreateSession as bindExtCreate, loadExternalAgents } from "./views/external/external.js";
 import {
   closeFsModal, openFsModal, openRemoteFolder, renderAttachChips, setupDragDrop, uploadLocalFiles,
-} from "./views/attachments.js";
-import { loadRag, openKb, closeKb, renderRagHitsInToolCard } from "./views/rag.js";
-import { closeEstate, openEstate, loadEstate, renderEstateInToolCard } from "./views/estate.js";
+} from "./views/chat/attachments.js";
+import { loadRag, openKb, closeKb, renderRagHitsInToolCard } from "./views/kb/rag.js";
+import { closeEstate, openEstate, loadEstate, renderEstateInToolCard } from "./views/estate/estate.js";
 
-import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings.js";
-import { loadPluginState } from "./views/settings-plugins.js";
-import { isSubagentEditorOpen } from "./views/settings-subagents.js";
-import { createBackup, refreshBackups } from "./views/settings-backup.js";
-import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser-use.js";
-import { closeMcpEditor, isMcpEditorOpen } from "./views/settings-mcp.js";
+import { bindSettingsNavigation, closeSettingsPage, openSettings } from "./views/settings/settings.js";
+import { loadPluginState } from "./views/settings/plugins/settings-plugins.js";
+import { isSubagentEditorOpen } from "./views/settings/subagents/settings-subagents.js";
+import { createBackup, refreshBackups } from "./views/settings/models/settings-backup.js";
+import { bindBrowserDock, renderBrowserInToolCard } from "./views/browser/browser-use.js";
+import { closeMcpEditor, isMcpEditorOpen } from "./views/settings/mcp/settings-mcp.js";
 import { loadUserCommands } from "./composer/menu.js";
 import { createSession, finalize, send, stopStreaming, closeModalImpl, openModalImpl } from "./stream/turn.js";
 import { compactContext } from "./actions/compact.js";
@@ -98,11 +98,11 @@ async function init(): Promise<void> {
   loadLocal();
   initIconHydration();
   // M4 4.6：执行流程面板 + 附件 chips 启动即挂载（由 store 驱动显示）
-  void import("./apps/workflow-plan-vue.js").then((m) => m.mountWorkflowPlanVue()).catch(() => {});
-  void import("./apps/attach-chips-vue.js").then((m) => m.mountAttachChipsVue()).catch(() => {});
-  void import("./apps/context-meter-vue.js").then((m) => m.mountContextMeterVue()).catch(() => {});
+  void import("./views/chat/workflow-plan-vue.js").then((m) => m.mountWorkflowPlanVue()).catch(() => {});
+  void import("./views/chat/attach-chips-vue.js").then((m) => m.mountAttachChipsVue()).catch(() => {});
+  void import("./views/chat/context-meter-vue.js").then((m) => m.mountContextMeterVue()).catch(() => {});
   // M4 4.6：消息流块骨架也启动即挂载（空清单 = 空列表；parts 由其后的 mountBlock 注入）
-  void import("./apps/message-list-vue.js").then((m) => m.mountMessageListVue()).catch(() => {});
+  void import("./views/chat/message-list-vue.js").then((m) => m.mountMessageListVue()).catch(() => {});
   bindScrollToBottom();
   // Electron 桌面端标记：样式层据此开启「顶栏拖拽 + 右上角给原生控制键让位」
   if (desktopBridge()?.isElectron) document.body.classList.add("in-desktop");
@@ -202,7 +202,7 @@ async function init(): Promise<void> {
   // M4 4.5：权限 chip 由 perm-chip-vue.vue 渲染；必须**在绑定前同步挂载**，
   // 否则 on() 找不到 #cm-perm（异步 import 会晚于绑定）。挂载模块内部再
   // 动态 import Vue 与 pinia，所以这里不把裸包名带进静态图。
-  await import("./apps/topbar-vue.js").then((m) => m.mountShellHeadsVue()).catch(() => {});
+  await import("./views/app/topbar-vue.js").then((m) => m.mountShellHeadsVue()).catch(() => {});
   on("cm-model", "click", (e) => {
     e.stopPropagation();
     toggleCmMenu("cm-model", "cm-model-menu", renderModelMenu);
@@ -275,15 +275,15 @@ async function init(): Promise<void> {
   on("backup-create-btn", "click", () => { void createBackup(); });
   // M4 4.3：供应商/模型面板与弹窗事件全部由 Vue 组件接管（stores/models 驱动）
   // 供应商连接弹窗启动即挂载（默认隐藏，开关由 store.providerFormOpen 驱动）
-  void import("./apps/provider-form-vue.js").then((m) => m.mountProviderFormVue()).catch(() => {});
+  void import("./views/settings/models/provider-form-vue.js").then((m) => m.mountProviderFormVue()).catch(() => {});
 
   // 文件上下文：📎 附件 / 文件选择器 / 远程文件夹 / 本地上传
   on("attach-btn", "click", () => { void openFsModal(); });
   on("fs-done", "click", closeFsModal);
   on("fs-mask", "click", (e) => { if (e.target === $("fs-mask")) closeFsModal(); });
-  on("fs-up", "click", () => { void import("./views/attachments.js").then((m) => m.goParent()); });
+  on("fs-up", "click", () => { void import("./views/chat/attachments.js").then((m) => m.goParent()); });
   on("fs-root", "change", (e) => {
-    void import("./views/attachments.js").then((m) => m.browseFs((e.target as HTMLSelectElement).value));
+    void import("./views/chat/attachments.js").then((m) => m.browseFs((e.target as HTMLSelectElement).value));
   });
   on("fs-remote", "click", () => { void openRemoteFolder(); });
   on("fs-upload-btn", "click", () => {
@@ -313,7 +313,7 @@ async function init(): Promise<void> {
 
   // M4 4.4：贝壳弹窗事件全部由 Vue 组件接管（stores/estate 驱动）
   // 弹窗遮罩点击空白关闭（mount 容器在组件模板之外，原生挂监听）
-  void import("./apps/estate-panel-vue.js").then((m) => {
+  void import("./views/estate/estate-panel-vue.js").then((m) => {
     m.mountEstatePanelVue();
     const mask = $("estate-mask");
     mask?.addEventListener("click", (e) => { if (e.target === mask) void closeEstate(); });
@@ -323,7 +323,7 @@ async function init(): Promise<void> {
 
   // 求职数据源（内置采集）：面板开关 / 数据目录 / 登录 / 自检
   // M4 4.4：求职弹窗启动即挂载（默认隐藏，开关由 store.jobOpen 驱动）
-  void import("./apps/job-panel-vue.js").then((m) => m.mountJobPanelVue()).catch(() => {});
+  void import("./views/job/job-panel-vue.js").then((m) => m.mountJobPanelVue()).catch(() => {});
 
   on("send-btn", "click", () => { void send(); });
   on("stop-btn", "click", stopStreaming);
@@ -364,7 +364,7 @@ async function init(): Promise<void> {
       // 供应商弹窗是第一层：只关它，不要把背后的设置页一起关掉。
       if (isProviderFormOpen()) {
         e.preventDefault();
-        void import("./views/model-form.js").then((m) => m.closeProviderForm());
+        void import("./views/settings/models/model-form.js").then((m) => m.closeProviderForm());
         return;
       }
       if (isMcpEditorOpen()) {

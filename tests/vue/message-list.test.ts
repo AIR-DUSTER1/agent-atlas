@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import MessageListView from "../../src/client/views/message-list-vue.vue";
+import MessageListView from "../../src/client/views/chat/message-list-vue.vue";
 import { useMessagesStore, usageCaptionOf, type MessageBlockView } from "../../src/client/stores/messages.js";
 import { state } from "../../src/client/core/state.js";
 import type { AssistantBlock, ChatBlock } from "../../src/client/modules/types.js";

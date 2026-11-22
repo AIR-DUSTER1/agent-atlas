@@ -79,7 +79,7 @@ test("求职登录提示使用高对比警示底色，避免黄底灰字看不�
 test("贝壳登录失效显示为需要处理并自动展开登录入口", async () => {
   const [css, estate] = await Promise.all([
     readFile(join(CLIENT, "styles", "chat-tools.css"), "utf8"),
-    readFile(join(CLIENT, "views", "estate.ts"), "utf8"),
+    readFile(join(CLIENT, "views", "estate", "estate.ts"), "utf8"),
   ]);
   assert.match(css, /\.tool-card\.needs-approval,[\s\S]*?\.tool-card\.needs-action\s*\{[^}]*border-left-color:\s*var\(--amber\)/s);
   assert.match(css, /\.tool-group-status\.warn\s*\{[^}]*color:\s*var\(--amber\)/s);

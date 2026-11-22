@@ -7,9 +7,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import TopbarVue from "../../src/client/views/topbar-vue.vue";
-import WelcomeHeadVue from "../../src/client/views/welcome-head-vue.vue";
-import PermChipVue from "../../src/client/views/perm-chip-vue.vue";
+import TopbarVue from "../../src/client/views/app/topbar-vue.vue";
+import WelcomeHeadVue from "../../src/client/views/welcome/welcome-head-vue.vue";
+import PermChipVue from "../../src/client/views/app/perm-chip-vue.vue";
 import { state } from "../../src/client/core/state.js";
 import type { ProjectEntry, Session } from "../../src/client/modules/types.js";
 

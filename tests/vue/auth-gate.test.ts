@@ -5,8 +5,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
-import AuthLogin from "../../src/client/views/auth-login.vue";
-import AuthPassword from "../../src/client/views/auth-password.vue";
+import AuthLogin from "../../src/client/views/auth/auth-login.vue";
+import AuthPassword from "../../src/client/views/auth/auth-password.vue";
 
 type FetchResponse = { status: number; json: () => Promise<unknown> };
 type FetchMock = (input: string, init?: RequestInit) => FetchResponse;
@@ -110,7 +110,7 @@ describe("auth-gate 编排", () => {
       ok: true,
       user: { displayName: "Alice", role: "admin", mustChangePassword: false },
     }));
-    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/apps/auth-gate.js");
+    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/views/auth/auth-gate.js");
     const done = showLoginGate();
     await submitLogin("alice", "a-good-password");
     await vi.waitFor(() => expect(isAuthGateOpen()).toBe(false));
@@ -131,7 +131,7 @@ describe("auth-gate 编排", () => {
       }
       return loginResponse(200, { ok: true });
     });
-    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/apps/auth-gate.js");
+    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/views/auth/auth-gate.js");
     const done = showLoginGate();
     await submitLogin("alice", "temp-pass-123");
     // 强制改密页已切换：等表单渲染后填新密码并提交
@@ -148,7 +148,7 @@ describe("auth-gate 编排", () => {
 
   it("登录失败时错误回显且门页保持打开（不 resolve）", async () => {
     stubFetch(() => loginResponse(401, { error: "用户名或密码不正确" }));
-    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/apps/auth-gate.js");
+    const { showLoginGate, isAuthGateOpen } = await import("../../src/client/views/auth/auth-gate.js");
     void showLoginGate();
     await submitLogin("alice", "wrong-pass-xxx");
     expect(isAuthGateOpen()).toBe(true);

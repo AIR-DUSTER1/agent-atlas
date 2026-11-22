@@ -139,9 +139,9 @@ test("browser_act 在人工审批前不会触碰浏览器", async () => {
 test("右侧 Browser Use 面板、样式与工具卡增强已接线", async () => {
   const html = await readClientIndexHtml();
   const main = await readFile("src/client/main.ts", "utf8");
-  const view = await readFile("src/client/views/browser-use.ts", "utf8");
+  const view = await readFile("src/client/views/browser/browser-use.ts", "utf8");
   // M4 4.4：面板 body 迁入 Vue 组件，静态帧只留 #browser-dock-mount
-  const dockVue = await readFile("src/client/views/browser-dock-vue.vue", "utf8");
+  const dockVue = await readFile("src/client/views/browser/browser-dock-vue.vue", "utf8");
   const serverIndex = await readFile("src/server/app.ts", "utf8");
   assert.match(html, /id="browser-dock-mount"/);
   assert.match(html, /href="\/styles\/browser-use\.css"/);

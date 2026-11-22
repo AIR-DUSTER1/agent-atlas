@@ -11,7 +11,7 @@
  */
 
 import { uiPrompt } from "../ui/dialog.js";
-import { showForceChangeGate, showLoginGate } from "../apps/auth-gate.js";
+import { showForceChangeGate, showLoginGate } from "../views/auth/auth-gate.js";
 
 let loginInFlight: Promise<boolean> | null = null;
 

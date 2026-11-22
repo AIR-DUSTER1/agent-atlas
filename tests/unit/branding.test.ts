@@ -36,7 +36,7 @@ test("Web、桌面端与容器入口使用同一产品名", async () => {
   const desktop = await read("desktop/main.ts");
   const dockerfile = await read("Dockerfile");
   // M4 4.5：欢迎页 h1 迁入 welcome-head-vue.vue，产品名来自 modules/product.ts
-  const welcomeVue = await read("src/client/views/welcome-head-vue.vue");
+  const welcomeVue = await read("src/client/views/welcome/welcome-head-vue.vue");
   const productTs = await read("src/client/modules/product.ts");
   assert.match(html, /<title>agentatlas<\/title>/);
   assert.match(productTs, /PRODUCT_NAME = "agentatlas"/);

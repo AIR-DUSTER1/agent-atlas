@@ -19,28 +19,31 @@ const ROOT = join(fileURLToPath(new URL("../../", import.meta.url)));
 const CLIENT = join(ROOT, "src", "client");
 const VENDOR_PACKAGES = new Set(["chart.js", "lucide", "marked", "dompurify", "highlight.js"]);
 
-/** P0 迁移预算：只允许下降；新增文件默认预算为 0。 */
+/**
+ * P0 迁移预算：只允许下降；新增文件默认预算为 0。
+ * key 是相对 `src/client/` 的**当前**路径（views 已按页面重组进 views/<page>/）。
+ * 搬页面时必须一起改这里 —— 旧 key 会静默 miss 成预算 0。
+ */
 const INNER_HTML_BUDGET: Record<string, number> = {
   "composer/menu.ts": 3,
   "render/messages.ts": 3,
   "render/parts.ts": 1,
-  "views/attachments.ts": 8,
-  "views/composer-bar.ts": 5,
-  "views/estate.ts": 3,
-  "views/external.ts": 2,
-  "views/model-form.ts": 3,
-  "views/model-panel.ts": 8,
-  "views/navigation.ts": 3,
-  "views/projects.ts": 3,
-  "views/rag.ts": 11,
-  "views/sessions.ts": 2,
-  "views/settings-backup.ts": 2,
-  "views/settings-commands.ts": 0,
-  "views/settings-mcp.ts": 0,
-  "views/settings-memories.ts": 2,
-  "views/settings-skills.ts": 2,
-  "views/settings-stats.ts": 10,
-  "views/shell.ts": 5,
+  "views/chat/attachments.ts": 8,
+  "views/chat/composer-bar.ts": 5,
+  "views/estate/estate.ts": 3,
+  "views/external/external.ts": 2,
+  "views/settings/models/model-form.ts": 3,
+  "views/settings/models/model-panel.ts": 8,
+  "views/app/navigation.ts": 3,
+  "views/app/projects.ts": 3,
+  "views/kb/rag.ts": 11,
+  "views/app/sessions.ts": 2,
+  "views/settings/models/settings-backup.ts": 2,
+  "views/settings/commands/settings-commands.ts": 0,
+  "views/settings/mcp/settings-mcp.ts": 0,
+  "views/settings/memories/settings-memories.ts": 2,
+  "views/settings/skills/settings-skills.ts": 2,
+  "views/welcome/shell.ts": 5,
 };
 
 async function listTs(dir: string): Promise<string[]> {
@@ -114,7 +117,8 @@ test("通用 render/stream 不 import 租房或房产实现", async () => {
   for (const sub of ["render", "stream"]) {
     for (const file of await listTs(join(CLIENT, sub))) {
       for (const spec of importsOf(await readFile(file, "utf8"))) {
-        if (/views\/estate|tools-estate|租金|rental/i.test(spec)) {
+        // views 已按页面重组，房产实现可能位于 views/estate/ 或任意页面子目录
+        if (/views\/(?:[^/]+\/)*estate|tools-estate|租金|rental/i.test(spec)) {
           violations.push(`${relative(CLIENT, file)}: ${spec}`);
         }
       }
@@ -208,7 +212,7 @@ test("模型重试默认折叠且上下文容量保留历史 used", async () => 
   const events = await readFile(join(CLIENT, "stream", "events.ts"), "utf8");
   assert.match(events, /case "model_retry": upsertModelRetry/);
   assert.match(events, /u\.contextWindow = ev\.contextWindow/);
-  const composer = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
+  const composer = await readFile(join(CLIENT, "views", "chat", "composer-bar.ts"), "utf8");
   // M4 4.6：容量条派生计算迁往 stores/context-meter.ts（组件只消费）
   const meter = await readFile(join(CLIENT, "stores", "context-meter.ts"), "utf8");
   assert.match(meter, /const scale = s\.inputBudget \?\? s\.contextWindow/);
@@ -236,7 +240,7 @@ test("切换更小窗口模型前走 ZCode 式压缩守门", async () => {
   assert.match(guard, /完整聊天记录仍保留/);
   const compact = await readFile(join(CLIENT, "actions", "compact.ts"), "utf8");
   assert.match(compact, /Promise<boolean>/);
-  const menu = await readFile(join(CLIENT, "views", "composer-bar.ts"), "utf8");
+  const menu = await readFile(join(CLIENT, "views", "chat", "composer-bar.ts"), "utf8");
   assert.match(menu, /prepareModelSwitch\(p\.id, m\.id\)/);
 });
 

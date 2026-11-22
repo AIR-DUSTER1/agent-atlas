@@ -141,7 +141,8 @@ test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", as
     assert.match(stats, new RegExp(`id="${id}"`), id);
   }
   assert.match(stats, /activeRangeId: "7d"/);
-  assert.match(stats, /import\("\.\.\/\.\.\/vendor\/chart\.js"\)/);
+  // Chart.js 必须动态加载；深度不设死，页面可按 views/<page>/ 任意层级组织
+  assert.match(stats, /import\("(?:\.\.\/)+vendor\/chart\.js"\)/);
   assert.match(stats, /CHART_SPECS/);
   assert.match(stats, /stats-chart-card/);
   assert.match(stats, /ResizeObserver/);

@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readClientSource } from "../helpers/client-source.js";
+import { resolveClientPath } from "../helpers/client-source.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
 import { readFile } from "node:fs/promises";
 import {
@@ -71,7 +72,7 @@ test("前端权限菜单包含自主模式，并展示 AI 风险判断理由", a
   // M4 4.5：权限模式常量的权威位置是 modules/permission-modes.ts（无 pinia 依赖，
   // legacy 桥与 Vue store 共用）；chip 文案由 perm-chip-vue.vue 渲染。
   const modes = await readFile(new URL("modules/permission-modes.ts", root), "utf8");
-  const chip = await readFile(new URL("views/perm-chip-vue.vue", root), "utf8");
+  const chip = await readFile(new URL(await resolveClientPath("views/perm-chip-vue.vue"), root), "utf8");
   assert.match(modes, /id: "autonomous", label: "自主"/);
   assert.match(modes, /高风险才申请人工审批/);
   assert.match(app, /approval-risk-reason/);

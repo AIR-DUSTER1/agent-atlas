@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import ProjectSwitcherVue from "../../src/client/views/project-switcher-vue.vue";
+import ProjectSwitcherVue from "../../src/client/views/app/project-switcher-vue.vue";
 import { useProjectsStore } from "../../src/client/stores/projects.js";
 import { state } from "../../src/client/core/state.js";
 import type { ProjectEntry } from "../../src/client/modules/types.js";

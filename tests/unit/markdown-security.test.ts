@@ -14,7 +14,7 @@ const read = (path: string): Promise<string> =>
 
 test("Markdown 使用 marked + DOMPurify 动态加载并显式净化", async () => {
   const source = await read("modules/format.ts");
-  assert.match(source, /import\("\.\.\/vendor\/markdown\.js"\)/);
+  assert.match(source, /import\("(?:\.\.\/)+vendor\/markdown\.js"\)/);
   assert.match(source, /DOMPurify\.sanitize\(raw/);
   assert.match(source, /ALLOWED_TAGS: MARKDOWN_TAGS/);
   assert.match(source, /ALLOWED_ATTR: MARKDOWN_ATTRS/);
@@ -33,7 +33,7 @@ test("Markdown 加载失败继续使用安全 fallback，不阻断消息", async
 
 test("代码高亮动态加载，失败仍保留代码和复制按钮", async () => {
   const source = await read("render/code-enhance.ts");
-  assert.match(source, /import\("\.\.\/vendor\/highlight\.js"\)/);
+  assert.match(source, /import\("(?:\.\.\/)+vendor\/highlight\.js"\)/);
   assert.match(source, /\.catch\(\(\) => null\)/);
   assert.match(source, /代码已复制/);
   assert.match(source, /class: "code-copy-btn"/);

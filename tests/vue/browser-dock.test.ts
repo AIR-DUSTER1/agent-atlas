@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import BrowserDockVue from "../../src/client/views/browser-dock-vue.vue";
+import BrowserDockVue from "../../src/client/views/browser/browser-dock-vue.vue";
 import type { BrowserDockSnapshot } from "../../src/client/stores/browser-dock.js";
 
 let pinia: Pinia;

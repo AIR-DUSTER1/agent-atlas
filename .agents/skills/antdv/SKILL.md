@@ -29,10 +29,12 @@ npx antdv semantic Table              # class / styles 语义结构
 
 ## 本项目的六条硬约束
 
-1. **只在 `views/*.vue` 里 import**。`.ts` 不得 import `antdv-next`
+1. **只在页面 SFC（`views/<page>/**/*.vue`）里 import**。`.ts` 不得 import `antdv-next`
    （`tests/unit/client-architecture.test.ts` 守门）。
-2. **模板最外层包 `<AntdvProvider>`**（`../ui/antdv-provider.vue`）：它承载深/浅主题
-   + 中文 locale，且不产生包裹元素。自建 `ConfigProvider` 或私有 `theme.token` 视为违规。
+2. **模板最外层包 `<AntdvProvider>`**：它承载深/浅主题 + 中文 locale，且不产生包裹元素。
+   自建 `ConfigProvider` 或私有 `theme.token` 视为违规。
+   import 路径按 SFC 所在层级补 `../` 指向 `src/client/ui/antdv-provider.vue`
+   （页面已按 `views/<page>/` 组织，深度随目录变化，不要在文档里写死相对层级）。
 3. **`darkAlgorithm` 不是顶层具名导出**，只能 `import { theme }` 后用
    `theme.darkAlgorithm`。顶层具名导入过 tsc 但 Vite 报 `MISSING_EXPORT`。
 4. **DOM 契约优先于"用上组件库"**（见下节表格）。

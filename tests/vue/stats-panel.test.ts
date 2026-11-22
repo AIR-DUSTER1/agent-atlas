@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import StatsPanelVue from "../../src/client/views/stats-panel-vue.vue";
+import StatsPanelVue from "../../src/client/views/settings/stats/stats-panel-vue.vue";
 import { useStatsStore } from "../../src/client/stores/stats.js";
 import type { StatsRange, StatsResult } from "../../src/client/modules/types-api.js";
 

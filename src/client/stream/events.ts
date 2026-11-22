@@ -12,8 +12,8 @@
 
 import { partEls, saveLocal, state, transcript } from "../core/state.js";
 import { scrollBottom } from "../core/dom.js";
-import { updateContextBar } from "../views/composer-bar.js";
-import { setWorkflowPlan } from "../views/workflow-plan.js";
+import { updateContextBar } from "../views/chat/composer-bar.js";
+import { setWorkflowPlan } from "../views/chat/workflow-plan.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
 import { refreshConclusionMedia, sanitizeEstateConclusionText } from "../render/conclusion-media.js";
 import {
@@ -167,7 +167,7 @@ function releaseStreamAfterInterrupt(sid: string | null, ablock: AssistantBlock)
 
 /** 侧栏「生成中」标记挂在 state.streams 上，解除流占用后必须重绘才能消失。 */
 function sideRenderSessions(): void {
-  void import("../views/sessions.js").then((m) => m.renderSessions());
+  void import("../views/app/sessions.js").then((m) => m.renderSessions());
 }
 
 export function addErrorBlock(message: string, sid: string | null = state.currentId): void {

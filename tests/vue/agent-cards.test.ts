@@ -7,8 +7,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
-import AgentCardsVue from "../../src/client/views/agent-cards-vue.vue";
-import ExampleChipsVue from "../../src/client/views/example-chips-vue.vue";
+import AgentCardsVue from "../../src/client/views/welcome/agent-cards-vue.vue";
+import ExampleChipsVue from "../../src/client/views/welcome/example-chips-vue.vue";
 import { state } from "../../src/client/core/state.js";
 
 let pinia: Pinia;

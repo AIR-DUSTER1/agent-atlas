@@ -67,7 +67,11 @@ docs/**           功能介绍、部署、运维、安全等用户/operator 文�
 必须保持：
 
 - `src/agent/workflow.ts` 只做稳定 re-export 门面；节点在 `workflow/nodes/`，图接线在 `workflow/graph.ts`。
-- `src/client/index.html` 只保留根壳、CSP、build-info 注入点和 include 清单；页面片段在 `pages/`。
+- `src/client/index.html` 只保留根壳、CSP 与 build-info 注入点（`pages/` 片段机制已退役）。
+- **前端页面按 `views/<page>/` 组织**：一个页面一个目录，页面专属的 SFC / 逻辑 / 挂载模块
+  都在里面；`views/` 根目录不得有文件；`src/client/apps` 与 `src/client/pages` 均不得回流。
+  跨页共享上移到 `core/` / `modules/` / `ui/` / `stores/`；叶子页面之间不得互相 import。
+  细则见工程规范 §4.1，守门 `tests/unit/view-layout.test.ts`。
 - `src/client/core/state.ts` 是前端唯一可变状态源；不能让多个模块各存状态副本。
 - 通用消息渲染不得 import 房产/求职实现；业务专属卡通过增强注册表注入。
 - 单文件只做一件事；超过约 500 行时先判断是否混合了多个职责。
