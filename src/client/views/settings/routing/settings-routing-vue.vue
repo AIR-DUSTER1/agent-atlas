@@ -214,11 +214,11 @@ async function runTest(): Promise<void> {
       <span class="routing-kicker"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> Agent routing</span>
       <h2 id="routing-title"><i class="ui-icon" data-icon="Waypoints" aria-hidden="true"></i> 路由决策</h2>
     </div>
-    <label class="routing-switch" title="启用路由决策">
+    <!-- antdv Switch 自带轨道，不需要旧的 .routing-switch-track 自绘层 -->
+    <span class="routing-switch" title="启用路由决策">
       <Switch id="routing-enabled" v-model:checked="form.enabled" aria-label="启用路由决策" />
-      <span class="routing-switch-track" aria-hidden="true"></span>
       <span class="routing-switch-label" id="routing-enabled-label">{{ form.enabled ? "已启用" : "已停用" }}</span>
-    </label>
+    </span>
   </div>
 
   <div class="routing-grid">
@@ -326,7 +326,7 @@ async function runTest(): Promise<void> {
 
   <div class="routing-actions">
     <div id="routing-status" class="settings-status" :class="statusKind" role="status" aria-live="polite">{{ statusText }}</div>
-    <Button id="routing-save-btn" class="ui-button ui-button-primary" :disabled="saving" @click="save">保存路由配置</Button>
+    <Button id="routing-save-btn" :disabled="saving" @click="save" type="primary">保存路由配置</Button>
   </div>
   </AntdvProvider>
 </template>

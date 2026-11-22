@@ -177,7 +177,7 @@ onMounted(() => {
       <Input id="job-data-dir" v-model:value="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
     </label>
     <div class="kb-actions">
-      <Button id="job-save-btn" class="btn btn-approve" :disabled="store.saving" @click="save">保存并重新探测</Button>
+      <Button id="job-save-btn" :disabled="store.saving" @click="save" type="primary">保存并重新探测</Button>
       <Button id="job-doctor-btn" class="ghost-btn" :disabled="store.doctorRunning" @click="runDoctor">运行自检</Button>
       <Button id="job-diagnose-btn" class="ghost-btn" title="检查四个平台的页面结构，不写入选择器" :disabled="Boolean(store.diagnosing)" @click="diagnose(false)">
         {{ store.diagnosing === "plain" ? "正在诊断…" : "结构诊断" }}

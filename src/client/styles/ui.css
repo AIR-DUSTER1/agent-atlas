@@ -286,3 +286,30 @@ button > .ui-icon { pointer-events: none; }
 .thinking-chevron { display: inline-flex; align-items: center; justify-content: center; }
 .approval-chevron .ui-icon { --icon-size: 11px; }
 .thinking-chevron .ui-icon { --icon-size: 12px; }
+
+/* ------------------------------------------------------------
+   antdv 组件在表单栅格里的宽度归一（组件库批次）
+   ------------------------------------------------------------
+   antdv 的 InputNumber / Select / DatePicker 默认按内容收窄（约 90-120px），
+   放进 .field / .routing-field 这种整栏表单里会显得「塌陷」。
+   统一让它们在表单容器内撑满，与 Input 的视觉一致。
+   代价：antdv 的语义类需要在这里补宽度，属于布局适配而非改主题。
+   ------------------------------------------------------------ */
+.field > .ant-select,
+.field > .ant-input-number,
+.field > .ant-picker,
+.routing-field > .ant-select,
+.routing-field > .ant-input-number,
+.routing-field > .ant-picker {
+  width: 100%;
+  min-width: 0;
+}
+/* 紧凑行（.key-row / 行内字段）保持自适应，不撑满 */
+.key-row > .ant-select,
+.key-row > .ant-input-number,
+.cap-row > .ant-input-number {
+  width: auto;
+  min-width: 120px;
+}
+/* Slider 与阈值数字回显并排时留出呼吸 */
+.routing-field > .ant-slider { margin: 6px 0; }

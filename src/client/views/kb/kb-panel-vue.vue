@@ -211,7 +211,7 @@ function close(): void {
       </label>
     </div>
     <div class="kb-actions">
-      <Button id="kb-save" class="btn btn-approve" :disabled="saving" @click="saveConfig">保存配置</Button>
+      <Button id="kb-save" :disabled="saving" @click="saveConfig" type="primary">保存配置</Button>
       <Button id="kb-test" class="ghost-btn" :disabled="testing" @click="testConn">测试连接</Button>
       <span id="kb-status" class="settings-status"></span>
     </div>
@@ -248,7 +248,7 @@ function close(): void {
     <div class="field-label ext-head"><i class="ui-icon" data-icon="Search" aria-hidden="true"></i> 检索测试</div>
     <div class="kb-search-row">
       <Input id="kb-query" aria-label="知识库检索问题" type="text" spellcheck="false" placeholder="输入检索词，Enter 或点击按钮（会话里由 retrieve_docs 工具自动调用）" @keydown.enter.prevent="searchTest" />
-      <Button id="kb-search-btn" class="btn btn-approve" @click="searchTest">检索</Button>
+      <Button id="kb-search-btn" @click="searchTest" type="primary">检索</Button>
     </div>
     <div id="kb-hits" class="kb-hits">
       <div v-if="store.hitsState === 'loading'" class="fs-empty">检索中…</div>

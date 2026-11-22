@@ -194,7 +194,7 @@ function toggleKeyVisible(): void {
         <Button id="pf-test" class="ghost-btn" @click="onTest">{{ isCreate ? "测试连接 / 拉取模型" : "测试连接" }}</Button>
         <div class="spacer"></div>
         <Button id="pf-cancel-edit" class="ghost-btn" @click="store.closeProviderForm()">取消</Button>
-        <Button id="pf-save" class="btn btn-approve" :disabled="saving" @click="onSave">保存供应商</Button>
+        <Button id="pf-save" :disabled="saving" @click="onSave" type="primary">保存供应商</Button>
       </div>
       <div id="provider-modal-status" class="settings-status" role="status" aria-live="polite"></div>
     </div>

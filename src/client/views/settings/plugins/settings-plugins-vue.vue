@@ -126,7 +126,7 @@ async function onToggle(plugin: BuiltinPlugin, next: boolean): Promise<void> {
         :loading="togglingId === row.plugin.id"
         @update:checked="(next: boolean) => onToggle(row.plugin, next)"
       />
-      <Button class="plugin-manage btn btn-approve" @click="openPluginManage(row.plugin)">{{ row.plugin.manageLabel }}</Button>
+      <Button class="plugin-manage" type="primary" @click="openPluginManage(row.plugin)">{{ row.plugin.manageLabel }}</Button>
     </div>
   </article>
   </AntdvProvider>

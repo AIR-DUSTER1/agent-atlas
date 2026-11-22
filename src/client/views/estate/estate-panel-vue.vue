@@ -170,7 +170,7 @@ function close(): void {
     <div id="estate-status" class="estate-status" :class="status1Kind">{{ status1Text || "探测中…" }}</div>
     <div class="kb-actions">
       <Button id="estate-check" class="ghost-btn" @click="reload">重新检测</Button>
-      <Button id="estate-install" class="btn btn-approve" :disabled="installing" @click="install">
+      <Button id="estate-install" :disabled="installing" @click="install" type="primary">
         <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> 安装 CLI（自动下载官方二进制）
       </Button>
     </div>
@@ -196,7 +196,7 @@ function close(): void {
         <i class="ui-icon" data-icon="ExternalLink" aria-hidden="true"></i> 打开官方登录页
       </Button>
       <Button id="estate-key-paste" class="ghost-btn" :disabled="checkingLogin" @click="pasteKeyFromClipboard">从剪贴板读取</Button>
-      <Button id="estate-key-save" class="btn btn-approve" @click="saveKey">保存 Key</Button>
+      <Button id="estate-key-save" @click="saveKey" type="primary">保存 Key</Button>
       <span id="estate-status2" class="settings-status" :style="{ color: status2Color }">{{ status2Text }}</span>
     </div>
     <p class="settings-note">使用系统默认浏览器打开官方登录页，只打开一次；页面显示的是掩码，请点 Key 右侧的「复制」，再回到这里点「从剪贴板读取」并保存。不要在短时间内反复扫码或连续重试。</p>
