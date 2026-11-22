@@ -242,8 +242,21 @@ test("切换更小窗口模型前走 ZCode 式压缩守门", async () => {
   assert.match(guard, /完整聊天记录仍保留/);
   const compact = await readFile(join(CLIENT, "actions", "compact.ts"), "utf8");
   assert.match(compact, /Promise<boolean>/);
+
+  // 不变式：任何切换模型的入口都必须先过 prepareModelSwitch。
+  // 顶栏菜单不再自己调它，而是统一委托 activateModel —— 因此断言「委托链完整」，
+  // 而不是「菜单文件里出现某个函数名」。后者只是实现位置：菜单曾绕过
+  // activateModel 手写 POST .../models/:id，跨供应商时静默失效，而这条断言
+  // 因为函数名还在文件里，一直是绿的。
   const menu = await readFile(join(CLIENT, "views", "chat", "composer-bar.ts"), "utf8");
-  assert.match(menu, /prepareModelSwitch\(p\.id, m\.id\)/);
+  assert.match(menu, /activateModel\(p\.id, m\.id\)/, "顶栏菜单必须走统一的激活入口");
+  assert.doesNotMatch(
+    menu,
+    /providers\/\$\{p\.id\}\/models\/\$\{m\.id\}/,
+    "顶栏菜单不得绕过 activateModel 直接调模型更新接口（跨供应商时会静默失效）",
+  );
+  const actions = await readFile(join(CLIENT, "views", "settings", "models", "model-actions.ts"), "utf8");
+  assert.match(actions, /prepareModelSwitch\(providerId, modelId\)/, "activateModel 必须保留切小窗口前的压缩守门");
 });
 
 test("客户端错误上报只发送摘要、版本身份与视图，不发送 stack/密钥/对话", async () => {

@@ -17,7 +17,6 @@ import { state } from "../../core/state.js";
 import { uiAlert } from "../../ui/dialog.js";
 import { quickReasoningDisplayLabel, visibleQuickReasoningLevels } from "../../modules/reasoning-display.js";
 import { activateModel } from "../settings/models/model-actions.js";
-import { prepareModelSwitch } from "../../actions/model-switch.js";
 import { closeCmMenus } from "../app/navigation.js";
 import type { AppConfig, ModelEntry, ProviderEntry } from "../../modules/types.js";
 
@@ -152,16 +151,12 @@ export function renderModelMenu(menu: HTMLElement): void {
       item.addEventListener("click", async () => {
         if (isCurrent) { closeCmMenus(); return; }
         item.disabled = true;
+        // 必须走 activateModel（POST /api/config/activate）：它会同时切「供应商」
+        // 与「模型」。早先这里手写 POST .../models/:id {makeActive:true} 只改
+        // 供应商内部的 activeModelId，跨供应商切换时服务端静默忽略、返回 200，
+        // 界面什么都不变 —— 菜单看起来"点不动"。
         try {
-          if (!(await prepareModelSwitch(p.id, m.id))) {
-            closeCmMenus();
-            return;
-          }
-          await api(`/api/config/providers/${p.id}/models/${m.id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ makeActive: true }),
-          });
+          await activateModel(p.id, m.id);
           applyConfigState(await api<AppConfig>("/api/config"));
         } catch (err) {
           uiAlert(`切换失败：${(err as Error).message}`, "切换模型");

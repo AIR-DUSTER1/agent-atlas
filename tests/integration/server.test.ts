@@ -299,6 +299,76 @@ test("同供应商切换模型会重建配置且保留会话历史", async () =>
   assert.equal(transcript.body.records[1].user, "继续用刚才的上下文");
 });
 
+test("跨供应商切换模型必须真的换掉运行时模型（顶栏菜单曾经 200 但没生效）", async () => {
+  // 回归背景：顶栏模型菜单曾绕过 /api/config/activate，直接 POST
+  // /api/config/providers/:id/models/:id { makeActive: true }。服务端那里只改
+  // 供应商内部 activeModelId，再用「该供应商是否已启用」决定要不要同步运行时
+  // config —— 跨供应商时条件不成立，接口照样 200，但 config.model 一个字节没变。
+  const providerA = await json("/api/config/providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "跨供应商甲",
+      baseURL: "https://a.example.test/v1",
+      models: [{ name: "alpha-1" }, { name: "alpha-2" }],
+    }),
+  });
+  assert.equal(providerA.status, 200);
+  const a = providerA.body.provider;
+  const alpha1 = a.models.find((m: { name: string }) => m.name === "alpha-1");
+
+  const providerB = await json("/api/config/providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "跨供应商乙",
+      baseURL: "https://b.example.test/v1",
+      models: [{ name: "beta-1" }],
+    }),
+  });
+  assert.equal(providerB.status, 200);
+  const b = providerB.body.provider;
+  const beta1 = b.models.find((m: { name: string }) => m.name === "beta-1");
+
+  const first = await json("/api/config/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: a.id, modelId: alpha1.id }),
+  });
+  assert.equal(first.status, 200);
+  const beforeConfig = await json("/api/config");
+  assert.equal(beforeConfig.body.model, "alpha-1");
+
+  // 走模型更新接口的 makeActive（顶栏菜单旧路径）：跨供应商也必须生效
+  const switched = await json(`/api/config/providers/${b.id}/models/${beta1.id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ makeActive: true }),
+  });
+  assert.equal(switched.status, 200);
+  assert.equal(switched.body.activeChanged, true, "跨供应商切换必须报告配置已变更");
+
+  const afterConfig = await json("/api/config");
+  assert.equal(afterConfig.body.model, "beta-1", "运行时模型必须真的换到跨供应商的目标模型");
+  assert.equal(
+    afterConfig.body.providers.find((p: { id: string }) => p.id === b.id)?.active,
+    true,
+    "目标供应商必须成为启用供应商",
+  );
+  assert.equal(
+    afterConfig.body.providers.find((p: { id: string }) => p.id === a.id)?.active,
+    false,
+    "原供应商必须取消启用",
+  );
+
+  // 清理：退回甲供应商，避免影响后续用例的模拟模型标签
+  await json("/api/config/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: a.id, modelId: alpha1.id }),
+  });
+});
+
 test("会话创建 → chat SSE → transcript 回放", async () => {
   const mk = await json("/api/sessions", {
     method: "POST",

@@ -226,7 +226,15 @@ export async function updateModel(providerId: string, modelId: string, input: {
   }
   if (input.makeActive === true) p.activeModelId = m.id;
 
-  const activeChanged = p.id === activeIdRef();
+  // makeActive 的语义是「让这个模型成为当前生效的模型」，跨供应商时必须连
+  // 供应商一起切过去。早先这里只改 p.activeModelId，再用 p.id === activeId
+  // 判断是否同步运行时 config —— 跨供应商时条件不成立，接口照样返回 200，
+  // 但 config 一个字段都没变（顶栏菜单因此看起来"点不动"）。
+  const previousProviderId = activeIdRef();
+  const previousModelId = activeModelOfForCrud(activeProviderForCrud())?.id;
+  if (input.makeActive === true) setActiveIdRef(p.id);
+  const activeChanged = previousProviderId !== activeIdRef()
+    || previousModelId !== activeModelOfForCrud(activeProviderForCrud())?.id;
   if (activeChanged) applyActiveToConfigForCrud();
   await persistForCrud();
   return { provider: toPublicForCrud(p), model: toPublicModelForCrud(p, m), activeChanged };
