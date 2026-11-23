@@ -231,7 +231,7 @@ export function finalize(
   // interrupt 之后本轮的流已被主动解除，用户可能已经发起新一轮（复用了同一个
   // ablock）。只有「登记的还是我这一条」才删，否则会把新一轮的流删掉，
   // 让它永远收不回来（按钮卡在停止态、也无法再发消息）。
-  if (sid && state.streams[sid] && (!stream || state.streams[sid] === stream)) {
+  if (sid && state.streams[sid] && (!stream || state.streams[sid].ctrl === stream.ctrl)) {
     delete state.streams[sid];
   }
   if (sid === state.currentId) syncComposerState(sid);

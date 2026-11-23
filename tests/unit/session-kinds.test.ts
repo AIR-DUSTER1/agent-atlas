@@ -99,7 +99,7 @@ test("interrupt 到达即解除流占用，审批不必等 SSE 尾部", async ()
   assert.match(events, /stream\.ablock !== ablock/, "只解除确实属于这个块的流");
   const turn = await readFile(join(SRC, "client", "stream", "turn.ts"), "utf8");
   // 收尾必须是「按流对象身份」删，而不是按 ablock 删 —— 否则会把 resume 新登记的那条删掉
-  assert.match(turn, /state\.streams\[sid\] === stream/);
+  assert.match(turn, /state\.streams\[sid\]\.ctrl === stream\.ctrl/);
   assert.match(turn, /finalize\(ablock, sid, stream\)/);
 });
 
