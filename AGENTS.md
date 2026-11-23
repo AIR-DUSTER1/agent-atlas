@@ -33,19 +33,18 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 | 约束 | 说明 |
 |---|---|
 | TypeScript | `strict` + `NodeNext` + `noEmit`；服务端 ESM import 必须带 `.js` 后缀 |
-| 后端 | Hono（`@hono/node-server`）+ `streamSSE`；新路由必须经 `zValidator` 声明 schema；横切一律走 middleware，禁止在 handler 内手写横切 |
+| 后端 | Hono（`@hono/node-server`）；新路由必须声明请求 schema（终态 `zValidator` / `streamSSE`，过渡期允许 `jsonBody` + 原生 SSE）；横切一律走 middleware，禁止在 handler 内手写横切 |
 | 前端 | Vue 3 SFC + Pinia + antdv-next（限通用控件）；构建链 Vite；组件不得 import `src/server/**`；业务状态只能经 Pinia store，不得组件内私建副本 |
 | antdv-next | 只在 `views/*.vue` 里 import（`.ts` 禁用），模板包 `<AntdvProvider>`；写代码前先 `npx antdv info <C> --ver 1.5.2`；主题只改 `ui/antdv-theme.ts`；体积必须留在懒加载 chunk。细则见工程规范 §5.1 与 `$antdv` Skill |
-| 前端依赖 | 必须登记版本、许可证和体积；依赖清单由守门测试直接断言（过渡期仍经 `src/client/vendor/*` wrapper，M3 由 Vite 取代） |
+| 前端依赖 | 必须登记版本、许可证和体积；依赖清单由守门测试直接断言；Vite 直接打包 npm 依赖（图标白名单见 `src/client/ui/icons.ts`） |
 | 服务端依赖 | 遵守运行时白名单（Hono / `@hono/node-server` / `@hono/zod-validator` / 现有登记）；新增依赖前先证明标准库/现有依赖不可行 |
 | 执行方式 | TS 使用 `tsx` 直跑；新增脚本必须能被 `tsx` 直接执行 |
 | 可选前端能力 | 图表、Markdown、高亮必须动态加载且有降级路径，不得进入首屏启动闭包 |
 | 可访问性 | 图标按钮和表单必须有可访问名称；正文对比度 ≥ 4.5:1；流式区使用 live region |
 
-> 过渡期说明（框架迁移 M0-M3，见 `.plans/development-docs/framework-migration-plan.md`）：存量 `node:http`
-> 顺序分发、`h()` 视图与 vendor 构建链在各自里程碑退役前仍可运行与修改，但**新增路由必须落在
-> `src/server/routes/*.ts`（终态挂 Hono），新增页面不得再手写 `h()` DOM**；旧形态只做修 bug 级维护。
+> 迁移收尾中（见 `.plans/development-docs/framework-migration-plan.md`）：业务页面使用 Vue SFC；流式热路径与 UI 原语共用 `src/client/ui/dom.ts`；legacy `state` 导入已由 Pinia store facade 承接。新增路由必须落在 `src/server/routes/*.ts`，新增页面不得再手写业务 DOM。
 > 领域层红线不变：`src/agent/**`、`src/memory/**`、`src/routing/**` 不得 import `hono` / `vue` / `antdv-next`。
+
 
 详细依赖登记和体积见 `.plans/development-docs/engineering-standards.md`。
 
@@ -57,7 +56,7 @@ src/memory/**     记忆领域；禁止 import server/client
 src/routing/**    路由决策领域；禁止 import server/client
 src/server/**     HTTP/SSE/持久化/运维；routes 不得直接操作 fs
 src/client/**     前端；只能通过 /api/* 与服务端通信
-src/client/vendor 过渡期第三方隔离层（M3 由 Vite 取代）
+src/client/ui     共享交互原语、图标白名单与 Vue 基础组件
 src/versioning.ts 产品版本、构建标识与发布一致性权威工具
 desktop/**        Electron 主进程与 preload
 docs/**           功能介绍、部署、运维、安全等用户/operator 文档

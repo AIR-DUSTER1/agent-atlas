@@ -527,7 +527,7 @@ API Key 在界面和 API 中只返回掩码；真实 Key 不会出现在日志�
 
 ### 14.2 设备与用户隔离
 
-每个设备有独立身份，会话、审批、导出、统计和 Browser Use 状态按设备或 owner 绑定。生产环境开启认证后，不同真实用户的会话和数据互不可见。
+每个设备有独立身份，会话、审批、导出、统计和 Browser Use 状态按设备或 userId 绑定。生产环境开启认证后，不同真实用户的会话和数据互不可见。
 
 `STATE_BACKEND=postgres` 时使用 PostgreSQL 的 `userId + RLS` 数据面，适合多个真实用户共享一个自托管实例。当前 SSE、限流和浏览器会话仍按单实例设计，不等同于多节点集群高可用。
 
@@ -675,7 +675,7 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 - 这是 `0.9.0-beta.18` 开发预览，不是 1.0 稳定版，不提供正式 SLA。
 - 文件后端默认是单实例写者模型，不能让多个进程同时写同一个 `/data`。
-- PostgreSQL 提供多用户 owner/RLS 隔离，但不等同于多节点集群高可用。
+- PostgreSQL 提供 userId/RLS 多用户隔离，但不等同于多节点集群高可用。
 - RAG 依赖外部 HTTP 服务；未配置或服务不可用时，Agent 应如实说明，不能伪造检索结果。
 - Browser Use 需要浏览器运行时；Docker 默认镜像已内置无头 Chrome，minimal 镜像不包含。
 - Computer Use 仅支持 Windows，默认关闭，动作需要权限和审批。

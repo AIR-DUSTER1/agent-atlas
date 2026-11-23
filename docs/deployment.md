@@ -78,7 +78,7 @@ agentatlas 容器（单实例）
         │
         └── /data
             ├── web-config.json          # 管理员级全局配置
-            ├── memory-store/            # 当前仍为 owner-scoped 文件
+            ├── memory-store/            # 当前仍为 user-scoped 文件
             ├── audit.ndjson
             └── backups/
 ```
