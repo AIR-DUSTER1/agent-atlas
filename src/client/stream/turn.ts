@@ -13,6 +13,7 @@
 import { $, autoGrowImpl, chatScroll, inputEl, sendBtn, stopBtn } from "../core/dom.js";
 import { authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
+import { markRaw } from "vue";
 import { uiAlert } from "../ui/dialog.js";
 import { mountBlock, refreshAssistantCopy, renderAll } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
@@ -169,7 +170,7 @@ async function streamTurn(
   // （让审批按钮能立刻响应），后续 resume 会登记**新的**流对象。收尾时按身份
   // 比较，绝不能因为 ablock 相同就把用户新发起的那一轮一起删掉。
   const stream = { ctrl, sid, ablock };
-  state.streams[sid] = stream;
+  state.streams[sid] = markRaw(stream);
   syncComposerState(sid);
   renderSessions();
   const wasNear = nearBottomImpl();
@@ -231,7 +232,7 @@ export function finalize(
   // interrupt 之后本轮的流已被主动解除，用户可能已经发起新一轮（复用了同一个
   // ablock）。只有「登记的还是我这一条」才删，否则会把新一轮的流删掉，
   // 让它永远收不回来（按钮卡在停止态、也无法再发消息）。
-  if (sid && state.streams[sid] && (!stream || state.streams[sid] === stream)) {
+  if (sid && state.streams[sid] && (!stream || state.streams[sid].ctrl === stream.ctrl)) {
     delete state.streams[sid];
   }
   if (sid === state.currentId) syncComposerState(sid);
