@@ -13,6 +13,7 @@
 import { $, autoGrowImpl, chatScroll, inputEl, sendBtn, stopBtn } from "../core/dom.js";
 import { authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
+import { markRaw } from "vue";
 import { uiAlert } from "../ui/dialog.js";
 import { mountBlock, refreshAssistantCopy, renderAll } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
@@ -169,7 +170,7 @@ async function streamTurn(
   // （让审批按钮能立刻响应），后续 resume 会登记**新的**流对象。收尾时按身份
   // 比较，绝不能因为 ablock 相同就把用户新发起的那一轮一起删掉。
   const stream = { ctrl, sid, ablock };
-  state.streams[sid] = stream;
+  state.streams[sid] = markRaw(stream);
   syncComposerState(sid);
   renderSessions();
   const wasNear = nearBottomImpl();
