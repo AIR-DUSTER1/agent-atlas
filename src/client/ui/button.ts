@@ -4,7 +4,7 @@
  * 只负责视觉变体、可访问性与 loading 状态，不绑定业务事件。调用方通过
  * onClick 注入行为；字符串事件处理器被 h() 拒绝。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "icon";
 export type ButtonSize = "sm" | "md";

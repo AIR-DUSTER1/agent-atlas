@@ -9,7 +9,7 @@
  *  - 结果解析失败退回通用工具卡，不影响旧会话回放；
  *  - 全部骨架使用 h()/textContent，模型输出与工具名不拼 HTML。
  */
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import type { ToolPart } from "../modules/types.js";
 

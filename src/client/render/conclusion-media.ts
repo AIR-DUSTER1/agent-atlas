@@ -21,7 +21,7 @@ import { safeHref, safeImageSrc } from "../modules/format.js";
 import { buildListingUrl } from "../modules/estate-listing-url.js";
 import { mapLinkKey, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
 import type { MapRuntimeConfig } from "../modules/types-api.js";
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import { openMediaPreview } from "../ui/media-preview.js";
 import type { AssistantBlock } from "../modules/types.js";

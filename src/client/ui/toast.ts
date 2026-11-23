@@ -4,7 +4,7 @@
  * 成功/一般信息用 polite，错误用 alert；自动消失前可通过 hover / focus 暂停，
  * 并提供显式关闭按钮。提示是辅助反馈，不承载必须确认的决策。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
 export type ToastTone = "info" | "success" | "warning" | "error";
 export interface ToastOptions {

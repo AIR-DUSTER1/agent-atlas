@@ -1,8 +1,8 @@
 /**
- * ui/h.ts — 原生 DOM hyperscript
+ * ui/dom.ts — 安全 DOM 构造函数
  * ============================================================
  * 用 textContent 语义生成节点，彻底拒绝 html/innerHTML 字符串。事件只接受函数，
- * URL 属性统一过 safe-url；这是新 UI 代码的默认构建方式。
+ * URL 属性统一过 safe-url；流式热路径与 UI 原语共用这一层，业务页面优先使用 Vue SFC。
  */
 import { safeHref, safeImageSrc } from "./safe-url.js";
 

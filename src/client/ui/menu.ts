@@ -4,7 +4,7 @@
  * 统一替代各业务自己实现的「absolute + 点外面关闭」。菜单打开后挂到 body 做
  * fixed 定位，避免被 overflow:hidden 裁切；只允许一个活动菜单。
  */
-import { h, type Child } from "./h.js";
+import { h, type Child } from "./dom.js";
 
 export interface OpenMenuOptions {
   anchor: HTMLElement;

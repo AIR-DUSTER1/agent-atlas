@@ -76,7 +76,7 @@ export const CLIENT_SOURCES = [
   "core/api.ts",
   // 无业务 UI 原语
   "ui/safe-url.ts",
-  "ui/h.ts",
+  "ui/dom.ts",
   "ui/icon.ts",
   "ui/button.ts",
   "ui/input.ts",
@@ -135,11 +135,8 @@ export const CLIENT_SOURCES = [
   "views/model-actions.ts",
   // 输入框菜单
   "composer/menu.ts",
-  // 第三方隔离 wrapper（业务只允许从这里使用 npm 前端库）
-  "vendor/chart.ts",
-  "vendor/icons.ts",
-  "vendor/markdown.ts",
-  "vendor/highlight.ts",
+  // 图标白名单（Vite 直接打包 npm 依赖）
+  "ui/icons.ts",
 ];
 
 /** 读取全部前端源码并拼成一段文本（保留文件边界注释，便于定位断言来源） */

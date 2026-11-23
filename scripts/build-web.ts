@@ -1,8 +1,8 @@
 /**
- * scripts/build-client.ts — 前端构建（框架迁移 M3：Vite 接管，源码不动）
+ * scripts/build-web.ts — Vite 前端构建编排（框架迁移 M3：Vite 接管，源码不动）
  * ============================================================
  * 流程：读 index.html → 注入构建身份 → CSP hash 校验 → 写 index.vite.html
- * → vite build（把 main.ts 及其依赖、vendor wrapper 的 npm 包打进 assets/）→
+ * → vite build（把 main.ts 及其依赖、npm 依赖直接打进 assets/）→
  * 复制 styles → 写 build-info → 产物自检。
  *
  * M3 变化：页面入口与依赖图由 Vite 打包（assets/app.js + 动态增强 chunk），
@@ -127,10 +127,10 @@ async function main(): Promise<void> {
     console.error("✗ 构建产物缺少 assets/app.js（rollup entryFileNames 是否被改过？）");
     process.exit(1);
   }
-  // vendor 目录已退役：若它再次出现，说明有脚本又把自包含库写了回来（应走 Vite）
+  // vendor 目录已退役：任何文件回流都说明旧构建链或 import map 产物又被放回 public/
   const vendorEntries = await readdir(join(OUT, "vendor")).catch(() => [] as string[]);
-  if (vendorEntries.some((name) => name.endsWith("-lib.js"))) {
-    console.error("✗ 检测到 public/vendor/*-lib.js：vendor 自包含库已退役，npm 包必须由 Vite 打包");
+  if (vendorEntries.length > 0) {
+    console.error("✗ 检测到 public/vendor/*：vendor 自包含库已退役，npm 包必须由 Vite 打包");
     process.exit(1);
   }
   console.log(`✓ 前端构建完成 → src/server/public/ (${buildInfo.version} · ${buildInfo.buildId})`);

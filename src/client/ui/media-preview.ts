@@ -6,7 +6,7 @@
  * 指针拖动平移，并保持焦点陷阱、Esc 关闭与触发元素焦点恢复。
  * 设计立场：只接收已经由业务层安全构造的 DOM，不拼 HTML，不替代业务渲染。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 import { icon } from "./icon.js";
 
 export type MediaPreviewKind = "image" | "map";

@@ -10,7 +10,7 @@
  * 让用户的手永远赢。
  */
 import { chatScroll } from "../core/dom.js";
-import { h } from "./h.js";
+import { h } from "./dom.js";
 import { icon } from "./icon.js";
 
 const NEAR_BOTTOM_PX = 120;

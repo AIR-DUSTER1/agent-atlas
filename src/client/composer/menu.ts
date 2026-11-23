@@ -14,7 +14,7 @@ import { api } from "../core/api.js";
 import { state } from "../core/state.js";
 import { fmtSize } from "../modules/format.js";
 import { addPendingFile } from "../views/chat/attachments.js";
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { openFloatingMenu, type MenuController } from "../ui/menu.js";
 import { enterGoalMode } from "./goal.js";
 import type { ComposerItem, ComposerTrigger } from "../modules/types.js";

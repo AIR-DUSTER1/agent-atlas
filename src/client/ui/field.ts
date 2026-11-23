@@ -4,7 +4,7 @@
  * 确保每个设置项有稳定可访问关系；错误文案用 aria-live 与 aria-describedby
  * 关联，不再只在页面底部显示一个全局状态。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
 export interface FieldOptions {
   id: string;

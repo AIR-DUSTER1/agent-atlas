@@ -12,12 +12,10 @@ import { test } from "node:test";
 import { computeInlineScriptHashes } from "../../scripts/csp-integrity.js";
 import { CSP_SCRIPT_HASHES } from "../../src/server/csp-hashes.js";
 import { SECURITY_HEADERS } from "../../src/server/http-guard.js";
-import { VENDOR_ENTRIES, VENDOR_WRAPPER_FILES } from "../../scripts/vendor-entries.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
 
 const ROOT = join(fileURLToPath(new URL("../../", import.meta.url)));
 const CLIENT = join(ROOT, "src", "client");
-const VENDOR_PACKAGES = new Set(["chart.js", "lucide", "marked", "dompurify", "highlight.js"]);
 
 /**
  * P0 迁移预算：只允许下降；新增文件默认预算为 0。
@@ -79,7 +77,6 @@ test("业务源码 import 的 npm 前端包必须在登记表内", async () => {
   const violations: string[] = [];
   for (const file of await listTs(CLIENT)) {
     const rel = relative(CLIENT, file).replaceAll("\\", "/");
-    if (rel.startsWith("vendor/")) continue;
     // 去掉注释再抓 import，避免 banner 里的示例路径误报
     const source = (await readFile(file, "utf8"))
       .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -158,7 +155,7 @@ test("index.html 引用的样式全部进入构建产物", async () => {
     const built = await readFile(join(ROOT, "src", "server", "public", "styles", name), "utf8").catch(() => "");
     assert.ok(built.trim().length > 0, `缺少构建样式产物：${name}`);
   }
-  const buildScript = await readFile(join(ROOT, "scripts", "build-client.ts"), "utf8");
+  const buildScript = await readFile(join(ROOT, "scripts", "build-web.ts"), "utf8");
   // 样式按目录自动发现（递归收集，支持 base/ chat/ settings/<view>/ 子目录）
   assert.match(buildScript, /collect\(STYLE_DIR\)|readdir\(STYLE_DIR/);
   assert.match(buildScript, /index\.html 引用了未找到的样式/);
@@ -172,38 +169,10 @@ test("委派卡覆盖运行中与完成态且不拼 HTML", async () => {
   assert.match(source, /toolsUsed/);
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML/);
 });
-test("vendor 清单输出名唯一且不与 tsc wrapper 冲突", () => {
-  const outputs = VENDOR_ENTRIES.map((entry) => entry.outputFile);
-  assert.equal(new Set(outputs).size, outputs.length);
-  for (const wrapper of VENDOR_WRAPPER_FILES) assert.ok(!outputs.includes(wrapper));
-});
-
-/**
- * icons wrapper 从裸名 "lucide" 导入，import map 把 "lucide" 指向 icons-lib.js。
- * 只要 wrapper 导出的名字在产物里缺一个，整个模块链接阶段就失败 —— 症状是
- * **页面上所有图标一起消失**，而不是少一个。曾在加 Waypoints / Briefcase 时踩过：
- * 只改了 wrapper，忘了改 vendor 清单，CI 三处断言 `svg` 不可见。
- */
-test("icons wrapper 的每个导出都必须在 vendor 构建清单里", async () => {
-  const wrapper = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");
-  const lucide = VENDOR_ENTRIES.find((entry) => entry.name === "lucide");
-  assert.ok(lucide, "缺少 lucide vendor 条目");
-
-  /** 从 `export { A, B, C } from "..."` 里抽名字（跨行、允许尾逗号） */
-  const namesIn = (source: string): string[] => {
-    const match = /export\s*\{([\s\S]*?)\}\s*from/.exec(source);
-    if (!match) return [];
-    return match[1]!
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item && !item.startsWith("type "));
-  };
-
-  const wrapperNames = namesIn(wrapper);
-  const vendorNames = new Set(namesIn(lucide.source));
-  assert.ok(wrapperNames.length > 0, "wrapper 导出解析失败");
-  const missing = wrapperNames.filter((name) => !vendorNames.has(name));
-  assert.deepEqual(missing, [], `这些图标在 vendor 清单里缺失，会导致整个图标模块链接失败：${missing.join("、")}`);
+test("旧 vendor 构建链已退役，不得回流", async () => {
+  for (const path of ["scripts/build-vendor.ts", "scripts/vendor-entries.ts"]) {
+    await assert.rejects(readFile(join(ROOT, path), "utf8"), `${path} 已由 Vite 取代，不得重新加入`);
+  }
 });
 
 test("模型重试默认折叠且上下文容量保留历史 used", async () => {

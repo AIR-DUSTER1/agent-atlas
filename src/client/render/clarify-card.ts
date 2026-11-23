@@ -15,7 +15,7 @@ import {
   answeredCount, answerLinesOf, buildClarifySubmission, normalizeClarify, summarizeClarify,
   type ClarifyAnswer,
 } from "../modules/clarify.js";
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import type { ClarificationPart } from "../modules/types.js";
 import type { ClarificationQuestion } from "../modules/types.js";

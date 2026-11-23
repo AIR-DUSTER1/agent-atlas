@@ -4,16 +4,16 @@
  * 只在消息结束流式输出后运行，避免每个 token 都重排代码 DOM。highlight.js
  * 按需动态加载；加载失败仍保留原始转义代码和复制按钮。
  */
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import { toast } from "../ui/toast.js";
 import { writeClipboardText } from "../modules/clipboard.js";
 
-type HighlightModule = typeof import("../vendor/highlight.js");
+type HighlightModule = typeof import("highlight.js");
 let highlightPromise: Promise<HighlightModule | null> | null = null;
 
 function loadHighlight(): Promise<HighlightModule | null> {
-  highlightPromise ??= import("../vendor/highlight.js")
+  highlightPromise ??= import("highlight.js")
     .then((mod) => {
       mod.default.configure({ ignoreUnescapedHTML: true });
       return mod;

@@ -1,6 +1,6 @@
 /**
- * vendor/icons.ts — 图标白名单 wrapper
- * 只导出实际用到的 Lucide 图标，避免整包进入浏览器；新增图标时同步 vendor-entries.ts。
+ * ui/icons.ts — 图标白名单
+ * 只导出实际用到的 Lucide 图标，避免整包进入浏览器；新增图标只需更新此 wrapper，Vite 负责打包。
  */
 export {
   Plus, Search, Settings, Paperclip, Send, Square, Sun, Moon, Monitor,

@@ -141,8 +141,9 @@ const MARKDOWN_ATTRS = ["href", "src", "alt", "title", "class", "lang", "target"
 
 /** 动态加载 marked + DOMPurify；失败时继续使用内置安全 fallback，不阻断消息流。 */
 export function ensureMarkdownRenderer(): Promise<boolean> {
-  markdownLoadPromise ??= import("../vendor/markdown.js")
-    .then(({ marked, DOMPurify }) => {
+  markdownLoadPromise ??= Promise.all([import("marked"), import("dompurify")])
+    .then(([{ marked }, dompurify]) => {
+      const DOMPurify = dompurify.default;
       marked.setOptions({ gfm: true, breaks: true });
       DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
         if (node.tagName === "A") {

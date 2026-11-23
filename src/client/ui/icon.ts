@@ -1,12 +1,12 @@
 /**
  * ui/icon.ts — Lucide 图标占位与异步水合
  * ============================================================
- * 图标是可选增强：先输出稳定的 data-icon 占位，再按需加载 vendor/icons。
+ * 图标是可选增强：先输出稳定的 data-icon 占位，再按需加载 ui/icons。
  * 加载失败只保留占位，不阻断页面初始化，也不会把第三方库塞进入口闭包。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
-export type IconName = keyof typeof import("../vendor/icons.js");
+export type IconName = keyof typeof import("./icons.js");
 export interface IconOptions {
   size?: number;
   strokeWidth?: number;
@@ -14,11 +14,11 @@ export interface IconOptions {
   className?: string;
 }
 
-let iconModulePromise: Promise<typeof import("../vendor/icons.js")> | null = null;
+let iconModulePromise: Promise<typeof import("./icons.js")> | null = null;
 let observerInstalled = false;
 
-function loadIcons(): Promise<typeof import("../vendor/icons.js")> {
-  iconModulePromise ??= import("../vendor/icons.js").catch((err) => {
+function loadIcons(): Promise<typeof import("./icons.js")> {
+  iconModulePromise ??= import("./icons.js").catch((err) => {
     iconModulePromise = null;
     throw err;
   });
@@ -91,7 +91,7 @@ export async function hydrateIcons(root: ParentNode = document): Promise<void> {
   if (typeof Element !== "undefined" && root instanceof Element && root.matches(selector)) { hosts.add(root as HTMLElement); }
   for (const host of root.querySelectorAll<HTMLElement>(selector)) hosts.add(host);
   if (!hosts.size) return;
-  let mod: typeof import("../vendor/icons.js");
+  let mod: typeof import("./icons.js");
   try {
     mod = await loadIcons();
   } catch {

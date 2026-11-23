@@ -2,7 +2,7 @@
  * ui-styles.test.ts — 拆分样式与图标清单完整性
  * ============================================================
  * 守：index 只引用拆分后的样式、文件真实存在、花括号平衡；HTML 中所有
- * data-icon 都必须在 vendor/icons 白名单导出，避免线上出现空图标。
+ * data-icon 都必须在 ui/icons 白名单导出，避免线上出现空图标。
  */
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
@@ -101,7 +101,7 @@ test("贝壳登录失效显示为需要处理并自动展开登录入口", async
 });
 test("HTML data-icon 均在 Lucide 白名单中导出", async () => {
   const html = await readClientIndexHtml();
-  const iconsSource = await readFile(join(CLIENT, "vendor", "icons.ts"), "utf8");
+  const iconsSource = await readFile(join(CLIENT, "ui", "icons.ts"), "utf8");
   const exported = new Set(
     iconsSource
       .replace(/\/\*[\s\S]*?\*\//g, "")

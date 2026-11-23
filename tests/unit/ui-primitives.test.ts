@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { h } from "../../src/client/ui/h.js";
+import { h } from "../../src/client/ui/dom.js";
 import { safeHref, safeImageSrc, safeUrl } from "../../src/client/ui/safe-url.js";
 import { configField, enhanceConfigControl } from "../../src/client/ui/config-control.js";
 import { textInput } from "../../src/client/ui/input.js";

@@ -4,7 +4,7 @@
  * 不使用原生 alert/confirm/prompt：它们样式不可控、在自动化/企业策略下可能
  * 被拦截。多个请求串行排队；对话框关闭后恢复触发元素焦点，Tab 不逃出弹层。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
