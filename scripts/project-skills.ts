@@ -20,10 +20,9 @@ export const EXPECTED_SKILLS = {
   "agentatlas-service-contract": "docs/security-and-tls.md",
   "agentatlas-frontend": ".plans/development-docs/engineering-standards.md",
   "agentatlas-release-ops": ".plans/development-docs/versioning.md",
-  // 组件库使用规范：由官方 antdv for-agents 页面 + 官方 Skill 派生，
-  // 补的是「在本项目里怎么用」（主题映射、DOM 契约、体积边界）。
-  // 权威文档仍指向工程规范（组件登记与前端细则都在 §3/§5）。
-  antdv: ".plans/development-docs/engineering-standards.md",
+  // 组件库使用规范由 AGENTS 的 Skill 路由与自身 Skill 共同约束。
+  // `.plans/` 是本地开发资料，不进入 Git；不能作为公开仓库的强制文件依赖。
+  antdv: "AGENTS.md",
 } as const;
 
 export interface SkillStat {
@@ -79,7 +78,7 @@ export async function validateProjectSkills(root = PROJECT_ROOT): Promise<Projec
     "assertAuthorized",
     "task_usage",
     "hitl.ts",
-    "src/client/vendor",
+    "src/client/ui/icons.ts",
     "src/agent/workflow.ts",
     "package.json.version",
     ".plans/development-docs/engineering-standards.md",
@@ -90,9 +89,19 @@ export async function validateProjectSkills(root = PROJECT_ROOT): Promise<Projec
   // 开发规范是本地 `.plans/` 文档，不要求随公开仓库分发；存在时再校验 Skill 登记。
   const standardsPath = join(root, ".plans", "development-docs", "engineering-standards.md");
   const standards = await readFile(standardsPath, "utf8").catch(() => "");
+  // `.plans/` 文件只在本地存在；antdv 的权威入口是 tracked AGENTS.md，
+  // 其余四个常驻领域 Skill 仍要求在工程规范中有一行登记。
+  const standardsRegisteredSkills = new Set([
+    "agentatlas-agent-runtime",
+    "agentatlas-service-contract",
+    "agentatlas-frontend",
+    "agentatlas-release-ops",
+  ]);
   for (const name of Object.keys(EXPECTED_SKILLS)) {
     if (!agents.includes(name)) issues.push(`AGENTS.md 未路由 Skill：${name}`);
-    if (standards && !standards.includes(name)) issues.push(`engineering-standards.md 未登记 Skill：${name}`);
+    if (standards && standardsRegisteredSkills.has(name) && !standards.includes(name)) {
+      issues.push(`engineering-standards.md 未登记 Skill：${name}`);
+    }
   }
 
   const entries = await readdir(join(root, ".agents", "skills"), { withFileTypes: true }).catch(() => []);

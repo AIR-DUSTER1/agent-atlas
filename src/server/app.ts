@@ -12,7 +12,10 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Context, MiddlewareHandler } from "hono";
+import { streamSSE } from "hono/streaming";
+import { HTTPException } from "hono/http-exception";
 import type { HttpBindings } from "@hono/node-server";
 import {
   assertFreshCredentials, assertPasswordChangeAllowed, handleAuthLogin, handleAuthLogout,
@@ -57,8 +60,9 @@ import {
 import { refreshMcpTools } from "./mcp-refresh.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
 import {
-  handleCreateUser, handleCreateUserToken, handleDeleteUser, handleListUserTokens,
-  handleListUsers, handleResetUserPassword, handleRevokeUserToken, handleUpdateUser,
+  createUserBodySchema, createUserTokenBodySchema, handleCreateUser, handleCreateUserToken,
+  handleDeleteUser, handleListUserTokens, handleListUsers, handleResetUserPassword,
+  handleRevokeUserToken, handleUpdateUser, updateUserBodySchema,
 } from "./routes/users.js";
 import {
   handleCleanupSessions, handleCompactSession, handleDeleteSession, handleExportSession,
@@ -89,6 +93,7 @@ import {
   handleAddExternalAgent, handleDeleteExternalAgent, handleListExternalAgents, handleUpdateExternalAgent,
 } from "./routes/external.js";
 import { parsedJsonOf } from "./http-body.js";
+import { jsonBody } from "./validation.js";
 import { BODY_MAX_BYTES, cacheParsedJson, readBody } from "./http-body.js";
 import {
   handleGetMemoryConfig, handleMemoryStatus, handleReindexMemory, handleTestEmbeddingMemory,
@@ -102,6 +107,7 @@ import { AUTH_ENABLED, EXPOSED_NOAUTH_ERR, LOOPBACK_HOST, PORT } from "./http-co
 
 // 「响应已直写」标记统一在 already-sent.ts（M2 的 validation.ts 也要用）。
 import { alreadySent } from "./already-sent.js";
+import { asServerResponse, CapturingResponse, SseResponseCapture } from "./response-capture.js";
 
 type RawGate = (req: IncomingMessage, res: ServerResponse, pathname: string) => boolean | Promise<boolean>;
 
@@ -161,6 +167,46 @@ type AppContext = Context<AppEnv>;
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  /** 把仍使用原生 ServerResponse 的 handler 收束为 Hono Response。 */
+  const captured = (fn: (c: AppContext) => Promise<void> | void) => async (c: AppContext): Promise<Response> => {
+    const capture = new CapturingResponse();
+    const original = c.env.outgoing;
+    (c.env as { outgoing: import("node:http").ServerResponse }).outgoing = asServerResponse(capture);
+    try {
+      await fn(c);
+      return capture.toResponse();
+    } finally {
+      (c.env as { outgoing: import("node:http").ServerResponse }).outgoing = original;
+    }
+  };
+
+  /** SSE 适配：先识别错误响应，再交给 Hono streamSSE；不会把事件流缓冲成普通 JSON。 */
+  const streamed = (fn: (c: AppContext, req: IncomingMessage, res: ServerResponse) => Promise<void>) =>
+    async (c: AppContext): Promise<Response> => {
+      const capture = new SseResponseCapture();
+      const response = asServerResponse(capture);
+      const task = Promise.resolve()
+        .then(() => fn(c, c.env.incoming, response))
+        .catch((err: unknown) => {
+          if (!capture.headersSent) {
+            respondBadRequest(response, c.env.incoming, err);
+          } else if (!capture.writableEnded) {
+            response.end();
+          }
+        });
+      await capture.ready;
+      if (!capture.isSse) {
+        await task;
+        return capture.toResponse();
+      }
+      for (const [name, value] of capture.headers) c.header(name, value);
+      return streamSSE(c, async (stream) => {
+        stream.onAbort(() => capture.abort());
+        for await (const chunk of capture.drain()) await stream.write(chunk);
+        await task;
+      });
+    };
+
   // ── 1. 请求上下文：X-Request-Id、计时、错误映射、记账（最外层 try/catch/finally）──
   app.use("*", async (c, next) => {
     const req = c.env.incoming;
@@ -218,6 +264,15 @@ export function createApp(): Hono<AppEnv> {
     }
     // 请求体不是合法 JSON（各路由直接 JSON.parse(readBody)）：客户端问题 → 400，
     // 不应落到 500（500 会误导「服务端故障」，也让压测把坏请求算成服务错误）
+    if (err instanceof HTTPException && err.status >= 400 && err.status < 500) {
+      const message = err.status === 400 || err.message.includes("Malformed JSON") ? "请求体不是合法的 JSON" : err.message;
+      if (!res.headersSent) {
+        res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: message }));
+      } else res.end();
+      state.errorStatus = res.statusCode;
+      return alreadySent();
+    }
     if (err instanceof SyntaxError) {
       if (!res.headersSent) respondBadRequest(res, req, new Error("请求体不是合法的 JSON"));
       else res.end();
@@ -246,14 +301,8 @@ export function createApp(): Hono<AppEnv> {
 
   // ── 3. 健康检查（免认证：部署探针无凭据可达；只回版本/布尔值，无路径与 Key）──
   // 平移前位于 lifecycle 门禁之前，且 beginRequest 不计数（tracked=false 只记指标）。
-  app.get("/healthz", async (c) => {
-    await handleHealthz(c.env.outgoing);
-    return alreadySent();
-  });
-  app.get("/readyz", async (c) => {
-    await handleReadyz(c.env.outgoing);
-    return alreadySent();
-  });
+  app.get("/healthz", captured(async (c) => { await handleHealthz(c.env.outgoing); }));
+  app.get("/readyz", captured(async (c) => { await handleReadyz(c.env.outgoing); }));
 
   // ── 4. 优雅退出门禁：不再接新业务（探针除外），明确 503 ──
   app.use("*", async (c, next) => {
@@ -285,10 +334,7 @@ export function createApp(): Hono<AppEnv> {
 
   // ── 7. 认证端点（豁免 verifyRequestAuth：登录/续期/注销/密码锁自身不能要求已登录）──
   const raw = (handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void) =>
-    async (c: { env: { incoming: IncomingMessage; outgoing: ServerResponse } }) => {
-      await handler(c.env.incoming, c.env.outgoing);
-      return alreadySent();
-    };
+    captured(async (c) => { await handler(c.env.incoming, c.env.outgoing); });
   app.get("/api/auth/session", raw(handleAuthStatus));
   app.post("/api/auth/session", raw(handleAuthLogin));
   app.post("/api/auth/session/renew", raw(handleAuthRenew));
@@ -303,7 +349,7 @@ export function createApp(): Hono<AppEnv> {
   app.delete("/api/auth/local-lock", raw(handleClearLocalLock));
 
   // ── 8. Prometheus 指标（不是 /api/*，但同样需要认证；静态页匿名无法读取）──
-  app.get("/metrics", async (c) => {
+  app.get("/metrics", captured(async (c) => {
     const req = c.env.incoming;
     const res = c.env.outgoing;
     if (!verifyMetricsAuth(req)) {
@@ -314,11 +360,10 @@ export function createApp(): Hono<AppEnv> {
       } else {
         respondUnauthorized(req, res);
       }
-      return alreadySent();
+      return;
     }
     handleMetrics(res);
-    return alreadySent();
-  });
+  }));
 
   // ── 9. 认证门禁：除认证端点、静态页与探针外，全部 /api/* 都需要有效会话 Cookie ──
   app.use("/api/*", async (c, next) => {
@@ -388,17 +433,15 @@ export function createApp(): Hono<AppEnv> {
   // ── 15b. M2 批次 1（探针与运维）：原生挂载；dispatch.ts 对应分支已摘除 ──
   // 均无请求体：直接复用既有 handler（写原生 res）。认证/管理员门禁由上方中间件覆盖。
   // handleVersion / handleDiagnostics 只收 res：单独 lambda 标注参数序
-  app.get("/api/version", async (c) => { handleVersion(c.env.outgoing); return alreadySent(); });
-  app.get("/api/diagnostics", async (c) => { await handleDiagnostics(c.env.outgoing); return alreadySent(); });
-  app.get("/api/stats", async (c) => {
+  app.get("/api/version", captured(async (c) => { handleVersion(c.env.outgoing); }));
+  app.get("/api/diagnostics", captured(async (c) => { await handleDiagnostics(c.env.outgoing); }));
+  app.get("/api/stats", captured(async (c) => {
     // handleStats 的参数序是 (res, req)，与 raw() 的 (req, res) 相反，单独写清楚
     await handleStats(c.env.outgoing, c.env.incoming);
-    return alreadySent();
-  });
-  app.post("/api/client-errors", async (c) => {
+  }));
+  app.post("/api/client-errors", captured(async (c) => {
     await handleClientError(c.env.incoming, c.env.outgoing, c.get("requestLog").requestId);
-    return alreadySent();
-  });
+  }));
 
   // ── 15c. M2 批次 3（模型配置域）：原生挂载；dispatch.ts 对应分支已摘除 ──
   // jsonRaw：路由层统一 readBody + JSON.parse（413 / SyntaxError 语义不变，经 app.onError），
@@ -410,12 +453,17 @@ export function createApp(): Hono<AppEnv> {
     cacheParsedJson(c.env.incoming, JSON.parse(rawBody || "{}"));
     await next();
   };
-  const jsonRaw = jsonRawFor();
-  // config 域 handler 的参数序是 (res, req[, id, mid])，与 raw() 的 (req, res) 相反，全部用 lambda 显式写。
-  const withBody = (fn: (c: AppContext) => Promise<void>) => async (c: AppContext) => {
-    await fn(c);
-    return alreadySent();
+  const jsonRaw = jsonBody(z.object({}).passthrough());
+  // 用户管理端点在 file 后端必须保持 404；不能先让 schema 解析把坏请求变成 400。
+  const usersBackendGate: MiddlewareHandler<AppEnv> = async (c, next) => {
+    if (isPostgresBackend()) {
+      await next();
+      return;
+    }
+    return c.json({ error: "当前为单用户模式（文件后端），没有用户管理面" }, 404);
   };
+  // config 域 handler 的参数序是 (res, req[, id, mid])，与 raw() 的 (req, res) 相反，全部用 lambda 显式写。
+  const withBody = (fn: (c: AppContext) => Promise<void>) => captured(fn);
   app.get("/api/config", withBody(async (c) => { await handleGetApiConfig(c.env.outgoing); }));
   app.post("/api/config/providers", jsonRaw, withBody(async (c) => { await handleAddProvider(c.env.outgoing, c.env.incoming); }));
   app.post("/api/config/providers/:id", jsonRaw, withBody(async (c) => { await handleUpdateProvider(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
@@ -495,12 +543,12 @@ export function createApp(): Hono<AppEnv> {
   app.get("/api/backup", withBody(async (c) => { await handleListBackups(c.env.outgoing); }));
   app.post("/api/restore", jsonRaw, withBody(async (c) => { await handleRestoreBackup(c.env.outgoing, c.env.incoming); }));
   app.get("/api/users", withBody(async (c) => { await handleListUsers(c.env.outgoing); }));
-  app.post("/api/users", jsonRaw, withBody(async (c) => { await handleCreateUser(c.env.incoming, c.env.outgoing); }));
-  app.patch("/api/users/:id", jsonRaw, withBody(async (c) => { await handleUpdateUser(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.post("/api/users", usersBackendGate, jsonBody(createUserBodySchema), withBody(async (c) => { await handleCreateUser(c.env.incoming, c.env.outgoing); }));
+  app.patch("/api/users/:id", usersBackendGate, jsonBody(updateUserBodySchema), withBody(async (c) => { await handleUpdateUser(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
   app.delete("/api/users/:id", withBody(async (c) => { await handleDeleteUser(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
   app.post("/api/users/:id/reset-password", withBody(async (c) => { await handleResetUserPassword(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
   app.get("/api/users/:id/tokens", withBody(async (c) => { await handleListUserTokens(c.env.outgoing, c.req.param("id") as string); }));
-  app.post("/api/users/:id/tokens", jsonRaw, withBody(async (c) => { await handleCreateUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
+  app.post("/api/users/:id/tokens", usersBackendGate, jsonBody(createUserTokenBodySchema), withBody(async (c) => { await handleCreateUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string); }));
   app.delete("/api/users/:id/tokens/:tokenId", withBody(async (c) => { await handleRevokeUserToken(c.env.incoming, c.env.outgoing, c.req.param("id") as string, c.req.param("tokenId") as string); }));
 
   // ── 15i. M2 批次 8（项目与文件）：原生挂载；dispatch 分支已摘除 ──
@@ -546,12 +594,11 @@ export function createApp(): Hono<AppEnv> {
     }
     return sessionId;
   };
-  const guarded = (fn: (c: AppContext, sessionId: string) => Promise<void>) => async (c: AppContext) => {
+  const guarded = (fn: (c: AppContext, sessionId: string) => Promise<void>) => captured(async (c) => {
     const sessionId = guardBrowserSession(c);
-    if (typeof sessionId !== "string") return sessionId;
+    if (typeof sessionId !== "string") return;
     await fn(c, sessionId);
-    return alreadySent();
-  };
+  });
   app.get("/api/estate", withBody(async (c) => { await handleGetEstate(c.env.outgoing); }));
   app.get("/api/estate/exports/:exportId", withBody(async (c) => { await handleEstateExport(c.env.outgoing, c.req.param("exportId") as string); }));
   app.post("/api/estate/install", jsonRaw, withBody(async (c) => { await handleInstallBeike(c.env.outgoing, c.env.incoming); }));
@@ -579,24 +626,16 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/external-agents/:id", jsonRaw, withBody(async (c) => { await handleUpdateExternalAgent(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.delete("/api/external-agents/:id", jsonRaw, withBody(async (c) => { await handleDeleteExternalAgent(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
 
-  // ── 15l. M2 批次 10（SSE 核心，最后一批）：原生挂载；dispatch.ts 整体退役 ──
-  // chat/resume 保持「解析后透传」形态：handler 自己把 SSE 写到原生 res，
-  // 流式期间 withBody 的 await 链保持打开（与 catch-all 透传等价）；
-  // 事件契约四处同步、task_usage 位置、AbortSignal 取消链路均不受挂载点影响。
-  app.post("/api/chat", jsonRaw, withBody(async (c) => {
-    const body = parsedJsonOf<{ sessionId?: string; message?: unknown; files?: unknown; headless?: unknown }>(c.env.incoming)!;
+  // ── 15l. M2 批次 10（SSE 核心）：Hono streamSSE 适配 ──
+  app.post("/api/chat", jsonRaw, streamed(async (c, req, res) => {
+    const body = parsedJsonOf<{ sessionId?: string; message?: unknown; files?: unknown; headless?: unknown }>(req)!;
     c.get("requestLog").sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-    try {
-      await handleChat(c.env.outgoing, c.env.incoming, body.sessionId ?? "", body);
-    } catch (err) {
-      // 附件解析等前置错误 → 400/413（此时流未开始）
-      respondBadRequest(c.env.outgoing, c.env.incoming, err);
-    }
+    await handleChat(res, req, body.sessionId ?? "", body);
   }));
-  app.post("/api/resume", jsonRaw, withBody(async (c) => {
-    const body = parsedJsonOf<{ sessionId?: string; decision?: unknown; choice?: unknown }>(c.env.incoming)!;
+  app.post("/api/resume", jsonRaw, streamed(async (c, req, res) => {
+    const body = parsedJsonOf<{ sessionId?: string; decision?: unknown; choice?: unknown }>(req)!;
     c.get("requestLog").sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-    await handleResume(c.env.outgoing, c.env.incoming, body.sessionId ?? "", body);
+    await handleResume(res, req, body.sessionId ?? "", body);
   }));
 
   // ── 16. 兜底：GET 非 /api 走静态文件；未匹配的 /api 与其余路径 404 ──

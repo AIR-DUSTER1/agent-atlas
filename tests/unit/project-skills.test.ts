@@ -34,4 +34,5 @@ test("项目规范分层：每个 Skill 都有单一领域边界", async () => {
   assert.ok(EXPECTED_SKILLS["agentatlas-service-contract"].includes("security-and-tls"));
   assert.ok(EXPECTED_SKILLS["agentatlas-frontend"].includes("engineering-standards"));
   assert.ok(EXPECTED_SKILLS["agentatlas-release-ops"].includes("versioning"));
+  assert.equal(EXPECTED_SKILLS.antdv, "AGENTS.md");
 });
