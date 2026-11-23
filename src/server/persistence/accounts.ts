@@ -13,7 +13,7 @@ import {
   isPostgresBackend, localUserIdentity, querySystem, setLocalUserIdentity,
   withSystemTransaction,
 } from "./postgres.js";
-import { hashPassword } from "../security/password.js";
+import { hashPassword, validatePasswordPolicy } from "../security/password.js";
 
 export type AccountRole = "admin" | "member";
 
@@ -295,6 +295,8 @@ export async function createManagedUser(input: {
   const username = input.username.trim();
   const usernameError = validateUsername(username);
   if (usernameError) throw new Error(usernameError);
+  const passwordError = validatePasswordPolicy(username, input.password);
+  if (passwordError) throw new Error(passwordError);
   const displayName = input.displayName.trim() || username;
   const passwordHash = await hashPassword(input.password);
   const result = await querySystem<{ id: string; created_at: Date }>(

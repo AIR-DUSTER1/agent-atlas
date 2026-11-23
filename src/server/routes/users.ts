@@ -11,7 +11,7 @@
  * POST   /api/users/:id/tokens            创建访问令牌（明文只出现一次）
  * DELETE /api/users/:id/tokens/:tokenId   吊销令牌
  *
- * 权限：全部走 index.ts 的 isAdminOnlyApi 门禁（admin only）。
+ * 权限：全部走 app.ts 的 isAdminOnlyApi 门禁（admin only）。
  * 文件模式：一律 404（单用户无管理面，见用户体系计划 §5.1）。
  * 守卫：不能禁用/删除自己；最后一个 active admin 不可禁用/删除/降级。
  */
@@ -25,7 +25,28 @@ import {
   resetUserPassword, revokeUserToken, setMustChangePassword,
   setUserRole, setUserStatus, softDeleteUser, validateUsername, type AccountRole,
 } from "../persistence/accounts.js";
+import { userIdentityForRequest } from "../security/device.js";
 import { isPostgresBackend } from "../persistence/postgres.js";
+import { z } from "zod";
+
+/** 用户管理路由的请求 schema；服务层仍负责业务约束和中文错误。 */
+export const createUserBodySchema = z.object({
+  username: z.string(),
+  displayName: z.string(),
+  role: z.enum(["admin", "member"]).optional(),
+  password: z.string(),
+}).passthrough();
+
+export const updateUserBodySchema = z.object({
+  status: z.enum(["active", "disabled"]).optional(),
+  role: z.enum(["admin", "member"]).optional(),
+  mustChangePassword: z.boolean().optional(),
+}).passthrough();
+
+export const createUserTokenBodySchema = z.object({
+  label: z.string().optional(),
+  expiresInDays: z.number().positive().optional(),
+}).passthrough();
 
 function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...headers });
@@ -44,6 +65,29 @@ function adminActionAudit(req: IncomingMessage, event: string, detail: Record<st
   writeAudit(event, { ip: ipTag(clientIp(req)), ...detail });
 }
 
+/** 纯判定：是否在对当前管理员执行禁用/降级；便于单测覆盖边界。 */
+export function isSelfAdminMutation(
+  actorId: string | undefined,
+  targetId: string,
+  body: Record<string, unknown>,
+): boolean {
+  const disablesSelf = body.status === "disabled";
+  const demotesSelf = body.role === "member";
+  return Boolean(actorId && actorId === targetId && (disablesSelf || demotesSelf));
+}
+
+/** 防止管理员通过禁用或降级自己制造即时失去管理权的状态。 */
+export function selfAdminMutationRejected(
+  req: IncomingMessage,
+  res: ServerResponse,
+  targetId: string,
+  body: Record<string, unknown>,
+): boolean {
+  if (!isSelfAdminMutation(userIdentityForRequest(req)?.userId, targetId, body)) return false;
+  sendJson(res, 409, { error: "不能禁用或降级当前登录的管理员；请由另一个管理员操作" });
+  return true;
+}
+
 export async function handleListUsers(res: ServerResponse): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
   sendJson(res, 200, { users: await listUsers() });
@@ -51,7 +95,7 @@ export async function handleListUsers(res: ServerResponse): Promise<void> {
 
 export async function handleCreateUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  // 请求由路由层 jsonBody(schema) 校验并缓存：坏 JSON / 字段类型错误统一 400
   const body = parsedJsonOf<Record<string, unknown>>(req)!;
   const username = typeof body.username === "string" ? body.username.trim() : "";
   const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";
@@ -73,12 +117,13 @@ export async function handleCreateUser(req: IncomingMessage, res: ServerResponse
 
 export async function handleUpdateUser(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  // 请求由路由层 jsonBody(schema) 校验并缓存：坏 JSON / 字段类型错误统一 400
   const body = parsedJsonOf<Record<string, unknown>>(req)!;
-  const actorId = id;
+  const targetId = id;
+  if (selfAdminMutationRejected(req, res, targetId, body)) return;
   const wantsDisable = body.status === "disabled";
   const wantsDemote = body.role === "member";
-  if ((wantsDisable || (body.role !== undefined && wantsDemote)) && await isLastActiveAdmin(actorId)) {
+  if ((wantsDisable || (body.role !== undefined && wantsDemote)) && await isLastActiveAdmin(targetId)) {
     sendJson(res, 409, { error: "这是最后一个可用的管理员，不能禁用或降级；请先创建另一个管理员" });
     return;
   }
@@ -88,23 +133,23 @@ export async function handleUpdateUser(req: IncomingMessage, res: ServerResponse
         sendJson(res, 400, { error: "status 只能是 active 或 disabled" });
         return;
       }
-      await setUserStatus(actorId, body.status);
-      adminActionAudit(req, body.status === "disabled" ? "user_disabled" : "user_enabled", { userId: actorId });
+      await setUserStatus(targetId, body.status);
+      adminActionAudit(req, body.status === "disabled" ? "user_disabled" : "user_enabled", { userId: targetId });
     }
     if (body.role !== undefined) {
       if (body.role !== "admin" && body.role !== "member") {
         sendJson(res, 400, { error: "role 只能是 admin 或 member" });
         return;
       }
-      await setUserRole(actorId, body.role);
-      adminActionAudit(req, "user_role_changed", { userId: actorId, role: body.role });
+      await setUserRole(targetId, body.role);
+      adminActionAudit(req, "user_role_changed", { userId: targetId, role: body.role });
     }
     if (body.mustChangePassword !== undefined) {
       if (typeof body.mustChangePassword !== "boolean") {
         sendJson(res, 400, { error: "mustChangePassword 必须是布尔值" });
         return;
       }
-      await setMustChangePassword(actorId, body.mustChangePassword);
+      await setMustChangePassword(targetId, body.mustChangePassword);
     }
     sendJson(res, 200, { ok: true });
   } catch (err) {
@@ -126,6 +171,10 @@ export async function handleResetUserPassword(req: IncomingMessage, res: ServerR
 
 export async function handleDeleteUser(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
+  if (userIdentityForRequest(req)?.userId === id) {
+    sendJson(res, 409, { error: "不能删除当前登录的用户；请由另一个管理员操作" });
+    return;
+  }
   if (await isLastActiveAdmin(id)) {
     sendJson(res, 409, { error: "这是最后一个可用的管理员，不能删除；请先创建另一个管理员" });
     return;
@@ -146,7 +195,7 @@ export async function handleListUserTokens(res: ServerResponse, id: string): Pro
 
 export async function handleCreateUserToken(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
   if (!isPostgresBackend()) { fileModeRejected(res); return; }
-  // 解析上移到路由层 jsonRaw（M2 批次 7b）：坏 JSON 由 onError 统一 400
+  // 请求由路由层 jsonBody(schema) 校验并缓存：坏 JSON / 字段类型错误统一 400
   const body = parsedJsonOf<Record<string, unknown>>(req)!;
   const label = typeof body.label === "string" ? body.label : "";
   let expiresAt: Date | null = null;

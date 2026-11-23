@@ -12,6 +12,7 @@ import {
   ACCOUNT_LOCK_THRESHOLD, checkAccountLock, clearAccountFailures,
   recordAccountFailure, resetAccountLocksForTests,
 } from "../../src/server/security/account-lock.js";
+import { isSelfAdminMutation } from "../../src/server/routes/users.js";
 
 test("scrypt 哈希往返：正确密码通过，错误密码拒绝", async () => {
   const stored = await hashPassword("correct-horse-battery");
@@ -83,4 +84,11 @@ test("账户锁定：不同用户名互不影响", () => {
   assert.equal(checkAccountLock("eve", now).locked, false);
   assert.equal(checkAccountLock("dave", now).remaining, 1);
   resetAccountLocksForTests();
+});
+test("用户管理：管理员不能禁用或降级自己", () => {
+  assert.equal(isSelfAdminMutation("admin-1", "admin-1", { status: "disabled" }), true);
+  assert.equal(isSelfAdminMutation("admin-1", "admin-1", { role: "member" }), true);
+  assert.equal(isSelfAdminMutation("admin-1", "admin-1", { status: "active" }), false);
+  assert.equal(isSelfAdminMutation("admin-1", "admin-2", { status: "disabled" }), false);
+  assert.equal(isSelfAdminMutation(undefined, "admin-1", { role: "member" }), false);
 });
