@@ -296,7 +296,15 @@ onMounted(() => {
               class="model-row"
               :class="{ active: m.active }"
             >
-              <Button class="m-pick" title="设为该供应商的启用模型" @click="!m.active && activateModel(selected.id, m.id)">{{ m.active ? "✓" : "○" }}</Button>
+              <Button
+                class="m-pick"
+                :class="{ active: m.active }"
+                :title="m.active ? '当前启用模型' : '设为该供应商的启用模型'"
+                :aria-label="m.active ? `当前启用模型 ${m.displayName || m.name}` : `设为启用模型 ${m.displayName || m.name}`"
+                @click="!m.active && activateModel(selected.id, m.id)"
+              >
+                <i class="ui-icon" :data-icon="m.active ? 'CircleCheck' : 'Circle'" aria-hidden="true"></i>
+              </Button>
               <div class="m-info">
                 <div class="m-name">{{ m.modality === "vision" ? "🖼 " : "" }}{{ m.displayName || m.name }}</div>
                 <div class="m-detail">{{ modelDetail(m) }}</div>

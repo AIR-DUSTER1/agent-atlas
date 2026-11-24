@@ -131,6 +131,12 @@
   min-width: 22px;
   height: 22px;
   padding: 0;
+  font-size: 0;
   line-height: 1;
 }
+.model-row .m-pick.ant-btn.active {
+  border-color: rgba(63,185,111,.55);
+  color: var(--green);
+}
+.model-row .m-pick .ui-icon { --icon-size: 14px; }
 
