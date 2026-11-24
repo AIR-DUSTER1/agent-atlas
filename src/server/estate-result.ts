@@ -305,7 +305,7 @@ export function extractEstateSearchListings(data: unknown): EstateSearchListing[
     // 「有VR」只是搜索亮点，不代表 material 返回了可打开的全景地址。
     // 缺 URL 时保留 hasVr 供 UI 诚实标注，禁止凭 houseId 拼旧模板跳营销页。
     const vr = extractEstateVrUrl(body);
-    const title = [community, layout, area].filter(Boolean).join(" · ") || "房源 " + id;
+    const title = [community, layout, area].filter(Boolean).join(" · ") || "小区待补充";
     rows.push({
       id,
       title,

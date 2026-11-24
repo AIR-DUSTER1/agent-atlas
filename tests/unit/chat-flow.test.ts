@@ -347,6 +347,24 @@ test("结论表识别简写租金，并只把真实 VR 链接放入结论", () =
 });
 
 
+test("结论表标题移除内部房源编号并优先展示小区名", () => {
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-community-title", "house_search", {
+      action: "search",
+      listings: [{
+        id: "103149264003",
+        title: "房源 103149264003",
+        community: "依山半岛",
+        layout: "2室1厅",
+        area: "92㎡",
+        price: "2800元/月",
+      }],
+    }),
+  ], "");
+  assert.equal(media.properties[0]?.title, "依山半岛 · 2室1厅 · 92㎡");
+  assert.doesNotMatch(media.properties[0]?.title || "", /103149264003/);
+});
+
 test("搜索结果带 metadata 的房产会保留 rentCode 供详情链接使用", () => {
   const raw = [
     "<参考数据><租赁房源>",

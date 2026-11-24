@@ -17,6 +17,7 @@ import {
   parseEstateCoordinate,
 } from "../../src/server/estate-result.js";
 import { buildCompareMap } from "../../src/server/estate-geo.js";
+import { mergeEstateListings } from "../../src/tools-estate.js";
 
 const IMAGE_ONE = "https://ke-image.ljcdn.com/frame/floorplan.jpg!m_fit,h_843,w_1125,l_fbk_v1,lo_0.22,f_jpg";
 const IMAGE_TWO = "https://ke-image.ljcdn.com/frame/living-room.webp?x=1";
@@ -53,7 +54,7 @@ test("详情归一化：贝壳小区经纬度直接生成单点地图与多地�
   assert.equal(normalized.action, "detail");
   assert.equal(normalized.houseId, "10001");
   assert.equal(normalized.rentCode, "QD2232327398555123712");
-  assert.equal(normalized.detailUrl, "https://m.ke.com/chuzu/qd/zufang/QD2232327398555123712.html");
+  assert.equal(normalized.detailUrl, "https://qd.zu.ke.com/zufang/QD2232327398555123712.html");
   assert.equal(normalized.presentation.map, true);
   assert.match(normalized.note, /直接渲染地图卡/);
 });
@@ -125,6 +126,31 @@ test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入�
   assert.equal(rows[1]?.area, "120㎡");
   assert.equal(rows[1]?.hasVr, false);
   assert.equal(rows[1]?.vr, undefined);
+});
+
+test("搜索结果合并时完整文本字段优先于只有 id 的稀疏对象", () => {
+  const merged = mergeEstateListings([
+    {
+      id: "103149264003",
+      title: "依山半岛 · 2室1厅 · 92㎡",
+      community: "依山半岛",
+      layout: "2室1厅",
+      area: "92㎡",
+      price: "2800元/月",
+      addressText: "崂山区依山半岛小区",
+      rentCode: "QD2145328735694356480",
+    },
+  ], [
+    { id: "103149264003", title: "房源 103149264003", hasVr: true },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.title, "依山半岛 · 2室1厅 · 92㎡");
+  assert.equal(merged[0]?.community, "依山半岛");
+  assert.equal(merged[0]?.layout, "2室1厅");
+  assert.equal(merged[0]?.area, "92㎡");
+  assert.equal(merged[0]?.price, "2800元/月");
+  assert.equal(merged[0]?.hasVr, true);
+  assert.equal(merged[0]?.rentCode, "QD2145328735694356480");
 });
 
 test("搜索 metadata 的 entity_ids/rent_codes 按顺序映射出详情链接", () => {

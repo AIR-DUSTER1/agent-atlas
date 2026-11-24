@@ -338,7 +338,7 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
       }, icon("Eye", { size: 14 }), h("span", null, "VR 看房")));
     }
     // 统一贝壳详情入口：优先用服务端已归一好的 detailUrl；取不到再用 rentCode
-    // 拼移动端租房详情路径。没有合法链接时不展示占位文案；城市未收录 /
+    // 拼桌面版租房详情路径。没有合法链接时不展示占位文案；城市未收录 /
     // 缺 rentCode 时返回 null。
     const listingHref = safeHref(property.detailUrl)
       ?? buildListingUrl(property.city, property.houseId, property.listingKind ?? "rent", property.rentCode);

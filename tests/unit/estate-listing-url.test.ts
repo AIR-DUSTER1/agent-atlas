@@ -12,7 +12,7 @@ import { buildListingUrl, CITY_SUBDOMAIN } from "../../src/client/modules/estate
 test("租房与二手房分别拼到实测存在的路径", () => {
   assert.equal(
     buildListingUrl("青岛", "103154186731", "rent", "QD2232327398555123712"),
-    "https://m.ke.com/chuzu/qd/zufang/QD2232327398555123712.html",
+    "https://qd.zu.ke.com/zufang/QD2232327398555123712.html",
   );
   assert.equal(
     buildListingUrl("青岛", "103118558783", "buy"),
@@ -21,8 +21,8 @@ test("租房与二手房分别拼到实测存在的路径", () => {
 });
 
 test("城市名带「市」后缀与空白也能命中", () => {
-  assert.equal(buildListingUrl("青岛市", "103154186731", "rent", "QD2232327398555123712"), "https://m.ke.com/chuzu/qd/zufang/QD2232327398555123712.html");
-  assert.equal(buildListingUrl(" 北京 ", "101100000001", "rent", "BJ1011000000001"), "https://m.ke.com/chuzu/bj/zufang/BJ1011000000001.html");
+  assert.equal(buildListingUrl("青岛市", "103154186731", "rent", "QD2232327398555123712"), "https://qd.zu.ke.com/zufang/QD2232327398555123712.html");
+  assert.equal(buildListingUrl(" 北京 ", "101100000001", "rent", "BJ1011000000001"), "https://bj.zu.ke.com/zufang/BJ1011000000001.html");
 });
 
 test("未收录城市与缺失城市不拼链接（降级为纯文字）", () => {
@@ -31,7 +31,7 @@ test("未收录城市与缺失城市不拼链接（降级为纯文字）", () =>
   assert.equal(buildListingUrl("", "103154186731", "rent", "QD2232327398555123712"), null);
 });
 
-test("租房无 rentCode、非法 rentCode 一律不拼移动端详情链接", () => {
+test("租房无 rentCode、非法 rentCode 一律不拼桌面版详情链接", () => {
   for (const bad of ["", "abc", "10315", "103154186731<script>", "103154186731/../x", undefined]) {
     assert.equal(buildListingUrl("青岛", "103154186731", "rent", bad), null, "应拒绝 rentCode=" + String(bad));
   }

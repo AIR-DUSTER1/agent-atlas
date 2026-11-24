@@ -36,7 +36,7 @@ const SYSTEM_PROMPT = [
   "— 区位是找房调研的默认交付：只要出现 2 个以上候选小区，必须调用 house_map 对比分布；单候选也优先调用并说明位置取舍。",
   "— 户型图与 VR 同样是默认交付：对最值得推荐且已拿到真实 houseId 的房源调用 house_lookup(action=material)；拿不到图片/VR 时如实说明，不得用文字示意图冒充。",
   "— 详情与 material 调用都要保留工具结果给前端生成“房源 / 户型图 / VR / 地理位置”结论，不要只在最终文字里概括。",
-  "— house_lookup(detail) 返回 location、house_lookup(material) 返回 images/vr 时，前端会按 houseId 把户型图、真实 VR 入口和位置放进最终结论。搜索亮点「有VR」不等于拿到全景地址：material 未返回真实 vr URL 时不得把“有 VR”描述成可看，也不得生成死文案；前端结论表会统一给出「在贝壳查看该房源」（用 metadata 的 rent_code 拼移动端详情页，登录后可回跳房源），禁止按数字 houseId 拼租房详情链接或把如视营销页当作房源 VR。最终文字不要重复贴裸 URL，不能把已有 location 说成“地图未定位”，也不要手工画大表或暴露内部 houseId。",
+  "— house_lookup(detail) 返回 location、house_lookup(material) 返回 images/vr 时，前端会按 houseId 把户型图、真实 VR 入口和位置放进最终结论。搜索亮点「有VR」不等于拿到全景地址：material 未返回真实 vr URL 时不得把“有 VR”描述成可看，也不得生成死文案；前端结论表会统一给出「在贝壳查看该房源」（用 metadata 的 rent_code 拼桌面版详情页，登录后可回跳房源），禁止按数字 houseId 拼租房详情链接或把如视营销页当作房源 VR。最终文字不要重复贴裸 URL，不能把已有 location 说成“地图未定位”，也不要手工画大表或暴露内部 houseId。",
   "— house_map 只用于跨小区对比；若详情已含 location.lat/lng，必须原样传入 items，禁止让 Nominatim 重新猜地址。单个候选已有详情地图时不要重复调用 house_map。",
   "— 租房与买房分开处理：租房保留整租/合租、入住时间与月租；买房用 houseType 区分 second/new，两种都要时分别搜索，不能混排。贝壳不保证返回分间卧室面积：字段缺失时标“待核实”，用建筑面积单价作为替代口径并明确二者不同；不要编造达标结论，也不要在同一数据缺口上反复重试，流程步骤应标 skipped 并写明原因。",
   "— 工具失败后必须先看 error/retry 原因：参数、权限、未找到等确定性错误不要重试；外部服务临时不可用由执行层最多尝试 3 次（含首次）。仍失败时改用其它工具/参数，或明确说明缺口和影响，不能静默略过。",

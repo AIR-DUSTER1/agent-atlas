@@ -30,7 +30,7 @@ test("房源候选超过 12 套时生成可下载的 XLSX 对比清单", async (
       ...(index === 0 ? {
         hasVr: true,
         vrUrl: "https://realsee.com/vr/tour-10001",
-        detailUrl: "https://qd.ke.com/zufang/103155520000.html",
+        rentCode: "QD2232327398555123712",
       } : {}),
     }));
     const artifact = await writeEstateWorkbook(listings, {
@@ -49,6 +49,7 @@ test("房源候选超过 12 套时生成可下载的 XLSX 对比清单", async (
     assert.match(raw, /租房候选/);
     assert.match(raw, /打开 VR/);
     assert.match(raw, /realsee\.com\/vr\/tour-10001/);
+    assert.match(raw, /qd\.zu\.ke\.com\/zufang\/QD2232327398555123712\.html/);
     assert.equal((raw.match(/测试小区/g) ?? []).length >= 15, true);
   } finally {
     if (previous === undefined) delete process.env.ESTATE_EXPORT_DIR;

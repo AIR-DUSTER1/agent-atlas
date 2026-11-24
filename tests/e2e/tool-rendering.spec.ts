@@ -144,7 +144,7 @@ async function createEstateChat(page: import("@playwright/test").Page): Promise<
 }
 
 /** 发一轮房产对话并等流结束（结论区已渲染）。 */
-async function runEstateTurn(page: import("@playwright/test").Page, message = "帮我找北京朝阳区两居室，预算6000"): Promise<void> {
+async function runEstateTurn(page: import("@playwright/test").Page, message = "帮我找北京朝阳区两居室租房，预算6000"): Promise<void> {
   await page.locator("#input").fill(message);
   await page.locator("#send-btn").click();
   await expect(page.locator("#messages .conclusion-media")).toBeVisible({ timeout: 30_000 });
@@ -183,6 +183,11 @@ test("房源结论直接展示地图与户型图，工具卡不再承载媒体",
   expect(await page.locator("#messages .tool-card img, #messages .tool-card iframe, #messages .tool-card .conclusion-table").count()).toBe(0);
 
   // 户型图预览：点开后是模态、可缩放、Esc 关闭并回焦
+  await expect(conclusion.locator(".conclusion-listing-link").first()).toHaveAttribute(
+    "href",
+    "https://bj.zu.ke.com/zufang/BJ2232327398555123712.html",
+  );
+
   const imageButton = conclusion.locator(".conclusion-image-open").first();
   await expect(imageButton).toHaveCount(1);
   await imageButton.focus();

@@ -8,8 +8,9 @@
  * 会 302 到登录页，登录后回不了房源路径，最终显示「访问资源不存在」。
  *
  * 实测（2026-11，青岛租房）：
- *  - 正确链接（移动端，登录 service 带完整回跳路径）：
- *    https://m.ke.com/chuzu/qd/zufang/{rentCode}.html
+ *  - 租房详情统一进入桌面版城市子域：
+ *    https://{sub}.zu.ke.com/zufang/{rentCode}.html
+ *  - 旧移动端 m.ke.com 页面不再作为默认入口，避免桌面客户端打开移动版。
  *  - houseId → rentCode 无法从 CLI houseId 推导；必须从搜索结果携带的
  *    metadata.rent_codes / entity_ids 里按顺序映射。
  *  - 没有合法 rentCode 时不生成链接（宁可没有入口，也不跳错城市/资源）。
@@ -43,7 +44,7 @@ function normalizeRentCode(value: string | undefined): string {
 
 /**
  * 构造房源详情页 URL。
- * 二手房用 houseId；租房优先用 rentCode（移动端真实路径），没有 rentCode
+ * 二手房用 houseId；租房用 rentCode 构造桌面城市子域路径，没有 rentCode
  * 绝不回退到 houseId 数字路径 —— 数字路径会导致登录后找不到资源。
  * @returns 合法 https 链接；缺少必要字段时返回 null。
  */
@@ -57,7 +58,7 @@ export function buildListingUrl(
   if (!sub) return null;
   if (kind === "rent") {
     const code = normalizeRentCode(rentCode);
-    return code ? `https://m.ke.com/chuzu/${sub}/zufang/${code}.html` : null;
+    return code ? `https://${sub}.zu.ke.com/zufang/${code}.html` : null;
   }
   const id = (houseId ?? "").trim();
   if (!/^\d{6,20}$/.test(id)) return null;

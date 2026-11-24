@@ -263,6 +263,26 @@ function propertyTitle(community: string, layout: string, area: string): string 
   return [community, layout, area].filter(Boolean).join(" · ") || "房源详情";
 }
 
+/** 只有编号、没有业务信息的标题不能直接进入结论表。 */
+function listingTitleIsPlaceholder(value: string, houseId: string): boolean {
+  if (["房源详情", "小区待补充", "位置待补", "详情", "待补充"].includes(value.trim())) return true;
+  const stripped = value.replaceAll(houseId, "").replace(/房源\s*/g, "").replace(/\d{8,20}/g, "").trim();
+  return !stripped;
+}
+
+/** 用户可见标题永不展示内部 houseId；占位标题优先回退到真实小区字段。 */
+function publicPropertyTitle(property: ConclusionProperty): string {
+  const stripped = property.title
+    .replaceAll(property.houseId, "")
+    .replace(/\b\d{8,20}\b/g, "")
+    .replace(/房源\s*/g, "")
+    .replace(/^\s*[·:：\-]+|[·:：\-]+\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (stripped && !["详情", "待补充", "房源详情", "小区待补充", "位置待补"].includes(stripped)) return stripped;
+  return propertyTitle(property.community || "", property.layout || "", property.area || "");
+}
+
 /** 从面积/租金中提取数值，只用于和最终回答做轻量匹配。 */
 function firstNumber(value: string): string {
   return value.replace(/[,，\s]/g, "").match(/\d+(?:\.\d+)?/)?.[0] || "";
@@ -369,11 +389,18 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
     const record = asRecord(item);
     const houseId = text(record?.id) || text(record?.houseId);
     if (!houseId) continue;
-    const title = text(record?.title) || text(record?.name);
-    const rent = text(record?.price);
+    const rawTitle = text(record?.title) || text(record?.name);
+    const rent = text(record?.price) || text(record?.rent);
+    const layout = text(record?.layout);
     const area = text(record?.area);
+    const floor = text(record?.floor);
+    const orientation = text(record?.orientation);
+    const decoration = text(record?.decoration);
     const address = text(record?.addressText) || text(record?.address);
-    const community = text(record?.community) || text(record?.communityName) || firstMatch(title, /^([^·]+)\s*·/);
+    const community = text(record?.community) || text(record?.communityName) || firstMatch(rawTitle, /^([^·]+)\s*·/);
+    const title = rawTitle && !listingTitleIsPlaceholder(rawTitle, houseId)
+      ? rawTitle
+      : propertyTitle(community, layout, area);
     const vrHint = record?.hasVr ?? record?.has_vr ?? (record?.vr === true ? true : undefined);
     const vrUrl = vrUrlFrom(record);
     const hasVr = vrHint === true || VR_POSITIVE_RE.test(rawText(vrHint)) || Boolean(vrUrl);
@@ -383,7 +410,11 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
       ...(community ? { community } : {}),
       ...(title ? { title } : {}),
       ...(rent ? { rent } : {}),
+      ...(layout ? { layout } : {}),
       ...(area ? { area } : {}),
+      ...(floor ? { floor } : {}),
+      ...(orientation ? { orientation } : {}),
+      ...(decoration ? { decoration } : {}),
       ...(address ? { address } : {}),
       ...(vrUrl ? { vrUrl } : {}),
       ...(text(record?.rentCode) ? { rentCode: text(record?.rentCode) } : {}),
@@ -616,7 +647,7 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
     if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl && !row.hasVr)) continue;
     row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
     row.location = row.location || locationsByHouse.get(id);
-    if (!row.title) row.title = propertyTitle(row.community || "", row.layout || "", row.area || "");
+    row.title = publicPropertyTitle(row);
     candidates.push(row);
   }
 
