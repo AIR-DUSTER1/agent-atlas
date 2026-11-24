@@ -111,10 +111,9 @@
 .skills-page-btn:disabled { opacity: .4; cursor: default; }
 .skills-page-ellipsis { padding: 0 4px; color: var(--text-3); }
 
-/* 技能筛选页签：antdv Button 默认 32px 高度 + 0 15px padding 会把
-   下划线页签挤成三个大胶囊；用内容高度与左右内边距复位，并让计数
-   与中文基线垂直居中。 */
-.skills-filter-tab.ant-btn {
+/* 技能筛选页签：已改为原生 button（避免 antdv Button 注入的边框/背景
+   把下划线页签挤成大胶囊）。沿用下划线页签样式，计数与基线垂直居中。 */
+.skills-filter-tab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -129,10 +128,10 @@
   box-shadow: none;
   line-height: 1;
 }
-.skills-filter-tab.ant-btn.active {
+.skills-filter-tab.active {
   border-bottom-color: var(--accent);
 }
-.skills-filter-tab.ant-btn > .skills-filter-label {
+.skills-filter-tab > .skills-filter-label {
   min-width: 0;
   height: auto;
   padding: 0;
@@ -141,7 +140,7 @@
   font-family: inherit;
   font-size: 12.5px;
 }
-.skills-filter-tab.ant-btn > .skills-filter-count {
+.skills-filter-tab > .skills-filter-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
