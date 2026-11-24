@@ -60,6 +60,10 @@ export interface ConclusionProperty {
   city?: string;
   /** 租 / 买：决定详情页是 /zufang/ 还是 /ershoufang/。缺省按租房处理。 */
   listingKind?: "rent" | "buy";
+  /** 贝壳租房详情页编码；租房详情链接必须用它，禁止用 houseId 拼数字路径。 */
+  rentCode?: string;
+  /** 工具已归一好的服务端详情链接；优先取它，取不到再由展示层用 rentCode 拼。 */
+  detailUrl?: string;
 }
 
 export interface ConclusionExport {
@@ -219,6 +223,23 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function rentCodeForRaw(raw: string, houseId: string): string {
+  const match = raw.match(/<metadata>([\s\S]*?)<\/metadata>/i);
+  if (!match?.[1]) return "";
+  const unescaped = match[1].replace(/\\"/g, '"').replace(/\\n/g, "\n");
+  try {
+    const meta = JSON.parse(unescaped) as Record<string, unknown>;
+    const entityIds = Array.isArray(meta.entity_ids) ? meta.entity_ids.map((v) => text(v)) : [];
+    const rentCodes = Array.isArray(meta.rent_codes) ? meta.rent_codes.map((v) => text(v)) : [];
+    // houseId 由调用方显式传入，避免在只传每套 body 时猜不到
+    const index = entityIds.indexOf(houseId);
+    const code = index >= 0 ? rentCodes[index] : '';
+    return /^[A-Z]{1,4}\d{10,}$/i.test(code) ? code.toUpperCase() : '';
+  } catch {
+    return "";
+  }
+}
+
 function rawText(value: unknown): string {
   if (typeof value === "string") return value;
   if (value == null) return "";
@@ -321,6 +342,7 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
     const traffic = field(body, ["区位交通"]);
     const community = firstMatch(traffic, /板块\s*([^，,。]+?)小区/)
       || firstMatch(traffic, /小区\s*([^，,。]+)/);
+    const rentCode = rentCodeForRaw(raw, houseId);
     const vrUrl = vrUrlFrom(body);
     const hasVr = VR_POSITIVE_RE.test(body);
     rows.push({
@@ -333,6 +355,7 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
       ...(orientation ? { orientation } : {}),
       ...(traffic ? { address: traffic } : {}),
       ...(vrUrl ? { vrUrl } : {}),
+      ...(rentCode ? { rentCode } : {}),
       title: propertyTitle(community, layout, area),
     });
   }
@@ -363,6 +386,8 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
       ...(area ? { area } : {}),
       ...(address ? { address } : {}),
       ...(vrUrl ? { vrUrl } : {}),
+      ...(text(record?.rentCode) ? { rentCode: text(record?.rentCode) } : {}),
+      ...(text(record?.detailUrl) ? { detailUrl: text(record?.detailUrl) } : {}),
     });
   }
   return rows;
@@ -426,7 +451,7 @@ function mergeProperty(
     rows.set(houseId, row);
     order.push(houseId);
   }
-  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address", "vrUrl", "city"] as const) {
+  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address", "vrUrl", "city", "rentCode", "detailUrl"] as const) {
     const value = text(patch[key]);
     if (value) row[key] = value;
   }
@@ -550,6 +575,8 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
           // city + 租买方向用于「在贝壳查看该房源」链接；两者缺一就不拼链接。
           ...(city ? { city } : {}),
           ...(mode ? { listingKind: mode === "buy" ? "buy" as const : "rent" as const } : {}),
+          ...(text(payload.rentCode) ? { rentCode: text(payload.rentCode) } : {}),
+          ...(text(payload.detailUrl) ? { detailUrl: text(payload.detailUrl) } : {}),
         });
       }
       const detailImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);

@@ -86,6 +86,7 @@ interface EstateToolListing {
   vr?: string;
   vrUrl?: string;
   hasVr?: boolean;
+  rentCode?: string;
 }
 
 function extractListings(data: unknown): EstateToolListing[] {
@@ -126,6 +127,7 @@ function extractListings(data: unknown): EstateToolListing[] {
       detailUrl: pick(o, ["detailUrl", "detail_url", "pageUrl"]),
       cover: pick(o, ["cover", "img", "image", "pic", "coverPic", "thumb"]),
       addressText: pick(o, ["addressText", "address", "position", "communityName", "xiaoqu"]),
+      rentCode: pick(o, ["rentCode", "rent_code", "rental_code"]),
       ...(vr ? { vr } : {}),
     };
   });

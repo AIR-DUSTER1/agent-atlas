@@ -34,7 +34,7 @@ function detailPayload(): string {
       },
     }),
     "</参考数据>",
-    "<metadata>{\"entity_ids\":[\"10001\"]}</metadata>",
+    "<metadata>{\"entity_ids\":[\"10001\"],\"rent_codes\":[\"QD2232327398555123712\"]}</metadata>",
   ].join("\n");
 }
 
@@ -49,9 +49,11 @@ test("详情归一化：贝壳小区经纬度直接生成单点地图与多地�
   assert.match(location.embedUrl, /marker=36\.123456,120\.123456/);
   assert.match(location.links.amap, /position=120\.123456,36\.123456/);
 
-  const normalized = normalizeEstateDetail(detailPayload(), "10001", "青岛") as Record<string, any>;
+  const normalized = normalizeEstateDetail(detailPayload(), "10001", "青岛", "rent") as Record<string, any>;
   assert.equal(normalized.action, "detail");
   assert.equal(normalized.houseId, "10001");
+  assert.equal(normalized.rentCode, "QD2232327398555123712");
+  assert.equal(normalized.detailUrl, "https://m.ke.com/chuzu/qd/zufang/QD2232327398555123712.html");
   assert.equal(normalized.presentation.map, true);
   assert.match(normalized.note, /直接渲染地图卡/);
 });
@@ -125,6 +127,19 @@ test("搜索文本归一化同时支持租房与买房字段，并保留 VR 入�
   assert.equal(rows[1]?.vr, undefined);
 });
 
+test("搜索 metadata 的 entity_ids/rent_codes 按顺序映射出详情链接", () => {
+  const raw = [
+    "<参考数据><租赁房源>",
+    "<100001>",
+    JSON.stringify({ 摘要信息: { 户型信息: "2室1厅，出租面积90㎡", 租赁价格: "2400元/月" } }),
+    "</100001>",
+    "<metadata>{\"entity_ids\":[\"100001\"],\"rent_codes\":[\"QD2232327398555123712\"]}</metadata>",
+  ].join("\n");
+  const rows = extractEstateSearchListings(raw);
+  assert.equal(rows[0]?.rentCode, "QD2232327398555123712");
+  assert.equal(rows[0]?.detailUrl, undefined);
+});
+
 test("有 VR 亮点但无真实链接时不拼旧模板入口", () => {
   const raw = '<100005>' + JSON.stringify({ 摘要信息: { 户型信息: "2室1厅，出租面积80㎡", 房源亮点: "有VR", 租赁价格: "2500元/月" } }) + '</100005>';
   const rows = extractEstateSearchListings(raw);
@@ -132,10 +147,10 @@ test("有 VR 亮点但无真实链接时不拼旧模板入口", () => {
   assert.equal(rows[0]?.vr, undefined);
 });
 
-test("裸「全景」不算有 VR：普通房源描述不得被标成有 VR 标记", () => {
+test("裸「全景」不算有 VR：普通房源描述不得被误判成有 VR", () => {
   // 回归：VR_POSITIVE_RE 曾把裸「全景」算作正向信号，房源文案里
   // 「小区实景全景拍摄」「楼栋全景展示」会让普通房源全被标成
-  // 「有 VR 标记 · 专属入口未返回」。全景必须与看房/链接/漫游等 VR 语境共现。
+  // 有 VR 但缺真实入口。全景必须与看房/链接/漫游等 VR 语境共现。
   const plain = ["小区实景全景拍摄于 2023 年", "楼栋全景展示", "周边全景：地铁/商圈/学校"];
   for (const [index, text] of plain.entries()) {
     const raw = `<10010${index}>` + JSON.stringify({ 摘要信息: {
@@ -187,7 +202,7 @@ test("精确坐标不会触发二次 geocode，单点地图保留 marker", async
 
 test("服务端与前端两份 VR 正向正则必须一致（禁止分裂出两套判定）", async () => {
   // 同一个「有 VR」判断在 server 归一和 client 渲染各有一份实现（前者决定
-  // 工具结果里的 hasVr，后者决定结论表是否显示「有 VR 标记」）。两份口径一旦
+  // 工具结果里的 hasVr，后者决定结论表是否显示有 VR 但缺真实入口）。两份口径一旦
   // 分叉，就会出现「服务端说有、前端说没有」或反之的鬼影。这里直接比对正则源文。
   const { readFile } = await import("node:fs/promises");
   const pick = (source: string): string => {

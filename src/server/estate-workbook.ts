@@ -42,6 +42,7 @@ export interface EstateWorkbookListing {
   vrUrl?: string;
   detailUrl?: string;
   url?: string;
+  rentCode?: string;
 }
 
 export interface EstateWorkbookContext {
@@ -79,6 +80,13 @@ function safeHttpsUrl(value: unknown): string {
 function timestamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function citySub(city: string): string {
+  const map: Record<string, string> = {
+    北京: "bj", 上海: "sh", 广州: "gz", 深圳: "sz", 成都: "cd", 杭州: "hz", 天津: "tj", 南京: "nj", 武汉: "wh", 西安: "xa", 重庆: "cq", 苏州: "su", 长沙: "cs", 郑州: "zz", 东莞: "dg", 青岛: "qd", 沈阳: "sy", 宁波: "nb", 昆明: "km", 合肥: "hf", 佛山: "fs", 无锡: "wx", 济南: "jn", 大连: "dl", 厦门: "xm", 福州: "fz", 哈尔滨: "hrb", 长春: "cc", 石家庄: "sjz", 太原: "ty", 南昌: "nc", 贵阳: "gy", 南宁: "nn", 兰州: "lz", 海口: "hk", 珠海: "zh", 中山: "zs", 惠州: "huizhou", 常州: "cz", 徐州: "xz", 烟台: "yt", 潍坊: "wf", 温州: "wz", 嘉兴: "jx", 绍兴: "sx", 台州: "tz", 泉州: "qz", 金华: "jh", 保定: "bd", 廊坊: "lf", 洛阳: "ly", 唐山: "ts",
+  };
+  return map[city.trim().replace(/\s+/g, "").replace(/市$/, "")] || "";
 }
 
 function safeFilePart(value: string): string {
@@ -131,7 +139,9 @@ export async function writeEstateWorkbook(
   const dataRows: XlsxCellValue[][] = rows.map((row, index) => {
     const title = text(row.title) || [row.community, row.layout, row.area].filter(Boolean).join(" · ") || `房源 ${index + 1}`;
     const vrUrl = safeHttpsUrl(row.vrUrl || row.vr);
-    const detailUrl = safeHttpsUrl(row.detailUrl || row.url);
+    const detailUrl = safeHttpsUrl(row.detailUrl || row.url) || (context.mode === "rent" && row.rentCode
+  ? `https://m.ke.com/chuzu/${citySub(context.city)}/zufang/${row.rentCode.toUpperCase().trim()}.html`
+  : "");
     return [
       index + 1,
       title,
@@ -144,7 +154,7 @@ export async function writeEstateWorkbook(
       text(row.decoration, 80),
       text(row.address || row.addressText),
       text(row.matchReason, MAX_REASON_LENGTH),
-      vrUrl ? "打开 VR" : row.hasVr ? "有 VR 标记（入口未返回）" : "",
+      vrUrl ? "打开 VR" : "",
       detailUrl ? "查看房源" : "",
     ];
   });
@@ -152,7 +162,9 @@ export async function writeEstateWorkbook(
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     const vrUrl = safeHttpsUrl(row.vrUrl || row.vr);
-    const detailUrl = safeHttpsUrl(row.detailUrl || row.url);
+    const detailUrl = safeHttpsUrl(row.detailUrl || row.url) || (context.mode === "rent" && row.rentCode
+      ? `https://m.ke.com/chuzu/${citySub(context.city)}/zufang/${row.rentCode.toUpperCase().trim()}.html`
+      : "");
     if (vrUrl) hyperlinks.push({ cell: `L${rowNumber}`, target: vrUrl, display: "打开 VR" });
     if (detailUrl) hyperlinks.push({ cell: `M${rowNumber}`, target: detailUrl, display: "查看房源" });
   });

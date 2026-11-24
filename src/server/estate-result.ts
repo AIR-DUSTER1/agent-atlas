@@ -9,6 +9,7 @@
  * 原始数据仍随结果返回给模型，归一字段只用于可靠渲染，不篡改业务事实。
  */
 import { buildMapLinks, buildPointMapEmbed, type GeocodePoint } from "./estate-geo.js";
+import { buildListingUrl, isRentCode } from "../shared/estate-listing-url.js";
 
 const MAX_ESTATE_IMAGES = 12;
 const MAX_SEARCH_LISTINGS = 50;
@@ -20,7 +21,7 @@ const VR_HINT_RE = /(?:\bvr\b|全景|panorama|virtual\s*tour)/i;
 /**
  * 「这套房有 VR」的正向判定。
  * 注意不能把裸「全景」算进来：贝壳房源文案里「小区实景全景拍摄」「楼栋全景展示」
- * 这类描述与 VR 入口无关，裸词会把普通房源误标成「有 VR 标记 · 专属入口未返回」。
+ * 这类描述与 VR 入口无关，裸词会把普通房源误标成有 VR 但缺真实入口。
  * 因此中文全景必须与 VR 语境共现（VR/虚拟看房/全景看房/全景链接/全景漫游），
  * 「有VR」「带VR看房」等直接写法照旧命中。
  */
@@ -159,6 +160,71 @@ function matchJsonStringField(strings: string[], field: string): string {
   return "";
 }
 
+/**
+ * 把 text 尾部 `<metadata>…</metadata>` 中的 JSON 取出来。
+ * CLI 结果里的 metadata 可能是字符串再套一层转义（\\" 是引号、\\n 是换行），
+ * 这里先做一层归一再 JSON.parse，解析失败返回 null。
+ */
+function extractMetadata(raw: string): Record<string, unknown> | null {
+  const match = raw.match(/<metadata>([\s\S]*?)<\/metadata>/i);
+  if (!match?.[1]) return null;
+  // 真实 CLI payload 观察：metadata 内可能已是 JSON 字符串再被 JSON.stringify
+  // 包一层，里面出现 \" 和 \n（转义反斜杠）。这里先把转义还原到可解析 JSON，
+  // 但普通非转义 JSON（直接 string literal）本来就不含 \ 前缀，不受影响。
+  const unescaped = match[1].replace(/\\"/g, '"').replace(/\\n/g, "\n");
+  try {
+    const parsed = JSON.parse(unescaped) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function textOf(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(textOf).filter(Boolean)
+    : textOf(value) ? [textOf(value)] : [];
+}
+
+/**
+ * 从 metadata 建立 houseId → rentCode 映射。
+ * 搜索名面的 rent_codes 与 entity_ids 数组按顺序对应（实体 i 的详情码是
+ * rent_codes[i]）；detail 的 rental_code / rent_code / rentCode 字段直接可读。
+ * 没有合法 rent code 的房源返回空串，禁止把 houseId 当详情路径用。
+ */
+export function extractRentCodeMap(data: unknown): Map<string, string> {
+  const raw = rawText(data);
+  const meta = extractMetadata(raw);
+  const map = new Map<string, string>();
+  if (!meta) return map;
+  const entityIds = stringArray(meta.entity_ids);
+  const rentCodes = stringArray(meta.rent_codes);
+  const limit = Math.min(entityIds.length, rentCodes.length);
+  for (let index = 0; index < limit; index += 1) {
+    const houseId = entityIds[index];
+    const code = rentCodes[index];
+    if (/^\d{5,20}$/.test(houseId) && isRentCode(code)) {
+      map.set(houseId, code.toUpperCase());
+    }
+  }
+  const directRaw = textOf(meta.rental_code) || textOf(meta.rent_code) || textOf(meta.rentCode);
+  if (directRaw && isRentCode(directRaw)) {
+    if (entityIds.length) {
+      const first = entityIds.find((id) => /^\d{5,20}$/.test(id));
+      if (first) map.set(first, directRaw.toUpperCase());
+    }
+  }
+  return map;
+}
+
+
+
 export interface EstateSearchListing {
   id: string;
   title: string;
@@ -169,6 +235,10 @@ export interface EstateSearchListing {
   community?: string;
   vr?: string;
   hasVr: boolean;
+  /** 房源详情路径需要的贝壳租房编码；只在 metadata 明确给出时存在。 */
+  rentCode?: string;
+  /** 已按城市/租买方向生成的合法详情页链接；缺 rentCode/城市时不存在。 */
+  detailUrl?: string;
 }
 
 function rawText(value: unknown): string {
@@ -206,14 +276,24 @@ function searchLayout(raw: string): string {
  * 结果模型只能面对一万多字原文，容易只挑前两条；这里保留真实 id 与 VR 标记，
  * 让 Agent 先拿到完整候选池，再由前端做最终表格展示。
  */
+function rentCodeForId(metadata: Record<string, unknown> | null, id: string): string {
+  if (!metadata) return "";
+  const entityIds = stringArray(metadata.entity_ids);
+  const rentCodes = stringArray(metadata.rent_codes);
+  const index = entityIds.indexOf(id);
+  return index >= 0 && isRentCode(rentCodes[index]) ? rentCodes[index].toUpperCase() : "";
+}
+
 export function extractEstateSearchListings(data: unknown): EstateSearchListing[] {
   const raw = rawText(data);
   if (!raw) return [];
+  const metadata = extractMetadata(raw);
   const rows: EstateSearchListing[] = [];
   const blockRe = /<(\d{6,})>\s*([\s\S]*?)<\/\1>/g;
   for (const match of raw.matchAll(blockRe)) {
     const id = match[1] || "";
     const body = match[2] || "";
+    const rentCode = rentCodeForId(metadata, id);
     const layout = searchLayout(body);
     const area = searchArea(body);
     const price = firstField(body, ["租赁价格", "总价", "售价", "价格"]);
@@ -236,6 +316,7 @@ export function extractEstateSearchListings(data: unknown): EstateSearchListing[
       ...(community ? { community } : {}),
       ...(vr ? { vr } : {}),
       hasVr: hasVr || Boolean(vr),
+      ...(rentCode ? { rentCode } : {}),
     });
     if (rows.length >= MAX_SEARCH_LISTINGS) break;
   }
@@ -275,12 +356,18 @@ export function normalizeEstateDetail(data: unknown, houseId: string, city: stri
   const location = extractEstateLocation(data, city);
   const images = extractEstateImageUrls(data);
   const vr = extractEstateVrUrl(data);
+  const rentCode = extractRentCodeMap(data).get(houseId) || "";
+  const detailUrl = mode === "rent" && rentCode
+    ? buildListingUrl(city, houseId, "rent", rentCode)
+    : undefined;
   return {
     action: "detail",
     houseId,
     city,
     // 租买方向决定前端详情页链接走 /zufang/ 还是 /ershoufang/，必须随结果下发。
     mode,
+    ...(rentCode ? { rentCode } : {}),
+    ...(detailUrl ? { detailUrl } : {}),
     ...(location ? { location } : {}),
     ...(images.length ? { images } : {}),
     ...(vr ? { vr } : {}),

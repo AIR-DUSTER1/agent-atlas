@@ -144,7 +144,9 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.match(app, /conclusion-map-preview-trigger/);
   assert.match(app, /conclusion-image-open/);
   assert.match(app, /conclusion-export-link/);
-  assert.match(app, /conclusion-vr-pending/);
+  assert.match(app, /conclusion-listing-link/);
+  assert.doesNotMatch(app, /conclusion-vr-pending/);
+  assert.doesNotMatch(app, /conclusion-vr-pending/);
   assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
   assert.match(app, /h\("details", \{ class: "tool-group" \}/);
   assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
@@ -325,10 +327,27 @@ test("结论表识别简写租金，并只把真实 VR 链接放入结论", () =
     "金光丽园 · 2室1厅 · 84㎡",
     "竹韵山色 · 2室1厅 · 95㎡",
   ]);
+  assert.equal(media.properties[1]?.rentCode, undefined);
   assert.equal(media.properties[1]?.vrUrl, undefined);
   assert.equal(media.properties[1]?.hasVr, true);
   assert.equal(media.properties[4]?.vrUrl, undefined);
   assert.equal(media.properties[4]?.hasVr, true);
+});
+
+
+test("搜索结果带 metadata 的房产会保留 rentCode 供详情链接使用", () => {
+  const raw = [
+    "<参考数据><租赁房源>",
+    "<103155465087>",
+    JSON.stringify({ 摘要信息: { 户型信息: "3室1厅，出租面积90㎡", 区位交通: "位于崂山区大埠东小区", 房源亮点: "有VR", 租赁价格: "2200元/月" } }),
+    "</103155465087>",
+    "<metadata>{\"entity_ids\":[\"103155465087\"],\"rent_codes\":[\"QD2232327398555123712\"]}</metadata>",
+  ].join("\n");
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-meta", "house_search", { action: "search", mode: "rent", data: raw }),
+  ], "大埠东 3室1厅 90㎡ ¥2200/月");
+  const hit = media.properties.find((property) => property.houseId === "103155465087");
+  assert.equal(hit?.rentCode, "QD2232327398555123712");
 });
 
 test("结论表最多展示 12 套并收集 Excel 下载入口", () => {

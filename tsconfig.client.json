@@ -14,12 +14,12 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "rootDir": "src/client",
+    "rootDir": "src",
     "outDir": "src/server/public",
     "noEmit": false,
     "declaration": false,
     "sourceMap": false,
     "removeComments": false
   },
-  "include": ["src/client/**/*.ts"]
+  "include": ["src/client/**/*.ts", "src/shared/**/*.ts"]
 }
