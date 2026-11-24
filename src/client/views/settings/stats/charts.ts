@@ -15,7 +15,7 @@ import type { StatsRange } from "../../../modules/types.js";
 
 type ChartOptions = NonNullable<ChartConfiguration["options"]>;
 
-type ChartModule = typeof import("chart.js");
+type ChartModule = typeof import("chart.js/auto");
 type ChartInstance = InstanceType<ChartModule["Chart"]>;
 
 /** 一张图的声明：key 与组件模板里的 data-chart-key 对齐。 */
@@ -313,7 +313,7 @@ export async function renderCharts(
 
   let mod: ChartModule;
   try {
-    mod = await import("chart.js");
+    mod = await import("chart.js/auto");
   } catch {
     onFallback?.("图表依赖加载失败（网络中断或构建产物缺失）");
     return;

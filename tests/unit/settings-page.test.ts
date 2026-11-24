@@ -141,8 +141,10 @@ test("使用统计展示 7/30 天、KPI、Chart.js 六图与数据表降级", as
     assert.match(stats, new RegExp(`id="${id}"`), id);
   }
   assert.match(stats, /activeRangeId: "7d"/);
-  // Chart.js 必须动态加载；深度不设死，页面可按 views/<page>/ 任意层级组织
-  assert.match(stats, /import\("chart\.js"\)/);
+  // Chart.js 必须走 auto 入口动态加载：auto 会注册 CategoryScale 等控制器，
+  // 否则 30 天视图在 chart.js v4 下会报 "category" is not a registered scale。
+  assert.match(stats, /import\("chart\.js\/auto"\)/);
+  assert.doesNotMatch(stats, /import\("chart\.js"\)/);
   assert.match(stats, /CHART_SPECS/);
   assert.match(stats, /stats-chart-card/);
   assert.match(stats, /ResizeObserver/);
