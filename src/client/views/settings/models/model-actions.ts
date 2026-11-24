@@ -82,13 +82,13 @@ export async function fetchGatewayModelChips(
 }
 
 /** 新增供应商弹窗：把模型加入待提交清单。 */
-export async function addPendingModelByName(name: string, meta: GatewayModel | null): Promise<void> {
+export async function addPendingModelByName(name: string, meta: GatewayModel | null): Promise<boolean> {
   const models = await store();
   const modelName = (name || "").trim();
-  if (!modelName) { setProviderModalStatus("✗ 模型名不能为空", "err"); return; }
+  if (!modelName) { setProviderModalStatus("✗ 模型名不能为空", "err"); return false; }
   if (models.pendingModels.some((m) => m.name === modelName)) {
     setProviderModalStatus("✗ 该模型已在初始模型清单里", "err");
-    return;
+    return false;
   }
   models.addPendingModel({
     name: modelName,
@@ -96,15 +96,16 @@ export async function addPendingModelByName(name: string, meta: GatewayModel | n
     contextWindow: meta?.contextWindow ?? null,
   });
   setProviderModalStatus(`✓ 已加入初始模型（保存供应商时一起提交，共 ${models.pendingModels.length} 个）`, "ok");
+  return true;
 }
 
 /** 把模型直接加到右栏当前供应商。 */
-export async function addModelByName(name: string, meta: GatewayModel | null): Promise<void> {
+export async function addModelByName(name: string, meta: GatewayModel | null): Promise<boolean> {
   const models = await store();
   const modelName = (name || "").trim();
-  if (!modelName) { setSettingsStatus("✗ 模型名不能为空", "err"); return; }
+  if (!modelName) { setSettingsStatus("✗ 模型名不能为空", "err"); return false; }
   const targetProviderId = models.selectedProviderId || models.editingProviderId;
-  if (!targetProviderId) { setSettingsStatus("✗ 请先从左侧选择供应商", "err"); return; }
+  if (!targetProviderId) { setSettingsStatus("✗ 请先从左侧选择供应商", "err"); return false; }
   try {
     const res = await api<{ created?: boolean; model: ModelEntry }>(
       `/api/config/providers/${targetProviderId}/models`,
@@ -122,8 +123,10 @@ export async function addModelByName(name: string, meta: GatewayModel | null): P
     models.selectProvider(targetProviderId);
     setSettingsStatus(res.created ? `✓ 已添加模型「${modelName}」并设为该供应商的启用模型` : `✓ 「${modelName}」已存在，已更新并设为启用模型`, "ok");
     models.openModelForm(targetProviderId, res.model.id);
+    return true;
   } catch (err) {
     setSettingsStatus(`✗ ${(err as Error).message}`, "err");
+    return false;
   }
 }
 

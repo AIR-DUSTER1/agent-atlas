@@ -65,21 +65,45 @@
 .model-add-row { margin-top: 2px; }
 
 /* 网关模型清单：全部平铺成 chips，点一下即添加（不再受输入框过滤） */
-.gw-models { margin-top: 9px; }
-.gw-label { font-size: 11px; color: var(--text-3); margin-bottom: 6px; }
-.gw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.gw-chip {
-  font-size: 11px; font-family: var(--mono);
-  padding: 4px 9px;
-  background: var(--bg-input);
-  border: 1px dashed var(--border);
-  border-radius: 7px;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: all .15s;
+/* 网关模型选择器（独立 Modal）：搜索区固定，列表独立滚动。
+   几百个模型不再把设置面板撑成一条长墙。 */
+.gmp-head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px;
 }
-.gw-chip:hover { border-color: var(--accent); border-style: solid; color: var(--text); }
-.gw-chip.added { border-style: solid; border-color: rgba(63,185,111,.45); color: var(--green); }
+.gmp-head .ant-input-affix-wrapper { flex: 1; min-width: 0; }
+.gmp-count { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
+.gmp-list {
+  display: flex; flex-direction: column; gap: 7px;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.gmp-empty {
+  display: grid; place-items: center; min-height: 140px;
+  color: var(--text-3); font-size: 12px;
+}
+.gmp-row.ant-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; height: auto; min-height: 52px;
+  padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg-input); color: var(--text);
+  text-align: left; white-space: normal;
+  box-shadow: none;
+}
+.gmp-row.ant-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-hover); }
+.gmp-row.ant-btn.added {
+  border-color: rgba(63,185,111,.42); background: rgba(63,185,111,.06); opacity: 1;
+}
+.gmp-row-main { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.gmp-row-main strong { overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.gmp-row-main small { overflow-wrap: anywhere; color: var(--text-3); font-size: 10.5px; }
+.gmp-row-action { flex: none; color: var(--accent-soft); font-size: 11px; }
+.gmp-row.added .gmp-row-action { color: var(--green); }
+
+#gateway-model-picker .ant-modal-body,
+#pending-model-picker .ant-modal-body { padding-top: 4px; }
 
 /* ---------- 设置页：单个模型编辑面板 ---------- */
 .model-form {

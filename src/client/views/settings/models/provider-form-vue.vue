@@ -6,7 +6,7 @@
   立场：API Key 只写不读，留空 = 保持不变；保存走 stores/models + model-actions。
 -->
 <script setup lang="ts">
-import { Button, Input, Select } from "antdv-next";
+import { Button, Input, Modal, Select } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useModelsStore } from "../../../stores/settings/models/models.js";
@@ -28,6 +28,8 @@ const newModelName = ref("");
 const keyVisible = ref(false);
 const saving = ref(false);
 const testing = ref(false);
+const fetchingModels = ref(false);
+const pickerQuery = ref("");
 
 const editingProvider = computed(() => store.currentEditingProvider);
 const isCreate = computed(() => store.providerFormMode === "create");
@@ -58,13 +60,35 @@ const keyStateText = computed(() => {
 
 const pendingEmpty = computed(() => store.pendingModels.length === 0);
 
-/** 网关返回模型 chips：待提交清单里已有的标记为已添加。 */
-function gatewayChipLabel(m: { id: string; contextWindow: number | null; supportsVision: boolean; supportsReasoning: boolean }): string {
-  const existing = store.pendingModels.some((item) => item.name === m.id);
-  return (existing ? "✓ " : "＋ ") + m.id
-    + (m.contextWindow ? ` · 上下文 ${m.contextWindow}` : "")
-    + (m.supportsVision ? " · 🖼" : "")
-    + (m.supportsReasoning ? " · ⚡" : "");
+const pendingNames = computed(() => new Set(store.pendingModels.map((item) => item.name)));
+const pickerModels = computed(() => {
+  const query = pickerQuery.value.trim().toLowerCase();
+  if (!query) return store.gatewayModels;
+  return store.gatewayModels.filter((model) => model.id.toLowerCase().includes(query));
+});
+
+function gatewayMeta(m: { contextWindow: number | null; supportsVision: boolean; supportsReasoning: boolean }): string {
+  return [
+    m.contextWindow ? `上下文 ${m.contextWindow}` : "上下文未知",
+    m.supportsVision ? "多模态" : "",
+    m.supportsReasoning ? "支持推理" : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function isPending(m: { id: string }): boolean {
+  return pendingNames.value.has(m.id);
+}
+
+function closeProviderModal(): void {
+  if (store.gatewayPickerContext === "pending") store.closeGatewayPicker();
+  store.closeProviderForm();
+}
+
+async function choosePendingModel(m: { id: string; contextWindow: number | null; supportsVision: boolean; supportsReasoning: boolean }): Promise<void> {
+  if (isPending(m)) return;
+  const ok = await addPendingModelByName(m.id, m);
+  // 添加失败时保留弹窗，状态条会说明原因
+  if (ok) store.closeGatewayPicker();
 }
 
 function addPendingFromInput(): void {
@@ -97,11 +121,24 @@ async function onTest(): Promise<void> {
   }
 }
 
+async function openPendingPicker(): Promise<void> {
+  fetchingModels.value = true;
+  try {
+    await onTest();
+    if (store.gatewayModels.length) {
+      pickerQuery.value = "";
+      store.openGatewayPicker("pending");
+    }
+  } finally {
+    fetchingModels.value = false;
+  }
+}
+
 onMounted(() => {
   // 遮罩点击空白处关闭（mount 容器在组件模板之外，只能原生挂监听）
   const mask = document.getElementById("provider-modal-mask");
   mask?.addEventListener("click", (event) => {
-    if (event.target === mask) store.closeProviderForm();
+      if (event.target === mask) closeProviderModal();
   });
 });
 
@@ -127,7 +164,7 @@ function toggleKeyVisible(): void {
           ? "修改连接信息不会影响已配置模型；API Key 留空表示保持原值。"
           : "一套网关凭据可以挂多个模型。" }}</p>
       </div>
-      <Button id="provider-modal-close" class="provider-modal-close" aria-label="关闭供应商弹窗" @click="store.closeProviderForm()">×</Button>
+      <Button id="provider-modal-close" class="provider-modal-close" aria-label="关闭供应商弹窗" @click="closeProviderModal">×</Button>
     </div>
 
     <div id="provider-form-wrap" class="provider-form">
@@ -174,32 +211,55 @@ function toggleKeyVisible(): void {
         </div>
         <div class="key-row model-add-row">
           <Input id="pf-new-model-name" v-model:value="newModelName" type="text" aria-label="新模型 ID" spellcheck="false" placeholder="输入模型名，或从网关列表选择" @keydown="onPendingKeydown" />
-          <Button id="pf-new-fetch-models" class="ghost-btn small" @click="onTest">获取列表</Button>
+          <Button id="pf-new-fetch-models" class="ghost-btn small" :loading="fetchingModels" @click="openPendingPicker">从网关选择</Button>
           <Button id="pf-new-model-add-btn" class="ghost-btn small" aria-label="添加模型" @click="addPendingFromInput">
             <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i><span>添加</span>
           </Button>
-        </div>
-        <div id="pf-new-gateway-models" class="gw-models">
-          <template v-if="store.gatewayModels.length">
-            <div class="gw-label">网关返回 {{ store.gatewayModels.length }} 个模型（点一下直接添加）：</div>
-            <div class="gw-chips">
-              <Button v-for="m in store.gatewayModels" :key="m.id" class="gw-chip" :class="{ added: store.pendingModels.some((item) => item.name === m.id) }"
-                :title="`${m.id}\n上下文：${m.contextWindow ?? '未知'}\n多模态：${m.supportsVision ? '是' : '未知'} · 支持推理：${m.supportsReasoning ? '是' : '未知'}`"
-                @click="addPendingModelByName(m.id, m)"
-              >{{ gatewayChipLabel(m) }}</Button>
-            </div>
-          </template>
         </div>
       </div>
 
       <div class="settings-actions provider-modal-actions">
         <Button id="pf-test" class="ghost-btn" @click="onTest">{{ isCreate ? "测试连接 / 拉取模型" : "测试连接" }}</Button>
         <div class="spacer"></div>
-        <Button id="pf-cancel-edit" class="ghost-btn" @click="store.closeProviderForm()">取消</Button>
+        <Button id="pf-cancel-edit" class="ghost-btn" @click="closeProviderModal">取消</Button>
         <Button id="pf-save" :disabled="saving" @click="onSave" type="primary">保存供应商</Button>
       </div>
       <div id="provider-modal-status" class="settings-status" role="status" aria-live="polite"></div>
     </div>
   </div>
+
+  <Modal
+    id="pending-model-picker"
+    :open="store.gatewayPickerContext === 'pending'"
+    title="从网关选择初始模型"
+    width="720px"
+    centered
+    :footer="null"
+    @cancel="store.closeGatewayPicker()"
+  >
+    <div class="gmp-head">
+      <Input id="gmp-search-pending" v-model:value="pickerQuery" aria-label="筛选网关模型" allow-clear spellcheck="false" placeholder="搜索模型 ID，例如 deepseek / claude / glm">
+        <template #prefix><i class="ui-icon" data-icon="Search" aria-hidden="true"></i></template>
+      </Input>
+      <span class="gmp-count">网关返回 {{ store.gatewayModels.length }} 个 · 已选择 {{ pendingNames.size }} 个</span>
+    </div>
+    <div id="gmp-pending-list" class="gmp-list">
+      <div v-if="!pickerModels.length" class="gmp-empty">
+        {{ store.gatewayModels.length ? "没有匹配的模型，换个关键词试试" : "网关没有返回模型" }}
+      </div>
+      <Button
+        v-for="m in pickerModels"
+        v-else
+        :key="m.id"
+        class="gmp-row"
+        :class="{ added: isPending(m) }"
+        :disabled="isPending(m)"
+        @click="choosePendingModel(m)"
+      >
+        <span class="gmp-row-main"><strong>{{ m.id }}</strong><small>{{ gatewayMeta(m) }}</small></span>
+        <span class="gmp-row-action">{{ isPending(m) ? "已添加" : "添加" }}</span>
+      </Button>
+    </div>
+  </Modal>
   </AntdvProvider>
 </template>
