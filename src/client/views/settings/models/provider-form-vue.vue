@@ -175,7 +175,9 @@ function toggleKeyVisible(): void {
         <div class="key-row model-add-row">
           <Input id="pf-new-model-name" v-model:value="newModelName" type="text" aria-label="新模型 ID" spellcheck="false" placeholder="输入模型名，或从网关列表选择" @keydown="onPendingKeydown" />
           <Button id="pf-new-fetch-models" class="ghost-btn small" @click="onTest">获取列表</Button>
-          <Button id="pf-new-model-add-btn" class="ghost-btn small" @click="addPendingFromInput">＋ 添加</Button>
+          <Button id="pf-new-model-add-btn" class="ghost-btn small" aria-label="添加模型" @click="addPendingFromInput">
+            <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i><span>添加</span>
+          </Button>
         </div>
         <div id="pf-new-gateway-models" class="gw-models">
           <template v-if="store.gatewayModels.length">

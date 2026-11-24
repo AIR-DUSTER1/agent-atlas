@@ -233,7 +233,9 @@ onMounted(() => {
     <aside class="provider-picker" aria-label="供应商列表">
       <div class="provider-picker-head">
         <div><strong>供应商</strong><span id="provider-count" class="key-state">{{ store.providers.length }} 个</span></div>
-        <Button id="add-provider-btn" class="provider-add-btn" title="添加供应商" @click="store.openProviderForm(null)">＋</Button>
+        <Button id="add-provider-btn" class="provider-add-btn" title="添加供应商" aria-label="添加供应商" @click="store.openProviderForm(null)">
+          <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i>
+        </Button>
       </div>
       <div id="provider-list" class="provider-nav-list">
         <Button v-for="p in store.providers" :key="p.id" class="provider-nav-item" :class="{ active: p.id === store.selectedProviderId, 'in-use': p.active }" :title="`${p.name}\n${p.baseURL}`" @click="selectProvider(p)">
@@ -310,7 +312,9 @@ onMounted(() => {
           <div class="key-row model-add-row">
             <Input id="pf-model-new" v-model:value="newModelName" aria-label="输入模型 ID" type="text" spellcheck="false" placeholder="输入模型名，或点「获取列表」从网关选择" @keydown.enter.prevent="addModelFromInput" />
             <Button id="pf-fetch-models" size="small" title="从网关拉取可用模型列表" @click="fetchGatewayModelChips('detail')">获取列表</Button>
-            <Button id="pf-model-add-btn" size="small" @click="addModelFromInput">＋ 添加</Button>
+            <Button id="pf-model-add-btn" size="small" aria-label="添加模型" @click="addModelFromInput">
+              <i class="ui-icon" data-icon="Plus" aria-hidden="true"></i><span>添加</span>
+            </Button>
           </div>
           <div id="gateway-models" class="gw-models">
             <template v-if="store.gatewayModels.length">
