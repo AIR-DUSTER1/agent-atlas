@@ -13,6 +13,7 @@ import { readClientCss, readClientFiles, readClientSource } from "../helpers/cli
 import { messageBlockKey } from "../../src/client/stores/messages.js";
 import {
   assistantBlockContaining,
+  isClarifyNodeName,
   isContinuationRecord,
   lastAssistantBlock,
   mergeAdjacentAssistantBlocks,
@@ -230,6 +231,19 @@ test("澄清卡自带内边距，且渲染逻辑已迁到独立模块", async ()
   assert.match(card, /clarify-progress/);
   assert.match(card, /clarify-submit/);
   assert.match(parts, /renderClarificationCardImpl\(part, el\)/);
+});
+
+test("澄清卡存在时不再重复显示 clarify 节点徽章", async () => {
+  const events = await readClientFiles(["stream/events.ts"]);
+  const messages = await readClientFiles(["render/messages.ts"]);
+  assert.equal(isClarifyNodeName("clarify"), true);
+  assert.equal(isClarifyNodeName("subgraph/clarify"), true);
+  assert.equal(isClarifyNodeName("agent"), false);
+  assert.match(events, /isClarifyNodeName\(name\) \&\& ablock\.parts\.some/);
+  assert.match(messages, /旧版本会把 clarify 节点徽章和澄清卡同时写入 transcript/);
+  assert.match(events, /part\.p === "clarification"/);
+  assert.match(events, /removeClarifyNodeChips\(ablock\)/);
+  assert.match(events, /partEls\.delete\(part\)/);
 });
 
 test("澄清卡支持多题：提交按钮在全答完前禁用", async () => {

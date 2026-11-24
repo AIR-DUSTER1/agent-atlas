@@ -22,6 +22,7 @@ import {
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
 import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
+import { isClarifyNodeName } from "../modules/chat-flow.js";
 import { messageBlockKey, useMessagesStore } from "../stores/messages.js";
 import type { AssistantBlock, ChatBlock } from "../modules/types.js";
 
@@ -62,6 +63,15 @@ function hydrateAssistant(block: AssistantBlock, wrap: HTMLElement | null): void
   block._el = wrap ?? undefined;
   const body = wrap?.querySelector<HTMLElement>(".assistant-body");
   if (!body) return;
+  // 旧版本会把 clarify 节点徽章和澄清卡同时写入 transcript；渲染时自动迁移清理。
+  if (block.parts.some((part) => part.p === "clarification")) {
+    for (let index = block.parts.length - 1; index >= 0; index -= 1) {
+      const part = block.parts[index];
+      if (part?.p !== "node" || !isClarifyNodeName(part.name)) continue;
+      partEls.delete(part);
+      block.parts.splice(index, 1);
+    }
+  }
   // 重建前先撤销旧 part 引用，避免增量更新继续写入已脱离 DOM 的节点。
   for (const part of block.parts) partEls.delete(part);
   body.replaceChildren();

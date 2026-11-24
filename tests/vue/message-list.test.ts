@@ -12,6 +12,7 @@ import { createPinia, setActivePinia, type Pinia } from "pinia";
 import MessageListView from "../../src/client/views/chat/message-list-vue.vue";
 import { useMessagesStore, usageCaptionOf, type MessageBlockView } from "../../src/client/stores/messages.js";
 import { state } from "../../src/client/core/state.js";
+import { remountAssistantParts } from "../../src/client/render/messages.js";
 import type { AssistantBlock, ChatBlock } from "../../src/client/modules/types.js";
 
 let pinia: Pinia;
@@ -151,6 +152,32 @@ describe("消息流块骨架", () => {
     await vi.waitFor(() => {
       expect(document.querySelector("#ui-toast-region")?.textContent ?? "").toContain("还没有可复制的总结");
     });
+  });
+
+  it("历史缓存中的 clarify 节点徽章在澄清卡旁自动清理", async () => {
+    const block = {
+      t: "assistant",
+      parts: [
+        { p: "node", name: "clarify" },
+        {
+          p: "clarification",
+          req: {
+            type: "clarification",
+            questions: [{ id: "q1", question: "哪个城市？", options: [{ id: "A", label: "青岛" }], allowCustom: true }],
+          },
+          status: "answered",
+          answer: "青岛",
+        },
+      ],
+    } as unknown as AssistantBlock;
+    state.currentId = "s1";
+    state.blocks = { s1: [block] } as never;
+    await mountList();
+    await remountAssistantParts(block);
+    await flushPromises();
+    expect(block.parts).toHaveLength(1);
+    expect(document.querySelector("#messages .node-chip")).toBeNull();
+    expect(document.querySelector("#messages .clarification-card")).not.toBeNull();
   });
 
   it("store.refresh 原地复用块对象（避免 Vue 重建 vnode 打乱命令式内容）", () => {

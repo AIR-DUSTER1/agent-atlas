@@ -16,6 +16,7 @@ import { updateContextBar } from "../views/chat/composer-bar.js";
 import { setWorkflowPlan } from "../views/chat/workflow-plan.js";
 import { mountBlock, updateTurnCaption } from "../render/messages.js";
 import { refreshConclusionMedia, sanitizeEstateConclusionText } from "../render/conclusion-media.js";
+import { isClarifyNodeName } from "../modules/chat-flow.js";
 import {
   appendReasoning, mountPart, renderTextPart, scheduleTextRender, setPendingApproval,
   updateThinkingPart, updateToolCard, upsertModelRetry,
@@ -92,8 +93,20 @@ export function fillToolResult(
   if (visible) scrollBottom();
 }
 
+/** 澄清卡本身已经是该节点的人读呈现，不再重复保留静态节点徽章。 */
+function removeClarifyNodeChips(ablock: AssistantBlock): void {
+  for (let index = ablock.parts.length - 1; index >= 0; index -= 1) {
+    const part = ablock.parts[index];
+    if (part?.p !== "node" || !isClarifyNodeName(part.name)) continue;
+    partEls.get(part)?.el.remove();
+    partEls.delete(part);
+    ablock.parts.splice(index, 1);
+  }
+}
+
 export function addNodeChip(ablock: AssistantBlock, name: string, visible = true): void {
   sealStreamingParts(ablock);
+  if (isClarifyNodeName(name) && ablock.parts.some((part) => part.p === "clarification")) return;
   // 同一节点的思考卡已经承担了步骤标题，不再重复生成静态 chip。
   const thinking = [...ablock.parts].reverse().find(
     (part) => part.p === "thinking" && part.node === name && !part.nodeSeen
@@ -132,6 +145,7 @@ export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, 
   sealStreamingParts(ablock);
   if (payload.type === "approval") markAwaitingApproval(ablock, payload.toolName, true);
   if (payload.type === "clarification") {
+    removeClarifyNodeChips(ablock);
     const part: AssistantPart = { p: "clarification", req: payload, status: "pending" };
     ablock.parts.push(part);
     mountPart(ablock, part);
