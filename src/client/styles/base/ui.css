@@ -492,3 +492,17 @@ button > .ui-icon { pointer-events: none; }
 .ant-btn.ext-del {
   font-size: 0;
 }
+
+/* 图标按钮：antdv Button 的 inline-flex 会把文字节点和图标拆成两个元素，
+   用稳定的 inline-flex 宿主居中；否则 ＋ 会贴角、图标看起来错位。 */
+.ant-btn > .ui-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.ant-btn > .ui-icon + span,
+.ant-btn > span + .ui-icon {
+  margin-left: 4px;
+}
+

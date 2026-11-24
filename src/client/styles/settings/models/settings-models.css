@@ -146,3 +146,16 @@
 .provider-modal-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
 #provider-modal-status { min-height: 20px; margin-top: 8px; }
 
+
+/* 供应商列表头部的纯图标加号：按钮由类名固定 28px，但 antdv 默认
+   padding/min-width 会把它挤成椭圆并把字符推离中心。这里显式复位。 */
+.provider-add-btn.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  min-width: 28px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
