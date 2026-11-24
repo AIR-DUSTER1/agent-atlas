@@ -343,6 +343,10 @@ export async function handlePasswordLogin(req: IncomingMessage, res: ServerRespo
     return;
   }
 
+  /* c8 ignore start -- 以下到 handlePasswordLogin 结尾是 postgres 多用户分支：
+     需要真实 DATABASE_URL 才能进入（findUserByUsername / getAuthGateState 等都打库）。
+     tests/coverage/auth-routes.ts 在无 PG 环境跑，只覆盖文件模式与模式分流；
+     PG 路径由 tests/integration/postgres.test.ts（需要外部 PG）覆盖。 */
   let username = "";
   let password = "";
   try {
@@ -419,7 +423,21 @@ export async function handleAuthMe(req: IncomingMessage, res: ServerResponse): P
     writeJson(res, 401, { authenticated: false, error: "尚未登录", needsLogin: true });
     return;
   }
+  // 该路由注册在凭据纪元门禁之前（登录/改密流程需要在门禁外可达），
+  // 所以必须在这里自行校验纪元：否则改密后用旧设备 Cookie 调 /me 仍返回 200，
+  // 前端会认为仍处于登录态而跳过重登。
   if (!isPostgresBackend()) {
+    const lock = await getLocalLock();
+    if (lock) {
+      const sessionFresh = payload ? payload.iat >= lock.updatedAt : null;
+      const deviceFresh = deviceFromRequest(req)?.iat ?? null;
+      if (sessionFresh === false && (deviceFresh === null || deviceFresh < lock.updatedAt)) {
+        clearSessionCookieOnResponse(res);
+        clearDeviceCookieOnResponse(res);
+        writeJson(res, 401, { authenticated: false, error: "凭据已更新，请重新登录", needsLogin: true });
+        return;
+      }
+    }
     writeJson(res, 200, {
       userId,
       username: null,
@@ -481,6 +499,10 @@ export async function handleAuthPassword(req: IncomingMessage, res: ServerRespon
     await setLocalLock(newPassword);
     revokeSession(sessionFromRequest(req));
     clearSessionCookieOnResponse(res);
+    // 必须同时清设备 Cookie：设备身份能独立换取用户身份（见 userIdentityForRequest），
+    // 只清会话 Cookie 时，改密后本设备仍可用旧设备 Cookie 通过认证 —— 等于改密不生效。
+    // PG 分支同样清了两者，这里补齐对称性。
+    clearDeviceCookieOnResponse(res);
     writeAudit("local_lock_changed", { ip: ipTag(clientIp(req)) });
     writeJson(res, 200, { ok: true, enabled: true, reloginRequired: true });
     return;
@@ -523,6 +545,7 @@ export async function handleAuthPassword(req: IncomingMessage, res: ServerRespon
   clearDeviceCookieOnResponse(res);
   writeAudit("user_password_changed", { ip: ipTag(clientIp(req)), userId });
   writeJson(res, 200, { ok: true, reloginRequired: true });
+  /* c8 ignore stop */
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +558,31 @@ export async function handleAuthPassword(req: IncomingMessage, res: ServerRespon
  * 两者都没有（Bearer 脚本 / 本机回环）不在此校验，交由原有认证路径。
  */
 export async function assertFreshCredentials(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  if (!isPostgresBackend()) return true;
+  if (!isPostgresBackend()) {
+    // 文件模式：LocalLockState.updatedAt 就是天然的凭据纪元 —— 每次 setLocalLock
+    // （设置 / 改密）都会刷新它。改密后比它更早签发的会话与设备 Cookie 必须失效，
+    // 否则改密形同虚设：设备 Cookie 能独立换取身份（见 userIdentityForRequest），
+    // 光清当前响应的 Cookie 拦不住已经拿到副本的一方。
+    const lock = await getLocalLock();
+    if (!lock) return true; // 未设锁：没有可失效的凭据基线
+    const payload = verifySessionRequest(req);
+    const device = deviceFromRequest(req);
+    if (!payload && !device) return true; // Bearer / 回环脚本不在纪元门禁范围
+    const epoch = lock.updatedAt;
+    if (payload && payload.iat >= epoch) return true;
+    if (device && device.iat >= epoch) return true;
+    clearSessionCookieOnResponse(res);
+    clearDeviceCookieOnResponse(res);
+    writeAudit("auth_stale_credentials_rejected", { ip: ipTag(clientIp(req)), userId: "local" });
+    writeJson(res, 401, {
+      error: "凭据已更新，请重新登录",
+      authRequired: true,
+      needsLogin: true,
+    });
+    return false;
+  }
+  /* c8 ignore start -- postgres 凭据纪元门禁（文件模式见上面分支）：
+     getAuthGateState 打库读 credential_epoch，无 PG 环境不可达。 */
   const identity = userIdentityForRequest(req);
   const payload = verifySessionRequest(req);
   const userId = identity?.userId ?? payload?.userId;
@@ -556,6 +603,7 @@ export async function assertFreshCredentials(req: IncomingMessage, res: ServerRe
   });
   writeAudit("auth_stale_credentials_rejected", { ip: ipTag(clientIp(req)), userId });
   return false;
+  /* c8 ignore stop */
 }
 
 /** must_change_password 门禁：除 /api/auth/* 外全部 403。 */
@@ -563,6 +611,8 @@ export async function assertPasswordChangeAllowed(
   req: IncomingMessage, res: ServerResponse, pathname: string,
 ): Promise<boolean> {
   if (!isPostgresBackend() || pathname.startsWith("/api/auth/")) return true;
+  /* c8 ignore start -- 首次登录强制改密门禁只在 postgres 多用户模式生效，
+     需要真实库读 must_change_password；无 PG 环境不可达。 */
   const identity = userIdentityForRequest(req);
   const payload = verifySessionRequest(req);
   const userId = identity?.userId ?? payload?.userId;
@@ -574,6 +624,7 @@ export async function assertPasswordChangeAllowed(
     code: "password_change_required",
   });
   return false;
+  /* c8 ignore stop */
 }
 
 // ---------------------------------------------------------------------------
