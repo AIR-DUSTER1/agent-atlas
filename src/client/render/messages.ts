@@ -22,7 +22,8 @@ import {
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
 import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
-import { useMessagesStore } from "../stores/messages.js";
+import { isClarifyNodeName } from "../modules/chat-flow.js";
+import { messageBlockKey, useMessagesStore } from "../stores/messages.js";
 import type { AssistantBlock, ChatBlock } from "../modules/types.js";
 
 /* ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ function wrapOf(block: ChatBlock): HTMLElement | null {
   if (!sid) return null;
   const index = transcript(sid).indexOf(block);
   if (index < 0) return null;
-  return window.__agentatlasBlockBodyRegistry?.wrap?.(`${block.t}-${index}`) ?? null;
+  return window.__agentatlasBlockBodyRegistry?.wrap?.(messageBlockKey(sid, block.t, index)) ?? null;
 }
 
 /** 接管一个助手块：把已有 parts 挂进它的 .assistant-body。 */
@@ -62,11 +63,36 @@ function hydrateAssistant(block: AssistantBlock, wrap: HTMLElement | null): void
   block._el = wrap ?? undefined;
   const body = wrap?.querySelector<HTMLElement>(".assistant-body");
   if (!body) return;
+  // 旧版本会把 clarify 节点徽章和澄清卡同时写入 transcript；渲染时自动迁移清理。
+  if (block.parts.some((part) => part.p === "clarification")) {
+    for (let index = block.parts.length - 1; index >= 0; index -= 1) {
+      const part = block.parts[index];
+      if (part?.p !== "node" || !isClarifyNodeName(part.name)) continue;
+      partEls.delete(part);
+      block.parts.splice(index, 1);
+    }
+  }
+  // 重建前先撤销旧 part 引用，避免增量更新继续写入已脱离 DOM 的节点。
+  for (const part of block.parts) partEls.delete(part);
+  body.replaceChildren();
+  block._typing = null;
   blockBodies.set(block, body);
   for (const part of block.parts) mountPart(block, part);
   if (!block.parts.length) mountTyping(block);
   if (block._usage) updateTurnCaption(block);
   refreshAssistantCopy(block);
+}
+
+/**
+ * 续跑前强制把助手块重新绑定到当前 DOM。
+ *
+ * 真实事故：审批续跑的 token 与 usage 都已到达，localStorage 也有最终回答，
+ * 但 Vue 重渲染后 partEls/blockBodies 仍指向旧节点，界面只更新用量不显示回答。
+ * 这里以 transcript 中的 part 数据为唯一事实源重建一次，保证后续增量命中新 DOM。
+ */
+export async function remountAssistantParts(block: AssistantBlock): Promise<void> {
+  const wrap = await waitForWrap(block);
+  hydrateAssistant(block, wrap);
 }
 
 /**

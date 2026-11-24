@@ -11,6 +11,7 @@ import { promises as fsp } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeSimpleXlsx, type XlsxCellValue, type XlsxHyperlink } from "./xlsx-lite.js";
+import { buildListingUrl } from "../shared/estate-listing-url.js";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_EXPORT_DIR = join(MODULE_DIR, "..", "..", ".setting", "estate-exports");
@@ -42,6 +43,7 @@ export interface EstateWorkbookListing {
   vrUrl?: string;
   detailUrl?: string;
   url?: string;
+  rentCode?: string;
 }
 
 export interface EstateWorkbookContext {
@@ -80,6 +82,8 @@ function timestamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
+
+
 
 function safeFilePart(value: string): string {
   return value.replace(/[\\/:*?"<>|\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 24);
@@ -131,7 +135,7 @@ export async function writeEstateWorkbook(
   const dataRows: XlsxCellValue[][] = rows.map((row, index) => {
     const title = text(row.title) || [row.community, row.layout, row.area].filter(Boolean).join(" · ") || `房源 ${index + 1}`;
     const vrUrl = safeHttpsUrl(row.vrUrl || row.vr);
-    const detailUrl = safeHttpsUrl(row.detailUrl || row.url);
+    const detailUrl = safeHttpsUrl(row.detailUrl || row.url) || buildListingUrl(context.city, row.houseId, context.mode, row.rentCode) || "";
     return [
       index + 1,
       title,
@@ -144,7 +148,7 @@ export async function writeEstateWorkbook(
       text(row.decoration, 80),
       text(row.address || row.addressText),
       text(row.matchReason, MAX_REASON_LENGTH),
-      vrUrl ? "打开 VR" : row.hasVr ? "有 VR 标记（入口未返回）" : "",
+      vrUrl ? "打开 VR" : "",
       detailUrl ? "查看房源" : "",
     ];
   });
@@ -152,7 +156,7 @@ export async function writeEstateWorkbook(
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     const vrUrl = safeHttpsUrl(row.vrUrl || row.vr);
-    const detailUrl = safeHttpsUrl(row.detailUrl || row.url);
+    const detailUrl = safeHttpsUrl(row.detailUrl || row.url) || buildListingUrl(context.city, row.houseId, context.mode, row.rentCode) || "";
     if (vrUrl) hyperlinks.push({ cell: `L${rowNumber}`, target: vrUrl, display: "打开 VR" });
     if (detailUrl) hyperlinks.push({ cell: `M${rowNumber}`, target: detailUrl, display: "查看房源" });
   });

@@ -224,7 +224,8 @@ test("通用与房产 profile 注入不同的分析 / 反思领域规则", () =>
   assert.match(estateProfile.systemPrompt, /houseType 区分 second\/new/);
   assert.match(estateProfile.systemPrompt, /一次最多展示 12 套/);
   assert.match(estateProfile.systemPrompt, /house_export/);
-  assert.match(estateProfile.reviewerGuidance ?? "", /入口未返回/);
+  assert.match(estateProfile.reviewerGuidance ?? "", /rent_code/);
+  assert.doesNotMatch(estateProfile.reviewerGuidance ?? "", /入口未返回/);
   assert.match(estateProfile.analystGuidance ?? "", /houseType/);
   assert.equal(estateProfile.contextPolicy?.maxToolResultChars, 20_000);
 });

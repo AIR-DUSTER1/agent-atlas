@@ -13,8 +13,9 @@
 import { $, autoGrowImpl, chatScroll, inputEl, sendBtn, stopBtn } from "../core/dom.js";
 import { authFetch } from "../core/api.js";
 import { saveLocal, state, transcript } from "../core/state.js";
+import { markRaw } from "vue";
 import { uiAlert } from "../ui/dialog.js";
-import { mountBlock, refreshAssistantCopy, renderAll } from "../render/messages.js";
+import { mountBlock, refreshAssistantCopy, remountAssistantParts, renderAll } from "../render/messages.js";
 import { closeComposerMenu } from "../composer/menu.js";
 import { renderAttachChips } from "../views/chat/attachments.js";
 import { updateContextBar } from "../views/chat/composer-bar.js";
@@ -133,6 +134,10 @@ export async function send(): Promise<void> {
     if (titleEl) titleEl.textContent = s.title;
     renderSessions();
   }
+  // 新块挂载与后续 SSE 是异步并发的。发请求前显式等待并重新绑定 DOM，
+  // 否则首轮 usage 触发的 Vue patch 可能让 partEls 指向旧节点。
+  await remountAssistantParts(ablock);
+  mountTyping(ablock);
   await streamTurn("/api/chat", {
     sessionId: sid,
     message,
@@ -149,13 +154,16 @@ export async function runResume(
   let ablock = targetBlock;
   if (ablock) {
     // 审批 / 澄清恢复沿用原助手块：一个完整回合始终只有一个头像。
-    mountTyping(ablock);
   } else {
     const created: AssistantBlock = { t: "assistant", parts: [] };
     transcript(sid).push(created);
     mountBlock(created);
     ablock = created;
   }
+  // 续跑前以 part 数据重建当前 DOM 引用：审批卡会触发一次局部重绘，
+  // 若不重绑，新 token 会写入 state/localStorage 却不进入用户可见正文。
+  await remountAssistantParts(ablock);
+  mountTyping(ablock);
   // 审批/澄清恢复：图状态里已有 continuousMode 驱动回炉循环，这里重传只为
   // 让服务端延续放宽后的超步保险丝；标记按会话持久化，刷新后依然拿得到
   await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousTurns[sid] ? { continuous: true } : {}), ...payload }, ablock, sid);
@@ -169,10 +177,11 @@ async function streamTurn(
   // （让审批按钮能立刻响应），后续 resume 会登记**新的**流对象。收尾时按身份
   // 比较，绝不能因为 ablock 相同就把用户新发起的那一轮一起删掉。
   const stream = { ctrl, sid, ablock };
-  state.streams[sid] = stream;
+  state.streams[sid] = markRaw(stream);
   syncComposerState(sid);
   renderSessions();
   const wasNear = nearBottomImpl();
+  let sawDone = false;
 
   try {
     const res = await authFetch(url, {
@@ -185,7 +194,19 @@ async function streamTurn(
       const data = await res.json().catch(() => ({})) as { error?: string };
       throw new Error(data.error || `HTTP ${res.status}`);
     }
-    await consumeSSE(res, (ev) => handleEvent(ev, ablock, sid));
+    await consumeSSE(res, (ev) => {
+      if (ev.type === "done") sawDone = true;
+      handleEvent(ev, ablock, sid);
+    });
+    if (!sawDone && !ctrl.signal.aborted) {
+      throw new Error("连接提前结束，未收到本轮完成信号");
+    }
+    if (sawDone) {
+      ensureVisibleResult(ablock, sid);
+      // usage 可能在本帧前触发过 Vue patch；以最终 part 状态再重建一次，
+      // 确保流式光标、工具状态和最终回答与 state 完全一致。
+      await remountAssistantParts(ablock);
+    }
   } catch (err) {
     const error = err as Error;
     if (error.name !== "AbortError") {
@@ -196,6 +217,31 @@ async function streamTurn(
     finalize(ablock, sid, stream);
     if (sid === state.currentId && wasNear) chatScroll.scrollTop = chatScroll.scrollHeight;
   }
+}
+
+/** 流已结束却只有工具/思考时补一条可读结果，避免界面永久停在光标或空白。 */
+function ensureVisibleResult(ablock: AssistantBlock, sid: string): void {
+  const visible = ablock.parts.some((part) =>
+    (part.p === "text" && Boolean(part.text.trim()))
+    || part.p === "approval"
+    || part.p === "clarification"
+  );
+  if (visible) return;
+  const latestTool = [...ablock.parts].reverse().find((part) => part.p === "tool" && part.result);
+  let fallback = "本轮没有生成可显示的回答，请重试；上方工具结果仍可展开查看。";
+  if (latestTool?.p === "tool") {
+    try {
+      const payload = JSON.parse(latestTool.result?.content || "") as { authRequired?: boolean; error?: string };
+      if (payload.authRequired) {
+        fallback = "当前操作需要先完成登录。请在上方工具卡打开官方登录页，登录成功后回复「继续」。";
+      } else if (payload.error) {
+        fallback = `本轮执行未完成：${payload.error}`;
+      }
+    } catch {
+      if (latestTool.result?.isError) fallback = `本轮执行未完成：${latestTool.result.content.slice(0, 300)}`;
+    }
+  }
+  handleEvent({ type: "ai_message", content: fallback, node: "agent" }, ablock, sid);
 }
 
 function nearBottomImpl(): boolean {
@@ -231,7 +277,7 @@ export function finalize(
   // interrupt 之后本轮的流已被主动解除，用户可能已经发起新一轮（复用了同一个
   // ablock）。只有「登记的还是我这一条」才删，否则会把新一轮的流删掉，
   // 让它永远收不回来（按钮卡在停止态、也无法再发消息）。
-  if (sid && state.streams[sid] && (!stream || state.streams[sid] === stream)) {
+  if (sid && state.streams[sid] && (!stream || state.streams[sid].ctrl === stream.ctrl)) {
     delete state.streams[sid];
   }
   if (sid === state.currentId) syncComposerState(sid);

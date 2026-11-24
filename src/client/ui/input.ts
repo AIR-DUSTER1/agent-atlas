@@ -4,7 +4,7 @@
  * 输入控件只生成可访问 DOM，不读全局 state；id / name / autocomplete 必须由
  * 调用方显式传入，方便 field 关联 label 与错误说明。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 
 export interface CommonInputOptions {
   id: string;

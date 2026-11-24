@@ -3,7 +3,7 @@
  * static.ts — 前端静态文件分发（白名单式防目录穿越）
  * ============================================================
  * 只服务 public/ 下的单层文件名（`\w - .` 白名单）与已登记的一层子目录
- * （assets/ vendor/ styles/）；全部 no-store，页面和脚本始终取最新构建。
+ * （assets/ styles/）；全部 no-store，页面和脚本始终取最新构建。
  *
  * M4 4.6 收紧：1:1 过渡树（core/ render/ stream/ views/ … 的逐文件副本）已退役，
  * 白名单同步收缩到真正还会产出的三个目录。少放行一个目录，就少一条潜在的
@@ -31,10 +31,10 @@ const MIME: Record<string, string> = {
 /**
  * 允许的一层子目录（字面量白名单；不含用户可控段）。
  * - assets：Vite 打包产物（assets/app.js + 动态增强 chunk）
- * - vendor：import map 指向的自包含库（chart/icons/marked/dompurify/highlight）
+ * - vendor：已退役，禁止重新放行
  * - styles：拷贝过来的样式表
  */
-const ALLOWED_DIRS = new Set(["assets", "vendor", "styles"]);
+const ALLOWED_DIRS = new Set(["assets", "styles"]);
 
 /** Windows 路径大小写不敏感；relative 结果越界时一律拒绝。 */
 function isInside(root: string, target: string): boolean {

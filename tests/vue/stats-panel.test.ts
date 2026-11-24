@@ -11,7 +11,7 @@ import StatsPanelVue from "../../src/client/views/settings/stats/stats-panel-vue
 import { useStatsStore } from "../../src/client/stores/settings/stats/stats.js";
 import type { StatsRange, StatsResult } from "../../src/client/modules/types-api.js";
 
-vi.mock("../../src/client/vendor/chart.js", () => ({
+vi.mock("chart.js", () => ({
   Chart: class {
     resize(): void {}
     destroy(): void {}

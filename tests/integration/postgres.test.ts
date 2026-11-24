@@ -1,5 +1,5 @@
 /**
- * postgres.test.ts — 多租户 PostgreSQL RLS 集成测试（需要真实数据库）
+ * postgres.test.ts — 多用户 PostgreSQL RLS 集成测试（需要真实数据库）
  * ============================================================
  * 运行：
  *   TEST_DATABASE_URL=postgres://app_user:...@host/db \
@@ -21,7 +21,7 @@ const previous = {
   DATABASE_ADMIN_URL: process.env.DATABASE_ADMIN_URL,
 };
 
-test("PostgreSQL userId + RLS：跨 owner 查询不可见，事务变量不串租户", { skip: !enabled }, async () => {
+test("PostgreSQL userId + RLS：跨 userId 查询不可见，事务变量不串用户", { skip: !enabled }, async () => {
   process.env.STATE_BACKEND = "postgres";
   process.env.DATABASE_URL = databaseUrl;
   process.env.DATABASE_ADMIN_URL = adminUrl;
@@ -49,6 +49,32 @@ test("PostgreSQL userId + RLS：跨 owner 查询不可见，事务变量不串�
     if (created.length) {
       await querySystem("DELETE FROM users WHERE id = ANY($1::uuid[])", [created]).catch(() => {});
     }
+    await closePostgres();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+test("PostgreSQL 用户管理：弱密码被拒绝，禁用状态可读", { skip: !enabled }, async () => {
+  process.env.STATE_BACKEND = "postgres";
+  process.env.DATABASE_URL = databaseUrl;
+  process.env.DATABASE_ADMIN_URL = adminUrl;
+  const { closePostgres, initializePostgres, querySystem } = await import("../../src/server/persistence/postgres.js");
+  const { createManagedUser, findUserByUsername, setUserStatus } = await import("../../src/server/persistence/accounts.js");
+  const username = `weak-${randomUUID().slice(0, 8)}`;
+  try {
+    await initializePostgres();
+    await assert.rejects(
+      () => createManagedUser({ username, displayName: "弱密码用户", role: "member", password: "short" }),
+      /密码至少/,
+    );
+    const created = await createManagedUser({ username, displayName: "禁用用户", role: "member", password: "valid-password-123" });
+    assert.equal((await findUserByUsername(username))?.status, "active");
+    await setUserStatus(created.userId, "disabled");
+    assert.equal((await findUserByUsername(username))?.status, "disabled");
+  } finally {
+    await querySystem("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     await closePostgres();
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

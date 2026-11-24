@@ -9,7 +9,10 @@
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="LangGraph.js" src="https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.18-F59E0B">
+  <img alt="Hono" src="https://img.shields.io/badge/Hono-4.x-E36002">
+  <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3.x-42B883">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-6.x-646CFF">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.19-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -26,7 +29,7 @@
 ## 项目简介
 
 agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 Agent 工作台，提供 Web、CLI 和 Electron 三种入口。
-> **技术栈换轨公告（0.10 起）**：agentatlas 正按 `.plans/development-docs/framework-migration-plan.md` 渐进迁移到 **Hono（后端路由）+ Vue 3 + Pinia + antdv-next（前端）+ Vite（构建链）**。M0 规则解除已完成；迁移完成前对外行为、HTTP/SSE 契约与 0.9 完全等价。无框架原生实现（node:http + 原生 TS）的终态归档在 `legacy/v0.9-native` 分支（版本冻结 0.9.x，仅安全修复）。迁移进度如实更新：**M0 ✅ → M1 ⏳ → M2 ⏳ → M3 ⏳ → M4 ⏳ → M5 ⏳**。
+> **框架化迁移状态**：当前 `dev` / `main` 已完成 tracked 代码迁移：**Hono（HTTP、SSE 与中间件）+ Vue 3 + Pinia + antdv-next（前端）+ Vite（构建链）**；请求校验走 `zValidator` 兼容层，SSE 走 Hono `streamSSE`，vendor wrapper 与旧构建链已退役。真实 PostgreSQL 验收仍需独立数据库环境。无框架原生实现归档在 `legacy/v0.9-native`，冻结在 0.9.x，仅接受安全修复。当前产品版本仍为 `0.9.0-beta.19`，待发布门禁完成后进入 0.10 版本线。
 
 它面向需要长期使用、可审计、可扩展 Agent 能力的开发者与专业用户：既可以在不配置模型密钥的情况下体验完整交互，也可以接入 OpenAI、Anthropic、Gemini 兼容网关、外部 MCP Server、RAG 和 HTTP 记忆服务。
 
@@ -109,7 +112,6 @@ npm run models
 5. 鼠标移到消息上会显示纯图标复制按钮，可复制用户输入、AI 总结或压缩摘要；操作区与用量保持同一行，思考过程使用无边框箭头展开，流式阶段显示「思考中」状态，工具卡直接显示原始工具名。
 6. 打开左下角设置，管理模型、插件、子代理、记忆与个性化、技能、MCP 与使用统计。
 7. 房产 Agent 首次使用时，在「设置 → 插件 → 找房数据源」手动打开一次官方登录页；扫码成功后点页面 Key 右侧的「复制」，再点「从剪贴板读取」并保存。登录链接与 CLI 共用宿主真实提供的 `BEIKE_SOURCE`，未设置时回退 `workbuddy`；服务端会用官方 MCP `tools/list` 做业务校验。鉴权失败会展开登录卡并给出下一步说明，不会静默中断。贝壳目前会按调用方 User-Agent 限制部分 Key：WorkBuddy 签发的 Key 需在 WorkBuddy 内使用，不能直接拿到独立 agentatlas 复用。
-8. 房产结论下方会生成“房源 / 户型图 / 地理位置”对比表：房产搜索支持把「附近某小区 3 公里内」拆成 `near` + `radiusKm` 的稳定查询，模型若仍把半径写进 query 也会自动恢复锚点；首轮有效候选不足 3 条时会在同一锚点和半径内补查变体；表格房源会按最终回答实际提到的面积与租金优先选取，一次最多展示 12 套；点击户型图或位置地图会打开预览弹窗，支持按钮、滚轮和键盘缩放、拖动平移与 Esc 关闭；搜索亮点标记「有VR」但 `material/detail` 未返回真实 VR URL 时，表格只标注“有 VR 标记 · 专属入口未返回”，不再按 houseId 拼 `vr.ke.com` 旧模板（该地址会跳到如视营销首页）；只有官方返回的 HTTPS 真实 VR 地址才显示“VR 看房”；每行按真实房源匹配户型图、VR 看房入口、租金、面积、坐标和地图入口，内部房源编号不会显示，未被选中的图片也不会以“其他户型图”混排；当合适候选超过 12 套时，`house_search` 单次结果会自动生成 Excel，跨多次搜索则由 Agent 调用 `house_export` 汇总 13–100 套；结论区提供受认证保护的 `.xlsx` 下载入口，便于继续筛选比较。即使反思阶段继续追加思考，表格也会固定在最后一条正文之后。房产只读查询遇到临时服务故障会先分析错误类型，只对可恢复故障自动尝试，单次调用最多 3 次，仍失败时阻止原样重放并说明缺口。连续调用会折叠为一个“连续工具调用”箭头组，组内每次房产工具调用仍是独立折叠卡片，不再出现“房产查询”套“房产查询”的双层展示；地图由 `MAP_PROVIDER` 选择高德/腾讯/百度/OSM/自定义提供方，全程不创建 iframe：高德、腾讯、百度分别配置 `AMAP_WEB_SERVICE_KEY`、`TENCENT_MAP_KEY`、`BAIDU_MAP_AK` 后，由服务端代理各家官方静态地图，Key 不下发浏览器；缺 Key 或上游失败时自动回退对应提供方的原生瓦片。底图失败时仍保留坐标和地图入口。
 9. 求职 Agent 首次使用时，在「设置 → 插件 → 求职岗位」检查浏览器并登录 BOSS直聘 / 智联招聘 / 前程无忧 / 猎聘（采集前需确认岗位方向、城市、期望月薪与工作年限四项）。**采集前会自动做登录预检**：BOSS直聘与智联招聘未登录时直接中止并提示去登录，因为未登录时薪资会全部为空、排序不可信；确需先看大概可显式跳过预检。各平台登录方式不同——BOSS 扫码，智联只有手机号 + 短信验证码（页面上没有二维码）。
 10. 采集结果会先做相关性过滤与 JD 清洗再入库：讲师、售前、产品经理等非目标岗位即使命中关键词也会被剔除（**按目标方向自适应**，你搜「产品经理」时该词不再生效），所以任何职业方向都能用；JD 尾部的「去App 与BOSS随时沟通」「工作地址」「相似职位」等页面文案会被清掉，避免抄进招呼语。同义方向（Agent开发 / 智能体开发 / 大模型开发）归并为同一方向，只占一页 Excel。
 11. 交付的 Excel 含「招呼语」「职位描述」「岗位ID」列：职位描述是清洗后的 JD 全文（行高固定，文本完整保留），岗位ID 是招呼语回写的稳定定位键。招呼语闭环：先由 Agent 生成画像模板 `profile.md`（在求职数据目录，请补全真实经历与量化成果），再导出待写清单并逐条撰写 ≤200 字开场白，写回后进入 Excel 的「招呼语」列。导出时会自动合并同一公司在多个平台发布的重复岗位、有 JD 的排前面；写回时会检查「混入页面文案 / 敬语开头 / 写薪资期望 / 过短」四类质量问题并点名提示。招呼语与投递状态、备注一样在再次采集时增量保留，写回操作执行前会请求审批。
@@ -127,8 +129,9 @@ npm run models
 
 ```mermaid
 flowchart LR
-    UI["Web / CLI / Desktop"] --> API["HTTP API + SSE"]
-    API --> WF["LangGraph Agent Workflow"]
+    UI["Vue 3 + Pinia Web / CLI / Desktop"] --> APP["Hono App + Middleware"]
+    APP --> ROUTES["领域路由 + streamSSE"]
+    ROUTES --> WF["LangGraph Agent Workflow"]
     WF --> PROFILE["Agent Profile 边界"]
     PROFILE --> GENERAL["通用 Agent"]
     PROFILE --> ESTATE["房产 Agent"]
@@ -138,8 +141,8 @@ flowchart LR
     TOOLS --> DEV["文件 / 终端 / 浏览器 / 电脑控制"]
     TOOLS --> EXT["RAG / MCP / 技能 / 自定义命令"]
     WF --> MODEL["多供应商模型层"]
-    API --> DATA["会话 / 个性化 / 记忆 / 审计 / 统计"]
-    DATA --> STORE[("本地文件或 Docker 数据卷")]
+    ROUTES --> DATA["会话 / 个性化 / 记忆 / 审计 / 统计"]
+    DATA --> STORE[("本地文件、PostgreSQL 或 Docker 数据卷")]
 ```
 
 设计原则：
@@ -147,18 +150,18 @@ flowchart LR
 - Agent Profile 决定可调用工具和审批项，通用 Agent 与业务 Agent 不共享越界能力。
 - 只读工具直接执行，会改变外部状态的工具必须经过权限策略或人工审批。
 - 模型、工具、审批结果和关键副作用进入会话回放、journal 或审计链路。
-- 服务端保持零 Web 框架，核心运行只依赖 Node.js、LangGraph 与文件型持久化。
+- Hono 统一承载路由、SSE 与认证、安全头、限流、请求上下文等中间件；领域层不依赖 Hono 或 Vue。
 
 ## 技术栈
 
 | 层级 | 技术选型 |
 |---|---|
 | Agent Runtime | LangGraph.js、TypeScript strict、NodeNext |
-| Service | `node:http`、SSE、零 Web 框架 |
-| Frontend | 原生 TypeScript、按职责拆分的 CSS、无 UI 框架 |
+| Service | Hono、`@hono/node-server`、`zValidator` 兼容请求校验、`streamSSE` |
+| Frontend | Vue 3 SFC、Pinia、antdv-next、Vite；保留现有 CSS token 体系 |
 | Desktop | Electron 桌面壳 |
-| Storage | JSONL journal / checkpoint、长期记忆目录、加密配置、备份 |
-| Test | Node Test、Playwright、故障注入、安全与负载测试 |
+| Storage | JSONL journal / checkpoint、长期记忆目录、加密配置、PostgreSQL 多用户、备份 |
+| Test | Node Test、Vitest、Playwright、故障注入、安全与负载测试 |
 | Deploy | Docker Compose、TLS 反向代理、Prometheus 指标 |
 
 ## 项目结构
@@ -168,23 +171,34 @@ src/
   agent/          LangGraph 图、Agent Profile、权限与工具边界
     workflow.ts   稳定的工作流公共门面
     workflow/     状态、提示词、解析、运行时、节点、边与图装配
-  client/         Web 前端源码
-  server/         HTTP / SSE、配置、会话、持久化与运维接口
+  client/
+    views/       页面目录；每页 SFC、legacy 桥与 Vue 挂载模块同目录
+    stores/      Pinia 状态切片
+    modules/     协议类型与无框架纯函数
+    core/        API、DOM 与共享状态兼容层
+    stream/      SSE 解析、消息事件与会话回合
+    render/      Markdown、工具卡与业务增强渲染
+    ui/          Vue/legacy 共享交互原语
+    styles/      token、页面样式与设置分区样式
+  server/
+    index.ts     进程启动、监听与优雅退出
+    app.ts       Hono 应用组装、中间件栈与路由挂载
+    routes/      按领域拆分的 HTTP 端点
+    persistence/ journal、checkpoint、迁移与多用户存储
+    security/    认证、设备身份、限流与密码学
+    observability/ 指标、日志、诊断与追踪
   tools-*.ts      各领域工具集
   llm.ts          多协议模型工厂
   config.ts       运行时配置
   cli.ts          CLI 入口
 
-  client/pages/    构建期 HTML 片段，入口只保留 include 清单
-  client/styles/   chat-*.css / settings-*.css 按功能分层
-
 desktop/          Electron 主进程与 preload
 docs/             功能介绍、部署、记忆、安全与运维文档
-tests/            单元、集成、安全、E2E、故障与负载测试
+tests/            单元、Vue 组件、集成、安全、E2E、故障与负载测试
 scripts/          构建、检查、备份与发布辅助脚本
 ```
 
-维护边界：`src/client/index.html` 只保留根壳和 `@include` 清单，`npm run build:client` 由 `scripts/compose-html.ts` 合成完整页面；`src/agent/workflow.ts` 只保留稳定导出，具体节点在 `src/agent/workflow/nodes/`。内部门禁会阻止这些入口重新长成单体。
+维护边界：`src/client/index.html` 是唯一 Vite 入口，页面片段与 `scripts/compose-html.ts` 已退役；`npm run build:client` 由 `scripts/build-web.ts` 负责注入构建身份、校验 CSP、调用 Vite 并复制分层样式。`src/client/views/` 根目录不得放文件，新页面必须使用 Vue SFC；`src/server/app.ts` 负责 Hono 路由组装，`src/server/index.ts` 主要负责启动、监听与优雅退出。`src/agent/workflow.ts` 继续作为稳定公共门面，具体节点在 `src/agent/workflow/nodes/`。
 
 ## 访问与设备隔离
 
@@ -307,15 +321,15 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 ## 版本与发布
 
-当前为 `0.9.0-beta.18` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
+当前为 `0.9.0-beta.19` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
 
 ```text
-0.9.0-beta.18 · af96bee
+0.9.0-beta.19 · 构建标识由当前提交自动生成
 ```
 
 - 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
 - `0.7.x` 是同一功能线的小功能点/修复；`0.x.0` 是新的大功能组，可能包含破坏性调整；`x.0.0` 才是正式主版本。
-- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.18` 形式。
+- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.19` 形式。
 - `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
 - 生产镜像使用不可变 digest，不使用 `latest`。
 - 版本规则由 `npm run version:check` 与 `npm run version:main-guard` 执行；开发规范维护在 `.plans/development-docs/versioning.md`（不提交）。
@@ -323,11 +337,12 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 ## 开发与测试
 
 ```bash
-npm run typecheck       # 后端、前端与桌面端三套 TypeScript 检查
-npm test                # 单元、集成、安全、故障与负载测试
+npm run typecheck       # 后端、Vue 前端与桌面端三套 TypeScript 检查
+npm test                # Node Test 单元、集成、安全、故障与负载测试
+npm run test:vue        # Vitest + Vue Test Utils 组件测试
 npm run e2e             # Playwright 浏览器主流程
 npm run browser:smoke   # 当前环境 Chrome 的多上下文、Cookie 隔离与持久化 smoke
-npm run build:client    # 构建前端浏览器产物
+npm run build:client    # Vite 构建浏览器产物并执行 CSP/资产自检
 npm run build:desktop   # 构建 Electron 主进程、启动原语与 preload
 npm run desktop         # 启动桌面端；自动处理端口冲突与退出清理
 npm run audit:prod      # 检查生产依赖高危漏洞

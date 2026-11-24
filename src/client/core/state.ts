@@ -11,8 +11,10 @@
  *    不存配置与密钥（那些在服务端）。
  */
 
+import { defineStore } from "pinia";
 import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
+import { pinia } from "../stores/pinia.js";
 
 export const LS_TRANSCRIPTS = "lg-agent-transcripts";
 export const LS_SESSIONS = "lg-agent-sessions-meta";
@@ -24,31 +26,35 @@ export const LS_THEME = "lg-agent-theme";
 export const LS_CONTINUOUS_TURNS = "lg-agent-continuous-turns";
 
 
-export const state: AppState = {
-  config: null,        // { mock, model, baseURL, contextWindow, providers, demos }
-  sessions: [],        // 会话列表（服务端内存态 + 本地残留标记）
-  projects: [],        // [{id, name, type:"local"|"cloud", path, url?, builtin?}]
-  externalAgents: [],  // 第三方接入的 Agent
-  rag: null,           // 外部 RAG 状态
-  estate: null,        // 贝壳 CLI 状态
-  job: null,           // 求职 Agent 浏览器 / 数据目录 / 最近清单状态
-  browser: null,       // Browser Use 浏览器可执行文件与活动会话状态
-  plugins: null,       // 内置插件启停状态（RAG / 找房 / Browser Use / Computer Use）
-  subagents: null,     // 设置页管理的运行时子代理
-  routing: null,       // 路由配置快照（设置页「路由决策」分区懒加载）
-  projectView: "all",  // "all" | "__none__" | projectId（侧栏过滤 + 新建会话归属）
-  projCollapsed: [],   // 侧栏分组折叠状态：被折叠的项目 id（ORPHAN_GROUP_KEY = 未归属组）
+const createInitialState = (): AppState => ({
+  config: null,
+  sessions: [],
+  projects: [],
+  externalAgents: [],
+  rag: null,
+  estate: null,
+  job: null,
+  browser: null,
+  plugins: null,
+  subagents: null,
+  routing: null,
+  projectView: "all",
+  projCollapsed: [],
   currentId: null,
-  blocks: {},          // sessionId -> [block]
-  usage: {},           // sessionId -> 本轮 usage
-  workflowPlans: {},   // sessionId -> 当前/最近一轮自主执行流程
-  streams: {},         // sessionId -> 正在流式的回合（不同会话可并行）
-  compacting: {},      // sessionId -> /压缩上下文是否进行中（仅互斥同一会话）
+  blocks: {},
+  usage: {},
+  workflowPlans: {},
+  streams: {},
+  compacting: {},
   settingsView: "models",
-  pendingFiles: [],    // 输入框待发送附件
-  continuousTurns: {}, // 会话 id → 当前一轮是否为 /goal 连续回合（resume 重传 continuous 用）
-  goalDraft: false,    // Goal 徽标模式：正文只放任务文本，发送层据此带 continuous（composer 草稿态）
-};
+  pendingFiles: [],
+  continuousTurns: {},
+  goalDraft: false,
+});
+
+/** 终态状态源：legacy 业务继续 import state，但底层已是共享 Pinia store。 */
+export const useAppStateStore = defineStore("appState", { state: createInitialState });
+export const state = useAppStateStore(pinia);
 
 /* ---------------------------------------------------------------------------
  * 流式渲染期间的 DOM 引用缓存（内存态，不参与持久化）

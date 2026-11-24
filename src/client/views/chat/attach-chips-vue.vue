@@ -22,18 +22,20 @@ function remove(key: string): void {
 <template>
   <AntdvProvider>
   <div id="attach-chips" class="attach-chips" :class="{ hidden: !store.visible }">
-    <span
+    <div
       v-for="file in store.files"
       :key="refKey(file)"
       class="attach-chip"
       :class="{ 'has-thumb': file.kind === 'upload' && Boolean(file.preview) }"
     >
       <img v-if="file.kind === 'upload' && file.preview" class="thumb" alt="" :src="file.preview" />
-      <template v-else>📎</template>
+      <i v-else class="ui-icon attach-file-icon" data-icon="Paperclip" aria-hidden="true"></i>
       <span class="c-name">{{ file.name }}</span>
       <span class="c-src">{{ store.sourceLabel(file) }}</span>
-      <Button class="c-del" title="移除" @click="remove(refKey(file))">✕</Button>
-    </span>
+      <Button class="c-del" :aria-label="`移除附件 ${file.name}`" :title="`移除附件 ${file.name}`" @click="remove(refKey(file))">
+        <i class="ui-icon" data-icon="X" aria-hidden="true"></i>
+      </Button>
+    </div>
   </div>
   </AntdvProvider>
 </template>

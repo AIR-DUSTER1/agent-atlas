@@ -86,6 +86,7 @@ interface EstateToolListing {
   vr?: string;
   vrUrl?: string;
   hasVr?: boolean;
+  rentCode?: string;
 }
 
 function extractListings(data: unknown): EstateToolListing[] {
@@ -126,9 +127,73 @@ function extractListings(data: unknown): EstateToolListing[] {
       detailUrl: pick(o, ["detailUrl", "detail_url", "pageUrl"]),
       cover: pick(o, ["cover", "img", "image", "pic", "coverPic", "thumb"]),
       addressText: pick(o, ["addressText", "address", "position", "communityName", "xiaoqu"]),
+      rentCode: pick(o, ["rentCode", "rent_code", "rental_code"]),
       ...(vr ? { vr } : {}),
     };
   });
+}
+
+const LISTING_TEXT_FIELDS = [
+  "houseId", "title", "community", "layout", "price", "rent", "area", "floor", "orientation",
+  "decoration", "url", "detailUrl", "cover", "addressText", "address", "vr", "vrUrl", "rentCode",
+] as const;
+
+/** 判断搜索容器里的占位标题 / 空值，避免它压过文本结果中的真实小区字段。 */
+function listingTextMissing(value: string | undefined, houseId: string): boolean {
+  const text = (value || "").trim();
+  if (!text) return true;
+  if (text === "房源详情" || text === "小区待补充" || text === "位置待补") return true;
+  const withoutId = houseId ? text.replaceAll(houseId, "").replace(/房源\s*/g, "").trim() : text;
+  return !withoutId;
+}
+
+function preferListingText(
+  current: string | undefined,
+  next: string | undefined,
+  houseId: string,
+  preferLonger = false,
+): string | undefined {
+  if (listingTextMissing(next, houseId)) return current;
+  if (listingTextMissing(current, houseId)) return next;
+  // 仅 title 取信息更完整的一条；面积/价格等字段保留先到的权威值。
+  return preferLonger && (next?.length ?? 0) > (current?.length ?? 0) ? next : current;
+}
+
+function listingKey(listing: EstateToolListing): string {
+  const id = (listing.houseId || listing.id || "").trim();
+  if (id) return id;
+  return [listing.community, listing.title, listing.layout, listing.area, listing.price || listing.rent, listing.addressText]
+    .filter(Boolean).join("|");
+}
+
+/**
+ * 合并搜索的两套投影：CLI JSON 文本解析出的完整字段，以及可能过窄的对象数组。
+ * 真实事故：对象数组只带 id/hasVr，旧逻辑优先采信后丢掉小区、户型、面积和租金，
+ * 最终表格只能显示「房源 103… / 位置待补」。
+ */
+export function mergeEstateListings(
+  richListings: EstateToolListing[],
+  sparseListings: EstateToolListing[],
+): EstateToolListing[] {
+  const rows = new Map<string, EstateToolListing>();
+  const order: string[] = [];
+  for (const listing of [...richListings, ...sparseListings]) {
+    const key = listingKey(listing);
+    if (!key) continue;
+    const current = rows.get(key);
+    if (!current) {
+      rows.set(key, { ...listing });
+      order.push(key);
+      continue;
+    }
+    const houseId = current.houseId || current.id || listing.houseId || listing.id || "";
+    for (const field of LISTING_TEXT_FIELDS) {
+      const chosen = preferListingText(current[field], listing[field], houseId, field === "title");
+      if (chosen) current[field] = chosen;
+    }
+    current.hasVr = Boolean(current.hasVr || listing.hasVr);
+  }
+  return order.map((key) => rows.get(key)).filter((row): row is EstateToolListing => Boolean(row));
 }
 
 /** 兼容模型仍把半径写进 query 的情况：从“左岸风度附近3公里内”恢复锚点和半径。 */
@@ -170,7 +235,8 @@ export const houseSearchTool = tool(
     const r = await houseSearch(mode, city.trim(), effectiveQuery, houseType ?? undefined);
     if (!r.ok) return JSON.stringify({ error: r.error });
     const objectListings = extractListings(r.data);
-    const listings: EstateToolListing[] = objectListings.length ? objectListings : extractEstateSearchListings(r.data);
+    const textListings = extractEstateSearchListings(r.data);
+    const listings = mergeEstateListings(textListings, objectListings);
     // 抽不出结构化字段 → 原样给模型（前端降级显示原始 JSON）
     if (!listings.length) return finalize(r);
     let excel: Awaited<ReturnType<typeof writeEstateWorkbook>> | undefined;

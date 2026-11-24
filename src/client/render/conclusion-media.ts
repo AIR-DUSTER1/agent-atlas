@@ -21,7 +21,7 @@ import { safeHref, safeImageSrc } from "../modules/format.js";
 import { buildListingUrl } from "../modules/estate-listing-url.js";
 import { mapLinkKey, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../modules/map-provider.js";
 import type { MapRuntimeConfig } from "../modules/types-api.js";
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import { openMediaPreview } from "../ui/media-preview.js";
 import type { AssistantBlock } from "../modules/types.js";
@@ -336,26 +336,21 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
         rel: "noopener noreferrer",
         "aria-label": `${property.title || property.community || "房源"} VR 看房`,
       }, icon("Eye", { size: 14 }), h("span", null, "VR 看房")));
-    } else if (property.hasVr) {
-      // 有 VR 标记但素材接口没给全景地址：不再留一条死文案，改为可点击的
-      // 详情页链接（贝壳网页端强制登录，跳过去可能需要先登录）。
-      // 城市未收录 / houseId 非法时不拼链接，退回原来的纯文字标注。
-      const listingHref = buildListingUrl(property.city, property.houseId, property.listingKind ?? "rent");
-      if (listingHref) {
-        facts.appendChild(h("a", {
-          class: "conclusion-listing-link",
-          href: listingHref,
-          target: "_blank",
-          rel: "noopener noreferrer",
-          title: "在贝壳查看该房源详情（网页端可能需要登录）",
-          "aria-label": `${property.title || property.community || "房源"} 在贝壳查看房源详情`,
-        }, icon("ExternalLink", { size: 14 }), h("span", null, "在贝壳查看该房源")));
-      } else {
-        facts.appendChild(h("span", {
-          class: "conclusion-vr-pending",
-          title: "搜索亮点标记有 VR，但素材接口没有返回可打开的全景链接",
-        }, "有 VR 标记 · 专属入口未返回"));
-      }
+    }
+    // 统一贝壳详情入口：优先用服务端已归一好的 detailUrl；取不到再用 rentCode
+    // 拼桌面版租房详情路径。没有合法链接时不展示占位文案；城市未收录 /
+    // 缺 rentCode 时返回 null。
+    const listingHref = safeHref(property.detailUrl)
+      ?? buildListingUrl(property.city, property.houseId, property.listingKind ?? "rent", property.rentCode);
+    if (listingHref) {
+      facts.appendChild(h("a", {
+        class: "conclusion-listing-link",
+        href: listingHref,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        title: "在贝壳查看该房源详情（登录后可直接回跳房源页）",
+        "aria-label": `${property.title || property.community || "房源"} 在贝壳查看房源详情`,
+      }, icon("ExternalLink", { size: 14 }), h("span", null, "在贝壳查看该房源")));
     }
     row.appendChild(facts);
     row.appendChild(renderImageCell(property));

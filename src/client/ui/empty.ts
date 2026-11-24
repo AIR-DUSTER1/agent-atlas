@@ -4,7 +4,7 @@
  * 空态必须回答「为什么空」与「下一步做什么」；行动按钮由调用方注入，
  * 避免组件内部猜业务。
  */
-import { h } from "./h.js";
+import { h } from "./dom.js";
 import { icon, type IconName } from "./icon.js";
 
 export interface EmptyOptions {

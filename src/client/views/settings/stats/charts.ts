@@ -10,12 +10,12 @@
  *  - 每张图独立容器与 observer，销毁时逐个 disconnect（防止 resize 泄漏）。
  */
 import { fmtTokens } from "../../../modules/format.js";
-import type { ChartConfiguration } from "../../../vendor/chart.js";
+import type { ChartConfiguration } from "chart.js";
 import type { StatsRange } from "../../../modules/types.js";
 
 type ChartOptions = NonNullable<ChartConfiguration["options"]>;
 
-type ChartModule = typeof import("../../../vendor/chart.js");
+type ChartModule = typeof import("chart.js/auto");
 type ChartInstance = InstanceType<ChartModule["Chart"]>;
 
 /** 一张图的声明：key 与组件模板里的 data-chart-key 对齐。 */
@@ -313,7 +313,7 @@ export async function renderCharts(
 
   let mod: ChartModule;
   try {
-    mod = await import("../../../vendor/chart.js");
+    mod = await import("chart.js/auto");
   } catch {
     onFallback?.("图表依赖加载失败（网络中断或构建产物缺失）");
     return;

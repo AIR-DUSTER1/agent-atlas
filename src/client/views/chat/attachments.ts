@@ -14,7 +14,7 @@ import { $ } from "../../core/dom.js";
 import { api } from "../../core/api.js";
 import { state } from "../../core/state.js";
 import { uiAlert, uiPrompt } from "../../ui/dialog.js";
-import { h } from "../../ui/h.js";
+import { h } from "../../ui/dom.js";
 import { icon } from "../../ui/icon.js";
 import { fmtSize } from "../../modules/format.js";
 import type { FsEntry, FsListResult, PendingFile } from "../../modules/types.js";

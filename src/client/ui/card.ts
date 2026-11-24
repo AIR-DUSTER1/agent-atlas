@@ -4,8 +4,8 @@
  * 只提供结构与语义，不承担业务状态。交互卡必须由调用方使用 button 或在内部
  * 提供可键盘操作控件，避免把 div 伪装成按钮。
  */
-import type { Child } from "./h.js";
-import { h } from "./h.js";
+import type { Child } from "./dom.js";
+import { h } from "./dom.js";
 
 export type CardTone = "default" | "interactive" | "empty" | "danger";
 export interface CardOptions {

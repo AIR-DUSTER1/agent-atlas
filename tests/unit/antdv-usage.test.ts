@@ -65,7 +65,6 @@ test("组件库只在 .vue 里 import，.ts 文件零引用", async () => {
   const violations: string[] = [];
   for (const file of await walk(CLIENT, [".ts"])) {
     const name = rel(file);
-    if (name.startsWith("vendor/")) continue;
     if (importsAntdv(stripComments(await readFile(file, "utf8")))) violations.push(name);
   }
   assert.deepEqual(violations, [], `这些 .ts 文件 import 了 antdv-next（应改为经 .vue 组件）：\n${violations.join("\n")}`);

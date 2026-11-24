@@ -509,7 +509,7 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       yield { type: "node", name: "tools" };
       const sId = MOCK_ID();
       const listings = [
-        { id: "mock-listing-1", title: `${city} 望京花园南里 ${cond}·南向有电梯`, price: rent ? "9,800 元/月" : "618 万", area: "89.4㎡", addressText: "望京核心区，地铁 14 号线沿线" },
+        { id: "mock-listing-1", title: `${city} 望京花园南里 ${cond}·南向有电梯`, community: "望京花园南里", layout: cond, price: rent ? "9,800 元/月" : "618 万", area: "89.4㎡", addressText: "望京核心区，地铁 14 号线沿线", ...(rent ? { rentCode: "BJ2232327398555123712" } : {}) },
         { id: "mock-listing-2", title: `${city} 慧谷阳光 ${cond}·带落地窗`, price: rent ? "8,600 元/月" : "586 万", area: "82.0㎡", addressText: "近望京商圈，配套成熟" },
         { id: "mock-listing-3", title: `${city} 银枫家园 ${cond}·满五唯一`, price: rent ? "7,200 元/月" : "520 万", area: "76.5㎡", addressText: "酒仙桥北路，近 798" },
         { id: "mock-listing-4", title: `${city} 北苑家园首城 ${cond}·精装修近地铁（演示）`, price: rent ? "6,900 元/月" : "488 万", area: "78.2㎡", addressText: "5 号线北苑路北站旁" },

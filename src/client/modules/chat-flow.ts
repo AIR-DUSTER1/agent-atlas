@@ -22,6 +22,11 @@ export function isContinuationRecord(record: TranscriptRecordLike | null | undef
   return LEGACY_CONTINUATION_PREFIXES.some((pattern) => pattern.test(user));
 }
 
+/** 澄清节点已经有专用卡片，不再用静态节点徽章重复表达。 */
+export function isClarifyNodeName(name: string): boolean {
+  return name.split(/[/:]/).filter(Boolean).includes("clarify");
+}
+
 /** 找当前对话最后一个助手块，供审批恢复复用。 */
 export function lastAssistantBlock(blocks: ChatBlock[] | null | undefined): AssistantBlock | null {
   if (!Array.isArray(blocks)) return null;

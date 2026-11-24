@@ -23,7 +23,7 @@ import { scrollBottom } from "../core/dom.js";
 import { decideApproval } from "../actions/approvals.js";
 import { renderClarificationCard as renderClarificationCardImpl } from "./clarify-card.js";
 import { renderToolEnhancers } from "./tool-enhancers.js";
-import { h } from "../ui/h.js";
+import { h } from "../ui/dom.js";
 import { icon } from "../ui/icon.js";
 import { renderDelegateInToolCard } from "./delegate-card.js";
 import { refreshConclusionMedia, sanitizeEstateConclusionText } from "./conclusion-media.js";

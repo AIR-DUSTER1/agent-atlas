@@ -10,12 +10,22 @@ import { collectEstateConclusionMedia, collectEstateHouseIds, stripEstateHouseId
 import { DEFAULT_MAP_CONFIG, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../../src/client/modules/map-provider.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
+import { messageBlockKey } from "../../src/client/stores/messages.js";
 import {
   assistantBlockContaining,
+  isClarifyNodeName,
   isContinuationRecord,
   lastAssistantBlock,
   mergeAdjacentAssistantBlocks,
 } from "../../src/client/modules/chat-flow.js";
+
+test("消息块 key 按会话隔离，切换会话不复用 v-once DOM", () => {
+  assert.equal(messageBlockKey("session-a", "assistant", 1), "session-a:assistant-1");
+  assert.notEqual(
+    messageBlockKey("session-a", "assistant", 1),
+    messageBlockKey("session-b", "assistant", 1),
+  );
+});
 
 test("continuation 标记与旧审批文案都能识别为恢复轮", () => {
   assert.equal(isContinuationRecord({ continuation: true, user: "任意" }), true);
@@ -54,8 +64,11 @@ test("前端恢复流复用原助手块，审批内容样式允许任意长串�
   const app = await readClientSource();
   const css = await readClientCss();
   assert.match(app, /export async function runResume\(/);
+  assert.match(app, /remountAssistantParts\(ablock\)/);
   assert.match(app, /mountTyping\(ablock\)/);
   assert.match(app, /isContinuationRecord\(rec\)/);
+  assert.match(app, /ensureVisibleResult\(ablock, sid\)/);
+  assert.match(app, /连接提前结束，未收到本轮完成信号/);
   assert.match(app, /mergeAdjacentAssistantBlocks\(blocks\)/);
   assert.match(css, /\.approval-desc\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(css, /\.approval-args\s*\{[^}]*overflow-wrap:\s*anywhere/s);
@@ -144,7 +157,9 @@ test("房产地图与户型图进入最终结论表格，工具组保持折叠",
   assert.match(app, /conclusion-map-preview-trigger/);
   assert.match(app, /conclusion-image-open/);
   assert.match(app, /conclusion-export-link/);
-  assert.match(app, /conclusion-vr-pending/);
+  assert.match(app, /conclusion-listing-link/);
+  assert.doesNotMatch(app, /conclusion-vr-pending/);
+  assert.doesNotMatch(app, /conclusion-vr-pending/);
   assert.match(app, /case "done":[\s\S]*refreshConclusionMedia/);
   assert.match(app, /h\("details", \{ class: "tool-group" \}/);
   assert.doesNotMatch(app, /estate-rich|estate-map-embed|estate-material-grid|estate-house-thumb/);
@@ -216,6 +231,19 @@ test("澄清卡自带内边距，且渲染逻辑已迁到独立模块", async ()
   assert.match(card, /clarify-progress/);
   assert.match(card, /clarify-submit/);
   assert.match(parts, /renderClarificationCardImpl\(part, el\)/);
+});
+
+test("澄清卡存在时不再重复显示 clarify 节点徽章", async () => {
+  const events = await readClientFiles(["stream/events.ts"]);
+  const messages = await readClientFiles(["render/messages.ts"]);
+  assert.equal(isClarifyNodeName("clarify"), true);
+  assert.equal(isClarifyNodeName("subgraph/clarify"), true);
+  assert.equal(isClarifyNodeName("agent"), false);
+  assert.match(events, /isClarifyNodeName\(name\) \&\& ablock\.parts\.some/);
+  assert.match(messages, /旧版本会把 clarify 节点徽章和澄清卡同时写入 transcript/);
+  assert.match(events, /part\.p === "clarification"/);
+  assert.match(events, /removeClarifyNodeChips\(ablock\)/);
+  assert.match(events, /partEls\.delete\(part\)/);
 });
 
 test("澄清卡支持多题：提交按钮在全答完前禁用", async () => {
@@ -325,10 +353,45 @@ test("结论表识别简写租金，并只把真实 VR 链接放入结论", () =
     "金光丽园 · 2室1厅 · 84㎡",
     "竹韵山色 · 2室1厅 · 95㎡",
   ]);
+  assert.equal(media.properties[1]?.rentCode, undefined);
   assert.equal(media.properties[1]?.vrUrl, undefined);
   assert.equal(media.properties[1]?.hasVr, true);
   assert.equal(media.properties[4]?.vrUrl, undefined);
   assert.equal(media.properties[4]?.hasVr, true);
+});
+
+
+test("结论表标题移除内部房源编号并优先展示小区名", () => {
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-community-title", "house_search", {
+      action: "search",
+      listings: [{
+        id: "103149264003",
+        title: "房源 103149264003",
+        community: "依山半岛",
+        layout: "2室1厅",
+        area: "92㎡",
+        price: "2800元/月",
+      }],
+    }),
+  ], "");
+  assert.equal(media.properties[0]?.title, "依山半岛 · 2室1厅 · 92㎡");
+  assert.doesNotMatch(media.properties[0]?.title || "", /103149264003/);
+});
+
+test("搜索结果带 metadata 的房产会保留 rentCode 供详情链接使用", () => {
+  const raw = [
+    "<参考数据><租赁房源>",
+    "<103155465087>",
+    JSON.stringify({ 摘要信息: { 户型信息: "3室1厅，出租面积90㎡", 区位交通: "位于崂山区大埠东小区", 房源亮点: "有VR", 租赁价格: "2200元/月" } }),
+    "</103155465087>",
+    "<metadata>{\"entity_ids\":[\"103155465087\"],\"rent_codes\":[\"QD2232327398555123712\"]}</metadata>",
+  ].join("\n");
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-meta", "house_search", { action: "search", mode: "rent", data: raw }),
+  ], "大埠东 3室1厅 90㎡ ¥2200/月");
+  const hit = media.properties.find((property) => property.houseId === "103155465087");
+  assert.equal(hit?.rentCode, "QD2232327398555123712");
 });
 
 test("结论表最多展示 12 套并收集 Excel 下载入口", () => {

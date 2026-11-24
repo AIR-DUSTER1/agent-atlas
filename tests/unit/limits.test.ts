@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { acquireSessionSlot, assertChatInterval, limitInspect, runWithLimit } from "../../src/server/limits.js";
+import { acquireSessionSlot, acquireSessionSlotEventually, assertChatInterval, limitInspect, runWithLimit } from "../../src/server/limits.js";
 
 test("acquireSessionSlot：同会话唯一流，释放后可再申请", () => {
   const release = acquireSessionSlot("s-unit-1");
@@ -14,6 +14,16 @@ test("acquireSessionSlot：同会话唯一流，释放后可再申请", () => {
   release();
   const again = acquireSessionSlot("s-unit-1");
   again();
+});
+
+test("acquireSessionSlotEventually：续跑短暂等待旧 SSE 释放槽位", async () => {
+  const release = acquireSessionSlot("s-unit-resume");
+  const waiting = acquireSessionSlotEventually("s-unit-resume", 500);
+  setTimeout(release, 80);
+  const releaseResume = await waiting;
+  releaseResume();
+  const after = acquireSessionSlot("s-unit-resume");
+  after();
 });
 
 test("assertChatInterval：1.5s 内第二次抛错，窗口外放行", () => {

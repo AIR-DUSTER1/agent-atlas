@@ -46,13 +46,13 @@
   border: 0; border-bottom: 2px solid transparent; background: transparent;
   color: var(--text-3); font: inherit; font-size: 12.5px; cursor: pointer;
 }
-.skills-filter-tab span {
+.skills-filter-tab .skills-filter-count {
   min-width: 18px; padding: 1px 5px; border-radius: 999px;
   background: var(--border); color: var(--text-3); font-family: var(--mono); font-size: 10px; text-align: center;
 }
 .skills-filter-tab:hover { color: var(--text); }
 .skills-filter-tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.skills-filter-tab.active span { background: rgba(91,140,255,.18); color: var(--accent-soft); }
+.skills-filter-tab.active .skills-filter-count { background: rgba(91,140,255,.18); color: var(--accent-soft); }
 .skills-list-summary { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 9px; color: var(--text-3); font-size: 11px; }
 .skills-dir { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skills-list { display: flex; flex-direction: column; gap: 8px; min-height: 120px; margin-bottom: 16px; }
@@ -110,3 +110,43 @@
 .skills-page-btn.active { border-color: var(--accent); background: rgba(91,140,255,.16); color: var(--accent-soft); }
 .skills-page-btn:disabled { opacity: .4; cursor: default; }
 .skills-page-ellipsis { padding: 0 4px; color: var(--text-3); }
+
+/* 技能筛选页签：已改为原生 button（避免 antdv Button 注入的边框/背景
+   把下划线页签挤成大胶囊）。沿用下划线页签样式，计数与基线垂直居中。 */
+.skills-filter-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+  gap: 5px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 1;
+}
+.skills-filter-tab.active {
+  border-bottom-color: var(--accent);
+}
+.skills-filter-tab > .skills-filter-label {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12.5px;
+}
+.skills-filter-tab > .skills-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  line-height: 1;
+}
+

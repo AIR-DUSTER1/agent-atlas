@@ -1,6 +1,6 @@
 /**
- * vendor/icons.ts — 图标白名单 wrapper
- * 只导出实际用到的 Lucide 图标，避免整包进入浏览器；新增图标时同步 vendor-entries.ts。
+ * ui/icons.ts — 图标白名单
+ * 只导出实际用到的 Lucide 图标，避免整包进入浏览器；新增图标只需更新此 wrapper，Vite 负责打包。
  */
 export {
   Plus, Search, Settings, Paperclip, Send, Square, Sun, Moon, Monitor,
@@ -13,5 +13,5 @@ export {
   ArrowDown, ArrowLeft, ArrowRight, ExternalLink, Eye, EyeOff, LoaderCircle, Info,
   TriangleAlert, CircleX, Sparkles, Map, Settings2, PanelLeft,
   ChevronsUpDown, Calendar, Code, FileCode, FolderTree, CheckCircle2, XCircle,
-  Waypoints, Briefcase, CircleHelp, Target,
+  Waypoints, Briefcase, CircleHelp, Circle, Target, List,
 } from "lucide";

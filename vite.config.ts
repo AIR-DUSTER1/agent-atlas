@@ -41,6 +41,13 @@ export default defineConfig({
         entryFileNames: "assets/app.js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/[name][extname]",
+        // 动态增强库使用稳定 chunk 名，release-check 与静态分发白名单不依赖 Vite 内部命名。
+        manualChunks: {
+          chart: ["chart.js"],
+          markdown: ["marked", "dompurify"],
+          highlight: ["highlight.js"],
+          icons: ["lucide"],
+        },
       },
     },
   },

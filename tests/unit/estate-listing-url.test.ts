@@ -11,8 +11,8 @@ import { buildListingUrl, CITY_SUBDOMAIN } from "../../src/client/modules/estate
 
 test("租房与二手房分别拼到实测存在的路径", () => {
   assert.equal(
-    buildListingUrl("青岛", "103154186731", "rent"),
-    "https://qd.zu.ke.com/zufang/103154186731.html",
+    buildListingUrl("青岛", "103154186731", "rent", "QD2232327398555123712"),
+    "https://qd.zu.ke.com/zufang/QD2232327398555123712.html",
   );
   assert.equal(
     buildListingUrl("青岛", "103118558783", "buy"),
@@ -21,20 +21,21 @@ test("租房与二手房分别拼到实测存在的路径", () => {
 });
 
 test("城市名带「市」后缀与空白也能命中", () => {
-  assert.equal(buildListingUrl("青岛市", "103154186731"), "https://qd.zu.ke.com/zufang/103154186731.html");
-  assert.equal(buildListingUrl(" 北京 ", "101100000001"), "https://bj.zu.ke.com/zufang/101100000001.html");
+  assert.equal(buildListingUrl("青岛市", "103154186731", "rent", "QD2232327398555123712"), "https://qd.zu.ke.com/zufang/QD2232327398555123712.html");
+  assert.equal(buildListingUrl(" 北京 ", "101100000001", "rent", "BJ1011000000001"), "https://bj.zu.ke.com/zufang/BJ1011000000001.html");
 });
 
 test("未收录城市与缺失城市不拼链接（降级为纯文字）", () => {
-  assert.equal(buildListingUrl("某个不存在的地级市", "103154186731"), null);
-  assert.equal(buildListingUrl(undefined, "103154186731"), null);
-  assert.equal(buildListingUrl("", "103154186731"), null);
+  assert.equal(buildListingUrl("某个不存在的地级市", "103154186731", "rent", "QD2232327398555123712"), null);
+  assert.equal(buildListingUrl(undefined, "103154186731", "rent", "QD2232327398555123712"), null);
+  assert.equal(buildListingUrl("", "103154186731", "rent", "QD2232327398555123712"), null);
 });
 
-test("非法 houseId 一律拒绝，不把模型编造内容拼进 URL", () => {
+test("租房无 rentCode、非法 rentCode 一律不拼桌面版详情链接", () => {
   for (const bad of ["", "abc", "10315", "103154186731<script>", "103154186731/../x", undefined]) {
-    assert.equal(buildListingUrl("青岛", bad), null, `应拒绝 houseId=${String(bad)}`);
+    assert.equal(buildListingUrl("青岛", "103154186731", "rent", bad), null, "应拒绝 rentCode=" + String(bad));
   }
+  assert.equal(buildListingUrl("青岛", "abc", "buy"), null);
 });
 
 test("映射表里的子域都是合法小写字母段（不含点与斜杠）", () => {
@@ -47,7 +48,7 @@ test("映射表里的子域都是合法小写字母段（不含点与斜杠）",
 
 test("mergeProperty 的字段白名单必须覆盖 ConclusionProperty 的全部可选字段", async () => {
   // 真实回归：city 与 listingKind 加进 ConclusionProperty 后，mergeProperty 的
-  // 字段白名单没同步，被静默丢弃 —— 表格照旧显示「有 VR 标记 · 专属入口未返回」，
+  // 字段白名单没同步，被静默丢弃 —— 表格照旧显示有 VR 但缺真实入口，
   // 而且类型检查完全通过（可选字段缺失不算错）。这类"白名单丢字段"只能靠结构断言抓。
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(

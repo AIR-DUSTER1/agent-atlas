@@ -952,3 +952,12 @@ test("插件并发切换不丢更新", async () => {
     }),
   ]);
 });
+test("file 后端用户管理端点保持 404，不先被请求 schema 改写", async () => {
+  assert.equal((await json("/api/users")).status, 404);
+  const badCreate = await json("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: 123 }),
+  });
+  assert.equal(badCreate.status, 404);
+});

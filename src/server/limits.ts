@@ -33,6 +33,31 @@ export function acquireSessionSlot(sessionId: string): () => void {
   return () => activeStreamSessions.delete(sessionId);
 }
 
+/** 续跑等待窗口：原 SSE 已经收到 interrupt，通常只剩服务端 finally 收尾。 */
+const RESUME_SLOT_WAIT_MS = 5_000;
+const RESUME_SLOT_RETRY_MS = 50;
+
+/**
+ * 审批 / 澄清 resume 专用：允许短暂等待上一条 SSE 完成 finally。
+ * 普通 chat 仍走同步 acquireSessionSlot，不能把重复发送偷偷排队。
+ */
+export async function acquireSessionSlotEventually(
+  sessionId: string,
+  timeoutMs = RESUME_SLOT_WAIT_MS,
+): Promise<() => void> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    try {
+      return acquireSessionSlot(sessionId);
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error("上一条回答仍在收尾，请稍等片刻后重新提交审批或澄清。");
+      }
+      await new Promise((resolve) => setTimeout(resolve, RESUME_SLOT_RETRY_MS));
+    }
+  }
+}
+
 /**
  * 发送间隔节流：同一会话两次发送至少隔 MIN_CHAT_INTERVAL_MS。
  * 目的：防手滑连点造成重复消耗模型配额（前端已有停止/去防抖，这里兜底）。

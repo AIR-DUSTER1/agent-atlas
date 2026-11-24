@@ -125,18 +125,20 @@ export async function loadSessionList(): Promise<void> {
 }
 
 /** 历史回放中的 interrupt 只代表运行时中断：审批/澄清恢复 pending 时再次可操作 */
-export function markInterruptsResolved(sid: string): void {
+export function markInterruptsResolved(sid: string): boolean {
+  let changed = false;
   for (const block of transcript(sid)) {
     if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
     for (const part of block.parts) {
-      if (part.p === "approval" && part.status === "pending") part.status = "resolved";
-      if (part.p === "clarification" && part.status === "pending") part.status = "answered";
+      if (part.p === "approval" && part.status === "pending") { part.status = "resolved"; changed = true; }
+      if (part.p === "clarification" && part.status === "pending") { part.status = "answered"; changed = true; }
     }
   }
+  return changed;
 }
 
 /** 若存在新的 pending 时，只把历史里最后一个 interrupt 标记成可操作，其余保持历史态 */
-export function markLatestInterruptPending(sid: string): void {
+export function markLatestInterruptPending(sid: string): boolean {
   let latest: { status: string } | null = null;
   for (const block of transcript(sid)) {
     if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
@@ -144,5 +146,6 @@ export function markLatestInterruptPending(sid: string): void {
       if (part.p === "approval" || part.p === "clarification") latest = part;
     }
   }
-  if (latest) latest.status = "pending";
+  if (latest && latest.status !== "pending") { latest.status = "pending"; return true; }
+  return false;
 }

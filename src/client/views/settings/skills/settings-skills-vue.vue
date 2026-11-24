@@ -235,10 +235,20 @@ async function importFiles(payloads: Array<{ name: string; content: string }>): 
 
   <div class="skills-list-toolbar">
     <div class="skills-filter-tabs" role="tablist" aria-label="技能状态筛选">
-      <Button v-for="tab in (['all', 'enabled', 'disabled'] as const)" :key="tab" class="skills-filter-tab" :class="{ active: currentFilter === tab }" :data-skill-filter="tab" role="tab" :aria-selected="String(currentFilter === tab)" @click="setFilter(tab)">
-        {{ tab === "all" ? "全部" : tab === "enabled" ? "已启用" : "已禁用" }}
-        <span :id="`skills-count-${tab}`">{{ counts[tab] }}</span>
-      </Button>
+      <button
+        v-for="tab in (['all', 'enabled', 'disabled'] as const)"
+        :key="tab"
+        type="button"
+        class="skills-filter-tab"
+        :class="{ active: currentFilter === tab }"
+        :data-skill-filter="tab"
+        role="tab"
+        :aria-selected="String(currentFilter === tab)"
+        @click="setFilter(tab)"
+      >
+        <span class="skills-filter-label">{{ tab === "all" ? "全部" : tab === "enabled" ? "已启用" : "已禁用" }}</span>
+        <span :id="`skills-count-${tab}`" class="skills-filter-count">{{ counts[tab] }}</span>
+      </button>
     </div>
     <div class="skills-list-summary">
       <span id="skills-count">{{ summaryText }}</span>
