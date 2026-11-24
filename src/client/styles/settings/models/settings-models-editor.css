@@ -64,7 +64,6 @@
 .model-empty { font-size: 11.5px; color: var(--text-3); padding: 6px 2px 8px; line-height: 1.6; }
 .model-add-row { margin-top: 2px; }
 
-/* 网关模型清单：全部平铺成 chips，点一下即添加（不再受输入框过滤） */
 /* 网关模型选择器（独立 Modal）：搜索区固定，列表独立滚动。
    几百个模型不再把设置面板撑成一条长墙。 */
 .gmp-head {
