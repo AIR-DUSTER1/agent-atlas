@@ -106,7 +106,10 @@ export function buildMessageBlocks(): MessageBlockView[] {
   const views: MessageBlockView[] = [];
   for (let index = 0; index < arr.length; index += 1) {
     const block = arr[index]!;
-    const key = `${block.t}-${index}`;
+    // key 必须带会话 id：message-list-vue 的 assistant-body 使用 v-once 保护
+    // 命令式 parts。不同会话若都生成 `assistant-1`，切会话时 Vue 会复用旧
+    // DOM，造成上下文、澄清卡和头像串到另一个会话。
+    const key = messageBlockKey(sid, block.t, index);
     if (block.t === "user") {
       views.push({ key, t: "user", text: block.text, files: block.files });
       continue;
@@ -131,6 +134,11 @@ export function buildMessageBlocks(): MessageBlockView[] {
     });
   }
   return views;
+}
+
+/** 消息块稳定 key：同一会话内按序号稳定，跨会话绝不复用 DOM。 */
+export function messageBlockKey(sid: string, type: ChatBlock["t"], index: number): string {
+  return `${sid}:${type}-${index}`;
 }
 
 /** 用量小字：↑ 输入 · ↓ 输出 · 缓存 N%（与 h() 版逐字一致）。 */

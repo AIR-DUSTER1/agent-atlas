@@ -7,7 +7,7 @@
 import { config } from "../../config.js";
 import { runGraphEvents } from "../stream.js";
 import { mockRun } from "../mock.js";
-import { assertChatInterval, acquireSessionSlot } from "../limits.js";
+import { assertChatInterval, acquireSessionSlot, acquireSessionSlotEventually } from "../limits.js";
 import { runExternalAgent, getExternalAgent } from "../external.js";
 import { analyzeEstateTurn } from "../estate.js";
 import { resolveChatFiles, buildUserContent, type ChatFileRef } from "../files.js";
@@ -475,7 +475,7 @@ export async function handleResume(
   }
 
   // T2-5：审批/澄清恢复也是流，同样走同会话唯一流闸
-  const releaseSlot = acquireSessionSlot(sessionId);
+  const releaseSlot = await acquireSessionSlotEventually(sessionId);
   try {
     // 真实模型的恢复同样要占供应商槽位；提前取，排队失败时还没登记轮次、能回 429。
     const needsModel = Boolean(config.apiKey);

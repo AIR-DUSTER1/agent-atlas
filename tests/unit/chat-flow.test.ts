@@ -10,12 +10,21 @@ import { collectEstateConclusionMedia, collectEstateHouseIds, stripEstateHouseId
 import { DEFAULT_MAP_CONFIG, mapStaticImageUrl, mapTileUrl, projectMapPoint, resolveMapConfig } from "../../src/client/modules/map-provider.js";
 import { test } from "node:test";
 import { readClientCss, readClientFiles, readClientSource } from "../helpers/client-source.js";
+import { messageBlockKey } from "../../src/client/stores/messages.js";
 import {
   assistantBlockContaining,
   isContinuationRecord,
   lastAssistantBlock,
   mergeAdjacentAssistantBlocks,
 } from "../../src/client/modules/chat-flow.js";
+
+test("消息块 key 按会话隔离，切换会话不复用 v-once DOM", () => {
+  assert.equal(messageBlockKey("session-a", "assistant", 1), "session-a:assistant-1");
+  assert.notEqual(
+    messageBlockKey("session-a", "assistant", 1),
+    messageBlockKey("session-b", "assistant", 1),
+  );
+});
 
 test("continuation 标记与旧审批文案都能识别为恢复轮", () => {
   assert.equal(isContinuationRecord({ continuation: true, user: "任意" }), true);
@@ -54,8 +63,11 @@ test("前端恢复流复用原助手块，审批内容样式允许任意长串�
   const app = await readClientSource();
   const css = await readClientCss();
   assert.match(app, /export async function runResume\(/);
+  assert.match(app, /remountAssistantParts\(ablock\)/);
   assert.match(app, /mountTyping\(ablock\)/);
   assert.match(app, /isContinuationRecord\(rec\)/);
+  assert.match(app, /ensureVisibleResult\(ablock, sid\)/);
+  assert.match(app, /连接提前结束，未收到本轮完成信号/);
   assert.match(app, /mergeAdjacentAssistantBlocks\(blocks\)/);
   assert.match(css, /\.approval-desc\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(css, /\.approval-args\s*\{[^}]*overflow-wrap:\s*anywhere/s);

@@ -170,6 +170,10 @@ test("会话发送、刷新恢复、人工审批折叠且只出现一个助手�
   await expect(page.getByRole("button", { name: "✓ 批准并执行" }).last()).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "✓ 批准并执行" }).last().click();
   await expect(page.locator(".msg-assistant").last()).toContainText("邮件已按你的批准发送完成", { timeout: 20_000 });
+  await expect(page.locator("#messages .typing")).toHaveCount(0);
+  await expect(page.locator("#messages .cursor")).toHaveCount(0);
+  await expect(page.locator("#messages .tool-card").last()).not.toHaveClass(/awaiting/);
+  await expect(page.locator("#messages .tool-card").last().locator(".tool-status")).toContainText("完成");
   await expect(page.locator(".approval-card.collapsed")).toHaveCount(1);
   await expect(page.locator(".msg-assistant").last().locator(".avatar")).toHaveCount(1);
   await page.locator(".approval-card .approval-summary").click();
