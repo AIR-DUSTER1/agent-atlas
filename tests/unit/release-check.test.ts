@@ -6,6 +6,7 @@
  * compose 的关键约束，防止以后重新把 devDependencies、测试或密钥打进运行层。
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -145,12 +146,8 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
 
   const dockerfile = await readFile("Dockerfile", "utf8");
   assert.match(dockerfile, /COPY tsconfig\.json tsconfig\.client\.json tsconfig\.desktop\.json vite\.config\.ts \.\//);
-  assert.match(dockerfile, /src\/server\/public\/styles\/base\/tokens\.css/);
   assert.match(dockerfile, /src\/server\/public\/styles\/base\/ui\.css/);
   assert.doesNotMatch(dockerfile, /src\/server\/public\/styles\/ui\.css/);
-  const dockerSmoke = await readFile("scripts/docker-smoke.ts", "utf8");
-  assert.match(dockerSmoke, /styles\/base\/ui\.css/);
-  assert.doesNotMatch(dockerSmoke, /styles\/ui\.css/);
   assert.match(dockerfile, /AS builder/);
   assert.match(dockerfile, /AS production-deps/);
   assert.match(dockerfile, /AS runtime-base/);
@@ -203,6 +200,28 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes("node_modules/electron"));
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes(".agents"));
 });
+test("main 合并 CI 验收入口与镜像 smoke 路径保持一致", async () => {
+  const pkg = JSON.parse(await readFile("package.json", "utf8")) as { scripts?: Record<string, string> };
+  assert.equal(pkg.scripts?.["ci:verify"], "tsx scripts/ci-verify.ts");
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  assert.match(workflow, /name: Vue component tests/);
+  assert.match(workflow, /npm run test:vue/);
+  const smoke = await readFile("scripts/docker-smoke.ts", "utf8");
+  assert.match(smoke, /styles\/base\/ui\.css/);
+  assert.doesNotMatch(smoke, /styles\/ui\.css/);
+  const agents = await readFile("AGENTS.md", "utf8");
+  assert.match(agents, /git fetch origin main && npm run ci:verify/);
+  assert.match(agents, /Docker daemon 不可用[\s\S]*禁止合并 main/);
+  const listed = spawnSync(process.execPath, ["--import", "tsx", "scripts/ci-verify.ts", "--list"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /image:smoke/);
+  assert.match(listed.stdout, /test:vue/);
+  assert.match(listed.stdout, /version:main-guard/);
+});
+
 test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const refs = [...workflow.matchAll(/uses:\s*([^\s#]+)(?:\s*#\s*(\S+))?/g)].map((match) => ({

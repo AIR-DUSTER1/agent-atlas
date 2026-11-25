@@ -163,7 +163,16 @@ npm run test:vue
 
 前端、部署或发布相关改动按 Skill 指引补充 E2E、审计、数据检查与镜像 smoke。存在阻断项时必须如实报告，不能用静态检查冒充运行验证。
 
-### 7.2 文档同步
+### 7.2 main 合并 CI 门禁
+
+合并 `dev` 到 `main` 前，候选提交必须满足以下任一同等级证据：
+
+1. GitHub CI 对**同一 commit SHA** 的 `quality`、`e2e`、`image` 全部绿色；
+2. 本地在候选提交上完整执行 `git fetch origin main && npm run ci:verify` 并通过。
+
+`ci:verify` 必须覆盖 CI 的版本、Skill、类型、构建、Node/Vue 测试、覆盖率、依赖审计、SBOM、E2E 与生产镜像 smoke。Docker daemon 不可用、CI pending、任一 job 失败或只跑了部分质量门，均禁止合并 main。依赖变更还必须在目标 PR 上确认 `dependency-review` 通过。
+
+### 7.3 文档同步
 
 - 用户可见能力或使用方式变化：更新 `README.md`。
 - 模块职责、调用链、评测或踩坑变化：更新 `.plans/development-docs/agent-wiki.md`，不得写进 `docs/`。
@@ -171,7 +180,7 @@ npm run test:vue
 - 开发计划、攻面分析、评测和交接：只写 `.plans/`，永不提交。
 - 未完成能力不得写成已交付。
 
-### 7.3 提交规范
+### 7.4 提交规范
 
 整个提交信息只能一行：
 

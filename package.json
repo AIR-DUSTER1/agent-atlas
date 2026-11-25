@@ -30,6 +30,7 @@
     "predesktop": "npm run build:desktop",
     "pretest": "npm run build:client",
     "test:all": "npm run typecheck && npm test",
+    "ci:verify": "tsx scripts/ci-verify.ts",
     "build:desktop": "tsx scripts/build-desktop.ts",
     "audit:prod": "tsx scripts/audit-production.ts",
     "sbom": "tsx scripts/write-sbom.ts",
