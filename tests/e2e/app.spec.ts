@@ -281,6 +281,19 @@ test("自主执行流程窗体默认折叠、无计划隐藏并实时同步步�
   await page.locator("#workflow-panel .workflow-summary").click();
   await expect(page.locator("#workflow-steps .workflow-step")).toHaveCount(3);
   await expect(page.locator("#workflow-steps .workflow-step.status-completed")).toHaveCount(3);
+  const markers = page.locator("#workflow-steps .workflow-step-marker .ui-icon");
+  await expect(markers).toHaveCount(3);
+  expect(await markers.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.icon))).toEqual([
+    "Check", "Check", "Check",
+  ]);
+  expect(await markers.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.iconReady))).toEqual(["1", "1", "1"]);
+  await expect(markers.locator("svg")).toHaveCount(3);
+  const markerBox = await page.locator("#workflow-steps .workflow-step-marker").first().boundingBox();
+  const iconBox = await markers.first().boundingBox();
+  expect(markerBox?.width).toBeGreaterThanOrEqual(19);
+  expect(markerBox?.height).toBeGreaterThanOrEqual(19);
+  expect(iconBox?.width).toBeGreaterThanOrEqual(12);
+  expect(iconBox?.height).toBeGreaterThanOrEqual(12);
 });
 test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await login(page);

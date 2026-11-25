@@ -240,12 +240,42 @@
   background: rgba(255,255,255,.015);
 }
 .workflow-step.is-active { background: rgba(91,140,255,.08); }
-.workflow-step-marker { flex: none; display: grid; place-items: center; margin-top: 1px; color: var(--text-3); }
-.workflow-step.status-in_progress .workflow-step-marker { color: var(--accent); }
-.workflow-step.status-completed .workflow-step-marker { color: var(--green); }
-.workflow-step.status-failed .workflow-step-marker { color: var(--red-soft); }
-.workflow-step.status-skipped .workflow-step-marker { color: var(--text-3); }
-.workflow-step.status-in_progress .workflow-step-marker .ui-icon { animation: spin 1.1s linear infinite; }
+.workflow-step-marker {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--tag-bg);
+  color: var(--text-3);
+  overflow: visible;
+}
+.workflow-step-marker .ui-icon { --icon-size: 13px; overflow: visible; }
+.workflow-step.status-pending .workflow-step-marker { color: var(--text-3); }
+.workflow-step.status-in_progress .workflow-step-marker {
+  color: var(--accent);
+  border-color: rgba(91,140,255,.48);
+  background: rgba(91,140,255,.14);
+  box-shadow: 0 0 0 3px rgba(91,140,255,.06);
+}
+.workflow-step.status-completed .workflow-step-marker {
+  color: var(--green);
+  border-color: rgba(57,178,126,.42);
+  background: rgba(57,178,126,.12);
+}
+.workflow-step.status-failed .workflow-step-marker {
+  color: var(--red-soft);
+  border-color: rgba(229,96,79,.42);
+  background: rgba(229,96,79,.12);
+}
+.workflow-step.status-skipped .workflow-step-marker {
+  color: var(--text-3);
+  border-style: dashed;
+  background: transparent;
+}
+.workflow-step.status-in_progress .workflow-step-marker .ui-icon { animation: spin 1.1s linear infinite; transform-origin: center; }
 .workflow-step-copy { min-width: 0; flex: 1; }
 .workflow-step-title { display: flex; gap: 7px; align-items: baseline; min-width: 0; font-size: 12px; }
 .workflow-step-index { flex: none; color: var(--text-3); font-family: var(--mono); font-size: 10px; }

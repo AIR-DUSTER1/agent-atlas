@@ -23,10 +23,10 @@ const STEP_STATUS_LABEL: Record<WorkflowStepStatus, string> = {
 };
 
 const STEP_STATUS_ICON: Record<WorkflowStepStatus, string> = {
-  pending: "Clock",
-  in_progress: "LoaderCircle",
-  completed: "CircleCheck",
-  failed: "CircleX",
+  pending: "MoreHorizontal",
+  in_progress: "Loader",
+  completed: "Check",
+  failed: "X",
   skipped: "ChevronRight",
 };
 
@@ -101,7 +101,7 @@ function onToggle(event: Event): void {
           :aria-current="isActive(step) ? 'step' : undefined"
         >
           <span class="workflow-step-marker" aria-hidden="true">
-            <i class="ui-icon" :data-icon="STEP_STATUS_ICON[step.status]" aria-hidden="true" style="--icon-size: 14px"></i>
+            <i class="ui-icon" :data-icon="STEP_STATUS_ICON[step.status]" aria-hidden="true"></i>
           </span>
           <div class="workflow-step-copy">
             <div class="workflow-step-title">
