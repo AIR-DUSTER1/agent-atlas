@@ -143,6 +143,12 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   for (const name of ["chart.js", "dompurify", "highlight.js", "lucide", "marked"]) {
     assert.ok(pkg.devDependencies[name], `${name} 应只用于构建`);
   }
+  // Vue 运行时只存在于 Vite 产物，且运行层会删除前端源码。
+  // 若误放回 dependencies，npm ci --omit=dev 会把整套组件库及其传递依赖带进生产镜像。
+  for (const name of ["antdv-next", "pinia", "vue"]) {
+    assert.ok(pkg.devDependencies[name], `${name} 应只用于前端构建`);
+    assert.ok(!pkg.dependencies[name], `${name} 不得进入生产运行依赖`);
+  }
 
   const dockerfile = await readFile("Dockerfile", "utf8");
   assert.match(dockerfile, /COPY tsconfig\.json tsconfig\.client\.json tsconfig\.desktop\.json vite\.config\.ts \.\//);
@@ -150,6 +156,8 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.doesNotMatch(dockerfile, /src\/server\/public\/styles\/ui\.css/);
   assert.match(dockerfile, /AS builder/);
   assert.match(dockerfile, /AS production-deps/);
+  assert.match(dockerfile, /npm ci --omit=dev --omit=optional --ignore-scripts/, "生产依赖必须排除 optional peer，防止 Vue/TypeScript 回流");
+  assert.match(dockerfile, /COPY --from=builder[^\n]*@esbuild\/linux-x64/, "运行镜像必须回填 tsx 所需的 esbuild 平台二进制");
   assert.match(dockerfile, /AS runtime-base/);
   assert.match(dockerfile, /AS runtime/);
   assert.match(dockerfile, /AS minimal/);

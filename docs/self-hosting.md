@@ -53,7 +53,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 docker compose build
 ```
 
-默认镜像内置与 `playwright-core` 对应的 Chrome Headless Shell。构建阶段从镜像源下载并由固定 SHA-256 校验，官方地址作为兜底；可用 `CHROME_HEADLESS_SHELL_BASE_URL` 指定可信镜像。本次验收镜像显示大小 897 MB、rootfs 630.7 MiB，`image:smoke` 默认要求 rootfs 不超过 700 MiB。当前内置浏览器只支持 `linux/amd64`；明确不使用 Browser Use 时可构建 `--target minimal` 瘦镜像。
+默认镜像内置与 `playwright-core` 对应的 Chrome Headless Shell。构建阶段从镜像源下载并由固定 SHA-256 校验，官方地址作为兜底；可用 `CHROME_HEADLESS_SHELL_BASE_URL` 指定可信镜像。本次验收镜像显示大小 906 MB、rootfs 631.2 MiB，`image:smoke` 默认要求 rootfs 不超过 700 MiB。当前内置浏览器只支持 `linux/amd64`；明确不使用 Browser Use 时可构建 `--target minimal` 瘦镜像。
 
 生产发布应在 CI / 发布机完成：
 

@@ -31,7 +31,12 @@ WORKDIR /app
 # 同 builder：npm 缓存指向 /tmp 并在层内清理，node_modules 是层内唯一保留物
 ENV npm_config_cache=/tmp/npm-cache
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && rm -rf /tmp/npm-cache
+# LangGraph SDK 将 Vue 声明为可选 peer；显式省略 optional，避免 devOptional 的 Vue/TypeScript
+# 被 npm 自动补进完全不需要前端运行时的服务端镜像。
+RUN npm ci --omit=dev --omit=optional --ignore-scripts && rm -rf /tmp/npm-cache
+# omit=optional 会移除 esbuild 的平台二进制，但运行期 tsx 仍需要它；只从完整 builder
+# 回填当前构建平台包，避免重新安装 Vue/TypeScript 这类仅前端使用的 optional peer。
+COPY --from=builder --chown=node:node /app/node_modules/@esbuild/linux-x64 ./node_modules/@esbuild/linux-x64
 
 # 浏览器版本从 playwright-core/browsers.json 读取；升级 Playwright 后若校验和不匹配，
 # 构建会失败并提示更新 CHROME_HEADLESS_SHELL_SHA256，避免静默漂移。
@@ -84,6 +89,9 @@ LABEL org.opencontainers.image.title="agentatlas" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_TIME}" \
       org.opencontainers.image.licenses="MIT"
+
+# 运行镜像不提供 Yarn 包管理流程；移除 Node 镜像自带 Yarn，缩小攻击面与镜像体积。
+RUN rm -rf /opt/yarn-v1.22.22 /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 WORKDIR /app
 ENV NODE_ENV=production \
