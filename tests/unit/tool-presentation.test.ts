@@ -107,3 +107,17 @@ test("确定性中文业务错误直接展示，不包成机器 JSON", () => {
   assert.equal(view.text, "房源编号格式不正确，请重新选择房源");
   assert.equal(view.statusLabel, "✕ 失败");
 });
+
+test("冷却后自动恢复的成功结果不再展示内部 retry JSON", () => {
+  const view = presentToolResult({
+    name: "house_lookup",
+    result: {
+      isError: false,
+      content: JSON.stringify({ action: "detail", ok: true, retry: { attempts: 2, recovered: true } }),
+    },
+  });
+  assert.equal(view.tone, "ok");
+  assert.equal(view.statusLabel, "✓ 已恢复");
+  assert.match(view.text, /自动等待并恢复查询/);
+  assert.doesNotMatch(view.text, /attempts|recovered|"retry"/);
+});

@@ -410,7 +410,7 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       }
       yield { type: "node", name: "tools" };
       yield { type: "node", name: "agent" };
-      yield* streamText("数据服务暂时繁忙，请稍后再试。", signal);
+      yield* streamText("服务主动等待后仍然繁忙，请稍后再试。", signal);
       return;
     }
 

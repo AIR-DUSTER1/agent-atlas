@@ -280,7 +280,45 @@ function publicPropertyTitle(property: ConclusionProperty): string {
     .replace(/\s{2,}/g, " ")
     .trim();
   if (stripped && !["详情", "待补充", "房源详情", "小区待补充", "位置待补"].includes(stripped)) return stripped;
-  return propertyTitle(property.community || "", property.layout || "", property.area || "");
+  const generated = propertyTitle(property.community || "", property.layout || "", property.area || "");
+  if (generated !== "房源详情") return generated;
+  return meaningfulPropertyText(property.location?.name)
+    || meaningfulPropertyText(property.location?.address)
+    || "房源详情";
+}
+
+const PROPERTY_PLACEHOLDERS = new Set([
+  "", "房源详情", "房源位置", "小区待补充", "位置待补", "详情", "待补充", "暂无", "未知", "未获取坐标",
+]);
+
+function meaningfulPropertyText(value: unknown): string {
+  const normalized = text(value);
+  return PROPERTY_PLACEHOLDERS.has(normalized) || /^(?:未获取|暂无|待补充)/.test(normalized) ? "" : normalized;
+}
+
+function titleHasPropertyIdentity(property: ConclusionProperty): boolean {
+  if (!meaningfulPropertyText(property.title) || listingTitleIsPlaceholder(property.title, property.houseId)) return false;
+  const core = property.title
+    .replace(/[\d.,，·+\s]/g, "")
+    .replace(/(?:室|厅|卫|厨|阳台|平米|㎡|元|月|租金|面积|整租|合租|住宅|房源)/g, "");
+  if (/^(?:小区)?待补充$/.test(core)) return false;
+  return /[\u3400-\u9fffA-Za-z]{2,}/.test(core);
+}
+
+function hasMeaningfulPropertyFacts(property: ConclusionProperty): boolean {
+  const location = property.location;
+  const hasCoordinate = number(location?.lat) !== undefined && number(location?.lng) !== undefined;
+  const hasLocationIdentity = Boolean(
+    hasCoordinate
+    || meaningfulPropertyText(location?.address)
+    || (meaningfulPropertyText(location?.name) && location?.name !== "房源位置"),
+  );
+  return Boolean(
+    meaningfulPropertyText(property.community)
+    || meaningfulPropertyText(property.address)
+    || hasLocationIdentity
+    || titleHasPropertyIdentity(property),
+  );
 }
 
 /** 从面积/租金中提取数值，只用于和最终回答做轻量匹配。 */
@@ -644,9 +682,11 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
   const candidates: ConclusionProperty[] = [];
   for (const id of propertyOrder) {
     const row = propertyRows.get(id);
-    if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl && !row.hasVr)) continue;
+    if (!row) continue;
     row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
     row.location = row.location || locationsByHouse.get(id);
+    // 只有内部 ID、占位标题或「有 VR」标记的稀疏结果不能进入推荐表。
+    if (!hasMeaningfulPropertyFacts(row)) continue;
     row.title = publicPropertyTitle(row);
     candidates.push(row);
   }

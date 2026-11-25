@@ -208,6 +208,10 @@ const MAX_IDENTICAL_TOOL_FAILURES = 2;
 const MAX_TOOL_ATTEMPTS = 3;
 /** 瞬时故障退避：最多两次重试，总计不超过三次尝试。 */
 const TOOL_RETRY_DELAYS_MS = [300, 900] as const;
+/** 外部冷却通常由服务端计时；多等 250ms 避免临界点再次撞上同一窗口。 */
+const COOLDOWN_WAIT_GRACE_MS = 250;
+/** 单次工具调用只主动等待一轮冷却，若仍限流就返回可操作说明，避免无限休眠。 */
+const MAX_AUTOMATIC_COOLDOWN_WAITS = 1;
 
 /** JSON 工具约定：顶层 ok:false 或非空 error 是业务失败，不能伪装成成功。 */
 function toolBusinessError(text: string): string | null {
@@ -393,6 +397,7 @@ async function invokeTool(
   const maxAttempts = retryAllowed
     ? Math.max(1, Math.min(MAX_TOOL_ATTEMPTS, Math.floor(retryPolicy?.maxAttempts ?? 1)))
     : 1;
+  let cooldownWaits = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let content: ToolMessage["content"];
@@ -439,18 +444,41 @@ async function invokeTool(
     const failureText = toolResultText(content);
     const failure = analyzeToolFailure(failureText);
     if (failure.retryAfterMs && failure.retryAfterMs > 0) {
-      const waitSeconds = Math.max(1, Math.ceil(failure.retryAfterMs / 1000));
+      const advertisedWaitMs = Math.max(1, Math.ceil(failure.retryAfterMs));
+      const waitSeconds = Math.max(1, Math.ceil(advertisedWaitMs / 1000));
+      if (retryAllowed && attempt < maxAttempts && cooldownWaits < MAX_AUTOMATIC_COOLDOWN_WAITS) {
+        cooldownWaits += 1;
+        // 这是模型工具调用内部的主动休眠，不把等待责任推给用户；用户中止时立即退出。
+        const keepGoing = await waitForRetry(advertisedWaitMs + COOLDOWN_WAIT_GRACE_MS, config?.signal);
+        if (keepGoing) continue;
+        content = withRetryMetadata(content, {
+          attempts: attempt,
+          maxAttempts,
+          retryable: false,
+          exhausted: true,
+          kind: failure.kind,
+          analysis: "等待服务冷却时任务已取消",
+          userMessage: "已停止等待本次查询，可以稍后重新发起。",
+          nextAction: "不要继续重试；等待用户重新发起或说明任务已中止。",
+        });
+        return { content, status: "error", attempts: attempt };
+      }
+      const waitedOnce = cooldownWaits > 0;
       content = withRetryMetadata(content, {
         attempts: attempt,
         maxAttempts,
         retryable: true,
         exhausted: false,
         kind: failure.kind,
-        retryAfterMs: failure.retryAfterMs,
+        retryAfterMs: advertisedWaitMs,
         cooldownActive: true,
-        analysis: failure.analysis,
-        userMessage: friendlyFailureText(failure, attempt, maxAttempts, false),
-        nextAction: `等待约 ${waitSeconds} 秒后再发起新的同源查询；本轮不要继续调用其它候选或相同工具。`,
+        analysis: waitedOnce ? "主动等待冷却后重试仍未恢复" : failure.analysis,
+        userMessage: waitedOnce
+          ? `系统已主动等待约 ${waitSeconds} 秒并重新查询，但服务仍然繁忙。请稍后再发起新的查询，已有结果不会丢失。`
+          : friendlyFailureText(failure, attempt, maxAttempts, false),
+        nextAction: waitedOnce
+          ? "本轮已经主动等待并重试一次；停止继续查询，向用户说明等待后仍不可用。"
+          : `等待约 ${waitSeconds} 秒后再发起新的同源查询；本轮不要继续调用其它候选或相同工具。`,
       });
       return { content, status: "error", attempts: attempt };
     }

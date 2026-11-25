@@ -93,7 +93,7 @@ test("同类工具连发折叠为单层「连续工具调用」，组内每次�
 test("外部服务限流只显示普通用户能理解的说明，不泄露机器重试字段", async ({ page }) => {
   await login(page);
   await createChat(page);
-  await runTurn(page, "限流工具演示", "数据服务暂时繁忙");
+  await runTurn(page, "限流工具演示", "服务主动等待后仍然繁忙");
 
   const group = page.locator("#messages .tool-group").first();
   await expect(group).toHaveCount(1);

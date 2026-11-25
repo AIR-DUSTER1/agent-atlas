@@ -433,6 +433,38 @@ test("手工 house_export 结果同样成为结论下载入口", () => {
   assert.equal(media.exports[0]?.count, 18);
 });
 
+test("只有占位标题和内部 ID 的稀疏房源不进入推荐表", () => {
+  const sparse = [
+    { id: "103155463901", title: "房源详情", hasVr: true },
+    { id: "103155463902", title: "小区待补充", hasVr: true },
+  ];
+  const media = collectEstateConclusionMedia([
+    estateToolPart("sparse-search", "house_search", { action: "search", city: "青岛", mode: "rent", listings: sparse }),
+    estateToolPart("sparse-detail", "house_lookup", {
+      action: "detail", houseId: "103155463901", city: "青岛", mode: "rent", data: "{}",
+    }),
+  ]);
+  assert.deepEqual(media.properties, [], "没有小区名、业务字段或坐标的占位行必须过滤");
+});
+
+test("没有小区字段但存在真实位置时，标题回退到位置名而不是房源详情", () => {
+  const media = collectEstateConclusionMedia([
+    estateToolPart("location-only", "house_lookup", {
+      action: "detail", houseId: "103155463903", city: "青岛", mode: "rent", data: "{}",
+      location: { label: "依山半岛", address: "劲松七路附近", lat: 36.117778, lng: 120.414538 },
+    }),
+  ]);
+  assert.equal(media.properties.length, 1);
+  assert.equal(media.properties[0]?.title, "依山半岛");
+  assert.equal(media.properties[0]?.location?.address, "劲松七路附近");
+});
+
+test("结论标题不再向用户解释内部编号隐藏实现", async () => {
+  const source = await readClientFiles(["render/conclusion-media.ts"]);
+  assert.doesNotMatch(source, /内部编号已隐藏/);
+  assert.match(source, /户型图、位置和详情按房源自动匹配/);
+});
+
 test("无房产媒体时不生成结论附件", () => {
   const media = collectEstateConclusionMedia([
     estateToolPart("search", "house_search", { action: "search", listings: [{ title: "房源" }] }),

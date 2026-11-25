@@ -405,7 +405,6 @@ function renderImages(images: ConclusionImage[]): HTMLElement | null {
 function renderConclusion(media: EstateConclusionMedia): HTMLElement {
   const hasTable = media.properties.length > 0;
   const hasExports = media.exports.length > 0;
-  const hasVr = media.properties.some((property) => Boolean(property.vrUrl));
   const section = h("section", {
     class: "conclusion-media",
     "aria-label": "本轮结论中的房源对比表",
@@ -415,7 +414,7 @@ function renderConclusion(media: EstateConclusionMedia): HTMLElement {
       h("div", { class: "conclusion-media-copy" },
         h("strong", null, hasTable ? "推荐房源对比" : hasExports ? "房源对比清单" : "结论附图：位置与户型"),
         h("span", null, hasTable
-          ? `最多展示 12 套${hasExports ? "，完整候选已写入 Excel" : ""}；${hasVr ? "真实 VR" : "户型图"}与位置按房源自动匹配；内部编号已隐藏`
+          ? `最多展示 12 套${hasExports ? "，完整候选已写入 Excel" : ""}；户型图、位置和详情按房源自动匹配`
           : hasExports ? "完整候选已写入 Excel，可直接下载后继续筛选比对" : "地图与图片直接来自本轮工具结果"),
       ),
     ),

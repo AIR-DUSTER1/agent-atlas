@@ -202,7 +202,22 @@ export function presentToolResult(part: Pick<ToolPart, "name" | "result">): Tool
   const result = part.result;
   if (!result) return { text: "", tone: "ok", statusLabel: "" };
   const raw = String(result.content || "").trim();
-  if (!result.isError) return { text: raw, tone: "ok", statusLabel: "✓ 完成" };
+  if (!result.isError) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const retry = parsed.retry && typeof parsed.retry === "object"
+        ? parsed.retry as Record<string, unknown>
+        : null;
+      if (retry?.recovered === true) {
+        return {
+          text: "服务短暂繁忙，系统已自动等待并恢复查询。",
+          tone: "ok",
+          statusLabel: "✓ 已恢复",
+        };
+      }
+    } catch { /* 普通成功结果不是 JSON 时按原内容展示 */ }
+    return { text: raw, tone: "ok", statusLabel: "✓ 完成" };
+  }
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
