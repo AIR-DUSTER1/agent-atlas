@@ -14,7 +14,7 @@ import {
   ensureMarkdownRenderer, fmtArgs, nodeIcon, nodeLabel, renderMarkdown,
 } from "../modules/format.js";
 import {
-  TOOL_CATEGORIES, TOOL_CATEGORY_ORDER, describeTool, type ToolCategoryId,
+  TOOL_CATEGORIES, TOOL_CATEGORY_ORDER, describeTool, presentToolResult, type ToolCategoryId,
 } from "../modules/tool-presentation.js";
 import {
   blockBodies, partEls, saveLocal, state, textTimers, thinkingTimers,
@@ -331,16 +331,18 @@ export function updateToolCard(part: ToolPart): void {
     status.textContent = "⏸ 待审批";
   }
   if (part.result && status) {
-    // awaiting 也要清：批准后工具真正开始执行，琥珀色「待审批」边框不能留着
-    card.classList.remove("running", "awaiting");
-    card.classList.add(part.result.isError ? "err" : "ok");
-    status.className = "tool-status " + (part.result.isError ? "err" : "ok");
+    // awaiting 也要清：批准后工具真正开始执行，琥珀色「待审批」边框不能留着。
+    card.classList.remove("running", "awaiting", "needs-action", "err", "ok");
+    const presentationResult = presentToolResult(part);
+    const retryTone = part.result.isError && presentationResult.tone === "retry";
+    card.classList.add(retryTone ? "needs-action" : part.result.isError ? "err" : "ok");
+    status.className = "tool-status " + (retryTone ? "warn" : part.result.isError ? "err" : "ok");
     const unsupported = part.result.isError && /当前 Agent 不支持工具/.test(String(part.result.content));
-    status.textContent = unsupported ? "✕ 不支持" : part.result.isError ? "✕ 失败" : "✓ 完成";
+    status.textContent = unsupported ? "✕ 不支持" : presentationResult.statusLabel;
     const resultPre = card.querySelector(".result-pre");
     if (resultPre) {
-      resultPre.textContent = part.result.content;
-      resultPre.className = "result-pre" + (part.result.isError ? " err" : "");
+      resultPre.textContent = presentationResult.text;
+      resultPre.className = "result-pre" + (retryTone ? " warn" : part.result.isError ? " err" : "");
     }
     // 知识库 / 房产等业务增强由 main.ts 注册，render/* 不反向依赖 views/*
     renderToolEnhancers(part, card);

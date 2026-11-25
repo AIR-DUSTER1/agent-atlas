@@ -90,6 +90,29 @@ test("同类工具连发折叠为单层「连续工具调用」，组内每次�
   await expect(cards.first()).toHaveClass(/open/);
 });
 
+test("外部服务限流只显示普通用户能理解的说明，不泄露机器重试字段", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await runTurn(page, "限流工具演示", "数据服务暂时繁忙");
+
+  const group = page.locator("#messages .tool-group").first();
+  await expect(group).toHaveCount(1);
+  await expect(group.locator(".tool-group-names")).toContainText("house_lookup ×3");
+  await expect(group.locator(".tool-group-status")).toHaveText("3 个需要处理");
+  await group.locator(".tool-group-summary").click();
+
+  const cards = group.locator(".tool-card");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.locator(".tool-status")).toHaveText(["⚠ 稍后重试", "⚠ 稍后重试", "⚠ 稍后重试"]);
+  await cards.first().locator(".tool-head").click();
+  const result = cards.first().locator(".result-pre");
+  await expect(result).toContainText("查询服务暂时繁忙");
+  await expect(result).toContainText("等待约 60 秒");
+  await expect(result).not.toContainText("service temporarily unavailable");
+  await expect(result).not.toContainText("maxAttempts");
+  await expect(result).not.toContainText("exhausted");
+});
+
 test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
   await login(page);
   await createChat(page);

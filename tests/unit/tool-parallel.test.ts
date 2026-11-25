@@ -330,6 +330,79 @@ test("瞬时故障达到三次尝试后熔断，模型不能再次原样调用",
   assert.match(String((second.messages[0] as ToolMessage).content), /自动重试已耗尽/);
 });
 
+test("外部服务给出共享冷却时间时立即停止重试，避免候选逐套放大请求", async () => {
+  let runs = 0;
+  const throttled = tool(
+    async () => {
+      runs += 1;
+      return JSON.stringify({
+        error: "service temporarily unavailable",
+        failureKind: "rate_limited",
+        retryAfterMs: 60_000,
+        cooldownActive: true,
+      });
+    },
+    { name: "house_lookup", description: "共享冷却测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [throttled],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const result = await node(makeState([{ id: "cooldown", name: "house_lookup", args: { houseId: "103155273255" } }]) as never);
+  const message = result.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(message.content)) as {
+    retry?: { attempts?: number; retryable?: boolean; cooldownActive?: boolean; retryAfterMs?: number; userMessage?: string; nextAction?: string };
+  };
+  assert.equal(runs, 1);
+  assert.equal(message.status, "error");
+  assert.equal(payload.retry?.attempts, 1);
+  assert.equal(payload.retry?.retryable, true);
+  assert.equal(payload.retry?.cooldownActive, true);
+  assert.equal(payload.retry?.retryAfterMs, 60_000);
+  assert.match(payload.retry?.userMessage || "", /查询服务暂时繁忙/);
+  assert.match(payload.retry?.nextAction || "", /等待约 60 秒/);
+});
+
+test("冷却期响应不写成同参数永久熔断，冷却后仍可重新查询", async () => {
+  let runs = 0;
+  const throttled = tool(
+    async () => {
+      runs += 1;
+      return runs === 1
+        ? JSON.stringify({
+            error: "service temporarily unavailable",
+            failureKind: "rate_limited",
+            retryAfterMs: 60_000,
+            cooldownActive: true,
+          })
+        : JSON.stringify({ action: "detail", ok: true, recovered: true });
+    },
+    { name: "house_lookup", description: "冷却后可重试测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [throttled],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const args = { houseId: "103155273255" };
+  const first = await node(makeState([{ id: "cooldown-1", name: "house_lookup", args }]) as never);
+  const firstMessage = first.messages[0] as ToolMessage;
+  const second = await node({
+    messages: [
+      new HumanMessage("等待后继续查这套房"),
+      new AIMessage({ content: "", tool_calls: [{ id: "cooldown-1", name: "house_lookup", args, type: "tool_call" }] }),
+      firstMessage,
+      new AIMessage({ content: "", tool_calls: [{ id: "cooldown-2", name: "house_lookup", args, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 2);
+  assert.notEqual((second.messages[0] as ToolMessage).status, "error");
+  assert.match(String((second.messages[0] as ToolMessage).content), /recovered/);
+});
+
 test("参数或业务确定性错误不自动重试，并把失败分析返回给 Agent", async () => {
   let runs = 0;
   const invalid = tool(

@@ -166,8 +166,12 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
       if (message.status !== "error") {
         completedBySignature.set(signature, { content: message.content, status: message.status ?? "success" });
       } else {
-        if (retryExhaustedFromText(toolResultText(message.content))) retryExhaustedBySignature.add(signature);
-        failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
+        const text = toolResultText(message.content);
+        if (retryExhaustedFromText(text)) retryExhaustedBySignature.add(signature);
+        // 冷却期拒绝没有触达外部服务，不能计入“同参数确定性失败”熔断。
+        if (!retryCooldownActiveFromText(text)) {
+          failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
+        }
       }
     }
   }
@@ -221,9 +225,14 @@ function toolBusinessError(text: string): string | null {
   return null;
 }
 
+export type ToolFailureKind = "rate_limited" | "timeout" | "network" | "unavailable" | "auth" | "invalid_args" | "not_found" | "business";
+
 interface ToolFailureAnalysis {
   retryable: boolean;
+  kind: ToolFailureKind;
   analysis: string;
+  /** 外部账号级冷却时间；大于 0 时不能立刻原样重试。 */
+  retryAfterMs?: number;
 }
 
 interface ToolRetryMetadata {
@@ -232,8 +241,39 @@ interface ToolRetryMetadata {
   retryable: boolean;
   exhausted: boolean;
   recovered?: boolean;
+  kind?: ToolFailureKind;
+  retryAfterMs?: number;
+  cooldownActive?: boolean;
   analysis: string;
+  userMessage?: string;
   nextAction?: string;
+}
+
+interface StructuredToolFailureHints {
+  kind?: ToolFailureKind;
+  retryAfterMs?: number;
+}
+
+/** 读取工具结果里的结构化失败提示；兼容新旧字段并忽略非法值。 */
+function structuredFailureHints(text: string): StructuredToolFailureHints {
+  try {
+    const parsed = JSON.parse(text.trim()) as Record<string, unknown>;
+    const retry = parsed.retry && typeof parsed.retry === "object"
+      ? parsed.retry as Record<string, unknown>
+      : null;
+    const source = retry && typeof retry === "object" ? retry : parsed;
+    const rawKind = source.kind ?? parsed.failureKind;
+    const kind = typeof rawKind === "string" && [
+      "rate_limited", "timeout", "network", "unavailable", "auth", "invalid_args", "not_found", "business",
+    ].includes(rawKind) ? rawKind as ToolFailureKind : undefined;
+    const rawWait = source.retryAfterMs ?? parsed.retryAfterMs;
+    const retryAfterMs = typeof rawWait === "number" && Number.isFinite(rawWait) && rawWait > 0
+      ? Math.min(30 * 60_000, Math.round(rawWait))
+      : undefined;
+    return { ...(kind ? { kind } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
+  } catch {
+    return {};
+  }
 }
 
 /** 瞬时故障识别：只描述错误性质，是否重试还取决于 profile 显式登记的工具白名单。 */
@@ -243,19 +283,53 @@ function isTransientToolFailure(text: string): boolean {
 
 /** 把失败拆成「可重试的瞬时故障」和需要修正调用/权限的确定性错误。 */
 function analyzeToolFailure(text: string): ToolFailureAnalysis {
+  const hints = structuredFailureHints(text);
   if (/(?:401|403|unauthorized|forbidden|authorization|auth required|invalid.*(?:key|token)|expired.*(?:key|token)|登录|鉴权|权限不足|key.*(?:无效|过期))/i.test(text)) {
-    return { retryable: false, analysis: "认证、权限或 Key 失效，重试相同调用不会恢复" };
+    return { retryable: false, kind: "auth", analysis: "认证、权限或 Key 失效，重试相同调用不会恢复" };
+  }
+  if (hints.retryAfterMs || hints.kind === "rate_limited") {
+    return {
+      retryable: true,
+      kind: "rate_limited",
+      analysis: "外部服务已触发临时限流，当前处于共享冷却期",
+      retryAfterMs: hints.retryAfterMs ?? 60_000,
+    };
   }
   if (isTransientToolFailure(text)) {
-    return { retryable: true, analysis: "外部服务临时不可用、限流、超时或网络波动" };
+    const rateLimited = /429|rate limit|限流|too many requests/i.test(text);
+    return {
+      retryable: true,
+      kind: rateLimited ? "rate_limited" : "network",
+      analysis: rateLimited ? "外部服务临时不可用或触发限流" : "外部服务超时、断网或临时波动",
+      ...(rateLimited ? { retryAfterMs: 60_000 } : {}),
+    };
   }
   if (/(?:参数|required|missing|不能为空|缺少|未提供|bad request|invalid argument|HTTP\s*400)/i.test(text)) {
-    return { retryable: false, analysis: "调用参数缺失或格式不合法，需要先修正参数" };
+    return { retryable: false, kind: "invalid_args", analysis: "调用参数缺失或格式不合法，需要先修正参数" };
   }
   if (/(?:not found|no result|no data|未找到|没有找到|无结果|暂无数据)/i.test(text)) {
-    return { retryable: false, analysis: "数据源没有匹配结果，原样重试通常无效" };
+    return { retryable: false, kind: "not_found", analysis: "数据源没有匹配结果，原样重试通常无效" };
   }
-  return { retryable: false, analysis: "业务返回确定性错误，需要调整参数或改用其它工具" };
+  return { retryable: false, kind: "business", analysis: "业务返回确定性错误，需要调整参数或改用其它工具" };
+}
+
+function friendlyFailureText(failure: ToolFailureAnalysis, attempts: number, maxAttempts: number, exhausted: boolean): string {
+  const waitSeconds = failure.retryAfterMs ? Math.max(1, Math.ceil(failure.retryAfterMs / 1000)) : 0;
+  if (failure.kind === "rate_limited") {
+    const tried = attempts > 1 ? `系统已自动尝试 ${attempts} 次，仍未成功；` : "系统已暂停继续查询；";
+    return `查询服务暂时繁忙，可能是短时间内请求较多或服务临时波动。${tried}` +
+      `${waitSeconds ? `请等待约 ${waitSeconds} 秒后再试。` : "请稍后再试。"}已有结果不会丢失。`;
+  }
+  if (failure.kind === "timeout" || failure.kind === "network" || failure.kind === "unavailable") {
+    return `查询服务刚刚出现临时波动，${exhausted ? `自动尝试 ${maxAttempts} 次仍未成功。` : "可以稍后重试。"}` +
+      "已有结果不会丢失。";
+  }
+  if (failure.kind === "auth") return "登录状态或访问权限需要更新，完成登录后再试即可。";
+  if (failure.kind === "invalid_args") return "这次查询条件不完整，需要调整条件后再试。";
+  if (failure.kind === "not_found") return "没有找到符合当前条件的房源或数据，可以换个区域或放宽条件。";
+  return exhausted
+    ? "这次查询多次尝试后仍未完成，请换一个条件或稍后再试。"
+    : "这次查询没有完成，需要调整条件后再试。";
 }
 
 function withRetryMetadata(content: ToolMessage["content"], metadata: ToolRetryMetadata): ToolMessage["content"] {
@@ -278,6 +352,16 @@ function retryExhaustedFromText(text: string): boolean {
   try {
     const parsed = JSON.parse(text.trim()) as { retry?: { exhausted?: unknown } };
     return parsed.retry?.exhausted === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 共享冷却是可恢复状态，不能像确定性失败一样永久熔断同一参数。 */
+function retryCooldownActiveFromText(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text.trim()) as { retry?: { cooldownActive?: unknown } };
+    return parsed.retry?.cooldownActive === true;
   } catch {
     return false;
   }
@@ -354,6 +438,22 @@ async function invokeTool(
 
     const failureText = toolResultText(content);
     const failure = analyzeToolFailure(failureText);
+    if (failure.retryAfterMs && failure.retryAfterMs > 0) {
+      const waitSeconds = Math.max(1, Math.ceil(failure.retryAfterMs / 1000));
+      content = withRetryMetadata(content, {
+        attempts: attempt,
+        maxAttempts,
+        retryable: true,
+        exhausted: false,
+        kind: failure.kind,
+        retryAfterMs: failure.retryAfterMs,
+        cooldownActive: true,
+        analysis: failure.analysis,
+        userMessage: friendlyFailureText(failure, attempt, maxAttempts, false),
+        nextAction: `等待约 ${waitSeconds} 秒后再发起新的同源查询；本轮不要继续调用其它候选或相同工具。`,
+      });
+      return { content, status: "error", attempts: attempt };
+    }
     if (retryAllowed && failure.retryable && attempt < maxAttempts) {
       const delay = TOOL_RETRY_DELAYS_MS[Math.min(attempt - 1, TOOL_RETRY_DELAYS_MS.length - 1)];
       const keepGoing = await waitForRetry(delay, config?.signal);
@@ -363,7 +463,9 @@ async function invokeTool(
         maxAttempts,
         retryable: false,
         exhausted: true,
+        kind: failure.kind,
         analysis: "调用已取消，停止自动重试",
+        userMessage: "这次查询已取消，可以稍后重新发起。",
         nextAction: "不要继续重试；等待用户重新发起或说明任务已中止。",
       });
       return { content, status: "error", attempts: attempt };
@@ -375,7 +477,9 @@ async function invokeTool(
       maxAttempts,
       retryable: failure.retryable,
       exhausted,
+      kind: failure.kind,
       analysis: failure.analysis,
+      userMessage: friendlyFailureText(failure, attempt, maxAttempts, exhausted),
       nextAction: exhausted
         ? "自动重试额度已用尽，请分析影响后改用其它工具/参数，或向用户说明暂不可用，不得再次原样调用。"
         : failure.retryable

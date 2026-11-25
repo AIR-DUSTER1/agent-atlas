@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
   assertTrustedInstallUrl,
   beikeBusinessError,
+  classifyBeikeFailure,
   beikeManifestTarget,
   beikeTarCommand,
   buildBeikeChildEnv,
@@ -27,6 +28,7 @@ import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../sr
 import { buildStaticMapUrl, parseStaticMapQuery } from "../../src/server/map-static.js";
 import { readClientIndexHtml } from "../helpers/client-html.js";
 import { buildEstateSearchQuery, inferEstateSearchScope } from "../../src/tools-estate.js";
+import { CooldownGate } from "../../src/server/runtime/cooldown-gate.js";
 
 test("房产搜索把锚点与半径结构化拼入查询，不被邻近板块替代", () => {
   assert.equal(buildEstateSearchQuery("两室 出租 2000-3000元", "左岸风度", 3), "左岸风度附近3公里内 两室 出租 2000-3000元");
@@ -45,6 +47,31 @@ test("贝壳 JSON 业务失败识别：ok:false / error 字符串", () => {
   assert.equal(beikeBusinessError({ error: "参数不完整" }), "参数不完整");
   assert.equal(beikeBusinessError({ ok: true, data: "正常结果" }), null);
   assert.equal(beikeBusinessError("<参考数据>"), null);
+});
+
+test("贝壳限流错误映射成账号级冷却，网络/参数错误分类稳定", () => {
+  assert.deepEqual(classifyBeikeFailure("service temporarily unavailable"), {
+    retryable: true,
+    kind: "rate_limited",
+    cooldownMs: 60_000,
+  });
+  assert.equal(classifyBeikeFailure("request timeout").kind, "timeout");
+  assert.equal(classifyBeikeFailure("fetch failed: ECONNRESET").kind, "network");
+  assert.equal(classifyBeikeFailure("参数不完整").retryable, false);
+});
+
+test("共享冷却窗只延长不缩短，并在到期后自动释放", () => {
+  let now = 1_000;
+  const gate = new CooldownGate("beike", () => now);
+  gate.activate(60_000, "rate_limited");
+  assert.equal(gate.remainingMs(), 60_000);
+  now += 30_000;
+  assert.equal(gate.remainingMs(), 30_000);
+  gate.activate(10_000, "network");
+  assert.equal(gate.snapshot().reason, "rate_limited", "更短冷却不能覆盖现有更长冷却");
+  now += 30_000;
+  assert.equal(gate.snapshot().active, false);
+  assert.equal(gate.snapshot().remainingMs, 0);
 });
 
 test("贝壳来源透传宿主真实标识，未设置时回退 workbuddy（与 UA 同源）", () => {

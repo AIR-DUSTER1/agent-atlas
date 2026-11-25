@@ -162,7 +162,7 @@ async function* interruptFlow(req: ApprovalPayload, signal?: AbortSignal): Async
 // ---------------------------------------------------------------------------
 // 场景识别
 // ---------------------------------------------------------------------------
-type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "batch-tools" | "same-tools" | "slow-thinking" | "estate-many" | "browser-open" | "chat";
+type Scenario = "email" | "weather" | "time" | "math" | "poem" | "memory" | "estate" | "batch-tools" | "same-tools" | "rate-limited-tools" | "slow-thinking" | "estate-many" | "browser-open" | "chat";
 
 function detectScenario(message: string): Scenario {
   if (/邮件|email/i.test(message)) return "email";
@@ -172,6 +172,7 @@ function detectScenario(message: string): Scenario {
   if (/批量工具|工具分组/.test(message)) return "batch-tools";
   // 同类工具连发：验证「单类别折叠为连续工具调用」这一分支
   if (/同类工具|连续工具/.test(message)) return "same-tools";
+  if (/限流工具|稍后重试演示/.test(message)) return "rate-limited-tools";
   // 慢速思考：思考卡只在流式期间显示「思考中」，需要足够长的窗口让 e2e 捕获中间态
   if (/慢速思考|思考过程/.test(message)) return "slow-thinking";
   // 候选超过 12 套：验证结论表上限与「完整候选」Excel 下载入口
@@ -373,6 +374,43 @@ async function* mockScenario(input: MockInput): AsyncGenerator<AgentEvent> {
       yield { type: "node", name: "tools" };
       yield { type: "node", name: "agent" };
       yield* streamText("四个候选都查完了，见上方折叠的工具组。", signal);
+      return;
+    }
+
+    // ---- 外部服务限流：验证工具卡只展示普通用户能理解的说明 ----
+    case "rate-limited-tools": {
+      yield { type: "node", name: "agent" };
+      yield* streamText("房源数据服务触发了临时限流，我先停止继续查询，避免加重限制。", signal);
+      for (let index = 0; index < 3; index += 1) {
+        const id = MOCK_ID();
+        yield* streamToolCall(id, "house_lookup", { action: "detail", city: "青岛", houseId: String(100000000000 + index) }, signal);
+        yield {
+          type: "tool_result",
+          id,
+          isError: true,
+          content: JSON.stringify({
+            error: "service temporarily unavailable",
+            failureKind: "rate_limited",
+            retryAfterMs: 60_000,
+            cooldownActive: true,
+            retry: {
+              attempts: 1,
+              maxAttempts: 3,
+              retryable: true,
+              exhausted: false,
+              kind: "rate_limited",
+              retryAfterMs: 60_000,
+              cooldownActive: true,
+              analysis: "外部服务已触发临时限流，当前处于共享冷却期",
+              userMessage: "查询服务暂时繁忙，可能是短时间内请求较多或服务临时波动。系统已暂停继续查询；请等待约 60 秒后再试。已有结果不会丢失。",
+              nextAction: "等待约 60 秒后再发起新的同源查询；本轮不要继续调用其它候选或相同工具。",
+            },
+          }),
+        };
+      }
+      yield { type: "node", name: "tools" };
+      yield { type: "node", name: "agent" };
+      yield* streamText("数据服务暂时繁忙，请稍后再试。", signal);
       return;
     }
 
