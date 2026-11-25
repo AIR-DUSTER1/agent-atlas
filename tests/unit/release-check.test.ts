@@ -144,6 +144,13 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   }
 
   const dockerfile = await readFile("Dockerfile", "utf8");
+  assert.match(dockerfile, /COPY tsconfig\.json tsconfig\.client\.json tsconfig\.desktop\.json vite\.config\.ts \.\//);
+  assert.match(dockerfile, /src\/server\/public\/styles\/base\/tokens\.css/);
+  assert.match(dockerfile, /src\/server\/public\/styles\/base\/ui\.css/);
+  assert.doesNotMatch(dockerfile, /src\/server\/public\/styles\/ui\.css/);
+  const dockerSmoke = await readFile("scripts/docker-smoke.ts", "utf8");
+  assert.match(dockerSmoke, /styles\/base\/ui\.css/);
+  assert.doesNotMatch(dockerSmoke, /styles\/ui\.css/);
   assert.match(dockerfile, /AS builder/);
   assert.match(dockerfile, /AS production-deps/);
   assert.match(dockerfile, /AS runtime-base/);

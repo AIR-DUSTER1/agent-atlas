@@ -157,7 +157,7 @@ async function main(): Promise<void> {
     if (!csp.includes("default-src 'self'")) throw new Error("首页缺少 CSP");
     await waitHttp(`${base}/assets/app.js`);
     await waitHttp(`${base}/assets/chart.js`);
-    await waitHttp(`${base}/styles/ui.css`);
+    await waitHttp(`${base}/styles/base/ui.css`);
 
     const login = await fetch(`${base}/api/auth/session`, {
       method: "POST",

@@ -17,14 +17,14 @@ WORKDIR /app
 ENV npm_config_cache=/tmp/npm-cache
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts && rm -rf /tmp/npm-cache
-COPY tsconfig.json tsconfig.client.json tsconfig.desktop.json ./
+COPY tsconfig.json tsconfig.client.json tsconfig.desktop.json vite.config.ts ./
 COPY src ./src
 COPY scripts ./scripts
 COPY tests ./tests
 COPY desktop ./desktop
 RUN npm run typecheck \
  && RELEASE_CHANNEL="${RELEASE_CHANNEL}" GIT_COMMIT="${GIT_COMMIT}" BUILD_TIME="${BUILD_TIME}" npm run build:client \
- && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/assets/app.js','src/server/public/build-info.json','src/server/public/styles/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
+ && node -e "const fs=require('fs');const files=['src/server/public/index.html','src/server/public/assets/app.js','src/server/public/build-info.json','src/server/public/styles/base/tokens.css','src/server/public/styles/base/ui.css'];for(const f of files)if(!fs.existsSync(f))throw new Error('missing build asset: '+f)"
 
 FROM ${NODE_IMAGE} AS production-deps
 WORKDIR /app
