@@ -66,6 +66,49 @@ test("无需审批的多个工具并发执行：总耗时接近最慢的单个�
   assert.equal(result.messages.length, 3);
 });
 
+test("批量工具每完成一项就推送 custom 结果，不等待 Promise.all", async () => {
+  let releaseSlow!: () => void;
+  const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+  const fast = tool(async () => "fast-result", {
+    name: "fast_tool", description: "快速工具", schema: z.object({}),
+  });
+  const slow = tool(async () => {
+    await slowGate;
+    return "slow-result";
+  }, { name: "slow_tool", description: "慢速工具", schema: z.object({}) });
+  const node = createApprovalToolsNode({
+    tools: [fast, slow],
+    approvalDescriptions: {},
+    profileId: "general",
+  });
+  const events: Array<{ type?: string; id?: string; content?: string; isError?: boolean }> = [];
+  let resolveFast!: () => void;
+  const fastSeen = new Promise<void>((resolve) => { resolveFast = resolve; });
+  const run = node(
+    makeState([
+      { id: "fast-1", name: "fast_tool", args: {} },
+      { id: "slow-1", name: "slow_tool", args: {} },
+    ]) as never,
+    {
+      writer: (chunk: unknown) => {
+        const event = chunk as { type?: string; id?: string; content?: string; isError?: boolean };
+        events.push(event);
+        if (event.type === "tool_result" && event.id === "fast-1") resolveFast();
+      },
+    } as never,
+  );
+  await Promise.race([
+    fastSeen,
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error("快速工具结果未在慢工具结束前推送")), 500)),
+  ]);
+  assert.deepEqual(events[0], { type: "tool_result", id: "fast-1", content: "fast-result", isError: false });
+  assert.equal(events.some((event) => event.id === "slow-1"), false);
+  releaseSlow();
+  const result = await run;
+  assert.equal(result.messages.length, 2);
+  assert.equal(events.at(-1)?.id, "slow-1");
+});
+
 test("结果顺序与模型发起的 tool_calls 顺序一致（并发不改变顺序）", async () => {
   // 故意让「先发起的工具更慢」——若按完成顺序回填，结果顺序会被打乱
   const slowFirst = sleepyTool("first_slow", 250);

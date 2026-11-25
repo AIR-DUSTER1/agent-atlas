@@ -19,7 +19,37 @@ test("stream：长任务递归保护固定为 1000", async () => {
     // 空流也必须正常结束；本用例只校验传给 LangGraph 的运行参数。
   }
   assert.equal(seenOptions?.recursionLimit, AGENT_RECURSION_LIMIT);
+  assert.ok((seenOptions?.streamMode as string[] | undefined)?.includes("custom"));
   assert.equal(AGENT_RECURSION_LIMIT, 1_000);
+});
+
+test("stream：custom 逐项工具结果立即可见，messages/updates 回显自动去重", async () => {
+  const graph = {
+    stream: async () =>
+      (async function* () {
+        yield [[], "custom", { type: "tool_result", id: "live-1", content: "fast-result", isError: false }];
+        yield ["messages", [
+          new ToolMessage({ content: "fast-result", tool_call_id: "live-1", name: "house_lookup", status: "success" }),
+          { langgraph_node: "tools" },
+        ]];
+        yield [[], "custom", { type: "tool_result", id: "live-2", content: "slow-result", isError: false }];
+        yield ["updates", {
+          tools: { messages: [
+            new ToolMessage({ content: "fast-result", tool_call_id: "live-1", name: "house_lookup", status: "success" }),
+            new ToolMessage({ content: "slow-result", tool_call_id: "live-2", name: "house_lookup", status: "success" }),
+          ] },
+        }];
+      })(),
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of runGraphEvents(graph, {}, { threadId: "custom-tool-progress-test" })) {
+    events.push(event);
+  }
+  const results = events.filter((event) => event.type === "tool_result");
+  assert.deepEqual(results, [
+    { type: "tool_result", id: "live-1", content: "fast-result", isError: false },
+    { type: "tool_result", id: "live-2", content: "slow-result", isError: false },
+  ]);
 });
 
 test("stream：连续模式放宽超步保险丝，普通模式不受影响", async () => {
@@ -274,7 +304,7 @@ test("stream：自主审查 usage 从 ToolMessage 转发并跨双流去重", asy
   assert.deepEqual([usage[0].inputTokens, usage[0].outputTokens, usage[0].cacheReadTokens], [300, 20, 100]);
   assert.equal(usage[0].internal, true);
   assert.equal(usage[0].node, "tools");
-  assert.equal(events.filter((event) => event.type === "tool_result").length, 2);
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 1);
 });
 
 test("stream：自主低风险放行产出 risk_decision，跨 messages/updates 只一次", async () => {

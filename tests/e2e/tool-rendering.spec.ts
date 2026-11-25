@@ -90,6 +90,24 @@ test("同类工具连发折叠为单层「连续工具调用」，组内每次�
   await expect(cards.first()).toHaveClass(/open/);
 });
 
+test("同批工具按实际完成顺序逐张更新，不会等全部结束才同时完成", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await page.locator("#input").fill("逐个完成演示");
+  await page.locator("#send-btn").click();
+
+  const cards = page.locator("#messages .tool-card");
+  await expect(cards).toHaveCount(3, { timeout: 10_000 });
+  await expect(cards.nth(0).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(cards.nth(1).locator(".tool-status")).toHaveText("运行中");
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("运行中");
+
+  await expect(cards.nth(1).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("运行中");
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
+});
+
 test("外部服务限流只显示普通用户能理解的说明，不泄露机器重试字段", async ({ page }) => {
   await login(page);
   await createChat(page);

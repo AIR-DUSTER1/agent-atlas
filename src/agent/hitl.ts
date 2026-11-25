@@ -22,6 +22,8 @@ import {
   MemorySaver,
   interrupt,
   Command,
+  getWriter,
+  type LangGraphRunnableConfig,
 } from "@langchain/langgraph";
 import { toolsCondition } from "@langchain/langgraph/prebuilt";
 import type { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
@@ -33,6 +35,7 @@ import { demoApprovals } from "./approvals.js";
 import { createToolMap, type AgentToolRetryPolicy, type ApprovalDescriptions, type AgentProfileId } from "./profile.js";
 import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
 import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor } from "./tool-risk.js";
+import { WORKFLOW_PLAN_TOOL_NAME } from "../workflow-plan.js";
 
 // ---------------------------------------------------------------------------
 // 工具集：多了一个「高风险」的 send_email
@@ -529,6 +532,7 @@ async function invokeTool(
 interface NodeConfig {
   signal?: AbortSignal;
   configurable?: { permission_mode?: PermissionMode; thread_id?: string };
+  writer?: (chunk: unknown) => void;
 }
 
 export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
@@ -536,6 +540,26 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
   // interrupt 恢复会重放节点；同一 thread + tool call 的风险判断必须缓存，避免重复计费。
   const riskCache = new Map<string, Promise<ToolRiskAssessment>>();
   const MAX_RISK_CACHE_ENTRIES = 200;
+
+  /** 并行批次每完成一项就推 custom 事件，UI 不必等 Promise.all 后同时变绿。 */
+  const emitToolResultProgress = (
+    config: NodeConfig | undefined,
+    call: { id?: string; name: string },
+    result: { content: ToolMessage["content"]; status: "success" | "error" },
+  ): void => {
+    if (call.name === WORKFLOW_PLAN_TOOL_NAME || typeof result.content !== "string") return;
+    try {
+      const write = getWriter(config as LangGraphRunnableConfig | undefined);
+      write?.({
+        type: "tool_result",
+        id: call.id ?? "",
+        content: result.content,
+        isError: result.status === "error",
+      });
+    } catch {
+      // 非 Web / 未启用 custom 模式没有 writer，不影响正常节点返回。
+    }
+  };
   for (const name of Object.keys(options.approvalDescriptions)) {
     if (!toolMap.has(name)) throw new Error(`Agent 审批项未绑定工具：${name}`);
   }
@@ -678,6 +702,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         content = result.content;
         status = result.status;
       }
+      emitToolResultProgress(config, call, { content, status });
       toolResults.push(new ToolMessageCls({
         content,
         tool_call_id: call.id ?? "",
@@ -701,9 +726,12 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         parallelBatch.map(async (item) => {
           if (item.action === "deny") {
             // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
-            return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
+            const content = readonlyDenyText(item.call.name);
+            emitToolResultProgress(config, item.call, { content, status: "error" });
+            return { item, content, status: "error" as const };
           }
           const result = await invokeTool(item.toolFn, item.call.args, config, options.toolRetryPolicy);
+          emitToolResultProgress(config, item.call, result);
           return { item, content: result.content, status: result.status };
         })
       );
