@@ -1,0 +1,60 @@
+/* ============================================================
+   shared/auth-gate.css — 认证门页覆盖层
+   ============================================================
+   为什么单独一个文件：门页的挂载容器 #auth-gate-root 由
+   views/auth/auth-gate-mount.ts 动态创建并追加到 <body>，它不在任何
+   SFC 的作用域内 —— 组件里的 scoped 样式（.auth-form 等）只覆盖表单本身。
+   缺这一层时容器就是个裸 div，会以普通块级元素贴在页面最下方（真实事故）。
+
+   层级：必须盖住 #app、对话框(320)、Toast(11000) 与 fatal-banner(12000)，
+   否则登录时后面的界面还能露出交互反馈。用 13000。
+   ============================================================ */
+
+#auth-gate-root {
+  position: fixed;
+  z-index: 13000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow: auto;
+  background: rgba(0, 0, 0, .58);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* 门页打开时锁住背景滚动，避免滚动穿透到 inert 的应用界面。 */
+body.auth-gate-open {
+  overflow: hidden;
+}
+
+/* 表单本身充当卡片：SFC 的根是 AntdvProvider > Form，没有额外包裹元素可用。 */
+#auth-gate-root .auth-form {
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+}
+
+/* 门页标题（SFC 内的 h2，见 auth-login.vue / auth-password.vue） */
+#auth-gate-root .auth-gate-title {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: var(--font-lg, 15px);
+  font-weight: 600;
+}
+
+#auth-gate-root .auth-gate-sub {
+  margin: 0 0 16px;
+  color: var(--text-3, var(--text-2));
+  font-size: var(--font-sm, 13px);
+}
+
+@media (max-width: 560px) {
+  #auth-gate-root { padding: 12px; align-items: flex-start; }
+  #auth-gate-root .auth-form { margin-top: 8vh; padding: 18px; }
+}

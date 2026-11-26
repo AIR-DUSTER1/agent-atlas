@@ -59,6 +59,8 @@ function onSubmit(event: Event): void {
 <template>
   <AntdvProvider>
     <Form class="auth-form" layout="vertical" novalidate :disabled="busy" @submit="onSubmit">
+      <h2 class="auth-gate-title">登录 agentatlas</h2>
+      <p class="auth-gate-sub">使用管理员为你创建的用户名和密码登录。</p>
       <p v-if="notice" class="auth-notice" role="status">{{ notice }}</p>
 
       <div class="auth-field">
