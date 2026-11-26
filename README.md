@@ -216,10 +216,13 @@ DATABASE_URL=postgresql://agent_app:APP_PASSWORD@postgres:5432/agentatlas
 DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 ```
 
+- **数据库模式一律强制登录**（与 `AUTH_TOKEN` 是否为空无关），首次打开页面即弹「用户名 + 密码」登录页，不再是令牌配对框。
+- 首次启动会自动给 `admin` 建一个初始密码：设了 `BOOTSTRAP_ADMIN_PASSWORD` 就用它（弱密码启动即报错），否则生成随机密码写入 `<数据目录>/bootstrap-admin-password.txt`（0600），也可用 `BOOTSTRAP_ADMIN_PASSWORD_FILE` 指向挂载的 secret 文件。密码只在该文件里，不进日志。
+- 首次登录强制改密；之后一切以用户名密码为准，`AUTH_TOKEN` 只作为运维救援通道。
 - 用户用「用户名 + 密码」登录；管理员在「设置 → 账号与安全」创建用户、重置密码、管理访问令牌（CLI 通道 `npm run user:create -- --name Alice` 仍可用）。
 - 首登或密码被重置后强制改密；修改密码会使该用户全部会话与设备免登失效。
 - 连续 10 次登录失败锁定账户 15 分钟；IP 维度另有 5 次 / 15 分钟限流。
-- `AUTH_TOKEN` 只作为管理员 bootstrap 与运维通道；会话、审批、checkpoint、项目和统计由 `userId` 隔离，数据库表启用 RLS。
+- 会话、审批、checkpoint、项目和统计由 `userId` 隔离，数据库表启用 RLS。
 - 供应商、插件、MCP、技能、备份和诊断配置只允许管理员修改。
 - 当前仍是单实例运行，SSE、限流和内存流锁尚未迁移到多实例。
 
@@ -235,9 +238,10 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 | `BASE_URL` / `API_KEY` / `MODEL` | 模型网关地址、密钥与默认模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
 | `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
-| `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为管理员 bootstrap 密钥 |
+| `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为运维救援密钥（登录本身用用户名密码） |
 | `BOOTSTRAP_ADMIN_USERNAME` | bootstrap 管理员登录名，默认 `admin` |
 | `BOOTSTRAP_ADMIN_NAME` | bootstrap 管理员显示名，默认「管理员」 |
+| `BOOTSTRAP_ADMIN_PASSWORD` / `_FILE` | PostgreSQL 模式首次启动的初始管理员密码（不设则随机生成写 0600 文件） |
 | `STATE_BACKEND` / `DATABASE_URL` / `DATABASE_ADMIN_URL` | 可选 PostgreSQL 多用户后端与迁移/运行角色 |
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
 | `SESSION_SECRET` / `DATA_KEY` | 生产会话与设备凭据签名、配置加密密钥 |

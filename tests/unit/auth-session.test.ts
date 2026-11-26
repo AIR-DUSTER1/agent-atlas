@@ -12,6 +12,7 @@ import {
   sessionTtlHours, setSessionCookie, verifySessionRequest, verifySessionToken,
 } from "../../src/server/security/session.js";
 import { FailureRateLimiter, clientIp } from "../../src/server/security/rate-limit.js";
+import { isAuthEnabled } from "../../src/server/auth.js";
 import {
   deviceCookie, ensureDeviceIdentity, ensureDeviceSession, hasAuthorizedDeviceSession,
   isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken, deviceFromRequest, userIdentityForRequest,
@@ -284,6 +285,27 @@ test("认证关闭时远端设备自动获得签名设备 Cookie", () => {
     assert.match(String(res.getHeader("set-cookie")), /lg_agent_device=/);
   } finally {
     delete process.env.SESSION_SECRET;
+  }
+});
+
+// 数据库模式强制登录的回归守门：本机直连不得自动获得 admin 身份，
+// 也不能因为 AUTH_TOKEN 为空就整站免认证（那是认证绕过）。
+test("数据库模式：本机直连不自动免登，缺 AUTH_TOKEN 也要求登录", () => {
+  const previous = { STATE_BACKEND: process.env.STATE_BACKEND, AUTH_TOKEN: process.env.AUTH_TOKEN };
+  process.env.STATE_BACKEND = "postgres";
+  delete process.env.AUTH_TOKEN;
+  try {
+    // AUTH_TOKEN 为空也必须要求认证
+    assert.equal(isAuthEnabled(), true);
+    // 本机直连不再被当作 local 设备身份
+    const res = fakeResponse();
+    assert.equal(ensureDeviceIdentity(fakeRequest(), res), null);
+    assert.equal(res.getHeader("set-cookie"), undefined);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 

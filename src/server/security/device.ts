@@ -14,6 +14,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { appendSetCookie, issueSession, parseCookies, setSessionCookie, verifySessionRequest } from "./session.js";
 import { isPostgresBackend, localUserIdentity } from "../persistence/postgres.js";
+import { authRequired } from "./auth-mode.js";
 
 export const DEVICE_COOKIE = "lg_agent_device";
 export const LOCAL_DEVICE_ID = "local";
@@ -148,7 +149,7 @@ export function isDirectLoopbackRequest(req: IncomingMessage): boolean {
 }
 
 function authEnabled(): boolean {
-  return envValue("AUTH_TOKEN").length > 0;
+  return authRequired();
 }
 
 function identityFromDevice(payload: DevicePayload): RequestIdentity | null {
@@ -194,7 +195,11 @@ export function ensureDeviceIdentity(req: IncomingMessage, res: ServerResponse):
     return identity.deviceId;
   }
 
-  if (isDirectLoopbackRequest(req)) {
+  // 本机直连免登只适用于文件模式（单用户、整台机器就是一个身份）。
+  // 数据库模式强制登录：loopback 若也自动给管理员身份，容器内的任意进程
+  // （包括被入侵的子进程）都能绕过 users 表直接拿到 admin —— 与「数据库模式
+  // 一律强制登录」的契约冲突。容器健康探针只打 /healthz、/readyz，不经过此处。
+  if (!isPostgresBackend() && isDirectLoopbackRequest(req)) {
     const identity = localRequestIdentity();
     cache(req, identity);
     return identity.deviceId;

@@ -14,6 +14,7 @@ import {
   withSystemTransaction,
 } from "./postgres.js";
 import { hashPassword, validatePasswordPolicy } from "../security/password.js";
+import { resolveInitialAdminPassword } from "../security/bootstrap-password.js";
 
 export type AccountRole = "admin" | "member";
 
@@ -253,6 +254,27 @@ export async function hasPassword(userId: string): Promise<boolean> {
     [userId],
   );
   return Boolean(result.rows[0]?.password_hash);
+}
+
+/**
+ * 数据库模式首次启动：给 bootstrap 管理员补一个初始密码，否则登录页永远进不去。
+ *
+ * 只在该管理员**还没有密码**时执行，重启幂等：一旦用户改过密码就再也不会被覆盖
+ * （否则每次重启都会把管理员的密码重置回初始值，属于安全事故）。
+ * 初始密码一律标记 must_change_password，登录后必须先改密。
+ */
+export async function ensureBootstrapAdminPassword(configFile: string): Promise<{
+  username: string;
+  source: "env" | "file" | "generated";
+  file: string | null;
+} | null> {
+  if (!isPostgresBackend()) return null;
+  const admin = await ensureBootstrapAdmin();
+  if (await hasPassword(admin.userId)) return null;
+
+  const initial = await resolveInitialAdminPassword(configFile);
+  await setUserPassword(admin.userId, await hashPassword(initial.password), true);
+  return { username: bootstrapAdminUsername(), source: initial.source, file: initial.file };
 }
 
 // ---------------------------------------------------------------------------

@@ -10,13 +10,18 @@ import type { IncomingMessage } from "node:http";
 import { verifyBearer } from "./auth-bearer.js";
 import { verifySessionRequest } from "./security/session.js";
 import { hasAuthorizedDeviceSession } from "./security/device.js";
+import { authRequired } from "./security/auth-mode.js";
 
 function currentToken(): string {
   return (process.env.AUTH_TOKEN ?? "").trim();
 }
 
+/**
+ * 是否必须认证。判定本身在 security/auth-mode.ts —— 数据库模式与 AUTH_TOKEN
+ * 无关，永远要求登录；文件模式沿用「AUTH_TOKEN 为空即免登」。
+ */
 export function isAuthEnabled(): boolean {
-  return currentToken().length > 0;
+  return authRequired();
 }
 
 export const UNAUTHORIZED_MSG =

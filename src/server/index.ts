@@ -32,7 +32,7 @@ import { isAuthEnabled, verifyMetricsAuth, verifyRequestAuth } from "./auth.js";
 import { adoptBearerIdentity, ensureDeviceIdentity, ensureDeviceSession, requireDeviceIdentity, isAdminRequest } from "./security/device.js";
 import { userIdentityForRequest } from "./security/device.js";
 import { initializePostgres, closePostgres, isPostgresBackend } from "./persistence/postgres.js";
-import { ensureBootstrapAdmin } from "./persistence/accounts.js";
+import { ensureBootstrapAdmin, ensureBootstrapAdminPassword } from "./persistence/accounts.js";
 import { enterUserContext, localUserContext } from "./user-context.js";
 import { applySecurityHeaders, checkSameOrigin, respondForbidden, respondUnauthorized } from "./http-guard.js";
 import { readBody, respondBadRequest, BodyTooLargeError } from "./http-body.js";
@@ -145,6 +145,18 @@ try {
 try {
   await initializePostgres();
   await ensureBootstrapAdmin();
+  // 数据库模式强制用户名密码登录：首次启动必须给出可用的初始密码，
+  // 否则登录页永远进不去（此前的坑：库里 admin 没有 password_hash）。
+  // 初始密码只写 0600 文件并把路径记进日志，密码本身不落日志、不进审计。
+  const bootstrapPassword = await ensureBootstrapAdminPassword(SETTINGS_FILE);
+  if (bootstrapPassword) {
+    log("warn", "bootstrap_admin_password_initialized", {
+      username: bootstrapPassword.username,
+      source: bootstrapPassword.source,
+      ...(bootstrapPassword.file ? { file: bootstrapPassword.file } : {}),
+      hint: "首次登录后必须先改密；密码值只在上面文件里，不在日志中",
+    });
+  }
   await runPersistenceMigrations();
   await loadSettings();
   await loadTraceSettings();
