@@ -139,13 +139,19 @@ export function markInterruptsResolved(sid: string): boolean {
 
 /** 若存在新的 pending 时，只把历史里最后一个 interrupt 标记成可操作，其余保持历史态 */
 export function markLatestInterruptPending(sid: string): boolean {
-  let latest: { status: string } | null = null;
+  let latest: { status: string; collapsed?: boolean } | null = null;
   for (const block of transcript(sid)) {
     if (block.t !== "assistant" || !Array.isArray(block.parts)) continue;
     for (const part of block.parts) {
       if (part.p === "approval" || part.p === "clarification") latest = part;
     }
   }
-  if (latest && latest.status !== "pending") { latest.status = "pending"; return true; }
+  if (latest) {
+    const changed = latest.status !== "pending" || latest.collapsed === true;
+    latest.status = "pending";
+    // 重新打开的审批必须展开操作区；不能保留上一次“已处理”状态的折叠。
+    latest.collapsed = false;
+    return changed;
+  }
   return false;
 }

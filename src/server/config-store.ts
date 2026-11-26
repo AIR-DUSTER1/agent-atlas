@@ -76,7 +76,6 @@ export async function readConfig(): Promise<Record<string, unknown>> {
     const bakRaw = await readFile(BAK_FILE, "utf8");
     const parsed = decodeConfig(bakRaw);
     if (parsed && typeof parsed === "object") {
-      // 把抢救出来的内容原子回写为主文件（下次读直接命中）
       await atomicWrite(SETTINGS_FILE, encodeConfigForDisk(parsed as Record<string, unknown>));
       log("warn", "config_restored", { source: "bak" });
       return normalize(parsed);
@@ -86,7 +85,6 @@ export async function readConfig(): Promise<Record<string, unknown>> {
       log("error", "config_secret_decrypt_failed", { action: "backup_fail_closed" });
       throw err;
     }
-    // .bak 也没有 / 也坏：返回空配置，让各模块按缺省播种（与「删除文件回退 .env」一致）
     if (raw !== null) log("error", "config_restore_failed", { action: "fallback_empty" });
   }
   return {};

@@ -2,7 +2,7 @@
  * ============================================================
  * render/conclusion-media.ts — 房产最终结论中的结构化对比表
  * ============================================================
- * 职责：把同一轮 house_* 结果按 houseId 合并成“房源 / 户型图 / VR / 地理位置”
+ * 职责：把同一轮 house_* 结果按 houseId 合并成“房源 / 价格 / 户型图 / VR / 地理位置”
  * 表格，挂到最终回答下方。内部 ID 只参与匹配，不展示给用户；流式或重写
  * 阶段自动撤下旧表，避免结论与过程不一致。
  */
@@ -33,6 +33,12 @@ const MAP_LINK_LABELS: Record<string, string> = {
   osm: "OSM",
 };
 const conclusionEls = new WeakMap<AssistantBlock, HTMLElement>();
+
+interface LocationMapTarget {
+  lat: number;
+  lng: number;
+  config: MapRuntimeConfig;
+}
 
 /** 结论表跟随最后一段已完成正文；反思思考可能排在正文之后，不能因此撤表。 */
 function latestCompletedTextPart(block: AssistantBlock) {
@@ -271,7 +277,18 @@ function renderImageCell(property: ConclusionProperty): HTMLElement {
   return cell;
 }
 
-function renderLocationCell(property: ConclusionProperty, media: EstateConclusionMedia, rendered: Set<string>): HTMLElement {
+function renderPriceCell(property: ConclusionProperty): HTMLElement {
+  const cell = document.createElement("td");
+  cell.className = "conclusion-table-price";
+  if (property.price) {
+    cell.appendChild(h("strong", { class: "conclusion-price-value" }, property.price));
+  } else {
+    cell.appendChild(h("span", { class: "conclusion-empty" }, "价格待补"));
+  }
+  return cell;
+}
+
+function renderLocationCell(property: ConclusionProperty, locationMaps: Map<string, LocationMapTarget>): HTMLElement {
   const cell = document.createElement("td");
   cell.className = "conclusion-table-location";
   const location = property.location;
@@ -282,18 +299,34 @@ function renderLocationCell(property: ConclusionProperty, media: EstateConclusio
   }
 
   const mapConfig = resolveMapConfig(state.config?.map);
-  const key = [location.name, location.lat ?? "", location.lng ?? ""].join("|");
-  if (Number.isFinite(location.lat) && Number.isFinite(location.lng) && !rendered.has(key)) {
+  const hasCoordinates = Number.isFinite(location.lat) && Number.isFinite(location.lng);
+  const key = hasCoordinates
+    ? `${(location.lat as number).toFixed(6)}|${(location.lng as number).toFixed(6)}`
+    : location.name;
+  if (hasCoordinates) {
+    const lat = location.lat as number;
+    const lng = location.lng as number;
     const title = `${property.title || location.name} 位置`;
-    const map = renderMapFrame(location.lat, location.lng, title, true, mapConfig);
-    if (map) {
-      const previewDescription = [location.name, precisionLabel(location.precision), coordinateText(location)]
-        .filter(Boolean).join(" · ");
-      cell.appendChild(renderMapPreviewTrigger(map, location.lat as number, location.lng as number, title, previewDescription, mapConfig));
-      rendered.add(key);
+    const previewDescription = [location.name, precisionLabel(location.precision), coordinateText(location)]
+      .filter(Boolean).join(" · ");
+    let thumbnail = locationMaps.get(key);
+    if (!thumbnail) {
+      thumbnail = { lat, lng, config: mapConfig };
+      locationMaps.set(key, thumbnail);
     }
-  } else if (rendered.has(key)) {
-    cell.appendChild(h("span", { class: "conclusion-same-location" }, "同一小区位置，见上方地图"));
+    // 同一小区沿用上一行的同一组坐标与地图配置，底图 URL 完全一致，
+    // 由浏览器缓存复用图片资源，不再输出「见上方地图」占位文字。
+    const map = renderMapFrame(thumbnail.lat, thumbnail.lng, title, true, thumbnail.config);
+    if (map) {
+      cell.appendChild(renderMapPreviewTrigger(
+        map,
+        thumbnail.lat,
+        thumbnail.lng,
+        title,
+        previewDescription,
+        thumbnail.config,
+      ));
+    }
   }
 
   cell.appendChild(h("strong", { class: "conclusion-location-name" }, location.name || property.community || "房源位置"));
@@ -310,19 +343,19 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
   table.className = "conclusion-table";
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["房源", "户型图", "地理位置"]) {
+  for (const label of ["房源", "价格", "户型图", "地理位置"]) {
     headRow.appendChild(h("th", null, label));
   }
   thead.appendChild(headRow);
   const tbody = document.createElement("tbody");
-  const renderedLocations = new Set<string>();
+  const locationMaps = new Map<string, LocationMapTarget>();
   for (const property of media.properties) {
     const row = document.createElement("tr");
     const facts = document.createElement("td");
     facts.className = "conclusion-table-property";
     facts.appendChild(h("strong", { class: "conclusion-property-title" }, property.title || property.community || "房源详情"));
     const tags = h("div", { class: "conclusion-property-tags" });
-    for (const value of [property.rent, property.layout, property.area, property.floor, property.orientation, property.decoration]) {
+    for (const value of [property.layout, property.area, property.floor, property.orientation, property.decoration]) {
       if (value) tags.appendChild(h("span", null, value));
     }
     if (tags.childElementCount) facts.appendChild(tags);
@@ -353,12 +386,13 @@ function renderPropertyTable(media: EstateConclusionMedia): { table: HTMLElement
       }, icon("ExternalLink", { size: 14 }), h("span", null, "在贝壳查看该房源")));
     }
     row.appendChild(facts);
+    row.appendChild(renderPriceCell(property));
     row.appendChild(renderImageCell(property));
-    row.appendChild(renderLocationCell(property, media, renderedLocations));
+    row.appendChild(renderLocationCell(property, locationMaps));
     tbody.appendChild(row);
   }
   table.append(thead, tbody);
-  return { table, mappedLocations: renderedLocations.size };
+  return { table, mappedLocations: locationMaps.size };
 }
 
 function renderMap(media: EstateConclusionMedia): HTMLElement | null {

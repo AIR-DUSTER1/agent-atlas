@@ -369,7 +369,7 @@ const computerScroll = tool(
 
 export const computerScreenshot = new ComputerScreenshotTool();
 
-/** 电脑控制工具集（general agent 绑定；动作类四项登记审批，截图只读直接执行） */
+/** 电脑控制工具集（由已启用的主 Agent Profile 显式装配；动作类四项登记审批，截图只读直接执行） */
 export const computerTools = [computerScreenshot, computerClick, computerType, computerKey, computerScroll];
 
 // 供单测断言工具命名与前缀一致性

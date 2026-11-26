@@ -15,6 +15,7 @@ import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 import { isPluginEnabled } from "../plugin-state.js";
 import type { ModelRuntimeConfig } from "../model-runtime.js";
+import { activePlatformApprovals, activePlatformTools, platformCapabilityPrompt } from "./platform-capabilities.js";
 
 const tools = [
   // 贝壳找房工具（检索/详情/户型图/对比地图/行情/经纪人）；约看与加微走人工审批
@@ -91,14 +92,30 @@ export const estateProfile: AgentProfile = {
   },
 };
 
-/** 运行时 profile：插件关闭时保留诚实的空能力边界，不把 house_* 工具带进图。 */
+/**
+ * 运行时 profile：找房领域工具按 estate 插件收敛；Browser Use / Computer Use
+ * 是显式平台能力，启用后同样装配给房产 Agent，但不引入通用开发或记忆工具。
+ */
 export function estateProfileWithPlugins(): AgentProfile {
-  if (isPluginEnabled("estate")) return estateProfile;
+  const estateEnabled = isPluginEnabled("estate");
+  const platformPrompt = platformCapabilityPrompt();
   return {
     ...estateProfile,
-    systemPrompt: `${SYSTEM_PROMPT}\n- 当前找房数据源插件已停用；不要调用 house_* 工具，请提示用户到「设置 → 插件」启用。`,
-    tools: [calculator, getCurrentTime],
-    approvalDescriptions: {},
+    systemPrompt: [
+      SYSTEM_PROMPT,
+      estateEnabled ? "" : "- 当前找房数据源插件已停用；不要调用 house_* 工具，请提示用户到「设置 → 插件」启用。",
+      platformPrompt,
+    ].filter(Boolean).join("\n"),
+    tools: [
+      ...(estateEnabled ? estateTools : []),
+      calculator,
+      getCurrentTime,
+      ...activePlatformTools(),
+    ],
+    approvalDescriptions: {
+      ...(estateEnabled ? estateApprovals : {}),
+      ...activePlatformApprovals(),
+    },
   };
 }
 

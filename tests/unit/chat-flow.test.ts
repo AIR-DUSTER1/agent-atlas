@@ -181,6 +181,9 @@ test("会话项右侧操作按钮共享横向操作区，导出与删除不会�
   assert.match(vue, /class="s-actions"/);
   assert.match(css, /\.s-actions\s*\{[^}]*display:\s*flex[^}]*gap:\s*2px/s);
   assert.match(css, /\.session-item \.s-title\s*\{[^}]*padding-right:\s*56px/s);
+  assert.match(css, /\.s-actions\s*\{[^}]*top:\s*8px/s, "会话操作按钮不能压住状态行");
+  assert.match(css, /\.session-item \.s-meta\s*\{[^}]*white-space:\s*nowrap/s, "状态行不允许文字竖向换行");
+  assert.match(css, /\.session-item \.s-pending[^}]*flex:\s*0 0 auto[^}]*white-space:\s*nowrap/s, "待审批徽标必须保持单行");
   assert.match(css, /@media \(hover: none\), \(pointer: coarse\)/);
   assert.doesNotMatch(css, /\.s-del\s*\{[^}]*position:\s*absolute/s, "按钮本体不能各自绝对定位");
 });
@@ -306,7 +309,7 @@ test("结论附件聚合详情地图、点位与多张户型图", () => {
   assert.deepEqual(media.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
   assert.equal(media.properties.length, 1);
   assert.equal(media.properties[0]?.title, "测试花园 · 2室1厅 · 90㎡");
-  assert.equal(media.properties[0]?.rent, "2400元/月");
+  assert.equal(media.properties[0]?.price, "2400元/月");
   assert.deepEqual(media.properties[0]?.images.map((image) => image.src), [IMAGE_ONE, IMAGE_TWO]);
   assert.equal(media.properties[0]?.vrUrl, VR_URL);
   assert.equal(media.properties[0]?.location?.name, "测试花园");
@@ -376,7 +379,21 @@ test("结论表标题移除内部房源编号并优先展示小区名", () => {
     }),
   ], "");
   assert.equal(media.properties[0]?.title, "依山半岛 · 2室1厅 · 92㎡");
+  assert.equal(media.properties[0]?.price, "2800元/月");
   assert.doesNotMatch(media.properties[0]?.title || "", /103149264003/);
+});
+
+test("买房 raw 搜索结果的总价会进入价格字段", () => {
+  const raw = [
+    "<参考数据><二手房>",
+    "<103155465088>",
+    JSON.stringify({ 摘要信息: { 户型信息: "3室2厅，建筑面积120㎡", 区位交通: "位于崂山区大埠东小区", 总价: "618 万" } }),
+    "</103155465088>",
+  ].join("\n");
+  const media = collectEstateConclusionMedia([
+    estateToolPart("search-buy-price", "house_search", { action: "search", mode: "buy", data: raw }),
+  ], "大埠东 3室2厅 120㎡ 618万");
+  assert.equal(media.properties[0]?.price, "618 万");
 });
 
 test("搜索结果带 metadata 的房产会保留 rentCode 供详情链接使用", () => {
@@ -463,6 +480,17 @@ test("结论标题不再向用户解释内部编号隐藏实现", async () => {
   const source = await readClientFiles(["render/conclusion-media.ts"]);
   assert.doesNotMatch(source, /内部编号已隐藏/);
   assert.match(source, /户型图、位置和详情按房源自动匹配/);
+});
+
+test("结论表提供价格列，重复位置复用缩略图而不是输出文字占位", async () => {
+  const source = await readClientFiles(["render/conclusion-media.ts"]);
+  const css = await readClientCss();
+  assert.match(source, /\["房源", "价格", "户型图", "地理位置"\]/);
+  assert.match(source, /locationMaps\.get\(key\)/);
+  assert.doesNotMatch(source, /同一小区位置/);
+  assert.match(css, /\.conclusion-table-price\s*\{/);
+  assert.match(css, /\.conclusion-price-value\s*\{/);
+  assert.doesNotMatch(css, /\.conclusion-same-location\s*\{/);
 });
 
 test("无房产媒体时不生成结论附件", () => {

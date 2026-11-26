@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readBody } from "../http-body.js";
 import { isAuthEnabled } from "../auth.js";
 import {
-  clearSessionCookieOnResponse, issueSession, revokeSession, sessionFromRequest,
+  clearSessionCookieOnResponse, issueRenewedSession, issueSession, revokeSession, sessionFromRequest,
   sessionTtlHours, setSessionCookie, verifySessionToken, verifySessionRequest,
 } from "../security/session.js";
 import {
@@ -83,7 +83,8 @@ function recordFailure(req: IncomingMessage): RateLimitDecision {
 }
 
 function issueAutoSession(req: IncomingMessage, res: ServerResponse, identity: RequestIdentity): void {
-  const { token, payload } = issueSession(Date.now(), undefined, identity);
+  const previous = verifySessionRequest(req);
+  const { token, payload } = issueRenewedSession(previous, Date.now(), previous?.sid, identity);
   setSessionCookie(res, token);
   renewDeviceCookie(res, identity);
   writeAudit("auth_session_issued", { ip: ipTag(clientIp(req)), mode: identity.deviceId === "local" ? "loopback" : "device" });
@@ -259,7 +260,7 @@ export async function handleAuthRenew(req: IncomingMessage, res: ServerResponse)
       deviceId: identity?.deviceId ?? owner.userId,
       role: owner.role,
     };
-    const next = issueSession(Date.now(), payload?.sid, nextIdentity);
+    const next = issueRenewedSession(payload, Date.now(), payload?.sid, nextIdentity);
     setSessionCookie(res, next.token);
     if (identity) renewDeviceCookie(res, nextIdentity);
     writeAudit("auth_session_renewed", { ip: ipTag(clientIp(req)), mode: identity ? "device" : "session", userId: owner.userId });

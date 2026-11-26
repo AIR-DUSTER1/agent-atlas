@@ -14,7 +14,7 @@ import { partEls, saveLocal, state, transcript } from "../core/state.js";
 import { scrollBottom } from "../core/dom.js";
 import { updateContextBar } from "../views/chat/composer-bar.js";
 import { setWorkflowPlan } from "../views/chat/workflow-plan.js";
-import { mountBlock, updateTurnCaption } from "../render/messages.js";
+import { mountBlock, remountAssistantParts, updateTurnCaption } from "../render/messages.js";
 import { refreshConclusionMedia, sanitizeEstateConclusionText } from "../render/conclusion-media.js";
 import { isClarifyNodeName } from "../modules/chat-flow.js";
 import {
@@ -41,9 +41,12 @@ function sealStreamingParts(ablock: AssistantBlock, kinds: Array<"text" | "think
   }
 }
 export function appendToken(ablock: AssistantBlock, text: string, visible = true): void {
+  if (!text) return;
   const parts = ablock.parts;
   let last = parts[parts.length - 1];
   if (!last || last.p !== "text" || !last.streaming) {
+    // 空 token / 纯空白不能创建新的正文容器，否则会留下一个孤立的流式光标。
+    if (!text.trim()) return;
     const part: TextPart = { p: "text", text: "", streaming: true };
     parts.push(part);
     mountPart(ablock, part);
@@ -131,19 +134,22 @@ export function addNodeChip(ablock: AssistantBlock, name: string, visible = true
  * 载荷里没有 callId，按工具名取「最近一张尚无结果的同名卡」：同一轮的同名同参调用
  * 会被签名去重，不会有多张并存，这个匹配是确定的。
  */
-function markAwaitingApproval(ablock: AssistantBlock, toolName: string, pending: boolean): void {
+function markAwaitingApproval(ablock: AssistantBlock, toolName: string, pending: boolean): ToolPart | null {
   for (let i = ablock.parts.length - 1; i >= 0; i -= 1) {
     const part = ablock.parts[i];
     if (part?.p !== "tool" || part.name !== toolName || part.result) continue;
     part.awaitingApproval = pending;
     void import("../render/parts.js").then((m) => m.updateToolCard(part));
-    return;
+    return part;
   }
+  return null;
 }
 
 export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, sid: string | null, visible = true): void {
   sealStreamingParts(ablock);
-  if (payload.type === "approval") markAwaitingApproval(ablock, payload.toolName, true);
+  const approvalTool = payload.type === "approval"
+    ? markAwaitingApproval(ablock, payload.toolName, true)
+    : null;
   if (payload.type === "clarification") {
     removeClarifyNodeChips(ablock);
     const part: AssistantPart = { p: "clarification", req: payload, status: "pending" };
@@ -151,9 +157,24 @@ export function addInterrupt(ablock: AssistantBlock, payload: InterruptPayload, 
     mountPart(ablock, part);
   } else {
     const part: AssistantPart = { p: "approval", req: payload, status: "pending" };
-    ablock.parts.push(part);
+    // 审批必须在对应工具卡之前展示；工具卡先由 tool_call 创建，不能把审批卡追加到它后面，
+    // 否则用户会先看到“已完成”的工具卡，再看到审批按钮，产生“先执行后审批”的错觉。
+    const toolIndex = approvalTool ? ablock.parts.indexOf(approvalTool) : -1;
+    if (toolIndex >= 0) ablock.parts.splice(toolIndex, 0, part);
+    else ablock.parts.push(part);
     mountPart(ablock, part);
+    if (approvalTool) {
+      const toolEl = partEls.get(approvalTool)?.el;
+      const approvalEl = partEls.get(part)?.el;
+      const group = toolEl?.closest<HTMLElement>(".tool-group") ?? null;
+      const before = group?.parentElement ? group : toolEl;
+      if (before?.parentElement && approvalEl) before.parentElement.insertBefore(approvalEl, before);
+    }
   }
+  // 当前助手块可能已被 Vue 的会话/用量刷新替换；实时流的 interrupt 到达时
+  // 立即重挂载，不依赖用户切换会话再回来触发渲染。历史回放没有 stream，
+  // 由最终 renderAll 统一挂载，避免逐条 interrupt 等待重挂载。
+  if (sid && state.streams[sid]) void remountAssistantParts(ablock);
   setPendingApproval(true, sid);
   if (visible) scrollBottom(true);
   // interrupt 之后这一轮就没有更多内容了：服务端会立刻补 done/end，但浏览器拿到

@@ -92,6 +92,22 @@ test("账户锁定：不同用户名互不影响", () => {
   assert.equal(checkAccountLock("dave", now).remaining, 1);
   resetAccountLocksForTests();
 });
+
+test("账户锁定：大小写不同的同一用户名共用同一计数与锁定", () => {
+  resetAccountLocksForTests();
+  const now = 4_000_000;
+  for (let i = 0; i < ACCOUNT_LOCK_THRESHOLD - 1; i += 1) {
+    recordAccountFailure("Admin", "iptag", now + i);
+  }
+  // 换大小写只差最后一次失败，不能因为是新键而清零重计。
+  const locked = recordAccountFailure("ADMIN", "iptag", now + 100);
+  assert.equal(locked.locked, true);
+  assert.equal(checkAccountLock("aDmIn", now + 120).locked, true);
+  clearAccountFailures(" admIn ");
+  assert.equal(checkAccountLock("ADMIN", now + 130).locked, false);
+  resetAccountLocksForTests();
+});
+
 test("用户管理：管理员不能禁用或降级自己", () => {
   assert.equal(isSelfAdminMutation("admin-1", "admin-1", { status: "disabled" }), true);
   assert.equal(isSelfAdminMutation("admin-1", "admin-1", { role: "member" }), true);

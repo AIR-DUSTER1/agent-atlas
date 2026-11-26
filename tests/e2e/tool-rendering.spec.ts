@@ -268,6 +268,9 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
 
   const table = page.locator("#messages .conclusion-table");
   await expect(table).toHaveCount(1);
+  await expect(table.locator("thead th").nth(1)).toHaveText("价格");
+  await expect(table.locator(".conclusion-table-price").first()).toContainText(/\d[\d,]* ?元\/月/);
+  expect(await table.locator(".conclusion-same-location").count()).toBe(0);
   const tableText = (await table.textContent()) ?? "";
   // 结论表只列最终回答里提到的房源，且带真实价格与面积
   expect(tableText).toMatch(/\d+㎡/);

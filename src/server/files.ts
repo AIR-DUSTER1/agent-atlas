@@ -78,10 +78,11 @@ function userRoots(userId: string, role: "admin" | "member"): Map<string, string
     roots = new Map<string, string>();
     authorizedRoots.set(userId, roots);
   }
+  // 管理员空授权根自动获得仓库根；member 必须由用户显式添加项目/远程文件夹，
+  // 不得在 roots 为空时把整个服务器仓库塞进去（审核报告 P0-2）。
   if (role === "admin" && !roots.size) roots.set(PROJECT_ROOT, "项目根");
   return roots;
 }
-
 function currentUserRoots(): Map<string, string> {
   const context = userContextOrLocal();
   return userRoots(context.userId, context.role);

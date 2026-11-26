@@ -18,16 +18,17 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { Button, Checkbox, Input, Modal, Select } from "antdv-next";
+import { Button, Checkbox, Input, Select } from "antdv-next";
 import { useModelsStore } from "../../../stores/settings/models/models.js";
 import {
-  activateModel, addModelByName, fetchGatewayModelChips, removeModel, removeProvider,
+  activateModel, addModelByName, applyModelSelection, fetchGatewayModelChips, removeModel, removeProvider,
 } from "./model-actions.js";
 import { setSettingsStatus } from "./model-status.js";
 import { PROTOCOL_LABEL } from "../../chat/composer-bar.js";
 import { fmtTokens } from "../../../modules/format.js";
 import type { GatewayModel, ModelEntry, ProviderEntry } from "../../../modules/types.js";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
+import ModelSelectionPicker from "./model-selection-picker.vue";
 
 const store = useModelsStore();
 
@@ -49,15 +50,15 @@ const selected = computed(() => store.selectedProvider);
 const modelCount = computed(() => selected.value ? `共 ${(selected.value.models || []).length} 个 · 一个供应商可添加多个模型` : "");
 const models = computed<ModelEntry[]>(() => selected.value ? (selected.value.models || []) : []);
 
-/** 已启用模型的名称集合：选择器里据此显示「已添加」，不再逐个全量扫描。 */
-const configuredModelNames = computed(() => new Set(models.value.map((model) => model.name)));
-
-/** 网关模型选择器的搜索过滤；空列表时展示加载/空态，不撑满页面。 */
-const gatewayPickerModels = computed(() => {
-  const query = store.gatewayPickerQuery.trim().toLowerCase();
-  if (!query) return store.gatewayModels;
-  return store.gatewayModels.filter((model) => model.id.toLowerCase().includes(query));
-});
+const gatewaySelectedNames = computed(() => models.value.map((model) => model.name));
+/** 网关本次未返回、但供应商仍然保存的模型，放进“不在供应商列表中”分组。 */
+const gatewayExtraModels = computed<GatewayModel[]>(() => models.value.map((model) => ({
+  id: model.name,
+  contextWindow: model.contextWindow,
+  supportsVision: model.modality === "vision",
+  supportsReasoning: Boolean(model.reasoningLevel && model.reasoningLevel !== "default"),
+})));
+const gatewayApplying = ref(false);
 
 const dialects = computed(() => store.config?.dialects || []);
 const effectiveDialect = computed(() => {
@@ -112,17 +113,6 @@ function modelDetail(m: ModelEntry): string {
     + (m.contextWindow ? ` · 窗口 ${fmtTokens(m.contextWindow)}（${contextSourceLabel(m)}）` : "");
 }
 
-function gatewayMeta(m: GatewayModel): string {
-  return [
-    m.contextWindow ? `上下文 ${fmtTokens(m.contextWindow)}` : "上下文未知",
-    m.supportsVision ? "多模态" : "",
-    m.supportsReasoning ? "支持推理" : "",
-  ].filter(Boolean).join(" · ");
-}
-
-function isModelAdded(m: GatewayModel): boolean {
-  return configuredModelNames.value.has(m.id);
-}
 
 async function openGatewayPicker(): Promise<void> {
   if (!selected.value) return;
@@ -137,11 +127,15 @@ async function openGatewayPicker(): Promise<void> {
   }
 }
 
-async function chooseGatewayModel(m: GatewayModel): Promise<void> {
-  if (isModelAdded(m)) return;
-  const ok = await addModelByName(m.id, m);
-  // addModelByName 失败会落在状态条，此时保留弹窗让用户继续选择
-  if (ok) store.closeGatewayPicker();
+async function applyGatewaySelection(selectedModels: GatewayModel[]): Promise<void> {
+  const providerId = selected.value?.id;
+  if (!providerId) return;
+  gatewayApplying.value = true;
+  try {
+    if (await applyModelSelection(providerId, selectedModels)) store.closeGatewayPicker();
+  } finally {
+    gatewayApplying.value = false;
+  }
 }
 
 /** 打开编辑面板时回填（watch editingModelId，覆盖打开/关闭两种流转）。 */
@@ -414,52 +408,21 @@ onMounted(() => {
   </div>
   <div id="settings-status" class="settings-status"></div>
 
-  <!-- 网关模型选择器：独立 Modal，避免几百个模型把右侧面板推到很长。
-       弹窗只负责筛选和选择，写入仍走 addModelByName 的统一写路径。 -->
-  <Modal
-    id="gateway-model-picker"
+  <!-- 通用模型多选弹窗：按供应商结果分组，点“应用”后批量增删。 -->
+  <ModelSelectionPicker
     :open="store.gatewayPickerContext === 'detail'"
-    title="从网关选择模型"
-    width="760px"
-    centered
-    :footer="null"
-    :mask-closable="true"
+    title="选择模型"
+    :models="store.gatewayModels"
+    :extra-models="gatewayExtraModels"
+    :selected-names="gatewaySelectedNames"
+    :applying="gatewayApplying"
+    modal-id="gateway-model-picker"
+    input-id="gmp-search"
+    list-id="gmp-list"
+    description="勾选的模型会加入当前供应商，取消勾选会从当前供应商中移除。"
     @cancel="store.closeGatewayPicker()"
-  >
-    <div class="gmp-head">
-      <Input
-        id="gmp-search"
-        v-model:value="store.gatewayPickerQuery"
-        aria-label="筛选网关模型"
-        allow-clear
-        spellcheck="false"
-        placeholder="搜索模型 ID，例如 deepseek / claude / glm"
-      >
-        <template #prefix><i class="ui-icon" data-icon="Search" aria-hidden="true"></i></template>
-      </Input>
-      <span class="gmp-count">网关返回 {{ store.gatewayModels.length }} 个 · 已配置 {{ configuredModelNames.size }} 个</span>
-    </div>
-    <div id="gmp-list" class="gmp-list">
-      <div v-if="!gatewayPickerModels.length" class="gmp-empty">
-        {{ store.gatewayModels.length ? "没有匹配的模型，换个关键词试试" : "网关没有返回模型" }}
-      </div>
-      <Button
-        v-for="m in gatewayPickerModels"
-        v-else
-        :key="m.id"
-        class="gmp-row"
-        :class="{ added: isModelAdded(m) }"
-        :disabled="isModelAdded(m)"
-        @click="chooseGatewayModel(m)"
-      >
-        <span class="gmp-row-main">
-          <strong>{{ m.id }}</strong>
-          <small>{{ gatewayMeta(m) }}</small>
-        </span>
-        <span class="gmp-row-action">{{ isModelAdded(m) ? "已添加" : "添加" }}</span>
-      </Button>
-    </div>
-  </Modal>
+    @apply="applyGatewaySelection"
+  />
 
   <!-- 备份与恢复分区由 settings-backup-vue 独立挂载，静态骨架保留在 models.html -->
   </AntdvProvider>

@@ -84,11 +84,17 @@ async function persist(userId = currentUserId()): Promise<void> {
 }
 
 async function authorizeProject(project: Project): Promise<void> {
-  await runWithUserContext({ userId: project.userId, deviceId: "project", role: "admin" }, async () => {
+  // 不能在授权根时把用户角色硬编码成 admin：member 的 roots 为空时会被
+  // files.ts 自动塞入整个仓库 PROJECT_ROOT，等于给普通成员开放只读全库。
+  // 这里只需要一个已经存在的 user context，角色保持当前请求/tx 的真实角色。
+  await runWithUserContext({
+    userId: project.userId,
+    deviceId: "project",
+    role: (userContextOrLocal() as { role?: "admin" | "member" }).role ?? "member",
+  }, () => {
     authorizeRoot(project.path, project.name);
   });
-}
-
+};
 export async function loadProjects(): Promise<void> {
   if (isPostgresBackend()) return;
   if (fileLoaded) return;

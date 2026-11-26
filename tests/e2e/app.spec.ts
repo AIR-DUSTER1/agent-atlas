@@ -690,6 +690,62 @@ test("保存模型后关闭编辑区并给出成功提示", async ({ page }) => 
   expect(pageErrors).toEqual([]);
 });
 
+test("模型选择弹窗支持搜索、分组、多选并批量应用", async ({ page }) => {
+  const addedModels: Array<Record<string, unknown>> = [];
+  await page.route("**/api/models", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        models: [
+          { id: "glm-5-turbo", contextWindow: 200000, supportsReasoning: true },
+          { id: "glm-5.3-flash", contextWindow: 1000000, supportsReasoning: true, supportsVision: true },
+          { id: "glm-5.3", contextWindow: 1000000, supportsReasoning: true },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/config/providers/*/models", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    addedModels.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, created: true, model: { id: "glm-5-turbo", name: "glm-5-turbo" } }),
+    });
+  });
+  await login(page);
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="models"]').click();
+  await page.locator("#provider-list .provider-nav-item").first().click();
+  await page.locator("#pf-fetch-models").click();
+
+  const modal = page.locator("#gateway-model-picker");
+  await expect(modal).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("选择模型", { exact: true })).toBeVisible();
+  await expect(modal.getByPlaceholder("搜索模型...")).toBeVisible();
+  await expect(modal).toContainText("供应商返回的模型");
+  await expect(modal).toContainText("已选");
+  await expect(modal).toContainText("只看已选");
+  await expect(modal.locator(".model-picker-select-all")).toBeVisible();
+  await expect(modal.locator(".model-picker-clear-all")).toBeVisible();
+  await expect(modal.locator(".model-picker-apply")).toBeVisible();
+
+  await modal.getByPlaceholder("搜索模型...").fill("flash");
+  await expect(modal.locator('.model-picker-row[data-model-id="glm-5.3-flash"]')).toBeVisible();
+  await expect(modal.locator(".model-picker-row")).toHaveCount(1);
+  await modal.getByPlaceholder("搜索模型...").fill("");
+  await modal.locator('.model-picker-row[data-model-id="glm-5-turbo"] input[type="checkbox"]').click();
+  await modal.locator(".model-picker-apply").click();
+  await expect(modal).toBeHidden();
+  expect(addedModels[0]?.name).toBe("glm-5-turbo");
+  expect(addedModels[0]?.makeActive).toBe(false);
+});
+
 /**
  * 回归：审批卡出现后切到别的会话再切回来，按钮必须仍然可点。
  *

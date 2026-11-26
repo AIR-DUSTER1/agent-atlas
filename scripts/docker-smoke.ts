@@ -185,6 +185,18 @@ async function main(): Promise<void> {
     if (versionBody.version !== version || !versionBody.buildId || !versionBody.commit) {
       throw new Error(`版本接口内容异常：${JSON.stringify(versionBody)}`);
     }
+    const pluginsResponse = await fetch(`${base}/api/plugins`, {
+      headers: { Cookie: cookie },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!pluginsResponse.ok) throw new Error(`插件状态 smoke 失败：HTTP ${pluginsResponse.status}`);
+    const pluginsBody = await pluginsResponse.json() as {
+      container?: boolean;
+      enabled?: { computer?: boolean };
+    };
+    if (pluginsBody.container !== true || pluginsBody.enabled?.computer !== false) {
+      throw new Error(`Docker 容器必须禁用 Computer Use：${JSON.stringify(pluginsBody)}`);
+    }
     const metrics = await fetch(`${base}/metrics`, {
       headers: { Authorization: `Bearer smoke-metrics-${suffix}-token` },
       signal: AbortSignal.timeout(5_000),
@@ -217,6 +229,7 @@ async function main(): Promise<void> {
         index: index.status,
         authCookie: true,
         versionApi: versionResponse.status,
+        plugins: pluginsResponse.status,
         metrics: metrics.status,
         logout: logout.status,
         gracefulStop: true,

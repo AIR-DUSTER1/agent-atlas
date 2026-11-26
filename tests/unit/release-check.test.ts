@@ -217,6 +217,8 @@ test("main 合并 CI 验收入口与镜像 smoke 路径保持一致", async () =
   const smoke = await readFile("scripts/docker-smoke.ts", "utf8");
   assert.match(smoke, /styles\/base\/ui\.css/);
   assert.doesNotMatch(smoke, /styles\/ui\.css/);
+  assert.match(smoke, /pluginsBody\.container/);
+  assert.match(smoke, /Docker 容器必须禁用 Computer Use/);
   const agents = await readFile("AGENTS.md", "utf8");
   assert.match(agents, /git fetch origin main && npm run ci:verify/);
   assert.match(agents, /Docker daemon 不可用[\s\S]*禁止合并 main/);

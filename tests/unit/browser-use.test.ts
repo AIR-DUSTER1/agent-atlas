@@ -95,7 +95,11 @@ test("Browser Use 插件停用时工具 fail-closed，启用后只审批 browser
   const profile = generalProfileWithPlugins();
   assert.ok(profile.tools.some((item) => item.name === "browser_open"));
   assert.ok("browser_act" in profile.approvalDescriptions);
-  assert.equal("browser_open" in profile.approvalDescriptions, false);
+  assert.ok("browser_open" in profile.approvalDescriptions, "browser_open 必须登记审批");
+  assert.ok("browser_fetch" in profile.approvalDescriptions, "browser_fetch 必须登记审批");
+  for (const name of ["browser_snapshot", "browser_navigate", "browser_scroll"]) {
+    assert.equal(name in profile.approvalDescriptions, false);
+  }
 });
 
 test("Browser Use 没有 thread_id 时不会误用全局会话", async () => {

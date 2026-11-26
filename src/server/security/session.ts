@@ -80,12 +80,19 @@ export function issueSession(
   sid: string = randomUUID(),
   owner?: { userId: string; role: "admin" | "member" },
 ): { token: string; payload: SessionPayload } {
-  const ttlMs = sessionTtlHours() * 60 * 60 * 1000;
+  return buildSession(now, sid, owner);
+}
+
+function buildSession(
+  now: number,
+  sid: string,
+  owner: { userId: string; role: "admin" | "member" } | undefined,
+): { token: string; payload: SessionPayload } {
   const payload: SessionPayload = {
     v: SESSION_VERSION,
     sid,
     iat: now,
-    exp: now + ttlMs,
+    exp: now + sessionTtlHours() * 60 * 60 * 1000,
     ...(owner?.userId ? { userId: owner.userId } : {}),
     ...(owner?.role ? { role: owner.role } : {}),
   };
@@ -93,6 +100,27 @@ export function issueSession(
   return { token: `${data}.${sign(data)}`, payload };
 }
 
+/** 续签会话：保持首次签发时间 iat，仅把 exp 延长一个 TTL，不重置凭据纪元。 */
+export function issueRenewedSession(
+  previous: SessionPayload | null,
+  now = Date.now(),
+  sid: string = previous?.sid ?? randomUUID(),
+  owner?: { userId: string; role: "admin" | "member" },
+): { token: string; payload: SessionPayload; previousExp: number | null } {
+  const previousExp = previous && Number.isFinite(previous.exp) ? previous.exp : null;
+  const iat = previous && Number.isFinite(previous.iat) ? previous.iat : now;
+  const exp = Math.max((previous && Number.isFinite(previous.exp) ? previous.exp : 0), now) + sessionTtlHours() * 60 * 60 * 1000;
+  const payload: SessionPayload = {
+    v: SESSION_VERSION,
+    sid,
+    iat,
+    exp,
+    ...(owner?.userId ? { userId: owner.userId } : {}),
+    ...(owner?.role ? { role: owner.role } : {}),
+  };
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return { token: `${data}.${sign(data)}`, payload, previousExp };
+}
 export function verifySessionToken(token: string, now = Date.now()): SessionPayload | null {
   const dot = token.indexOf(".");
   if (dot <= 0 || dot !== token.lastIndexOf(".")) return null;

@@ -5,7 +5,7 @@
  * 设计立场：不依赖外部 skill、Python 或平台 CLI；登录态和交付物全部落在应用数据目录。
  */
 import { promises as fsp } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { writeJobHtmlReport } from "./job-html.js";
@@ -56,10 +56,12 @@ async function persistJob(): Promise<void> { await mergeConfig({ job: saved }); 
 
 export function resolveJobDataDir(): string {
   if (!saved.dataDir) return DEFAULT_DATA_DIR;
-  return isAbsolute(saved.dataDir) ? saved.dataDir : join(DEFAULT_DATA_DIR, saved.dataDir);
-}
-
-export interface JobStatus {
+  const absolute = resolve(saved.dataDir);
+  if (absolute !== DEFAULT_DATA_DIR && !absolute.startsWith(DEFAULT_DATA_DIR.endsWith(sep) ? DEFAULT_DATA_DIR : DEFAULT_DATA_DIR + sep)) {
+    throw new Error("求职数据目录必须是「应用数据目录下的相对路径」：当前值会写入应用目录之外，被拒绝。请改回相对路径（例如 job-data / custom/job）");
+  }
+  return absolute;
+}export interface JobStatus {
   installed: boolean;
   hasOverride: boolean;
   browserOK: boolean;

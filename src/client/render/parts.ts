@@ -37,6 +37,7 @@ import type {
 export const TOOL_GROUP_MIN = 3;
 
 const THROTTLE_MS = 55;
+const STREAMING_CURSOR_TARGETS = new Set(["P", "H1", "H2", "H3", "H4", "LI", "BLOCKQUOTE", "TD", "TH", "PRE"]);
 
 /* ---------------------------------------------------------------------------
  * 思考过程
@@ -360,10 +361,21 @@ export function updateToolCard(part: ToolPart): void {
  * ------------------------------------------------------------------------- */
 const enhancedTextParts = new WeakSet<TextPart>();
 
+/** 光标要贴住最后一段正文，不能落到 Markdown 块级元素后面的空白行。 */
+function appendStreamingCursor(el: HTMLElement): void {
+  const cursor = h("span", { class: "cursor", "aria-hidden": "true" });
+  const last = el.lastElementChild;
+  if (last && STREAMING_CURSOR_TARGETS.has(last.tagName)) last.appendChild(cursor);
+  else el.appendChild(cursor);
+}
+
 function paintText(part: TextPart, el: HTMLElement): void {
   el.innerHTML = renderMarkdown(part.text);
-  if (part.streaming) el.appendChild(h("span", { class: "cursor", "aria-hidden": "true" }));
-  else void enhanceCodeBlocks(el);
+  if (part.streaming) {
+    if (part.text.trim()) appendStreamingCursor(el);
+    return;
+  }
+  void enhanceCodeBlocks(el);
 }
 
 export function renderTextPart(part: TextPart): void {
@@ -476,6 +488,9 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
   const body = blockBodies.get(block);
   if (!body) return;
   unmountTyping(block);
+  // 工具 / 节点 / 审批是正文的硬边界；即使迟到事件绕过了 sealStreamingParts，
+  // 也不能让上一段文本的光标落到工具卡前面。
+  if (part.p !== "text") body.querySelectorAll(".cursor").forEach((cursor) => cursor.remove());
 
   if (part.p === "text") {
     const el = document.createElement("div");

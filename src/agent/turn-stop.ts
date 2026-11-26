@@ -16,6 +16,13 @@ export interface ToolStopResult {
   action?: string;
 }
 
+/** 允许触发 stopAgent 的工具白名单：只有这些工具自己声明的强停语义才生效，
+ *  防止任意 ToolMessage 文本恰好返回 JSON 就切断本轮并注入 loginUrl（审核报告 P1-14）。 */
+const STOP_TOOL_ALLOWLIST = new Set([
+  "house_lookup",
+  "house_market",
+]);
+
 function messageText(content: BaseMessage["content"]): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -47,6 +54,11 @@ function parseToolStopResult(content: BaseMessage["content"]): ToolStopResult | 
 }
 
 /** 最新 AI 消息发起的任一工具返回 stopAgent:true 时，返回首个停止原因。 */
+/** 导出给测试与其它模块复用：单个 ToolMessage 是否允许触发 stopAgent。 */
+export function toolCanStopAgent(name: unknown): boolean {
+  return typeof name === "string" && STOP_TOOL_ALLOWLIST.has(name);
+}
+
 export function latestToolStopResult(messages: readonly BaseMessage[]): ToolStopResult | null {
   let lastAiIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -64,6 +76,8 @@ export function latestToolStopResult(messages: readonly BaseMessage[]): ToolStop
     if (!message || message.getType() !== "tool") continue;
     const toolCallId = (message as { tool_call_id?: unknown }).tool_call_id;
     if (callIds.size > 0 && (typeof toolCallId !== "string" || !callIds.has(toolCallId))) continue;
+    const toolName = (message as { name?: unknown }).name;
+    if (typeof toolName !== "string" || !STOP_TOOL_ALLOWLIST.has(toolName)) continue;
     const stop = parseToolStopResult(message.content);
     if (stop) return stop;
   }
