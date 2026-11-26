@@ -35,6 +35,17 @@ function toAbs(path: string): string {
   return isAbsolute(p) ? resolve(p) : resolve(PROJECT_ROOT, p);
 }
 
+/** resolve → realpath → assertAuthorized：符号链接不能逃出授权根（审核报告 P1-9）。 */
+async function toAuthorizedAbs(path: string): Promise<string> {
+  const abs = toAbs(path);
+  // 先对「解析后路径」做一次前缀授权，再 realpath 剥掉符号链接后检查真实落点；
+  // 两者都必须在授权根内，否则 read/write/list/grep 都能借软链穿透到根外。
+  assertAuthorized(abs);
+  const real = await fsp.realpath(abs).catch(() => abs);
+  assertAuthorized(real);
+  return real;
+}
+
 // ---------------------------------------------------------------------------
 // 1. 终端：执行 shell 命令（高风险 → 需审批）
 // ---------------------------------------------------------------------------
@@ -93,8 +104,7 @@ export const terminal = tool(
 // ---------------------------------------------------------------------------
 export const readFileTool = tool(
   async ({ path }) => {
-    const abs = toAbs(path);
-    assertAuthorized(abs);
+    const abs = await toAuthorizedAbs(path);
     const st = await fsp.stat(abs).catch(() => { throw new Error("文件不存在"); });
     if (st.isDirectory()) throw new Error("该路径是文件夹，请用 list_dir 列出内容");
     const buf = await fsp.readFile(abs);
@@ -119,8 +129,7 @@ export const readFileTool = tool(
 // ---------------------------------------------------------------------------
 export const writeFileTool = tool(
   async ({ path, content }) => {
-    const abs = toAbs(path);
-    assertAuthorized(abs);
+    const abs = await toAuthorizedAbs(path);
     if (content.length > WRITE_LIMIT) throw new Error(`内容过长（${content.length} 字符，上限 ${WRITE_LIMIT}）`);
     await fsp.mkdir(dirname(abs), { recursive: true });
     await fsp.writeFile(abs, content, "utf8");
@@ -143,8 +152,7 @@ export const writeFileTool = tool(
 // ---------------------------------------------------------------------------
 export const listDirTool = tool(
   async ({ path }) => {
-    const abs = toAbs(path || ".");
-    assertAuthorized(abs);
+    const abs = await toAuthorizedAbs(path || ".");
     const dirents = await fsp.readdir(abs, { withFileTypes: true });
     const names: string[] = [];
     for (const d of dirents) {
@@ -168,8 +176,7 @@ export const listDirTool = tool(
 // ---------------------------------------------------------------------------
 export const grepSearch = tool(
   async ({ pattern, path }) => {
-    const base = toAbs(path || ".");
-    assertAuthorized(base);
+    const base = await toAuthorizedAbs(path || ".");
     let regex: RegExp;
     try {
       regex = new RegExp(pattern, "i");
