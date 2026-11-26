@@ -34,7 +34,6 @@ export const useModelsStore = defineStore("models", {
     // 网关模型选择器：独立弹窗开关与筛选词。列表可能有几百个模型，
     // 不适合全部平铺在设置面板里。
     gatewayPickerContext: null as "detail" | "pending" | null,
-    gatewayPickerQuery: "",
   }),
   getters: {
     providers(): ProviderEntry[] {
@@ -111,11 +110,9 @@ export const useModelsStore = defineStore("models", {
     },
     openGatewayPicker(context: "detail" | "pending"): void {
       this.gatewayPickerContext = context;
-      this.gatewayPickerQuery = "";
     },
     closeGatewayPicker(): void {
       this.gatewayPickerContext = null;
-      this.gatewayPickerQuery = "";
     },
     addPendingModel(entry: PendingModel): void {
       this.pendingModels = [...this.pendingModels, entry];

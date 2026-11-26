@@ -7,17 +7,39 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import {
-  clearSessionCookie, clearSessionCookieOnResponse, issueSession, parseCookies,
+  clearSessionCookie, clearSessionCookieOnResponse, issueRenewedSession, issueSession, parseCookies,
   resetSessionSecurityForTests, revokeSession, sessionCookie, sessionFromRequest,
   sessionTtlHours, setSessionCookie, verifySessionRequest, verifySessionToken,
 } from "../../src/server/security/session.js";
 import { FailureRateLimiter, clientIp } from "../../src/server/security/rate-limit.js";
+import { isAuthEnabled } from "../../src/server/auth.js";
 import {
   deviceCookie, ensureDeviceIdentity, ensureDeviceSession, hasAuthorizedDeviceSession,
   isDirectLoopbackRequest, issueDeviceIdentity, verifyDeviceToken, deviceFromRequest, userIdentityForRequest,
   deviceIdentityForRequest, isAdminRequest, adoptBearerIdentity, requireUserIdentity, requireDeviceIdentity,
   renewDeviceCookie, enrollDeviceIdentity, clearDeviceCookieOnResponse, deviceTtlDays,
 } from "../../src/server/security/device.js";
+
+
+test("续签会话保留原始 iat（凭据纪元不因续签失效）", () => {
+  process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
+  process.env.SESSION_TTL_HOURS = "12";
+  try {
+    resetSessionSecurityForTests();
+    const now = Date.now();
+    const { payload } = issueSession(now, "sid-keep-iat");
+    const renewed = issueRenewedSession(payload, now + 60_000, payload.sid, { userId: "u1", role: "admin" });
+    assert.equal(renewed.payload.iat, payload.iat, "续签必须保留首次签发时间");
+    assert.ok(renewed.payload.exp > payload.exp, "续签只延长 exp");
+    assert.equal(renewed.payload.sid, payload.sid);
+    const nullPrev = issueRenewedSession(null, now + 10_000, "sid-2");
+    assert.equal(nullPrev.payload.iat, now + 10_000);
+  } finally {
+    delete process.env.SESSION_SECRET;
+    delete process.env.SESSION_TTL_HOURS;
+    resetSessionSecurityForTests();
+  }
+});
 
 test("HMAC 会话可校验；篡改与过期均失败", () => {
   process.env.SESSION_SECRET = "session-secret-for-test-at-least-32-chars";
@@ -284,6 +306,27 @@ test("认证关闭时远端设备自动获得签名设备 Cookie", () => {
     assert.match(String(res.getHeader("set-cookie")), /lg_agent_device=/);
   } finally {
     delete process.env.SESSION_SECRET;
+  }
+});
+
+// 数据库模式强制登录的回归守门：本机直连不得自动获得 admin 身份，
+// 也不能因为 AUTH_TOKEN 为空就整站免认证（那是认证绕过）。
+test("数据库模式：本机直连不自动免登，缺 AUTH_TOKEN 也要求登录", () => {
+  const previous = { STATE_BACKEND: process.env.STATE_BACKEND, AUTH_TOKEN: process.env.AUTH_TOKEN };
+  process.env.STATE_BACKEND = "postgres";
+  delete process.env.AUTH_TOKEN;
+  try {
+    // AUTH_TOKEN 为空也必须要求认证
+    assert.equal(isAuthEnabled(), true);
+    // 本机直连不再被当作 local 设备身份
+    const res = fakeResponse();
+    assert.equal(ensureDeviceIdentity(fakeRequest(), res), null);
+    assert.equal(res.getHeader("set-cookie"), undefined);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 

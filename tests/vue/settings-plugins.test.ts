@@ -18,10 +18,11 @@ vi.mock("../../src/client/views/shell.js", () => ({ refreshAgentCards: vi.fn() }
 
 type FetchResponse = { status: number; ok: boolean; json: () => Promise<unknown> };
 
-function pluginsBody(platform = "win32", overrides: Record<string, boolean> = {}): Record<string, unknown> {
+function pluginsBody(platform = "win32", overrides: Record<string, boolean> = {}, container = false): Record<string, unknown> {
   return {
     enabled: { rag: true, estate: true, job: true, browser: false, computer: false, ...overrides },
     platform,
+    container,
   };
 }
 
@@ -35,9 +36,9 @@ beforeEach(() => {
 });
 
 /** 用预置 store 状态挂载面板（与 refreshAll 等价的最小数据准备）。 */
-function mountPanel(overrides: Record<string, boolean> = {}, platform = "win32"): void {
+function mountPanel(overrides: Record<string, boolean> = {}, platform = "win32", container = false): void {
   const store = usePluginsStore();
-  store.plugins = pluginsBody(platform, overrides) as unknown as PluginSettingsState;
+  store.plugins = pluginsBody(platform, overrides, container) as unknown as PluginSettingsState;
   // attachTo：断言走 document.querySelector（e2e 同视角），必须挂进真实 DOM
   mount(SettingsPluginsVue, { attachTo: document.body, global: { plugins: [pinia] } });
 }
@@ -64,6 +65,15 @@ describe("插件面板卡片契约", () => {
     const computerSwitch = document.querySelector<HTMLButtonElement>('[data-plugin-id="computer"] [role="switch"]');
     expect(computerSwitch?.disabled).toBe(true);
     expect(computerSwitch?.getAttribute("aria-label")).toBe("电脑控制（Computer Use）仅支持 Windows");
+  });
+
+  it("Docker / 容器部署中禁用 Computer Use 并标注不可用", () => {
+    mountPanel({}, "win32", true);
+    const computer = document.querySelector('[data-plugin-id="computer"]');
+    expect(computer?.textContent).toContain("Docker 部署不可用");
+    const computerSwitch = document.querySelector<HTMLButtonElement>('[data-plugin-id="computer"] [role="switch"]');
+    expect(computerSwitch?.disabled).toBe(true);
+    expect(computerSwitch?.getAttribute("aria-label")).toBe("电脑控制（Computer Use）在 Docker 部署中不可用");
   });
 
   it("readiness：RAG 未配置时显示未配置，rag 状态就绪后显示已配置", async () => {

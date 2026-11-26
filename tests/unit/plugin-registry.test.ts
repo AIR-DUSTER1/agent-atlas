@@ -52,7 +52,7 @@ test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插
   assert.match(pluginPanel, /:data-transport="row\.transport\.id"/);
   // 启停开关改 antdv Switch：role="switch" 是它运行时输出的，源码里只剩组件标签。
   // 断言组件存在且受控于 row.enabled（受控 = 状态只有一个来源）。
-  assert.match(pluginPanel, /<Switch[\s\S]{0,300}:checked="row\.enabled"/);
+  assert.match(pluginPanel, /<Switch[\s\S]{0,400}:checked="row\.enabled"/);
   assert.match(pluginPanel, /plugin-switch/);
   assert.match(pluginPanel, /已启用|已停用/);
   assert.match(pluginPanel, /readinessOf/);
@@ -63,3 +63,4 @@ test("RAG、找房数据源、Browser Use 与 Computer Use 集中到设置页插
   assert.match(shell, /refreshWelcomePluginCopy\(\)/);
   assert.match(navigation, /refreshWelcomePluginCopy/);
 });
+

@@ -66,6 +66,49 @@ test("无需审批的多个工具并发执行：总耗时接近最慢的单个�
   assert.equal(result.messages.length, 3);
 });
 
+test("批量工具每完成一项就推送 custom 结果，不等待 Promise.all", async () => {
+  let releaseSlow!: () => void;
+  const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+  const fast = tool(async () => "fast-result", {
+    name: "fast_tool", description: "快速工具", schema: z.object({}),
+  });
+  const slow = tool(async () => {
+    await slowGate;
+    return "slow-result";
+  }, { name: "slow_tool", description: "慢速工具", schema: z.object({}) });
+  const node = createApprovalToolsNode({
+    tools: [fast, slow],
+    approvalDescriptions: {},
+    profileId: "general",
+  });
+  const events: Array<{ type?: string; id?: string; content?: string; isError?: boolean }> = [];
+  let resolveFast!: () => void;
+  const fastSeen = new Promise<void>((resolve) => { resolveFast = resolve; });
+  const run = node(
+    makeState([
+      { id: "fast-1", name: "fast_tool", args: {} },
+      { id: "slow-1", name: "slow_tool", args: {} },
+    ]) as never,
+    {
+      writer: (chunk: unknown) => {
+        const event = chunk as { type?: string; id?: string; content?: string; isError?: boolean };
+        events.push(event);
+        if (event.type === "tool_result" && event.id === "fast-1") resolveFast();
+      },
+    } as never,
+  );
+  await Promise.race([
+    fastSeen,
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error("快速工具结果未在慢工具结束前推送")), 500)),
+  ]);
+  assert.deepEqual(events[0], { type: "tool_result", id: "fast-1", content: "fast-result", isError: false });
+  assert.equal(events.some((event) => event.id === "slow-1"), false);
+  releaseSlow();
+  const result = await run;
+  assert.equal(result.messages.length, 2);
+  assert.equal(events.at(-1)?.id, "slow-1");
+});
+
 test("结果顺序与模型发起的 tool_calls 顺序一致（并发不改变顺序）", async () => {
   // 故意让「先发起的工具更慢」——若按完成顺序回填，结果顺序会被打乱
   const slowFirst = sleepyTool("first_slow", 250);
@@ -328,6 +371,110 @@ test("瞬时故障达到三次尝试后熔断，模型不能再次原样调用",
   } as never);
   assert.equal(runs, 3, "重试耗尽后不得再次执行相同调用");
   assert.match(String((second.messages[0] as ToolMessage).content), /自动重试已耗尽/);
+});
+
+test("外部服务触发冷却时主动等待，随后自动恢复查询", async () => {
+  let runs = 0;
+  const throttled = tool(
+    async () => {
+      runs += 1;
+      return runs === 1
+        ? JSON.stringify({
+            error: "service temporarily unavailable",
+            failureKind: "rate_limited",
+            retryAfterMs: 20,
+            cooldownActive: true,
+          })
+        : JSON.stringify({ action: "detail", ok: true, recovered: true });
+    },
+    { name: "house_lookup", description: "主动等待恢复测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [throttled],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const result = await node(makeState([{ id: "cooldown-recover", name: "house_lookup", args: { houseId: "103155273255" } }]) as never);
+  const message = result.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(message.content)) as { retry?: { attempts?: number; recovered?: boolean } };
+  assert.equal(runs, 2);
+  assert.notEqual(message.status, "error");
+  assert.equal(payload.retry?.attempts, 2);
+  assert.equal(payload.retry?.recovered, true);
+});
+
+test("主动等待后仍限流则停止继续休眠并返回可操作说明", async () => {
+  let runs = 0;
+  const throttled = tool(
+    async () => {
+      runs += 1;
+      return JSON.stringify({
+        error: "service temporarily unavailable",
+        failureKind: "rate_limited",
+        retryAfterMs: 10,
+        cooldownActive: true,
+      });
+    },
+    { name: "house_lookup", description: "主动等待仍限流测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [throttled],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const result = await node(makeState([{ id: "cooldown-fail", name: "house_lookup", args: { houseId: "103155273255" } }]) as never);
+  const message = result.messages[0] as ToolMessage;
+  const payload = JSON.parse(String(message.content)) as {
+    retry?: { attempts?: number; retryable?: boolean; cooldownActive?: boolean; retryAfterMs?: number; userMessage?: string; nextAction?: string };
+  };
+  assert.equal(runs, 2, "只允许主动等待一轮，不能在工具内部无限休眠");
+  assert.equal(message.status, "error");
+  assert.equal(payload.retry?.attempts, 2);
+  assert.equal(payload.retry?.retryable, true);
+  assert.equal(payload.retry?.cooldownActive, true);
+  assert.equal(payload.retry?.retryAfterMs, 10);
+  assert.match(payload.retry?.userMessage || "", /主动等待.*仍然繁忙/);
+  assert.match(payload.retry?.nextAction || "", /停止继续查询/);
+});
+
+test("冷却期响应不写成同参数永久熔断，冷却后仍可重新查询", async () => {
+  let runs = 0;
+  const recovered = tool(
+    async () => {
+      runs += 1;
+      return JSON.stringify({ action: "detail", ok: true, recovered: true });
+    },
+    { name: "house_lookup", description: "冷却后可重试测试", schema: z.object({ houseId: z.string() }) }
+  );
+  const node = createApprovalToolsNode({
+    tools: [recovered],
+    approvalDescriptions: {},
+    profileId: "estate",
+    toolRetryPolicy: { maxAttempts: 3, toolNames: ["house_lookup"] },
+  });
+  const args = { houseId: "103155273255" };
+  const cooldownMessage = new ToolMessage({
+    content: JSON.stringify({
+      error: "service temporarily unavailable",
+      retry: { attempts: 1, maxAttempts: 3, retryable: true, exhausted: false, cooldownActive: true, retryAfterMs: 60_000 },
+    }),
+    tool_call_id: "cooldown-history-1",
+    name: "house_lookup",
+    status: "error",
+  });
+  const second = await node({
+    messages: [
+      new HumanMessage("等待后继续查这套房"),
+      new AIMessage({ content: "", tool_calls: [{ id: "cooldown-history-1", name: "house_lookup", args, type: "tool_call" }] }),
+      cooldownMessage,
+      new AIMessage({ content: "", tool_calls: [{ id: "cooldown-history-2", name: "house_lookup", args, type: "tool_call" }] }),
+    ],
+  } as never);
+  assert.equal(runs, 1);
+  assert.notEqual((second.messages[0] as ToolMessage).status, "error");
+  assert.match(String((second.messages[0] as ToolMessage).content), /recovered/);
 });
 
 test("参数或业务确定性错误不自动重试，并把失败分析返回给 Agent", async () => {

@@ -1,6 +1,6 @@
 # PostgreSQL 多用户与 RLS
 
-> 适用版本：`0.9.0-beta.20` 开发预览
+> 适用版本：`0.9.0-beta.21` 开发预览
 > 状态：单实例应用 + PostgreSQL 多用户数据面。默认文件后端仍保留，桌面端和本地开发不需要数据库。
 
 ## 1. 能力边界
@@ -41,6 +41,10 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 DATABASE_POOL_MAX=10
 DATABASE_SSL=disable
 BOOTSTRAP_ADMIN_NAME=管理员
+# 首次启动的初始管理员密码；不设则自动生成随机密码写入
+# <web-config.json 同目录>/bootstrap-admin-password.txt（0600）。
+# 也可用 BOOTSTRAP_ADMIN_PASSWORD_FILE 指向挂载的 secret 文件。
+# BOOTSTRAP_ADMIN_PASSWORD=
 
 AUTH_TOKEN=至少16位随机管理员引导密钥
 SESSION_SECRET=至少32位随机会话/设备签名密钥
@@ -48,6 +52,19 @@ DATA_KEY=32字节base64密钥
 ```
 
 托管 PostgreSQL 使用 `DATABASE_SSL=require`。密码包含 `@`、`:`、`/` 等字符时必须做 URL 编码。
+
+### 首次登录
+
+`STATE_BACKEND=postgres` 时**登录是强制的**，与 `AUTH_TOKEN` 是否为空无关：打开页面即弹
+「用户名 + 密码」登录页。首次启动会自动给管理员设一个初始密码：
+
+1. 配了 `BOOTSTRAP_ADMIN_PASSWORD` → 用它（不满足策略则启动直接失败，不会静默降级）；
+2. 否则生成 24 位随机密码，写到 `<web-config.json 同目录>/bootstrap-admin-password.txt`（0600），
+   或用 `BOOTSTRAP_ADMIN_PASSWORD_FILE` 指定的位置；
+3. 初始密码一律标记「必须改密」，登录后先改密码才能进主界面；
+4. 密码值只存在于该文件，日志只记路径（`bootstrap_admin_password_initialized`），不记密码。
+
+管理员改过密码后，重启不会覆盖——该逻辑只在管理员还没有密码时执行。
 
 ## 4. 启动方式
 

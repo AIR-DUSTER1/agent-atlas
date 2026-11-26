@@ -12,7 +12,7 @@
  */
 
 import { defineStore } from "pinia";
-import { mergeAdjacentAssistantBlocks } from "../modules/chat-flow.js";
+import { mergeAdjacentAssistantBlocks, normalizeApprovalOrder } from "../modules/chat-flow.js";
 import type { AppState, ChatBlock } from "../modules/types.js";
 import { pinia } from "../stores/pinia.js";
 
@@ -46,6 +46,7 @@ const createInitialState = (): AppState => ({
   workflowPlans: {},
   streams: {},
   compacting: {},
+  approvalResuming: {},
   settingsView: "models",
   pendingFiles: [],
   continuousTurns: {},
@@ -83,7 +84,12 @@ export function loadLocal(): void {
     state.blocks = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, ChatBlock[]>;
     // 旧版本审批恢复会追加连续 assistant 块；加载时合并，避免历史缓存继续多头像。
     for (const [sid, blocks] of Object.entries(state.blocks)) {
-      if (Array.isArray(blocks)) state.blocks[sid] = mergeAdjacentAssistantBlocks(blocks);
+      if (Array.isArray(blocks)) {
+        state.blocks[sid] = mergeAdjacentAssistantBlocks(blocks);
+        for (const block of state.blocks[sid]) {
+          if (block.t === "assistant") normalizeApprovalOrder(block);
+        }
+      }
     }
   } catch { state.blocks = {}; }
   try {

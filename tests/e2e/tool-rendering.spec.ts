@@ -90,6 +90,47 @@ test("同类工具连发折叠为单层「连续工具调用」，组内每次�
   await expect(cards.first()).toHaveClass(/open/);
 });
 
+test("同批工具按实际完成顺序逐张更新，不会等全部结束才同时完成", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await page.locator("#input").fill("逐个完成演示");
+  await page.locator("#send-btn").click();
+
+  const cards = page.locator("#messages .tool-card");
+  await expect(cards).toHaveCount(3, { timeout: 10_000 });
+  await expect(cards.nth(0).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(cards.nth(1).locator(".tool-status")).toHaveText("运行中");
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("运行中");
+
+  await expect(cards.nth(1).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("运行中");
+  await expect(cards.nth(2).locator(".tool-status")).toHaveText("✓ 完成", { timeout: 10_000 });
+  await expect(page.locator("#stop-btn")).toBeHidden({ timeout: 10_000 });
+});
+
+test("外部服务限流只显示普通用户能理解的说明，不泄露机器重试字段", async ({ page }) => {
+  await login(page);
+  await createChat(page);
+  await runTurn(page, "限流工具演示", "服务主动等待后仍然繁忙");
+
+  const group = page.locator("#messages .tool-group").first();
+  await expect(group).toHaveCount(1);
+  await expect(group.locator(".tool-group-names")).toContainText("house_lookup ×3");
+  await expect(group.locator(".tool-group-status")).toHaveText("3 个需要处理");
+  await group.locator(".tool-group-summary").click();
+
+  const cards = group.locator(".tool-card");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.locator(".tool-status")).toHaveText(["⚠ 稍后重试", "⚠ 稍后重试", "⚠ 稍后重试"]);
+  await cards.first().locator(".tool-head").click();
+  const result = cards.first().locator(".result-pre");
+  await expect(result).toContainText("查询服务暂时繁忙");
+  await expect(result).toContainText("等待约 60 秒");
+  await expect(result).not.toContainText("service temporarily unavailable");
+  await expect(result).not.toContainText("maxAttempts");
+  await expect(result).not.toContainText("exhausted");
+});
+
 test("agent 与 tools 节点不显示空泛徽章，工具卡直接保留原始工具名", async ({ page }) => {
   await login(page);
   await createChat(page);
@@ -227,6 +268,9 @@ test("结论表跟随最终回答选择房源，户型图不再落入其他户�
 
   const table = page.locator("#messages .conclusion-table");
   await expect(table).toHaveCount(1);
+  await expect(table.locator("thead th").nth(1)).toHaveText("价格");
+  await expect(table.locator(".conclusion-table-price").first()).toContainText(/\d[\d,]* ?元\/月/);
+  expect(await table.locator(".conclusion-same-location").count()).toBe(0);
   const tableText = (await table.textContent()) ?? "";
   // 结论表只列最终回答里提到的房源，且带真实价格与面积
   expect(tableText).toMatch(/\d+㎡/);

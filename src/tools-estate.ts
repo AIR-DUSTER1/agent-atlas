@@ -35,6 +35,9 @@ function finalize(outcome: {
   loginUrl?: string;
   loginOpened?: boolean;
   stopAgent?: boolean;
+  failureKind?: string;
+  retryAfterMs?: number;
+  cooldownActive?: boolean;
 }): string {
   if (outcome.ok) {
     const text = JSON.stringify({ action: outcome.action, ...((outcome.data ?? {}) as object) });
@@ -56,7 +59,12 @@ function finalize(outcome: {
       stopAgent: true,
     });
   }
-  return JSON.stringify({ error: outcome.error });
+  return JSON.stringify({
+    error: outcome.error,
+    ...(outcome.failureKind ? { failureKind: outcome.failureKind } : {}),
+    ...(typeof outcome.retryAfterMs === "number" ? { retryAfterMs: outcome.retryAfterMs } : {}),
+    ...(outcome.cooldownActive ? { cooldownActive: true } : {}),
+  });
 }
 
 function badArgs(message: string): string {
@@ -233,7 +241,7 @@ export const houseSearchTool = tool(
     const resolvedRadiusKm = radiusKm ?? inferredScope.radiusKm;
     const effectiveQuery = buildEstateSearchQuery(requestedQuery, resolvedNear, resolvedRadiusKm);
     const r = await houseSearch(mode, city.trim(), effectiveQuery, houseType ?? undefined);
-    if (!r.ok) return JSON.stringify({ error: r.error });
+    if (!r.ok) return finalize(r);
     const objectListings = extractListings(r.data);
     const textListings = extractEstateSearchListings(r.data);
     const listings = mergeEstateListings(textListings, objectListings);

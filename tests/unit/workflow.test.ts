@@ -39,11 +39,12 @@ const toolProfile: AgentProfile = {
 const stoppingTool = tool(
   async () => JSON.stringify({ error: "需要登录", authRequired: true, loginUrl: "https://building.ke.com/?action=get-key&source=agentatlas", stopAgent: true }),
   {
-    name: "calculator",
+    name: "house_lookup",
     description: "测试用停止工具",
-    schema: z.object({ expression: z.string() }),
+    schema: z.object({ houseId: z.string() }),
   },
 );
+
 const stoppingToolProfile: AgentProfile = { ...testProfile, tools: [stoppingTool] };
 
 /**
@@ -68,7 +69,7 @@ class ScriptedToolCallModel extends BaseChatModel {
     const message: AIMessage = next === "TOOL"
       ? new AIMessage({
           content: "",
-          tool_calls: [{ name: "calculator", args: { expression: "1+1" }, id: `call_${this.script.length}`, type: "tool_call" }],
+          tool_calls: [{ name: "house_lookup", args: { houseId: "test-1" }, id: `call_${this.script.length}`, type: "tool_call" }],
         })
       : new AIMessage(next);
     return { generations: [{ text: "", message }] };

@@ -3,7 +3,7 @@
  * modules/conclusion-media.ts — 房产结论表格的数据归一
  * ============================================================
  * 同一轮会同时出现 search / detail / material / map。这里按 houseId 把
- * 房源事实、户型图、VR 与位置合并成一张表；houseId 仅用于内部匹配，绝不进入
+ * 房源事实、价格、户型图、VR 与位置合并成一张表；houseId 仅用于内部匹配，绝不进入
  * 用户可见标题。模型文字里的原始 ID 也由本模块提供确定性脱敏。
  */
 import type { AssistantPart } from "./types.js";
@@ -48,7 +48,8 @@ export interface ConclusionProperty {
   community?: string;
   layout?: string;
   area?: string;
-  rent?: string;
+  /** 统一价格文案：租房为「xxxx 元/月」，买房为「xxxx 万」。 */
+  price?: string;
   floor?: string;
   orientation?: string;
   decoration?: string;
@@ -280,7 +281,45 @@ function publicPropertyTitle(property: ConclusionProperty): string {
     .replace(/\s{2,}/g, " ")
     .trim();
   if (stripped && !["详情", "待补充", "房源详情", "小区待补充", "位置待补"].includes(stripped)) return stripped;
-  return propertyTitle(property.community || "", property.layout || "", property.area || "");
+  const generated = propertyTitle(property.community || "", property.layout || "", property.area || "");
+  if (generated !== "房源详情") return generated;
+  return meaningfulPropertyText(property.location?.name)
+    || meaningfulPropertyText(property.location?.address)
+    || "房源详情";
+}
+
+const PROPERTY_PLACEHOLDERS = new Set([
+  "", "房源详情", "房源位置", "小区待补充", "位置待补", "详情", "待补充", "暂无", "未知", "未获取坐标",
+]);
+
+function meaningfulPropertyText(value: unknown): string {
+  const normalized = text(value);
+  return PROPERTY_PLACEHOLDERS.has(normalized) || /^(?:未获取|暂无|待补充)/.test(normalized) ? "" : normalized;
+}
+
+function titleHasPropertyIdentity(property: ConclusionProperty): boolean {
+  if (!meaningfulPropertyText(property.title) || listingTitleIsPlaceholder(property.title, property.houseId)) return false;
+  const core = property.title
+    .replace(/[\d.,，·+\s]/g, "")
+    .replace(/(?:室|厅|卫|厨|阳台|平米|㎡|元|月|租金|面积|整租|合租|住宅|房源)/g, "");
+  if (/^(?:小区)?待补充$/.test(core)) return false;
+  return /[\u3400-\u9fffA-Za-z]{2,}/.test(core);
+}
+
+function hasMeaningfulPropertyFacts(property: ConclusionProperty): boolean {
+  const location = property.location;
+  const hasCoordinate = number(location?.lat) !== undefined && number(location?.lng) !== undefined;
+  const hasLocationIdentity = Boolean(
+    hasCoordinate
+    || meaningfulPropertyText(location?.address)
+    || (meaningfulPropertyText(location?.name) && location?.name !== "房源位置"),
+  );
+  return Boolean(
+    meaningfulPropertyText(property.community)
+    || meaningfulPropertyText(property.address)
+    || hasLocationIdentity
+    || titleHasPropertyIdentity(property),
+  );
 }
 
 /** 从面积/租金中提取数值，只用于和最终回答做轻量匹配。 */
@@ -312,13 +351,13 @@ function propertyMentionScore(property: ConclusionProperty, segments: string[], 
   const titleArea = firstMatch(property.title, /([\d.]+\s*(?:㎡|平|m²))/i);
   const area = firstNumber(property.area || titleArea);
   if (!area) return 0;
-  const rent = firstNumber(property.rent || "");
+  const price = firstNumber(property.price || "");
   const layout = property.layout || firstMatch(property.title, /(\d+室\d+厅)/);
   const community = propertyCommunity(property);
   const areaRe = new RegExp(`${escapeRegExp(area)}(?:㎡|平|m²)`, "i");
   // 结论常用「¥2,500」这种不带 /月的简写，也必须算命中；否则会漏掉正文里明确推荐的房源。
-  const rentRe = rent
-    ? new RegExp(`(?:(?:¥|￥)${escapeRegExp(rent)}(?=\\D|$)|${escapeRegExp(rent)}(?:元|/月|每月))`, "i")
+  const priceRe = price
+    ? new RegExp(`(?:(?:¥|￥)${escapeRegExp(price)}(?=\\D|$)|${escapeRegExp(price)}(?:万|元|/月|每月))`, "i")
     : null;
   let best = 0;
   for (const segment of segments) {
@@ -326,7 +365,7 @@ function propertyMentionScore(property: ConclusionProperty, segments: string[], 
     if (segmentCommunities.length && (!community || !segmentCommunities.some((name) => name.includes(community) || community.includes(name)))) continue;
     if (!areaRe.test(segment)) continue;
     let score = 1;
-    if (rentRe?.test(segment)) score += 3;
+    if (priceRe?.test(segment)) score += 3;
     if (layout && segment.includes(layout)) score += 2;
     best = Math.max(best, score);
   }
@@ -358,7 +397,7 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
     const layout = firstMatch(detail, /(\d+室\d+厅)/);
     const area = firstMatch(detail, /出租面积\s*([\d.]+\s*㎡)/).replace(/\s+/g, "");
     const orientation = firstMatch(detail, /朝向\s*([^，,]+)/);
-    const rent = field(body, ["租赁价格"]);
+    const price = field(body, ["租赁价格", "总价", "售价", "价格", "挂牌价", "月租", "租金"]);
     const traffic = field(body, ["区位交通"]);
     const community = firstMatch(traffic, /板块\s*([^，,。]+?)小区/)
       || firstMatch(traffic, /小区\s*([^，,。]+)/);
@@ -371,7 +410,7 @@ function parseSearchRaw(data: unknown): Array<Partial<ConclusionProperty> & { ho
       ...(community ? { community } : {}),
       ...(layout ? { layout } : {}),
       ...(area ? { area } : {}),
-      ...(rent ? { rent } : {}),
+      ...(price ? { price } : {}),
       ...(orientation ? { orientation } : {}),
       ...(traffic ? { address: traffic } : {}),
       ...(vrUrl ? { vrUrl } : {}),
@@ -390,7 +429,12 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
     const houseId = text(record?.id) || text(record?.houseId);
     if (!houseId) continue;
     const rawTitle = text(record?.title) || text(record?.name);
-    const rent = text(record?.price) || text(record?.rent);
+    const rawPrice = record?.price ?? record?.rent ?? record?.totalPrice ?? record?.monthlyRent;
+    const priceObject = asRecord(rawPrice);
+    const price = text(rawPrice)
+      || text(priceObject?.unit)
+      || text(priceObject?.value)
+      || text(priceObject?.display);
     const layout = text(record?.layout);
     const area = text(record?.area);
     const floor = text(record?.floor);
@@ -409,7 +453,7 @@ function parseListingObjects(listings: unknown): Array<Partial<ConclusionPropert
       hasVr,
       ...(community ? { community } : {}),
       ...(title ? { title } : {}),
-      ...(rent ? { rent } : {}),
+      ...(price ? { price } : {}),
       ...(layout ? { layout } : {}),
       ...(area ? { area } : {}),
       ...(floor ? { floor } : {}),
@@ -429,7 +473,7 @@ function factsFromDetail(data: unknown): Partial<ConclusionProperty> {
   const community = field(raw, ["小区名", "小区名称"]);
   const layout = field(raw, ["房型"]);
   const area = field(raw, ["出租面积"]);
-  const rent = field(raw, ["租赁价格"]);
+  const price = field(raw, ["租赁价格", "总价", "售价", "价格", "挂牌价", "月租", "租金"]);
   const floor = field(raw, ["房源所属楼层"]);
   const orientation = field(raw, ["出租朝向"]);
   const decoration = field(raw, ["装修"]);
@@ -440,7 +484,7 @@ function factsFromDetail(data: unknown): Partial<ConclusionProperty> {
     ...(hasVr ? { hasVr } : {}),
     ...(layout ? { layout } : {}),
     ...(area ? { area } : {}),
-    ...(rent ? { rent } : {}),
+    ...(price ? { price } : {}),
     ...(floor ? { floor } : {}),
     ...(orientation ? { orientation } : {}),
     ...(decoration ? { decoration } : {}),
@@ -482,7 +526,7 @@ function mergeProperty(
     rows.set(houseId, row);
     order.push(houseId);
   }
-  for (const key of ["title", "community", "layout", "area", "rent", "floor", "orientation", "decoration", "address", "vrUrl", "city", "rentCode", "detailUrl"] as const) {
+  for (const key of ["title", "community", "layout", "area", "price", "floor", "orientation", "decoration", "address", "vrUrl", "city", "rentCode", "detailUrl"] as const) {
     const value = text(patch[key]);
     if (value) row[key] = value;
   }
@@ -637,16 +681,18 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
     }
   }
 
-  const rentValue = (property: ConclusionProperty): number => {
-    const match = (property.rent || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
+  const priceValue = (property: ConclusionProperty): number => {
+    const match = (property.price || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
     return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
   };
   const candidates: ConclusionProperty[] = [];
   for (const id of propertyOrder) {
     const row = propertyRows.get(id);
-    if (!row || (!row.title && !row.rent && !row.area && !row.layout && !row.vrUrl && !row.hasVr)) continue;
+    if (!row) continue;
     row.images = (imagesByHouse.get(id) ?? []).slice(0, 3);
     row.location = row.location || locationsByHouse.get(id);
+    // 只有内部 ID、占位标题或「有 VR」标记的稀疏结果不能进入推荐表。
+    if (!hasMeaningfulPropertyFacts(row)) continue;
     row.title = publicPropertyTitle(row);
     candidates.push(row);
   }
@@ -656,18 +702,18 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
   const mentioned = candidates
     .map((property, index) => ({ property, index, score: propertyMentionScore(property, answerSegments, knownCommunities) }))
     .filter((item) => item.score >= 2)
-    .sort((left, right) => right.score - left.score || rentValue(left.property) - rentValue(right.property) || left.index - right.index);
+    .sort((left, right) => right.score - left.score || priceValue(left.property) - priceValue(right.property) || left.index - right.index);
   const fallback = candidates
     .map((property, index) => ({ property, index }))
     .sort((left, right) =>
       Number(examinedHouseIds.has(right.property.houseId)) - Number(examinedHouseIds.has(left.property.houseId))
-      || rentValue(left.property) - rentValue(right.property)
+      || priceValue(left.property) - priceValue(right.property)
       || left.index - right.index
     );
   const properties = (mentioned.length ? mentioned : fallback)
     .slice(0, MAX_CONCLUSION_PROPERTIES)
     .map((item) => item.property)
-    .sort((left, right) => rentValue(left) - rentValue(right));
+    .sort((left, right) => priceValue(left) - priceValue(right));
 
   return {
     mapEmbedUrl: detailMap || comparisonMap,

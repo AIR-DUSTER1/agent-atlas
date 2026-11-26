@@ -93,6 +93,7 @@
 .tool-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .tool-status.ok { color: var(--green); }
 .tool-status.err { color: var(--red); }
+.tool-status.warn { color: var(--amber); }
 /* 等审批 ≠ 运行中：琥珀色 + 不转的圈，与「真的在执行」明确区分 */
 .tool-status.awaiting { color: var(--amber); }
 .tool-group-status.warn { color: var(--amber); }
@@ -120,6 +121,7 @@
   color: var(--code-text, #cdd6f4);
 }
 .tool-body .result-pre { color: var(--green-soft); }
+.tool-body .result-pre.warn { color: var(--amber-soft); }
 
 /* --- tools 分组：同批超过两个工具时折叠；摘要保留工具名，避免“合了但看不出” --- */
 .tool-group {

@@ -1,7 +1,7 @@
 /** tool-presentation.test.ts — 工具分类、路径/命令摘要与未知工具回落 */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TOOL_CATEGORIES, describeTool } from "../../src/client/modules/tool-presentation.js";
+import { TOOL_CATEGORIES, describeTool, presentToolResult } from "../../src/client/modules/tool-presentation.js";
 
 function describe(name: string, args: Record<string, unknown> | string = {}) {
   return describeTool({
@@ -70,4 +70,54 @@ test("MCP 工具先按叶子名识别，未知或坏参数安全回落到通用�
   const calculator = describe("calculator", { expression: "1+2" });
   assert.equal(calculator.category.id, "other");
   assert.equal(calculator.summary, "1+2");
+});
+test("限流错误卡只展示普通用户能理解的说明，不泄露 retry JSON", () => {
+  const view = presentToolResult({
+    name: "house_lookup",
+    result: {
+      isError: true,
+      content: JSON.stringify({
+        error: "service temporarily unavailable",
+        failureKind: "rate_limited",
+        retryAfterMs: 60_000,
+        retry: {
+          attempts: 3,
+          maxAttempts: 3,
+          retryable: true,
+          exhausted: true,
+          retryAfterMs: 60_000,
+          userMessage: "查询服务暂时繁忙，通常是短时间内请求过多触发了临时限制。请等待约 60 秒后再试。已有结果不会丢失。",
+        },
+      }),
+    },
+  });
+  assert.equal(view.tone, "retry");
+  assert.equal(view.statusLabel, "⚠ 稍后重试");
+  assert.match(view.text, /查询服务暂时繁忙/);
+  assert.match(view.text, /等待约 60 秒/);
+  assert.doesNotMatch(view.text, /service temporarily unavailable|maxAttempts|exhausted|"retry"/);
+});
+
+test("确定性中文业务错误直接展示，不包成机器 JSON", () => {
+  const view = presentToolResult({
+    name: "house_lookup",
+    result: { isError: true, content: JSON.stringify({ error: "房源编号格式不正确，请重新选择房源" }) },
+  });
+  assert.equal(view.tone, "error");
+  assert.equal(view.text, "房源编号格式不正确，请重新选择房源");
+  assert.equal(view.statusLabel, "✕ 失败");
+});
+
+test("冷却后自动恢复的成功结果不再展示内部 retry JSON", () => {
+  const view = presentToolResult({
+    name: "house_lookup",
+    result: {
+      isError: false,
+      content: JSON.stringify({ action: "detail", ok: true, retry: { attempts: 2, recovered: true } }),
+    },
+  });
+  assert.equal(view.tone, "ok");
+  assert.equal(view.statusLabel, "✓ 已恢复");
+  assert.match(view.text, /自动等待并恢复查询/);
+  assert.doesNotMatch(view.text, /attempts|recovered|"retry"/);
 });

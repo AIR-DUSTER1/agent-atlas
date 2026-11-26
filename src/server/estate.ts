@@ -31,7 +31,8 @@ import { readConfig, mergeConfig } from "./config-store.js";
 import { writeAudit } from "./audit.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { incCounter } from "./observability/metrics.js";
-import { CircuitBreaker } from "./runtime/circuit-breaker.js";
+import { CircuitBreaker, CircuitOpenError } from "./runtime/circuit-breaker.js";
+import { CooldownGate } from "./runtime/cooldown-gate.js";
 import { ResourceGauge } from "./runtime/resource-gauge.js";
 import { log } from "./logging.js";
 import { isPluginEnabled } from "../plugin-state.js";
@@ -42,6 +43,10 @@ const BEIKE_CLI_CONCURRENCY = 1;
 const BEIKE_CLI_MIN_INTERVAL_MS = 1_500;
 const BEIKE_BREAKER_FAILURES = 2;
 const BEIKE_BREAKER_COOLDOWN_MS = 60_000;
+/** 明确限流时立即锁住所有贝壳调用；网络/超时用更短冷却，避免误伤过久。 */
+const BEIKE_RATE_LIMIT_COOLDOWN_MS = 60_000;
+const BEIKE_TIMEOUT_COOLDOWN_MS = 15_000;
+const BEIKE_NETWORK_COOLDOWN_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // 常量（限量即上限）
@@ -110,6 +115,8 @@ const KEY_AUTH_TIMEOUT_MS = 30_000;
 
 const beikeGauge = new ResourceGauge("beike", BEIKE_CLI_CONCURRENCY, 10, 15_000);
 const beikeBreaker = new CircuitBreaker("beike", BEIKE_BREAKER_FAILURES, BEIKE_BREAKER_COOLDOWN_MS);
+/** 账号级共享冷却：一次限流后，所有候选详情/户型图查询都先停，不能再按卡片各撞三次。 */
+const beikeCooldown = new CooldownGate("beike");
 
 /**
  * 安装链路可信来源 host 白名单（T1-6）：manifest 与二进制都必须是 HTTPS 且
@@ -261,6 +268,28 @@ export function beikeBusinessError(data: unknown): string | null {
       : "贝壳 CLI 返回业务失败";
   }
   return typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : null;
+}
+
+export type BeikeFailureKind = "rate_limited" | "timeout" | "network" | "temporary_unavailable";
+
+export interface BeikeFailureSignal {
+  retryable: boolean;
+  kind: BeikeFailureKind | null;
+  cooldownMs: number;
+}
+
+/** 把 CLI 文本错误归类成账号级冷却策略；只有真正可恢复的故障才返回 retryable。 */
+export function classifyBeikeFailure(text: string): BeikeFailureSignal {
+  if (/429|too many requests|rate limit|限流|请求过于频繁|访问频繁|service temporarily unavailable|temporarily unavailable|temporary unavailable|暂时不可用|临时不可用|系统繁忙/i.test(text)) {
+    return { retryable: true, kind: "rate_limited", cooldownMs: BEIKE_RATE_LIMIT_COOLDOWN_MS };
+  }
+  if (/timeout|timed out|超时/i.test(text)) {
+    return { retryable: true, kind: "timeout", cooldownMs: BEIKE_TIMEOUT_COOLDOWN_MS };
+  }
+  if (/ECONN|EAI_AGAIN|ENOTFOUND|fetch failed|network error|网络(?:错误|波动|不可用)/i.test(text)) {
+    return { retryable: true, kind: "network", cooldownMs: BEIKE_NETWORK_COOLDOWN_MS };
+  }
+  return { retryable: false, kind: null, cooldownMs: 0 };
 }
 
 /**
@@ -771,6 +800,11 @@ export interface BeikeOutcome {
   loginUrl?: string;
   loginOpened?: boolean;
   stopAgent?: boolean;
+  /** 可恢复故障类型；工具执行层据此决定是否停止立即重试。 */
+  failureKind?: BeikeFailureKind;
+  /** 账号级冷却剩余时间；大于 0 时所有同源查询都应等待，而不是换参数继续撞。 */
+  retryAfterMs?: number;
+  cooldownActive?: boolean;
 }
 
 async function beikeAuthOutcome(action: string): Promise<BeikeOutcome> {
@@ -790,41 +824,83 @@ async function beikeAuthOutcome(action: string): Promise<BeikeOutcome> {
   };
 }
 
+/** 已处于冷却期时直接返回可操作说明，不启动任何贝壳子进程。 */
+async function beikeCooldownOutcome(action: string): Promise<BeikeOutcome> {
+  const remainingMs = beikeCooldown.remainingMs();
+  const kind = (beikeCooldown.snapshot().reason || "temporary_unavailable") as BeikeFailureKind;
+  incCounter("agent_dependency_cooldown_blocked_total", { dependency: "beike", reason: kind });
+  return {
+    ok: false,
+    action,
+    failureKind: kind,
+    retryAfterMs: remainingMs,
+    cooldownActive: true,
+    error: `房源数据服务暂时繁忙，系统已暂停同源查询。请等待约 ${Math.max(1, Math.ceil(remainingMs / 1000))} 秒后再试。`,
+  };
+}
+
+/** 首次遇到限流/网络故障即锁住整个贝壳账号，阻止模型对后续候选继续放大请求。 */
+function activateBeikeCooldown(action: string, signal: BeikeFailureSignal, detail: string): void {
+  if (!signal.retryable || !signal.kind) return;
+  const wasActive = beikeCooldown.remainingMs() > 0;
+  beikeCooldown.activate(signal.cooldownMs, signal.kind);
+  if (!wasActive) {
+    writeAudit("beike.cooldownStarted", { action, kind: signal.kind, cooldownMs: signal.cooldownMs });
+    log("warn", "beike_cooldown_started", { action, kind: signal.kind, cooldownMs: signal.cooldownMs, detail: detail.slice(0, 160) });
+  }
+  recordDependency("beike", "degraded", "贝壳数据服务触发临时限流，已进入共享冷却");
+  incCounter("agent_dependency_cooldown_started_total", { dependency: "beike", reason: signal.kind });
+}
+
 async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcome> {
   try {
     // 认证失败后不再触达 CLI：并行工具、反思回炉和下一轮追问都走同一个短路点。
     if (currentBeikeLoginGate()) return await beikeAuthOutcome(action);
+    // 限流是账号级状态：第一个失败后，其它候选与工具必须一起停，不能各撞三次。
+    if (beikeCooldown.remainingMs() > 0) return await beikeCooldownOutcome(action);
     const { path: bin } = await ensureBeike();
-    // 并发 1 + 1.5 秒启动间隔；连续两次认证/业务失败后熔断 60 秒。
+    // 并发 1 + 1.5 秒启动间隔；进程级异常仍由 CircuitBreaker 兜底。
     const r = await beikeBreaker.run(() => runBeikeThrottled(bin, args, BEIKE_RUN_TIMEOUT_MS));
     if (r.code === 0) {
       const parsed = parseBeikeJson(r.stdout);
       if (parsed.ok) {
         // CLI 可能以 exit 0 返回业务失败 JSON（例如后端工具名升级）。
-        // 只看退出码会把这类失败画成绿色「完成」，上层也无法熔断。
         const businessError = beikeBusinessError(parsed.data);
         if (businessError) {
           if (isBeikeAuthFailure(businessError)) return await beikeAuthOutcome(action);
-          recordDependency("beike", "degraded", "贝壳 CLI 返回业务错误");
+          const signal = classifyBeikeFailure(businessError);
           incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
+          if (signal.retryable) {
+            activateBeikeCooldown(action, signal, businessError);
+            const retryAfterMs = beikeCooldown.remainingMs();
+            return {
+              ok: false,
+              action,
+              failureKind: signal.kind ?? "temporary_unavailable",
+              retryAfterMs,
+              cooldownActive: true,
+              error: `房源数据服务暂时繁忙，系统已暂停同源查询。请等待约 ${Math.max(1, Math.ceil(retryAfterMs / 1000))} 秒后再试。`,
+            };
+          }
+          recordDependency("beike", "degraded", "贝壳 CLI 返回业务错误");
           return { ok: false, action, error: businessError };
         }
+        beikeCooldown.reset();
         recordDependency("beike", "ok", "贝壳 CLI 调用正常");
         incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
         beikeCredentialVerified = true;
         return { ok: true, action, data: parsed.data };
       }
-      // 纯文本输出（非 JSON）：对模型来说文本本身就是可读结果
+      // 纯文本输出（非 JSON）：对模型来说文本本身就是可读结果。
       if (isBeikeAuthFailure(parsed.raw)) return await beikeAuthOutcome(action);
+      beikeCooldown.reset();
       recordDependency("beike", "ok", "贝壳 CLI 调用正常");
       incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "success" });
       return { ok: true, action, data: { text: parsed.raw.slice(0, 6_000) } };
     }
     if (isBeikeAuthFailure(`${r.stderr}\n${r.stdout}`)) return await beikeAuthOutcome(action);
-    recordDependency("beike", "degraded", "贝壳 CLI 返回错误");
     incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
-    // CLI 版本过低（-32001）：T1-6 后不再静默自动重装 —— 下载执行代码必须由
-    // 用户显式确认。这里明确告知版本差并指引用户到面板点「安装/升级 CLI」。
+    // CLI 版本过低（-32001）：下载执行代码必须由用户显式确认。
     if (/CLI_UPGRADE_REQUIRED|版本过低|-32001/i.test(r.stderr + r.stdout)) {
       writeAudit("beike.upgradeDeclined", { action, current: saved.beikeVersion ?? "" });
       const cur = saved.beikeVersion || "未知";
@@ -837,15 +913,39 @@ async function beikeCommand(action: string, args: string[]): Promise<BeikeOutcom
       };
     }
     const detail = (r.stderr || r.stdout || "无输出").trim().slice(-500);
+    const signal = classifyBeikeFailure(detail);
+    if (signal.retryable) {
+      activateBeikeCooldown(action, signal, detail);
+      const retryAfterMs = beikeCooldown.remainingMs();
+      return {
+        ok: false,
+        action,
+        failureKind: signal.kind ?? "temporary_unavailable",
+        retryAfterMs,
+        cooldownActive: true,
+        error: `房源数据服务暂时繁忙，系统已暂停同源查询。请等待约 ${Math.max(1, Math.ceil(retryAfterMs / 1000))} 秒后再试。`,
+      };
+    }
+    recordDependency("beike", "degraded", "贝壳 CLI 返回错误");
     return {
       ok: false,
       action,
       error: `贝壳查询失败（beike ${args[0]} ${args[1]}）：${detail}`,
     };
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      beikeCooldown.activate(err.retryAfterMs, "temporary_unavailable");
+      return await beikeCooldownOutcome(action);
+    }
+    const text = err instanceof Error ? err.message : String(err);
+    const signal = classifyBeikeFailure(text);
+    if (signal.retryable) {
+      activateBeikeCooldown(action, signal, text);
+      return await beikeCooldownOutcome(action);
+    }
     recordDependency("beike", "down", "贝壳 CLI 不可用");
     incCounter("agent_external_dependency_calls_total", { dependency: "beike", status: "error" });
-    return { ...unavailableJSON(err), ok: false, action, error: err instanceof Error ? err.message : String(err) } as BeikeOutcome;
+    return { ...unavailableJSON(err), ok: false, action, error: text } as BeikeOutcome;
   }
 }
 

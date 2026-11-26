@@ -1,6 +1,6 @@
 # 部署与运维总览
 
-> 适用范围：**开发预览阶段的自托管与部署参考**。当前版本为 `0.9.0-beta.20`，不是正式发布版。
+> 适用范围：**开发预览阶段的自托管与部署参考**。当前版本为 `0.9.0-beta.21`，不是正式发布版。
 > 这些文档用于验证单实例部署、数据恢复和运维流程，不构成生产 SLA 或稳定兼容承诺。
 
 ## 文档导航
@@ -30,6 +30,9 @@
 
 多用户模式（`STATE_BACKEND=postgres`）下：
 
+- **登录强制**：与 `AUTH_TOKEN` 是否为空无关，首页直接弹「用户名 + 密码」登录页，不走令牌配对。
+- 首次启动自动给管理员设初始密码（`BOOTSTRAP_ADMIN_PASSWORD`，或随机生成写入
+  `<数据目录>/bootstrap-admin-password.txt`）；首登强制改密，改密后才进主界面。
 - 用户用「用户名 + 密码」登录；管理员在「设置 → 账号与安全」创建用户、重置密码、管理访问令牌。
 - 首登或密码被重置后强制改密（`must_change_password`）；改密后所有会话与设备免登失效。
 - 连续 10 次登录失败锁定账户 15 分钟；IP 维度另有 5 次 / 15 分钟限流。
@@ -57,6 +60,10 @@ agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
       ├── audit-archive*/          # 审计归档与哈希清单
       └── backups/                 # 校验清单 v2 + 保留策略
 ```
+
+生产镜像固定设置 `BROWSER_USE_CONTAINER=1`。因此 Docker / 容器部署中 **Computer Use 始终禁用**：旧配置即使写成启用也会在启动时收敛为关闭，API 启用请求会被拒绝，设置页显示“Docker 部署不可用”。需要在 Windows 桌面直接控制本机时，请使用桌面版而不是容器版。
+
+`BROWSER_USE_EXECUTABLE_PATH`、`BROWSER_USE_CONTAINER`、`JOB_BROWSER_HEADLESS` 是无头 Chromium 的 Browser Use / 求职采集参数，不是 Computer Use 运行时；它们本身不增加镜像层。Computer Use 工具实现也没有额外 npm 或原生依赖。若完全不需要无头浏览器，可使用 `--target minimal` 构建瘦镜像，但 Browser Use 和求职网页采集也会失去浏览器运行时；Computer Use 在任何容器目标中都不可用。
 
 ## 多用户生产拓扑
 

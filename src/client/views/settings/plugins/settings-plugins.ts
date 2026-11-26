@@ -53,7 +53,7 @@ export function openPluginManage(plugin: BuiltinPlugin): void {
     const status = state.browser;
     void uiAlert(
       "Browser Use 使用本机 Chrome / Edge 的无头浏览器，不持久化账号数据，空闲 10 分钟自动回收。\n\n" +
-      "启用后通用 Agent 可以打开网页、读取真实渲染内容、点击、填写表单和滚动；所有会改变页面的动作仍需人工审批。\n\n" +
+      "启用后当前 Agent 可以打开网页、读取真实渲染内容、点击、填写表单和滚动；所有会改变页面的动作仍需人工审批。\n\n" +
       (status?.available
         ? `当前浏览器：${status.browserName}（${status.executableName}）`
         : status?.error || "当前未检测到可用浏览器，可设置 BROWSER_USE_EXECUTABLE_PATH。"),
@@ -63,8 +63,10 @@ export function openPluginManage(plugin: BuiltinPlugin): void {
   }
   if (plugin.id === "computer") {
     void uiAlert(
-      "Computer Use 只在本机 Windows 桌面会话可用。\n\n" +
-      "启用后通用 Agent 才能调用截图、点击、输入、按键和滚动工具；动作仍受会话权限与高风险审批约束。\n\n" +
+      (state.plugins?.container
+        ? "当前是 Docker / 容器部署，Computer Use 已禁用；请在 Windows 本机桌面版中使用。\n\n"
+        : "Computer Use 只在本机 Windows 桌面会话可用。\n\n") +
+      "启用后当前 Agent 才能调用截图、点击、输入、按键和滚动工具；动作仍受会话权限与高风险审批约束。\n\n" +
       "默认关闭是为了避免应用在用户未授权时获得本机控制能力。",
       "Computer Use 说明"
     );

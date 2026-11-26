@@ -33,12 +33,13 @@ interface PluginRow {
 const pluginRows = computed<PluginRow[]>(() =>
   BUILTIN_PLUGINS.map((plugin) => {
     const transport = pluginTransportMeta(plugin.transport);
+    const container = Boolean(store.plugins?.container);
     return {
       plugin,
       transport,
       enabled: store.plugins?.enabled[plugin.id] ?? plugin.defaultEnabled,
       ready: readinessOf(plugin),
-      supported: plugin.id !== "computer" || !store.plugins || store.plugins.platform === "win32",
+      supported: plugin.id !== "computer" || (!container && (!store.plugins || store.plugins.platform === "win32")),
     };
   }),
 );
@@ -73,6 +74,7 @@ function readinessOf(plugin: BuiltinPlugin): { ready: boolean; label: string } {
         : "未找到 Chrome / Edge",
     };
   }
+  if (store.plugins?.container) return { ready: false, label: "Docker 部署不可用" };
   const available = !store.plugins || store.plugins.platform === "win32";
   return { ready: available, label: available ? "Windows 可用" : "仅支持 Windows" };
 }
@@ -120,7 +122,11 @@ async function onToggle(plugin: BuiltinPlugin, next: boolean): Promise<void> {
       <Switch
         class="plugin-switch"
         :title="row.supported ? (row.enabled ? '停用插件' : '启用插件') : '当前平台不支持'"
-        :aria-label="row.supported ? `${row.enabled ? '停用' : '启用'}${row.plugin.name}` : `${row.plugin.name}仅支持 Windows`"
+        :aria-label="row.supported
+          ? `${row.enabled ? '停用' : '启用'}${row.plugin.name}`
+          : row.plugin.id === 'computer' && store.plugins?.container
+            ? `${row.plugin.name}在 Docker 部署中不可用`
+            : `${row.plugin.name}仅支持 Windows`"
         :checked="row.enabled"
         :disabled="!row.supported || togglingId === row.plugin.id"
         :loading="togglingId === row.plugin.id"

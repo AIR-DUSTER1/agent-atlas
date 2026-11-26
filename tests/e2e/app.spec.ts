@@ -281,6 +281,19 @@ test("自主执行流程窗体默认折叠、无计划隐藏并实时同步步�
   await page.locator("#workflow-panel .workflow-summary").click();
   await expect(page.locator("#workflow-steps .workflow-step")).toHaveCount(3);
   await expect(page.locator("#workflow-steps .workflow-step.status-completed")).toHaveCount(3);
+  const markers = page.locator("#workflow-steps .workflow-step-marker .ui-icon");
+  await expect(markers).toHaveCount(3);
+  expect(await markers.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.icon))).toEqual([
+    "Check", "Check", "Check",
+  ]);
+  expect(await markers.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.iconReady))).toEqual(["1", "1", "1"]);
+  await expect(markers.locator("svg")).toHaveCount(3);
+  const markerBox = await page.locator("#workflow-steps .workflow-step-marker").first().boundingBox();
+  const iconBox = await markers.first().boundingBox();
+  expect(markerBox?.width).toBeGreaterThanOrEqual(19);
+  expect(markerBox?.height).toBeGreaterThanOrEqual(19);
+  expect(iconBox?.width).toBeGreaterThanOrEqual(12);
+  expect(iconBox?.height).toBeGreaterThanOrEqual(12);
 });
 test("流式停止按钮可中断生成并恢复输入", async ({ page }) => {
   await login(page);
@@ -675,6 +688,62 @@ test("保存模型后关闭编辑区并给出成功提示", async ({ page }) => 
   // 2) 成功提示仍然可见（提示条在表单外面，不能被一起隐藏）
   await expect(page.locator("#settings-status")).toContainText(/已保存模型/);
   expect(pageErrors).toEqual([]);
+});
+
+test("模型选择弹窗支持搜索、分组、多选并批量应用", async ({ page }) => {
+  const addedModels: Array<Record<string, unknown>> = [];
+  await page.route("**/api/models", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        models: [
+          { id: "glm-5-turbo", contextWindow: 200000, supportsReasoning: true },
+          { id: "glm-5.3-flash", contextWindow: 1000000, supportsReasoning: true, supportsVision: true },
+          { id: "glm-5.3", contextWindow: 1000000, supportsReasoning: true },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/config/providers/*/models", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    addedModels.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, created: true, model: { id: "glm-5-turbo", name: "glm-5-turbo" } }),
+    });
+  });
+  await login(page);
+  await page.locator("#settings-btn").click();
+  await page.locator('[data-settings-view="models"]').click();
+  await page.locator("#provider-list .provider-nav-item").first().click();
+  await page.locator("#pf-fetch-models").click();
+
+  const modal = page.locator("#gateway-model-picker");
+  await expect(modal).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("选择模型", { exact: true })).toBeVisible();
+  await expect(modal.getByPlaceholder("搜索模型...")).toBeVisible();
+  await expect(modal).toContainText("供应商返回的模型");
+  await expect(modal).toContainText("已选");
+  await expect(modal).toContainText("只看已选");
+  await expect(modal.locator(".model-picker-select-all")).toBeVisible();
+  await expect(modal.locator(".model-picker-clear-all")).toBeVisible();
+  await expect(modal.locator(".model-picker-apply")).toBeVisible();
+
+  await modal.getByPlaceholder("搜索模型...").fill("flash");
+  await expect(modal.locator('.model-picker-row[data-model-id="glm-5.3-flash"]')).toBeVisible();
+  await expect(modal.locator(".model-picker-row")).toHaveCount(1);
+  await modal.getByPlaceholder("搜索模型...").fill("");
+  await modal.locator('.model-picker-row[data-model-id="glm-5-turbo"] input[type="checkbox"]').click();
+  await modal.locator(".model-picker-apply").click();
+  await expect(modal).toBeHidden();
+  expect(addedModels[0]?.name).toBe("glm-5-turbo");
+  expect(addedModels[0]?.makeActive).toBe(false);
 });
 
 /**

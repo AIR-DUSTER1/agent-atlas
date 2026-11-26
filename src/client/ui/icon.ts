@@ -50,13 +50,29 @@ function installObserver(): void {
   if (observerInstalled || typeof MutationObserver === "undefined") return;
   observerInstalled = true;
   const observer = new MutationObserver((records) => {
+    const roots = new Set<Element>();
     for (const record of records) {
+      if (record.type === "attributes" && record.target instanceof HTMLElement) {
+        // Vue 状态切换只更新 data-icon；旧的 data-icon-ready/SVG 必须清掉再水合。
+        const host = record.target;
+        host.removeAttribute("data-icon-ready");
+        host.removeAttribute("data-icon-error");
+        host.replaceChildren();
+        roots.add(host);
+        continue;
+      }
       for (const node of record.addedNodes) {
-        if (node instanceof Element) void hydrateIcons(node);
+        if (node instanceof Element) roots.add(node);
       }
     }
+    for (const root of roots) void hydrateIcons(root);
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-icon"],
+  });
 }
 
 /** 安装全局新增节点监听，并水合页面里静态写好的 data-icon 占位。 */

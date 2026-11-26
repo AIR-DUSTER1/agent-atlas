@@ -278,6 +278,8 @@ export interface AppState {
   streams: Record<string, SessionStreamState>;
   /** 会话 id → 是否正在压缩上下文；只互斥同一会话。 */
   compacting: Record<string, boolean>;
+  /** 会话 id → 用户已提交审批/澄清，resume 流尚未完全收尾。 */
+  approvalResuming: Record<string, boolean>;
   settingsView: string;
   pendingFiles: PendingFile[];
   /** 会话 id → 当前一轮是否为 /goal 连续回合：发送时设置、普通消息清除、resume 时重传 continuous。 */

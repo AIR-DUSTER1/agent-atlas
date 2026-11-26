@@ -6,6 +6,7 @@
  * compose 的关键约束，防止以后重新把 devDependencies、测试或密钥打进运行层。
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -142,10 +143,21 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   for (const name of ["chart.js", "dompurify", "highlight.js", "lucide", "marked"]) {
     assert.ok(pkg.devDependencies[name], `${name} 应只用于构建`);
   }
+  // Vue 运行时只存在于 Vite 产物，且运行层会删除前端源码。
+  // 若误放回 dependencies，npm ci --omit=dev 会把整套组件库及其传递依赖带进生产镜像。
+  for (const name of ["antdv-next", "pinia", "vue"]) {
+    assert.ok(pkg.devDependencies[name], `${name} 应只用于前端构建`);
+    assert.ok(!pkg.dependencies[name], `${name} 不得进入生产运行依赖`);
+  }
 
   const dockerfile = await readFile("Dockerfile", "utf8");
+  assert.match(dockerfile, /COPY tsconfig\.json tsconfig\.client\.json tsconfig\.desktop\.json vite\.config\.ts \.\//);
+  assert.match(dockerfile, /src\/server\/public\/styles\/base\/ui\.css/);
+  assert.doesNotMatch(dockerfile, /src\/server\/public\/styles\/ui\.css/);
   assert.match(dockerfile, /AS builder/);
   assert.match(dockerfile, /AS production-deps/);
+  assert.match(dockerfile, /npm ci --omit=dev --omit=optional --ignore-scripts/, "生产依赖必须排除 optional peer，防止 Vue/TypeScript 回流");
+  assert.match(dockerfile, /COPY --from=builder[^\n]*@esbuild\/linux-x64/, "运行镜像必须回填 tsx 所需的 esbuild 平台二进制");
   assert.match(dockerfile, /AS runtime-base/);
   assert.match(dockerfile, /AS runtime/);
   assert.match(dockerfile, /AS minimal/);
@@ -196,6 +208,30 @@ test("发布工程：依赖分类与镜像边界不回退", async () => {
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes("node_modules/electron"));
   assert.ok(FORBIDDEN_RUNTIME_PATHS.includes(".agents"));
 });
+test("main 合并 CI 验收入口与镜像 smoke 路径保持一致", async () => {
+  const pkg = JSON.parse(await readFile("package.json", "utf8")) as { scripts?: Record<string, string> };
+  assert.equal(pkg.scripts?.["ci:verify"], "tsx scripts/ci-verify.ts");
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  assert.match(workflow, /name: Vue component tests/);
+  assert.match(workflow, /npm run test:vue/);
+  const smoke = await readFile("scripts/docker-smoke.ts", "utf8");
+  assert.match(smoke, /styles\/base\/ui\.css/);
+  assert.doesNotMatch(smoke, /styles\/ui\.css/);
+  assert.match(smoke, /pluginsBody\.container/);
+  assert.match(smoke, /Docker 容器必须禁用 Computer Use/);
+  const agents = await readFile("AGENTS.md", "utf8");
+  assert.match(agents, /git fetch origin main && npm run ci:verify/);
+  assert.match(agents, /Docker daemon 不可用[\s\S]*禁止合并 main/);
+  const listed = spawnSync(process.execPath, ["--import", "tsx", "scripts/ci-verify.ts", "--list"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /image:smoke/);
+  assert.match(listed.stdout, /test:vue/);
+  assert.match(listed.stdout, /version:main-guard/);
+});
+
 test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const refs = [...workflow.matchAll(/uses:\s*([^\s#]+)(?:\s*#\s*(\S+))?/g)].map((match) => ({

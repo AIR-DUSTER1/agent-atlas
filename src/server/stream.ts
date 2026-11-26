@@ -2,11 +2,12 @@
  * ============================================================
  * stream.ts — 把 LangGraph 原始流事件「翻译」成前端友好的 AgentEvent
  * ============================================================
- * 实测（LangGraph JS v1.x）streamMode: ["messages","updates"] 的事件形状：
+ * 实测（LangGraph JS v1.x）streamMode: ["messages","updates","custom"] 的事件形状：
  *
  *   ["messages",  [ chunk, metadata ]]     ← 模型 token / 整条 ToolMessage
  *   ["updates",   { 节点名: { messages: [...] } }]
  *   ["updates",   { __interrupt__: [{ value: 审批载荷 }] }]
+ *   [[namespace], "custom", 工具节点实时进度]
  *
  * 关键结论（均有探针脚本实测）：
  *   1. messages 模式会把子图里的消息也「冒泡」上来，
@@ -68,6 +69,14 @@ function asInterruptPayload(value: unknown): InterruptPayload | null {
   return type === "approval" || type === "clarification" ? (value as InterruptPayload) : null;
 }
 
+
+/** 工具节点 custom 流的唯一载荷：单项完成即推 UI，不等待同批其它工具。 */
+function asToolResultProgress(value: unknown): { id: string; content: string; isError: boolean } | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as { type?: unknown; id?: unknown; content?: unknown; isError?: unknown };
+  if (event.type !== "tool_result" || typeof event.id !== "string" || !event.id || typeof event.content !== "string") return null;
+  return { id: event.id, content: event.content, isError: event.isError === true };
+}
 
 /** 任意 graph.stream() 可用对象（4 个 demo 的图节点名互不相同，泛型互斥，鸭子类型即可） */
 type AnyGraph = {
@@ -418,7 +427,7 @@ export async function* runGraphEvents(
     });
   }
   const stream = await graph.stream(input, {
-    streamMode: ["messages", "updates"],
+    streamMode: ["messages", "updates", "custom"],
     // 业务层不限制任务时长 / 调用次数；图运行用 1000 超步兜底，避免正常长任务触发默认 25 步上限。
     // 连续模式放宽到独立保险丝：小时级回炉按 1000 会先撞 GraphRecursionError。
     recursionLimit: options.continuous ? CONTINUOUS_RECURSION_LIMIT : AGENT_RECURSION_LIMIT,
@@ -449,6 +458,8 @@ export async function* runGraphEvents(
   const toolIds = new Map<number, string>(); // tool_call_chunks 的 index → 事件 id
   const announcedTools = new Set<string>();
   const loggedToolResults = new Set<string>();
+  // custom 实时结果先到；后续 messages/updates 的同一 ToolMessage 只做统计与模型兜底，不重复刷新卡片。
+  const emittedToolResultIds = new Set<string>();
   // 流程工具是编排控制面，不展示成普通工具卡，也不计入用户工具调用统计。
   const suppressedPlanToolIds = new Set<string>();
   let emittedPlanSignature = "";
@@ -501,7 +512,29 @@ export async function* runGraphEvents(
   for await (const tagged of stream) {
     if (options.signal?.aborted) return;
     if (!Array.isArray(tagged)) continue;
-    const [mode, payload] = tagged as [string, unknown];
+    // custom 模式在 LangGraph v1 是 [namespace, "custom", chunk]；旧兼容形态是 ["custom", chunk]。
+    const tuple = tagged as unknown[];
+    const namespacedCustom = tuple.length >= 3 && tuple[1] === "custom";
+    const mode = namespacedCustom ? "custom" : String(tuple[0] ?? "");
+    const payload = namespacedCustom ? tuple[2] : tuple[1];
+
+    // -------------------------------------------------------------
+    // custom 模式：工具节点在 Promise.all 完成前逐项推送结果
+    // -------------------------------------------------------------
+    if (mode === "custom") {
+      const progress = asToolResultProgress(payload);
+      if (progress && !emittedToolResultIds.has(progress.id)) {
+        emittedToolResultIds.add(progress.id);
+        streamedSinceBoundary = false;
+        yield {
+          type: "tool_result",
+          id: progress.id,
+          content: progress.content,
+          isError: progress.isError,
+        };
+      }
+      continue;
+    }
 
     // -------------------------------------------------------------
     // messages 模式：模型 token 流 + 整条工具消息
@@ -606,12 +639,15 @@ export async function* runGraphEvents(
             ...(autoDecision.callId ? { callId: autoDecision.callId } : {}),
           };
         }
-        yield {
-          type: "tool_result",
-          id: resultId,
-          content: contentText(msg.content),
-          isError: msg.status === "error",
-        };
+        if (!emittedToolResultIds.has(resultId)) {
+          emittedToolResultIds.add(resultId);
+          yield {
+            type: "tool_result",
+            id: resultId,
+            content: contentText(msg.content),
+            isError: msg.status === "error",
+          };
+        }
         resetUsageCall(); // 下一次工具返回后的模型请求是新的 API 调用
         continue;
       }
@@ -697,12 +733,16 @@ export async function* runGraphEvents(
                 ...(autoDecision.callId ? { callId: autoDecision.callId } : {}),
               };
             }
-            yield {
-              type: "tool_result",
-              id: msg.tool_call_id ?? "",
-              content: contentText(msg.content),
-              isError: msg.status === "error",
-            };
+            const resultId = msg.tool_call_id ?? "";
+            if (!emittedToolResultIds.has(resultId)) {
+              emittedToolResultIds.add(resultId);
+              yield {
+                type: "tool_result",
+                id: resultId,
+                content: contentText(msg.content),
+                isError: msg.status === "error",
+              };
+            }
             resetUsageCall();
             continue;
           }

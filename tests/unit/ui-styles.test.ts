@@ -69,6 +69,17 @@ test("配置表单公共组件共享高度、焦点环与占位样式", async ()
   assert.match(css, /\.ui-config-control:focus[\s\S]*?border-color:\s*var\(--border-focus\)[^}]*box-shadow:\s*0 0 0 3px var\(--info-bg\)/s);
   assert.match(css, /\.ui-config-control::placeholder[\s\S]*?color:\s*var\(--text-3\)/s);
 });
+
+test("新建对话按钮跨主题保持固定高度、可见边框且不产生侧栏抖动", async () => {
+  const [layout, tokens] = await Promise.all([
+    readFile(join(CLIENT, "styles", "base", "layout.css"), "utf8"),
+    readFile(join(CLIENT, "styles", "base", "tokens.css"), "utf8"),
+  ]);
+  assert.match(layout, /#new-chat-btn\s*\{[^}]*display:\s*inline-flex[^}]*height:\s*37px[^}]*border:\s*1px dashed/s);
+  assert.match(layout, /#new-chat-btn\s*\{[^}]*background:\s*color-mix\([^}]*--accent/s);
+  assert.doesNotMatch(tokens, /--border-strong:\s*var\(--border-strong\)/);
+});
+
 test("房产弹窗操作按钮统一高度并对齐，状态独占下一行", async () => {
   const css = await readFile(join(CLIENT, "styles", "settings", "plugins", "plugins.css"), "utf8");
   assert.match(css, /#estate-modal \.kb-actions[^}]*align-items:\s*stretch[^}]*flex-wrap:\s*wrap/s);

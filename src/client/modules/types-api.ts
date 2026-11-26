@@ -358,6 +358,8 @@ export interface RagHit {
 export interface PluginSettingsState {
   enabled: Record<"rag" | "estate" | "job" | "browser" | "computer", boolean>;
   platform: string;
+  /** 当前进程运行在 Docker / 容器内；Computer Use 不可用。 */
+  container: boolean;
 }
 
 export interface BrowserUseState {

@@ -12,7 +12,7 @@
   <img alt="Hono" src="https://img.shields.io/badge/Hono-4.x-E36002">
   <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3.x-42B883">
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6.x-646CFF">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.20-F59E0B">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.21-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -56,6 +56,8 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 
 界面将 Agent 选择、会话管理、模型切换、权限控制与设置中心整合在同一工作台中。左下角设置页集中管理模型与供应商、插件、子代理、路由、记忆与个性化、统计、命令、技能和 MCP。
 
+Browser Use 与 Computer Use 启用后作为平台能力提供给通用、房产和求职主 Agent；三个 Profile 的领域工具与记忆范围仍然独立，不会互相串用。Computer Use 仅在 Windows 本机桌面可用，Docker / 容器部署中固定禁用。
+
 ## 快速开始
 
 ### 环境要求
@@ -78,6 +80,8 @@ npm run web
 ### 接入真实模型
 
 推荐在页面左下角进入 **设置 → 模型与供应商**，添加供应商和模型后再回到会话。
+
+点击「获取列表」会打开多选弹窗：可以搜索模型、全选或全不选、只看已选，分组确认后一次性应用新增与移除。
 
 也可以复制环境变量模板并填写网关信息：
 
@@ -216,10 +220,13 @@ DATABASE_URL=postgresql://agent_app:APP_PASSWORD@postgres:5432/agentatlas
 DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 ```
 
+- **数据库模式一律强制登录**（与 `AUTH_TOKEN` 是否为空无关），首次打开页面即弹「用户名 + 密码」登录页，不再是令牌配对框。
+- 首次启动会自动给 `admin` 建一个初始密码：设了 `BOOTSTRAP_ADMIN_PASSWORD` 就用它（弱密码启动即报错），否则生成随机密码写入 `<数据目录>/bootstrap-admin-password.txt`（0600），也可用 `BOOTSTRAP_ADMIN_PASSWORD_FILE` 指向挂载的 secret 文件。密码只在该文件里，不进日志。
+- 首次登录强制改密；之后一切以用户名密码为准，`AUTH_TOKEN` 只作为运维救援通道。
 - 用户用「用户名 + 密码」登录；管理员在「设置 → 账号与安全」创建用户、重置密码、管理访问令牌（CLI 通道 `npm run user:create -- --name Alice` 仍可用）。
 - 首登或密码被重置后强制改密；修改密码会使该用户全部会话与设备免登失效。
 - 连续 10 次登录失败锁定账户 15 分钟；IP 维度另有 5 次 / 15 分钟限流。
-- `AUTH_TOKEN` 只作为管理员 bootstrap 与运维通道；会话、审批、checkpoint、项目和统计由 `userId` 隔离，数据库表启用 RLS。
+- 会话、审批、checkpoint、项目和统计由 `userId` 隔离，数据库表启用 RLS。
 - 供应商、插件、MCP、技能、备份和诊断配置只允许管理员修改。
 - 当前仍是单实例运行，SSE、限流和内存流锁尚未迁移到多实例。
 
@@ -235,9 +242,10 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 | `BASE_URL` / `API_KEY` / `MODEL` | 模型网关地址、密钥与默认模型 |
 | `AI_PROTOCOL` | `openai` / `openai-responses` / `anthropic` / `gemini` |
 | `HOST` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
-| `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为管理员 bootstrap 密钥 |
+| `AUTH_TOKEN` | 文件模式为首次配对令牌；PostgreSQL 模式为运维救援密钥（登录本身用用户名密码） |
 | `BOOTSTRAP_ADMIN_USERNAME` | bootstrap 管理员登录名，默认 `admin` |
 | `BOOTSTRAP_ADMIN_NAME` | bootstrap 管理员显示名，默认「管理员」 |
+| `BOOTSTRAP_ADMIN_PASSWORD` / `_FILE` | PostgreSQL 模式首次启动的初始管理员密码（不设则随机生成写 0600 文件） |
 | `STATE_BACKEND` / `DATABASE_URL` / `DATABASE_ADMIN_URL` | 可选 PostgreSQL 多用户后端与迁移/运行角色 |
 | `PRODUCTION` | 设为 `1` 时启用生产启动门禁 |
 | `SESSION_SECRET` / `DATA_KEY` | 生产会话与设备凭据签名、配置加密密钥 |
@@ -320,15 +328,15 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 ## 版本与发布
 
-当前为 `0.9.0-beta.20` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
+当前为 `0.9.0-beta.21` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
 
 ```text
-0.9.0-beta.20 · 构建标识由当前提交自动生成
+0.9.0-beta.21 · 构建标识由当前提交自动生成
 ```
 
 - 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
 - `0.7.x` 是同一功能线的小功能点/修复；`0.x.0` 是新的大功能组，可能包含破坏性调整；`x.0.0` 才是正式主版本。
-- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.20` 形式。
+- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.21` 形式。
 - `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
 - 生产镜像使用不可变 digest，不使用 `latest`。
 - 版本规则由 `npm run version:check` 与 `npm run version:main-guard` 执行；开发规范维护在 `.plans/development-docs/versioning.md`（不提交）。

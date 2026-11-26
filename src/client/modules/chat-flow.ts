@@ -6,7 +6,7 @@
  * 这里只处理纯数据结构，不依赖 DOM，供 main 与单测共用。
  */
 
-import type { AssistantBlock, AssistantPart, ChatBlock } from "./types.js";
+import type { AssistantBlock, AssistantPart, ChatBlock, ToolPart } from "./types.js";
 
 const LEGACY_CONTINUATION_PREFIXES = [/^（人工审批：/, /^（需求澄清：/];
 
@@ -68,4 +68,37 @@ export function mergeAdjacentAssistantBlocks(blocks: ChatBlock[] | null | undefi
     merged.push(block);
   }
   return merged;
+}
+
+/** 旧缓存迁移：审批 part 必须排在对应工具卡之前，避免“先完成、后审批”的视觉顺序。 */
+export function normalizeApprovalOrder(block: AssistantBlock): boolean {
+  if (!Array.isArray(block.parts)) return false;
+  const approvals = block.parts.filter((part): part is Extract<AssistantPart, { p: "approval" }> => part.p === "approval");
+  const tools = block.parts.filter((part): part is ToolPart => part.p === "tool");
+  const usedTools = new Set<ToolPart>();
+  let changed = false;
+  for (const approval of approvals) {
+    if (approval.status === "pending" && approval.collapsed === true) {
+      approval.collapsed = false;
+      changed = true;
+    }
+    const matching = tools.filter((candidate) => !usedTools.has(candidate) && candidate.name === approval.req.toolName);
+    const approvalIndex = block.parts.indexOf(approval);
+    const byDistance = [...matching].sort((left, right) =>
+      Math.abs(block.parts.indexOf(left) - approvalIndex) - Math.abs(block.parts.indexOf(right) - approvalIndex));
+    // 同一工具名可能重复出现（例如连续 terminal）。审批优先绑定等待审批的卡片，
+    // 其次绑定尚未产生结果的卡片，最后才用最近的已完成卡兼容旧缓存。
+    const tool = matching.find((candidate) => candidate.awaitingApproval)
+      ?? matching.find((candidate) => !candidate.result)
+      ?? byDistance[0];
+    if (!tool) continue;
+    usedTools.add(tool);
+    const toolIndex = block.parts.indexOf(tool);
+    if (toolIndex !== approvalIndex + 1) {
+      block.parts.splice(approvalIndex, 1);
+      block.parts.splice(block.parts.indexOf(tool), 0, approval);
+      changed = true;
+    }
+  }
+  return changed;
 }

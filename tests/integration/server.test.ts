@@ -852,20 +852,21 @@ test("插件启停 API：Computer Use 平台限制、持久化与坏请求 400",
   assert.equal(before.status, 200);
   assert.equal(before.body.enabled.computer, false);
   assert.equal(before.body.platform, process.platform);
+  assert.equal(before.body.container, process.env.BROWSER_USE_CONTAINER === "1");
 
   const turnedOn = await json("/api/plugins/computer", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled: true }),
   });
-  if (process.platform === "win32") {
+  if (process.platform === "win32" && process.env.BROWSER_USE_CONTAINER !== "1") {
     assert.equal(turnedOn.status, 200);
     assert.equal(turnedOn.body.enabled.computer, true);
     const reread = await json("/api/plugins");
     assert.equal(reread.body.enabled.computer, true, "启停状态应由服务端持久化");
   } else {
     assert.equal(turnedOn.status, 400);
-    assert.match(turnedOn.body.error, /Windows/);
+    assert.match(turnedOn.body.error, process.env.BROWSER_USE_CONTAINER === "1" ? /Docker/ : /Windows/);
     const reread = await json("/api/plugins");
     assert.equal(reread.body.enabled.computer, false, "不支持的平台不得启用 Computer Use");
   }

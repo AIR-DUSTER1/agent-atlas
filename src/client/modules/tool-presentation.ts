@@ -178,6 +178,79 @@ function summarize(category: ToolCategoryId, rawName: string, args: ToolArgs | n
   return compact(fallback || (category === "mcp" ? "MCP 工具" : "调用工具"));
 }
 
+export type ToolResultTone = "ok" | "error" | "retry";
+
+export interface ToolResultPresentation {
+  text: string;
+  tone: ToolResultTone;
+  statusLabel: string;
+}
+
+function readableChineseError(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || text.length > 500) return "";
+  if (/[\u3400-\u9fff]/.test(text) && !/(?:ECONN|ENOTFOUND|EAI_AGAIN|stack|trace|undefined|null|\{.*\})/i.test(text)) return text;
+  return "";
+}
+
+/**
+ * 面向普通用户的结果文案：错误 JSON 只用于协议传输，不能把 retry/attempts
+ * 这类机器字段原样摊在卡片里。原始内容仍保留在 ToolPart，供日志与回放诊断。
+ */
+export function presentToolResult(part: Pick<ToolPart, "name" | "result">): ToolResultPresentation {
+  const result = part.result;
+  if (!result) return { text: "", tone: "ok", statusLabel: "" };
+  const raw = String(result.content || "").trim();
+  if (!result.isError) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const retry = parsed.retry && typeof parsed.retry === "object"
+        ? parsed.retry as Record<string, unknown>
+        : null;
+      if (retry?.recovered === true) {
+        return {
+          text: "服务短暂繁忙，系统已自动等待并恢复查询。",
+          tone: "ok",
+          statusLabel: "✓ 已恢复",
+        };
+      }
+    } catch { /* 普通成功结果不是 JSON 时按原内容展示 */ }
+    return { text: raw, tone: "ok", statusLabel: "✓ 完成" };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const retry = parsed.retry && typeof parsed.retry === "object"
+      ? parsed.retry as Record<string, unknown>
+      : null;
+    if (retry) {
+      const retryable = retry.retryable === true || typeof retry.retryAfterMs === "number";
+      const userMessage = typeof retry.userMessage === "string" ? retry.userMessage.trim() : "";
+      const waitSeconds = typeof retry.retryAfterMs === "number" && retry.retryAfterMs > 0
+        ? Math.max(1, Math.ceil(retry.retryAfterMs / 1000))
+        : 0;
+      const fallback = retryable
+        ? `查询服务暂时繁忙。${waitSeconds ? `请等待约 ${waitSeconds} 秒后再试。` : "请稍后再试。"}已有结果不会丢失。`
+        : "这次查询没有完成，需要调整条件或完成登录后再试。";
+      return {
+        text: userMessage || fallback,
+        tone: retryable ? "retry" : "error",
+        statusLabel: retryable ? (waitSeconds ? "⚠ 稍后重试" : "⚠ 暂时不可用") : "✕ 失败",
+      };
+    }
+    const readable = readableChineseError(parsed.error || parsed.message);
+    if (readable) return { text: readable, tone: "error", statusLabel: "✕ 失败" };
+  } catch { /* 非 JSON 错误继续走纯文本降级 */ }
+
+  const readable = readableChineseError(raw);
+  return {
+    text: readable || "这次操作没有完成，请稍后重试，或换一个条件继续。",
+    tone: "error",
+    statusLabel: "✕ 失败",
+  };
+}
+
 export function describeTool(part: ToolPartLike): ToolPresentation {
   const rawName = (part.name || "tool").trim();
   const category = categoryForName(rawName);

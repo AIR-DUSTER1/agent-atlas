@@ -30,6 +30,7 @@ function blockedReason(): string | null {
   const sid = state.currentId;
   if (!sid) return null;
   if (state.compacting[sid]) return "上下文压缩还没结束，请等它完成后再处理这条审批。";
+  if (state.approvalResuming[sid]) return "审批决定已经提交，正在恢复执行，请稍等。";
   if (state.streams[sid]) {
     return "本会话还有一轮正在生成。请等它结束，或先点输入框右侧的停止按钮，再回来处理这条审批。";
   }

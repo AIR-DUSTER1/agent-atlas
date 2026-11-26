@@ -244,13 +244,19 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
     }
 
     if (typeof data.pendingApproval === "boolean") {
-      const resolved = markInterruptsResolved(s.id);
-      const reopened = data.pendingApproval ? markLatestInterruptPending(s.id) : false;
-      s.pendingApproval = data.pendingApproval;
-      renderSessions();
-      // 本地缓存已有 transcript 时上面不会重放 DOM；卡片状态变化必须显式重绘，
-      // 否则服务端已处理但界面仍显示可提交，或服务端仍 pending 却显示已答复。
-      if (hadLocal && (resolved || reopened) && !state.streams[s.id]) renderAll();
+      if (state.approvalResuming[s.id]) {
+        // 用户已提交审批、resume 流还在收尾时，服务端的旧 pending 快照不能把卡片重新打开。
+        s.pendingApproval = false;
+        renderSessions();
+      } else {
+        const resolved = markInterruptsResolved(s.id);
+        const reopened = data.pendingApproval ? markLatestInterruptPending(s.id) : false;
+        s.pendingApproval = data.pendingApproval;
+        renderSessions();
+        // 本地缓存已有 transcript 时上面不会重放 DOM；卡片状态变化必须显式重绘，
+        // 否则服务端已处理但界面仍显示可提交，或服务端仍 pending 却显示已答复。
+        if (hadLocal && (resolved || reopened) && !state.streams[s.id]) renderAll();
+      }
     }
     saveLocal();
     if (state.currentId === s.id) {

@@ -30,13 +30,24 @@ interface LockEntry {
 
 const locks = new Map<string, LockEntry>();
 
+/**
+ * 锁定键统一归一化：findUserByUsername 用 lower(username) 大小写不敏感匹配，
+ * 锁定计数也必须用同一口径，否则 Admin/ADMIN/aDmin 各自独立计数可绕过锁定阈值
+ * （审核报告 P0 已核实）。限制长度防随机用户名把 Map 撑大。
+ */
+export function normalizeAccountUsername(username: string): string {
+  return username.trim().slice(0, 128).toLowerCase();
+}
+
+
 function prune(entry: LockEntry, now: number): void {
   entry.failures = entry.failures.filter((ts) => now - ts < ACCOUNT_LOCK_WINDOW_MS);
   if (entry.lockedUntil && entry.lockedUntil <= now) entry.lockedUntil = 0;
 }
 
 /** 检查用户名是否处于锁定期；不产生任何写入。 */
-export function checkAccountLock(username: string, now = Date.now()): AccountLockDecision {
+export function checkAccountLock(rawUsername: string, now = Date.now()): AccountLockDecision {
+  const username = normalizeAccountUsername(rawUsername);
   const entry = locks.get(username);
   if (!entry) {
     return { locked: false, retryAfterSeconds: 0, remaining: ACCOUNT_LOCK_THRESHOLD };
@@ -57,7 +68,8 @@ export function checkAccountLock(username: string, now = Date.now()): AccountLoc
 }
 
 /** 记录一次登录失败；达到阈值时锁定并写审计（绝不记录密码）。 */
-export function recordAccountFailure(username: string, ipTag: string, now = Date.now()): AccountLockDecision {
+export function recordAccountFailure(rawUsername: string, ipTag: string, now = Date.now()): AccountLockDecision {
+  const username = normalizeAccountUsername(rawUsername);
   let entry = locks.get(username);
   if (!entry) {
     entry = { failures: [], lockedUntil: 0 };
@@ -85,8 +97,8 @@ export function recordAccountFailure(username: string, ipTag: string, now = Date
 }
 
 /** 登录成功后清零该用户的失败计数。 */
-export function clearAccountFailures(username: string): void {
-  locks.delete(username);
+export function clearAccountFailures(rawUsername: string): void {
+  locks.delete(normalizeAccountUsername(rawUsername));
 }
 
 /** 测试钩子：清空全部锁定状态。 */

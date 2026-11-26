@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readBody } from "../http-body.js";
 import { isAuthEnabled } from "../auth.js";
 import {
-  clearSessionCookieOnResponse, issueSession, revokeSession, sessionFromRequest,
+  clearSessionCookieOnResponse, issueRenewedSession, issueSession, revokeSession, sessionFromRequest,
   sessionTtlHours, setSessionCookie, verifySessionToken, verifySessionRequest,
 } from "../security/session.js";
 import {
@@ -40,6 +40,27 @@ function writeJson(res: ServerResponse, status: number, body: unknown, headers: 
   res.end(JSON.stringify(body));
 }
 
+/**
+ * 匿名 401 载荷：两种后端入口不同，前端据 needsLogin / needsPairing 决定弹哪个门页。
+ *  - postgres：用户体系强制登录，必须弹「用户名 + 密码」门页（needsLogin）；
+ *    令牌配对降级为运维/救援通道，不再作为默认入口 —— 否则新部署会卡在
+ *    「设备配对」框里，而库里可能压根没有可用的用户名密码。
+ *  - file：单用户，首次靠 AUTH_TOKEN 配对（needsPairing）。
+ * 两种后端的话术不一样，各自传入，避免「请使用用户名密码登录」和
+ * 「请输入访问令牌」混在同一句里误导用户。导出以便测试直接断言形状。
+ */
+export function unauthenticatedAuthBody(error: { pairing: string; login?: string }): Record<string, unknown> {
+  if (isPostgresBackend()) {
+    return {
+      authenticated: false,
+      authRequired: true,
+      needsLogin: true,
+      error: error.login ?? "尚未登录，请使用用户名和密码登录",
+    };
+  }
+  return { authenticated: false, authRequired: true, needsPairing: true, error: error.pairing };
+}
+
 function ipTag(ip: string): string {
   return createHash("sha256").update(ip).digest("hex").slice(0, 16);
 }
@@ -62,7 +83,8 @@ function recordFailure(req: IncomingMessage): RateLimitDecision {
 }
 
 function issueAutoSession(req: IncomingMessage, res: ServerResponse, identity: RequestIdentity): void {
-  const { token, payload } = issueSession(Date.now(), undefined, identity);
+  const previous = verifySessionRequest(req);
+  const { token, payload } = issueRenewedSession(previous, Date.now(), previous?.sid, identity);
   setSessionCookie(res, token);
   renewDeviceCookie(res, identity);
   writeAudit("auth_session_issued", { ip: ipTag(clientIp(req)), mode: identity.deviceId === "local" ? "loopback" : "device" });
@@ -133,7 +155,7 @@ export async function handleAuthStatus(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  writeJson(res, 401, { authenticated: false, authRequired: true, needsPairing: true, error: "此设备尚未配对" });
+  writeJson(res, 401, unauthenticatedAuthBody({ pairing: "此设备尚未配对" }));
 }
 
 export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -166,12 +188,7 @@ export async function handleAuthLogin(req: IncomingMessage, res: ServerResponse)
     return;
   }
   if (!token) {
-    writeJson(res, 401, {
-      authenticated: false,
-      authRequired: true,
-      needsPairing: true,
-      error: "此设备尚未配对，请输入用户访问令牌",
-    });
+    writeJson(res, 401, unauthenticatedAuthBody({ pairing: "此设备尚未配对，请输入用户访问令牌" }));
     return;
   }
 
@@ -243,7 +260,7 @@ export async function handleAuthRenew(req: IncomingMessage, res: ServerResponse)
       deviceId: identity?.deviceId ?? owner.userId,
       role: owner.role,
     };
-    const next = issueSession(Date.now(), payload?.sid, nextIdentity);
+    const next = issueRenewedSession(payload, Date.now(), payload?.sid, nextIdentity);
     setSessionCookie(res, next.token);
     if (identity) renewDeviceCookie(res, nextIdentity);
     writeAudit("auth_session_renewed", { ip: ipTag(clientIp(req)), mode: identity ? "device" : "session", userId: owner.userId });

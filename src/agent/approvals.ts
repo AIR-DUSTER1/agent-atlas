@@ -20,6 +20,8 @@ export const generalApprovals: ApprovalDescriptions = {
   computer_type: (a) => `向当前窗口输入 ${String(a.text ?? "").length} 字符文本：${String(a.text ?? "").slice(0, 40)}`,
   computer_key: (a) => `发送组合按键 ${String(a.combo)}`,
   computer_scroll: (a) => `在鼠标位置${a.direction === "up" ? "向上" : "向下"}滚动 ${String(a.lines ?? 3)} 行`,
+  browser_fetch: (a) => `抓取网页 ${String(a.url ?? "未指定")}${String(a.allowLocalhost) === "true" ? "（用户要求允许访问本机/内网）" : ""}（只读，但访问内网/本机需要用户确认）`,
+  browser_open: (a) => `打开浏览器访问 ${String(a.url ?? "未指定")}${String(a.allowLocalhost) === "true" ? "（用户要求允许访问本机/内网）" : ""}`,
   browser_act: (a) => {
     const action = String(a.action ?? "操作");
     if (action === "press") return `在 Browser Use 页面发送按键 ${String(a.key ?? "未指定")}`;

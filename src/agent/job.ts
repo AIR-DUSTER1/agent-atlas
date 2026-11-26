@@ -18,6 +18,7 @@ import type { AgentProfile } from "./profile.js";
 import { createWorkflowGraph } from "./workflow.js";
 import { isPluginEnabled } from "../plugin-state.js";
 import type { ModelRuntimeConfig } from "../model-runtime.js";
+import { activePlatformApprovals, activePlatformTools, platformCapabilityPrompt } from "./platform-capabilities.js";
 
 const tools = [
   // 内置四平台采集 / 查询 / 补详情 / 概览 / 招呼语闭环；采集、补详情与写回走人工审批
@@ -96,14 +97,30 @@ export const jobProfile: AgentProfile = {
   },
 };
 
-/** 运行时 profile：插件关闭时保留诚实的空能力边界，不把 job_* 工具带进图。 */
+/**
+ * 运行时 profile：求职数据源按 job 插件收敛；Browser Use / Computer Use
+ * 作为显式平台能力可被求职 Agent 使用，但不会引入找房或通用开发工具。
+ */
 export function jobProfileWithPlugins(): AgentProfile {
-  if (isPluginEnabled("job")) return jobProfile;
+  const jobEnabled = isPluginEnabled("job");
+  const platformPrompt = platformCapabilityPrompt();
   return {
     ...jobProfile,
-    systemPrompt: `${SYSTEM_PROMPT}\n- 当前求职数据源插件已停用；不要调用 job_* 工具，请提示用户到「设置 → 插件」启用。`,
-    tools: [calculator, getCurrentTime],
-    approvalDescriptions: {},
+    systemPrompt: [
+      SYSTEM_PROMPT,
+      jobEnabled ? "" : "- 当前求职数据源插件已停用；不要调用 job_* 工具，请提示用户到「设置 → 插件」启用。",
+      platformPrompt,
+    ].filter(Boolean).join("\n"),
+    tools: [
+      ...(jobEnabled ? jobTools : []),
+      calculator,
+      getCurrentTime,
+      ...activePlatformTools(),
+    ],
+    approvalDescriptions: {
+      ...(jobEnabled ? jobApprovals : {}),
+      ...activePlatformApprovals(),
+    },
   };
 }
 

@@ -14,7 +14,7 @@ import {
   ensureMarkdownRenderer, fmtArgs, nodeIcon, nodeLabel, renderMarkdown,
 } from "../modules/format.js";
 import {
-  TOOL_CATEGORIES, TOOL_CATEGORY_ORDER, describeTool, type ToolCategoryId,
+  TOOL_CATEGORIES, TOOL_CATEGORY_ORDER, describeTool, presentToolResult, type ToolCategoryId,
 } from "../modules/tool-presentation.js";
 import {
   blockBodies, partEls, saveLocal, state, textTimers, thinkingTimers,
@@ -37,6 +37,7 @@ import type {
 export const TOOL_GROUP_MIN = 3;
 
 const THROTTLE_MS = 55;
+const STREAMING_CURSOR_TARGETS = new Set(["P", "H1", "H2", "H3", "H4", "LI", "BLOCKQUOTE", "TD", "TH", "PRE"]);
 
 /* ---------------------------------------------------------------------------
  * 思考过程
@@ -331,16 +332,18 @@ export function updateToolCard(part: ToolPart): void {
     status.textContent = "⏸ 待审批";
   }
   if (part.result && status) {
-    // awaiting 也要清：批准后工具真正开始执行，琥珀色「待审批」边框不能留着
-    card.classList.remove("running", "awaiting");
-    card.classList.add(part.result.isError ? "err" : "ok");
-    status.className = "tool-status " + (part.result.isError ? "err" : "ok");
+    // awaiting 也要清：批准后工具真正开始执行，琥珀色「待审批」边框不能留着。
+    card.classList.remove("running", "awaiting", "needs-action", "err", "ok");
+    const presentationResult = presentToolResult(part);
+    const retryTone = part.result.isError && presentationResult.tone === "retry";
+    card.classList.add(retryTone ? "needs-action" : part.result.isError ? "err" : "ok");
+    status.className = "tool-status " + (retryTone ? "warn" : part.result.isError ? "err" : "ok");
     const unsupported = part.result.isError && /当前 Agent 不支持工具/.test(String(part.result.content));
-    status.textContent = unsupported ? "✕ 不支持" : part.result.isError ? "✕ 失败" : "✓ 完成";
+    status.textContent = unsupported ? "✕ 不支持" : presentationResult.statusLabel;
     const resultPre = card.querySelector(".result-pre");
     if (resultPre) {
-      resultPre.textContent = part.result.content;
-      resultPre.className = "result-pre" + (part.result.isError ? " err" : "");
+      resultPre.textContent = presentationResult.text;
+      resultPre.className = "result-pre" + (retryTone ? " warn" : part.result.isError ? " err" : "");
     }
     // 知识库 / 房产等业务增强由 main.ts 注册，render/* 不反向依赖 views/*
     renderToolEnhancers(part, card);
@@ -358,10 +361,21 @@ export function updateToolCard(part: ToolPart): void {
  * ------------------------------------------------------------------------- */
 const enhancedTextParts = new WeakSet<TextPart>();
 
+/** 光标要贴住最后一段正文，不能落到 Markdown 块级元素后面的空白行。 */
+function appendStreamingCursor(el: HTMLElement): void {
+  const cursor = h("span", { class: "cursor", "aria-hidden": "true" });
+  const last = el.lastElementChild;
+  if (last && STREAMING_CURSOR_TARGETS.has(last.tagName)) last.appendChild(cursor);
+  else el.appendChild(cursor);
+}
+
 function paintText(part: TextPart, el: HTMLElement): void {
   el.innerHTML = renderMarkdown(part.text);
-  if (part.streaming) el.appendChild(h("span", { class: "cursor", "aria-hidden": "true" }));
-  else void enhanceCodeBlocks(el);
+  if (part.streaming) {
+    if (part.text.trim()) appendStreamingCursor(el);
+    return;
+  }
+  void enhanceCodeBlocks(el);
 }
 
 export function renderTextPart(part: TextPart): void {
@@ -474,6 +488,9 @@ export function mountPart(block: AssistantBlock, part: AssistantPart): void {
   const body = blockBodies.get(block);
   if (!body) return;
   unmountTyping(block);
+  // 工具 / 节点 / 审批是正文的硬边界；即使迟到事件绕过了 sealStreamingParts，
+  // 也不能让上一段文本的光标落到工具卡前面。
+  if (part.p !== "text") body.querySelectorAll(".cursor").forEach((cursor) => cursor.remove());
 
   if (part.p === "text") {
     const el = document.createElement("div");

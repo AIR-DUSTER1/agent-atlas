@@ -22,6 +22,8 @@ import {
   MemorySaver,
   interrupt,
   Command,
+  getWriter,
+  type LangGraphRunnableConfig,
 } from "@langchain/langgraph";
 import { toolsCondition } from "@langchain/langgraph/prebuilt";
 import type { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
@@ -33,6 +35,7 @@ import { demoApprovals } from "./approvals.js";
 import { createToolMap, type AgentToolRetryPolicy, type ApprovalDescriptions, type AgentProfileId } from "./profile.js";
 import { resolveToolPermission, readonlyDenyText, type PermissionMode } from "./permission.js";
 import { createToolRiskAssessor, type ToolRiskAssessment, type ToolRiskAssessor } from "./tool-risk.js";
+import { WORKFLOW_PLAN_TOOL_NAME } from "../workflow-plan.js";
 
 // ---------------------------------------------------------------------------
 // 工具集：多了一个「高风险」的 send_email
@@ -166,8 +169,12 @@ function turnToolHistory(messages: BaseMessage[]): TurnToolHistory {
       if (message.status !== "error") {
         completedBySignature.set(signature, { content: message.content, status: message.status ?? "success" });
       } else {
-        if (retryExhaustedFromText(toolResultText(message.content))) retryExhaustedBySignature.add(signature);
-        failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
+        const text = toolResultText(message.content);
+        if (retryExhaustedFromText(text)) retryExhaustedBySignature.add(signature);
+        // 冷却期拒绝没有触达外部服务，不能计入“同参数确定性失败”熔断。
+        if (!retryCooldownActiveFromText(text)) {
+          failedBySignature.set(signature, (failedBySignature.get(signature) ?? 0) + 1);
+        }
       }
     }
   }
@@ -204,6 +211,10 @@ const MAX_IDENTICAL_TOOL_FAILURES = 2;
 const MAX_TOOL_ATTEMPTS = 3;
 /** 瞬时故障退避：最多两次重试，总计不超过三次尝试。 */
 const TOOL_RETRY_DELAYS_MS = [300, 900] as const;
+/** 外部冷却通常由服务端计时；多等 250ms 避免临界点再次撞上同一窗口。 */
+const COOLDOWN_WAIT_GRACE_MS = 250;
+/** 单次工具调用只主动等待一轮冷却，若仍限流就返回可操作说明，避免无限休眠。 */
+const MAX_AUTOMATIC_COOLDOWN_WAITS = 1;
 
 /** JSON 工具约定：顶层 ok:false 或非空 error 是业务失败，不能伪装成成功。 */
 function toolBusinessError(text: string): string | null {
@@ -221,9 +232,14 @@ function toolBusinessError(text: string): string | null {
   return null;
 }
 
+export type ToolFailureKind = "rate_limited" | "timeout" | "network" | "unavailable" | "auth" | "invalid_args" | "not_found" | "business";
+
 interface ToolFailureAnalysis {
   retryable: boolean;
+  kind: ToolFailureKind;
   analysis: string;
+  /** 外部账号级冷却时间；大于 0 时不能立刻原样重试。 */
+  retryAfterMs?: number;
 }
 
 interface ToolRetryMetadata {
@@ -232,8 +248,39 @@ interface ToolRetryMetadata {
   retryable: boolean;
   exhausted: boolean;
   recovered?: boolean;
+  kind?: ToolFailureKind;
+  retryAfterMs?: number;
+  cooldownActive?: boolean;
   analysis: string;
+  userMessage?: string;
   nextAction?: string;
+}
+
+interface StructuredToolFailureHints {
+  kind?: ToolFailureKind;
+  retryAfterMs?: number;
+}
+
+/** 读取工具结果里的结构化失败提示；兼容新旧字段并忽略非法值。 */
+function structuredFailureHints(text: string): StructuredToolFailureHints {
+  try {
+    const parsed = JSON.parse(text.trim()) as Record<string, unknown>;
+    const retry = parsed.retry && typeof parsed.retry === "object"
+      ? parsed.retry as Record<string, unknown>
+      : null;
+    const source = retry && typeof retry === "object" ? retry : parsed;
+    const rawKind = source.kind ?? parsed.failureKind;
+    const kind = typeof rawKind === "string" && [
+      "rate_limited", "timeout", "network", "unavailable", "auth", "invalid_args", "not_found", "business",
+    ].includes(rawKind) ? rawKind as ToolFailureKind : undefined;
+    const rawWait = source.retryAfterMs ?? parsed.retryAfterMs;
+    const retryAfterMs = typeof rawWait === "number" && Number.isFinite(rawWait) && rawWait > 0
+      ? Math.min(30 * 60_000, Math.round(rawWait))
+      : undefined;
+    return { ...(kind ? { kind } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
+  } catch {
+    return {};
+  }
 }
 
 /** 瞬时故障识别：只描述错误性质，是否重试还取决于 profile 显式登记的工具白名单。 */
@@ -243,19 +290,53 @@ function isTransientToolFailure(text: string): boolean {
 
 /** 把失败拆成「可重试的瞬时故障」和需要修正调用/权限的确定性错误。 */
 function analyzeToolFailure(text: string): ToolFailureAnalysis {
+  const hints = structuredFailureHints(text);
   if (/(?:401|403|unauthorized|forbidden|authorization|auth required|invalid.*(?:key|token)|expired.*(?:key|token)|登录|鉴权|权限不足|key.*(?:无效|过期))/i.test(text)) {
-    return { retryable: false, analysis: "认证、权限或 Key 失效，重试相同调用不会恢复" };
+    return { retryable: false, kind: "auth", analysis: "认证、权限或 Key 失效，重试相同调用不会恢复" };
+  }
+  if (hints.retryAfterMs || hints.kind === "rate_limited") {
+    return {
+      retryable: true,
+      kind: "rate_limited",
+      analysis: "外部服务已触发临时限流，当前处于共享冷却期",
+      retryAfterMs: hints.retryAfterMs ?? 60_000,
+    };
   }
   if (isTransientToolFailure(text)) {
-    return { retryable: true, analysis: "外部服务临时不可用、限流、超时或网络波动" };
+    const rateLimited = /429|rate limit|限流|too many requests/i.test(text);
+    return {
+      retryable: true,
+      kind: rateLimited ? "rate_limited" : "network",
+      analysis: rateLimited ? "外部服务临时不可用或触发限流" : "外部服务超时、断网或临时波动",
+      ...(rateLimited ? { retryAfterMs: 60_000 } : {}),
+    };
   }
   if (/(?:参数|required|missing|不能为空|缺少|未提供|bad request|invalid argument|HTTP\s*400)/i.test(text)) {
-    return { retryable: false, analysis: "调用参数缺失或格式不合法，需要先修正参数" };
+    return { retryable: false, kind: "invalid_args", analysis: "调用参数缺失或格式不合法，需要先修正参数" };
   }
   if (/(?:not found|no result|no data|未找到|没有找到|无结果|暂无数据)/i.test(text)) {
-    return { retryable: false, analysis: "数据源没有匹配结果，原样重试通常无效" };
+    return { retryable: false, kind: "not_found", analysis: "数据源没有匹配结果，原样重试通常无效" };
   }
-  return { retryable: false, analysis: "业务返回确定性错误，需要调整参数或改用其它工具" };
+  return { retryable: false, kind: "business", analysis: "业务返回确定性错误，需要调整参数或改用其它工具" };
+}
+
+function friendlyFailureText(failure: ToolFailureAnalysis, attempts: number, maxAttempts: number, exhausted: boolean): string {
+  const waitSeconds = failure.retryAfterMs ? Math.max(1, Math.ceil(failure.retryAfterMs / 1000)) : 0;
+  if (failure.kind === "rate_limited") {
+    const tried = attempts > 1 ? `系统已自动尝试 ${attempts} 次，仍未成功；` : "系统已暂停继续查询；";
+    return `查询服务暂时繁忙，可能是短时间内请求较多或服务临时波动。${tried}` +
+      `${waitSeconds ? `请等待约 ${waitSeconds} 秒后再试。` : "请稍后再试。"}已有结果不会丢失。`;
+  }
+  if (failure.kind === "timeout" || failure.kind === "network" || failure.kind === "unavailable") {
+    return `查询服务刚刚出现临时波动，${exhausted ? `自动尝试 ${maxAttempts} 次仍未成功。` : "可以稍后重试。"}` +
+      "已有结果不会丢失。";
+  }
+  if (failure.kind === "auth") return "登录状态或访问权限需要更新，完成登录后再试即可。";
+  if (failure.kind === "invalid_args") return "这次查询条件不完整，需要调整条件后再试。";
+  if (failure.kind === "not_found") return "没有找到符合当前条件的房源或数据，可以换个区域或放宽条件。";
+  return exhausted
+    ? "这次查询多次尝试后仍未完成，请换一个条件或稍后再试。"
+    : "这次查询没有完成，需要调整条件后再试。";
 }
 
 function withRetryMetadata(content: ToolMessage["content"], metadata: ToolRetryMetadata): ToolMessage["content"] {
@@ -278,6 +359,16 @@ function retryExhaustedFromText(text: string): boolean {
   try {
     const parsed = JSON.parse(text.trim()) as { retry?: { exhausted?: unknown } };
     return parsed.retry?.exhausted === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 共享冷却是可恢复状态，不能像确定性失败一样永久熔断同一参数。 */
+function retryCooldownActiveFromText(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text.trim()) as { retry?: { cooldownActive?: unknown } };
+    return parsed.retry?.cooldownActive === true;
   } catch {
     return false;
   }
@@ -309,6 +400,7 @@ async function invokeTool(
   const maxAttempts = retryAllowed
     ? Math.max(1, Math.min(MAX_TOOL_ATTEMPTS, Math.floor(retryPolicy?.maxAttempts ?? 1)))
     : 1;
+  let cooldownWaits = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let content: ToolMessage["content"];
@@ -354,6 +446,45 @@ async function invokeTool(
 
     const failureText = toolResultText(content);
     const failure = analyzeToolFailure(failureText);
+    if (failure.retryAfterMs && failure.retryAfterMs > 0) {
+      const advertisedWaitMs = Math.max(1, Math.ceil(failure.retryAfterMs));
+      const waitSeconds = Math.max(1, Math.ceil(advertisedWaitMs / 1000));
+      if (retryAllowed && attempt < maxAttempts && cooldownWaits < MAX_AUTOMATIC_COOLDOWN_WAITS) {
+        cooldownWaits += 1;
+        // 这是模型工具调用内部的主动休眠，不把等待责任推给用户；用户中止时立即退出。
+        const keepGoing = await waitForRetry(advertisedWaitMs + COOLDOWN_WAIT_GRACE_MS, config?.signal);
+        if (keepGoing) continue;
+        content = withRetryMetadata(content, {
+          attempts: attempt,
+          maxAttempts,
+          retryable: false,
+          exhausted: true,
+          kind: failure.kind,
+          analysis: "等待服务冷却时任务已取消",
+          userMessage: "已停止等待本次查询，可以稍后重新发起。",
+          nextAction: "不要继续重试；等待用户重新发起或说明任务已中止。",
+        });
+        return { content, status: "error", attempts: attempt };
+      }
+      const waitedOnce = cooldownWaits > 0;
+      content = withRetryMetadata(content, {
+        attempts: attempt,
+        maxAttempts,
+        retryable: true,
+        exhausted: false,
+        kind: failure.kind,
+        retryAfterMs: advertisedWaitMs,
+        cooldownActive: true,
+        analysis: waitedOnce ? "主动等待冷却后重试仍未恢复" : failure.analysis,
+        userMessage: waitedOnce
+          ? `系统已主动等待约 ${waitSeconds} 秒并重新查询，但服务仍然繁忙。请稍后再发起新的查询，已有结果不会丢失。`
+          : friendlyFailureText(failure, attempt, maxAttempts, false),
+        nextAction: waitedOnce
+          ? "本轮已经主动等待并重试一次；停止继续查询，向用户说明等待后仍不可用。"
+          : `等待约 ${waitSeconds} 秒后再发起新的同源查询；本轮不要继续调用其它候选或相同工具。`,
+      });
+      return { content, status: "error", attempts: attempt };
+    }
     if (retryAllowed && failure.retryable && attempt < maxAttempts) {
       const delay = TOOL_RETRY_DELAYS_MS[Math.min(attempt - 1, TOOL_RETRY_DELAYS_MS.length - 1)];
       const keepGoing = await waitForRetry(delay, config?.signal);
@@ -363,7 +494,9 @@ async function invokeTool(
         maxAttempts,
         retryable: false,
         exhausted: true,
+        kind: failure.kind,
         analysis: "调用已取消，停止自动重试",
+        userMessage: "这次查询已取消，可以稍后重新发起。",
         nextAction: "不要继续重试；等待用户重新发起或说明任务已中止。",
       });
       return { content, status: "error", attempts: attempt };
@@ -375,7 +508,9 @@ async function invokeTool(
       maxAttempts,
       retryable: failure.retryable,
       exhausted,
+      kind: failure.kind,
       analysis: failure.analysis,
+      userMessage: friendlyFailureText(failure, attempt, maxAttempts, exhausted),
       nextAction: exhausted
         ? "自动重试额度已用尽，请分析影响后改用其它工具/参数，或向用户说明暂不可用，不得再次原样调用。"
         : failure.retryable
@@ -397,6 +532,7 @@ async function invokeTool(
 interface NodeConfig {
   signal?: AbortSignal;
   configurable?: { permission_mode?: PermissionMode; thread_id?: string };
+  writer?: (chunk: unknown) => void;
 }
 
 export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
@@ -404,6 +540,26 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
   // interrupt 恢复会重放节点；同一 thread + tool call 的风险判断必须缓存，避免重复计费。
   const riskCache = new Map<string, Promise<ToolRiskAssessment>>();
   const MAX_RISK_CACHE_ENTRIES = 200;
+
+  /** 并行批次每完成一项就推 custom 事件，UI 不必等 Promise.all 后同时变绿。 */
+  const emitToolResultProgress = (
+    config: NodeConfig | undefined,
+    call: { id?: string; name: string },
+    result: { content: ToolMessage["content"]; status: "success" | "error" },
+  ): void => {
+    if (call.name === WORKFLOW_PLAN_TOOL_NAME || typeof result.content !== "string") return;
+    try {
+      const write = getWriter(config as LangGraphRunnableConfig | undefined);
+      write?.({
+        type: "tool_result",
+        id: call.id ?? "",
+        content: result.content,
+        isError: result.status === "error",
+      });
+    } catch {
+      // 非 Web / 未启用 custom 模式没有 writer，不影响正常节点返回。
+    }
+  };
   for (const name of Object.keys(options.approvalDescriptions)) {
     if (!toolMap.has(name)) throw new Error(`Agent 审批项未绑定工具：${name}`);
   }
@@ -477,6 +633,33 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
       }
 
       const action = resolveToolPermission(permissionMode, call.name, options.approvalDescriptions);
+      // allowLocalhost=true 是模型可控的内网放行开关：即使 browser_fetch/browser_open 表面上只读，
+      // 一旦放行本机/内网就等同于高风险越权面，必须要求人工审批（审核报告 P1-7）。
+      const localhostGrant = ((call.name === "browser_fetch" || call.name === "browser_open")
+        && (call.args as { allowLocalhost?: unknown })?.allowLocalhost === true);
+      if (localhostGrant) {
+        const desc = options.approvalDescriptions[call.name]?.(call.args as Record<string, unknown>)
+          || `允许 ${call.name} 访问本机/内网地址`;
+        const decision = interrupt<ApprovalRequest, "approve" | "reject">({
+          type: "approval",
+          toolName: call.name,
+          description: desc,
+          args: call.args as Record<string, unknown>,
+        });
+        const localResult = decision === "approve"
+          ? await invokeTool(toolFn, call.args, config, options.toolRetryPolicy)
+          : { content: `用户拒绝了本次 ${call.name} 的内网访问，不要执行。`, status: "error" as const };
+        emitToolResultProgress(config, call, localResult);
+        toolResults.push(new ToolMessageCls({
+          content: localResult.content,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: localResult.status,
+        }));
+        if (localResult.status === "success") history.completedBySignature.set(signature, { content: localResult.content, status: localResult.status });
+        continue;
+      }
+
       // 可并行的三类：只读拒绝（立即有结论）、auto/未登记审批的直接执行、自主低风险。
       // interrupt 类必须留在外面串行处理。
       if (action === "deny" || action === "run") {
@@ -546,6 +729,7 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         content = result.content;
         status = result.status;
       }
+      emitToolResultProgress(config, call, { content, status });
       toolResults.push(new ToolMessageCls({
         content,
         tool_call_id: call.id ?? "",
@@ -569,9 +753,12 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
         parallelBatch.map(async (item) => {
           if (item.action === "deny") {
             // 只读会话：改世界操作直接拒绝，让模型转述而不是反复重试
-            return { item, content: readonlyDenyText(item.call.name), status: "error" as const };
+            const content = readonlyDenyText(item.call.name);
+            emitToolResultProgress(config, item.call, { content, status: "error" });
+            return { item, content, status: "error" as const };
           }
           const result = await invokeTool(item.toolFn, item.call.args, config, options.toolRetryPolicy);
+          emitToolResultProgress(config, item.call, result);
           return { item, content: result.content, status: result.status };
         })
       );
