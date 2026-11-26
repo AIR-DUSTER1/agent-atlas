@@ -237,3 +237,18 @@ test("客户端错误上报只发送摘要、版本身份与视图，不发送 s
   assert.match(source, /buildId:\s*BUILD_INFO\.buildId/);
   assert.match(source, /view:\s*currentView\(\)/);
 });
+
+test("认证门页覆盖层样式必须存在并被入口引用（否则门页会贴在页面底部）", async () => {
+  // 真实事故：门页容器 #auth-gate-root 由 JS 动态挂到 <body>，SFC 的 scoped 样式
+  // 只覆盖表单本身；缺覆盖层 CSS 时表单以普通块级元素排在页面最下方，
+  // 看起来像"登录框露在界面下面"。这条断言防止样式文件再次丢失或忘登记。
+  const html = await readClientIndexHtml();
+  assert.match(html, /href="\/styles\/shared\/auth-gate\.css"/, "入口必须引用 auth-gate.css");
+  const css = await readFile(join(CLIENT, "styles", "shared", "auth-gate.css"), "utf8");
+  assert.match(css, /#auth-gate-root\s*\{[^}]*position:\s*fixed/, "门页容器必须是 fixed 覆盖层");
+  assert.match(css, /#auth-gate-root\s*\{[^}]*inset:\s*0/, "覆盖层必须铺满视口");
+  assert.match(css, /body\.auth-gate-open\s*\{[^}]*overflow:\s*hidden/, "门页打开时必须锁背景滚动");
+  // 层级要盖住对话框(320)与 Toast(11000)
+  const zIndex = /#auth-gate-root\s*\{[^}]*z-index:\s*(\d+)/.exec(css)?.[1];
+  assert.ok(Number(zIndex) > 11000, `门页 z-index 必须高于 Toast，实际 ${zIndex}`);
+});

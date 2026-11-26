@@ -48,6 +48,8 @@ function onSubmit(event: Event): void {
 <template>
   <AntdvProvider>
     <Form class="auth-form" layout="vertical" novalidate :disabled="busy" @submit="onSubmit">
+      <h2 class="auth-gate-title">设置新密码</h2>
+      <p class="auth-gate-sub">为安全起见，首次登录或密码被重置后必须先改密。</p>
       <p v-if="notice" class="auth-notice" role="status">{{ notice }}</p>
 
       <div class="auth-field">
