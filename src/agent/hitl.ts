@@ -633,6 +633,33 @@ export function createApprovalToolsNode(options: ApprovalToolsNodeOptions) {
       }
 
       const action = resolveToolPermission(permissionMode, call.name, options.approvalDescriptions);
+      // allowLocalhost=true 是模型可控的内网放行开关：即使 browser_fetch/browser_open 表面上只读，
+      // 一旦放行本机/内网就等同于高风险越权面，必须要求人工审批（审核报告 P1-7）。
+      const localhostGrant = ((call.name === "browser_fetch" || call.name === "browser_open")
+        && (call.args as { allowLocalhost?: unknown })?.allowLocalhost === true);
+      if (localhostGrant) {
+        const desc = options.approvalDescriptions[call.name]?.(call.args as Record<string, unknown>)
+          || `允许 ${call.name} 访问本机/内网地址`;
+        const decision = interrupt<ApprovalRequest, "approve" | "reject">({
+          type: "approval",
+          toolName: call.name,
+          description: desc,
+          args: call.args as Record<string, unknown>,
+        });
+        const localResult = decision === "approve"
+          ? await invokeTool(toolFn, call.args, config, options.toolRetryPolicy)
+          : { content: `用户拒绝了本次 ${call.name} 的内网访问，不要执行。`, status: "error" as const };
+        emitToolResultProgress(config, call, localResult);
+        toolResults.push(new ToolMessageCls({
+          content: localResult.content,
+          tool_call_id: call.id ?? "",
+          name: call.name,
+          status: localResult.status,
+        }));
+        if (localResult.status === "success") history.completedBySignature.set(signature, { content: localResult.content, status: localResult.status });
+        continue;
+      }
+
       // 可并行的三类：只读拒绝（立即有结论）、auto/未登记审批的直接执行、自主低风险。
       // interrupt 类必须留在外面串行处理。
       if (action === "deny" || action === "run") {

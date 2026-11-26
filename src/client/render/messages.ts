@@ -22,7 +22,7 @@ import {
 import { messagesEl, scrollBottom } from "../core/dom.js";
 import { mountPart, mountTyping } from "./parts.js";
 import { markNewMessage, resetNewMessageCount } from "../ui/scroll-to-bottom.js";
-import { isClarifyNodeName } from "../modules/chat-flow.js";
+import { isClarifyNodeName, normalizeApprovalOrder } from "../modules/chat-flow.js";
 import { messageBlockKey, useMessagesStore } from "../stores/messages.js";
 import type { AssistantBlock, ChatBlock } from "../modules/types.js";
 
@@ -60,6 +60,7 @@ function wrapOf(block: ChatBlock): HTMLElement | null {
 
 /** 接管一个助手块：把已有 parts 挂进它的 .assistant-body。 */
 function hydrateAssistant(block: AssistantBlock, wrap: HTMLElement | null): void {
+  normalizeApprovalOrder(block);
   block._el = wrap ?? undefined;
   const body = wrap?.querySelector<HTMLElement>(".assistant-body");
   if (!body) return;

@@ -22,6 +22,9 @@ import {
 } from "./model-status.js";
 import type { AppConfig, GatewayModel, ModelEntry } from "../../../modules/types.js";
 
+/** 批量增删模型时每次请求的独立超时，避免长列表共用起始时间后误伤后续请求。 */
+const MODEL_BATCH_TIMEOUT_MS = 30_000;
+
 interface ProviderFormValues {
   name: string;
   baseURL: string;
@@ -70,7 +73,7 @@ export async function fetchGatewayModelChips(
     });
     if (res.ok) {
       models.setGatewayModels(res.models || []);
-      setGatewayStatus(target, `✓ 连接成功，网关共 ${res.models?.length ?? 0} 个模型${formOpen ? " —— 点一下即可加入初始模型" : " —— 下面点一下即可添加"}`, "ok");
+      setGatewayStatus(target, `✓ 连接成功，网关共 ${res.models?.length ?? 0} 个模型 —— 打开选择器后勾选并应用`, "ok");
       // 拉取成功会把 context_length 写入服务端缓存 → 刷新配置以更新容量条分母
       if (res.contextWindow) await syncConfig();
     } else {
@@ -126,6 +129,64 @@ export async function addModelByName(name: string, meta: GatewayModel | null): P
     return true;
   } catch (err) {
     setSettingsStatus(`✗ ${(err as Error).message}`, "err");
+    return false;
+  }
+}
+
+/** 批量应用模型勾选：新增未保存模型，删除被取消勾选的已有模型。 */
+export async function applyModelSelection(providerId: string, selectedModels: GatewayModel[]): Promise<boolean> {
+  const models = await store();
+  const provider = models.providers.find((item) => item.id === providerId);
+  if (!provider) { setSettingsStatus("✗ 供应商不存在，请刷新后重试", "err"); return false; }
+  const selectedByName = new Map(selectedModels.map((model) => [model.id, model]));
+  if (!selectedByName.size) { setSettingsStatus("✗ 至少保留一个模型", "err"); return false; }
+  const current = provider.models || [];
+  const currentByName = new Map(current.map((model) => [model.name, model]));
+  const additions = [...selectedByName.values()].filter((model) => !currentByName.has(model.id));
+  const removals = current.filter((model) => !selectedByName.has(model.name));
+  if (!additions.length && !removals.length) {
+    setSettingsStatus("模型列表没有变化", "");
+    return true;
+  }
+  const errors: string[] = [];
+  try {
+    for (const model of additions) {
+      try {
+        await api(`/api/config/providers/${providerId}/models`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: model.id,
+            modality: model.supportsVision ? "vision" : undefined,
+            contextWindow: model.contextWindow ?? undefined,
+            makeActive: false,
+          }),
+          signal: AbortSignal.timeout(MODEL_BATCH_TIMEOUT_MS),
+        });
+      } catch (err) {
+        errors.push(`新增 ${model.id}：${(err as Error).message}`);
+      }
+    }
+    for (const model of removals) {
+      try {
+        await api(`/api/config/providers/${providerId}/models/${model.id}`, {
+          method: "DELETE",
+          signal: AbortSignal.timeout(MODEL_BATCH_TIMEOUT_MS),
+        });
+      } catch (err) {
+        errors.push(`移除 ${model.name}：${(err as Error).message}`);
+      }
+    }
+    await syncConfig();
+    models.selectProvider(providerId);
+    if (errors.length) {
+      setSettingsStatus(`✗ 模型列表部分更新失败：${errors.slice(0, 2).join("；")}`, "err");
+      return false;
+    }
+    setSettingsStatus(`✓ 模型列表已更新：新增 ${additions.length} 个，移除 ${removals.length} 个`, "ok");
+    return true;
+  } catch (err) {
+    setSettingsStatus(`✗ 更新模型列表失败：${(err as Error).message}`, "err");
     return false;
   }
 }

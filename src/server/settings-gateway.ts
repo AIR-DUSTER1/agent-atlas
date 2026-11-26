@@ -54,7 +54,16 @@ export async function fetchModelDetails(opts: { baseURL?: string; apiKey?: strin
   let url = opts.baseURL?.trim();
   let key = opts.apiKey;
   let protocol: Protocol | undefined;
-  if ((!url || key === undefined) && opts.providerId) {
+  // 显式传了 baseURL 且带了 providerId：不允许回退到已存 Key（审核报告 P0-3）。
+  // 页面「从网关添加模型」改地址却没填 Key 时，旧 Key 会发给新地址造成密钥外泄。
+  if (url && opts.providerId) {
+    const p = getProviderViewForGateway(opts.providerId);
+    if (!p) throw new Error("供应商不存在");
+    if (key === undefined || key === "") {
+      throw new Error("地址已改为非已存供应商地址，必须同时填写有效的访问 Key（不能沿用已保存 Key）");
+    }
+    protocol = p.protocol;
+  } else if ((!url || key === undefined) && opts.providerId) {
     const p = getProviderViewForGateway(opts.providerId);
     if (!p) throw new Error("供应商不存在");
     url = url || p.baseURL;

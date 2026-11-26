@@ -159,8 +159,9 @@ async function save(): Promise<void> {
       systemone: {
         baseURL: form.systemoneBaseURL.trim(),
         expectedModel: form.systemoneExpectedModel.trim(),
-        // 留空 = 保持不变（服务端语义）；空串清除需要用「清除」按钮另外表达。
-        apiKey: form.systemoneKey,
+        // 留空 = 保持不变（服务端语义）：不传 apiKey 字段；只有用户显式输入非空才覆盖。
+        // （之前的实现把空串也发上去，等于每次保存都把 Key 清掉，审核报告 P0-4）
+        ...(form.systemoneKey.trim() ? { apiKey: form.systemoneKey } : {}),
       },
       thresholds: {
         ruleAutoAccept: form.ruleAutoAccept,

@@ -21,8 +21,8 @@ import { writeAudit } from "../audit.js";
 import { clientIp } from "../security/rate-limit.js";
 import { createHash } from "node:crypto";
 import {
-  createManagedUser, createUserToken, isLastActiveAdmin, listUserTokens, listUsers,
-  resetUserPassword, revokeUserToken, setMustChangePassword,
+  bumpCredentialEpoch, createManagedUser, createUserToken, isLastActiveAdmin, listUserTokens, listUsers,
+  resetUserPassword, revokeUserToken, revokeUserTokens, setMustChangePassword,
   setUserRole, setUserStatus, softDeleteUser, validateUsername, type AccountRole,
 } from "../persistence/accounts.js";
 import { userIdentityForRequest } from "../security/device.js";
@@ -162,6 +162,10 @@ export async function handleResetUserPassword(req: IncomingMessage, res: ServerR
   // 允许重置最后一个管理员的密码（丢了密码必须有人能救回来）；禁用/删除才有守卫。
   try {
     const tempPassword = await resetUserPassword(id);
+    // 重置密码 = 凭据变更：必须推进 credential_epoch 并吊销访问令牌，否则旧会话/
+    // 设备 Cookie 仍有效（审核报告已核实）。会话由 assertFreshCredentials 按 epoch 拦截。
+    await bumpCredentialEpoch(id);
+    await revokeUserTokens(id);
     adminActionAudit(req, "user_password_reset", { userId: id });
     sendJson(res, 200, { tempPassword, mustChangePassword: true });
   } catch (err) {

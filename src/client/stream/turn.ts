@@ -150,7 +150,7 @@ export async function runResume(
   payload: Record<string, unknown>, targetBlock: AssistantBlock | null = null
 ): Promise<void> {
   const sid = state.currentId;
-  if (!sid || state.streams[sid] || state.compacting[sid]) return;
+  if (!sid || state.streams[sid] || state.compacting[sid] || state.approvalResuming[sid]) return;
   let ablock = targetBlock;
   if (ablock) {
     // 审批 / 澄清恢复沿用原助手块：一个完整回合始终只有一个头像。
@@ -160,13 +160,18 @@ export async function runResume(
     mountBlock(created);
     ablock = created;
   }
-  // 续跑前以 part 数据重建当前 DOM 引用：审批卡会触发一次局部重绘，
-  // 若不重绑，新 token 会写入 state/localStorage 却不进入用户可见正文。
-  await remountAssistantParts(ablock);
-  mountTyping(ablock);
-  // 审批/澄清恢复：图状态里已有 continuousMode 驱动回炉循环，这里重传只为
-  // 让服务端延续放宽后的超步保险丝；标记按会话持久化，刷新后依然拿得到
-  await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousTurns[sid] ? { continuous: true } : {}), ...payload }, ablock, sid);
+  state.approvalResuming[sid] = true;
+  try {
+    // 续跑前以 part 数据重建当前 DOM 引用：审批卡会触发一次局部重绘，
+    // 若不重绑，新 token 会写入 state/localStorage 却不进入用户可见正文。
+    await remountAssistantParts(ablock);
+    mountTyping(ablock);
+    // 审批/澄清恢复：图状态里已有 continuousMode 驱动回炉循环，这里重传只为
+    // 让服务端延续放宽后的超步保险丝；标记按会话持久化，刷新后依然拿得到
+    await streamTurn("/api/resume", { sessionId: sid, ...(state.continuousTurns[sid] ? { continuous: true } : {}), ...payload }, ablock, sid);
+  } finally {
+    delete state.approvalResuming[sid];
+  }
 }
 
 async function streamTurn(

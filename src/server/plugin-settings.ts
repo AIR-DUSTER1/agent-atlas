@@ -11,6 +11,7 @@ import {
   DEFAULT_PLUGIN_ENABLED,
   PLUGIN_IDS,
   getPluginEnabledSnapshot,
+  isContainerRuntime,
   isPluginId,
   isPluginSupported,
   setPluginEnabledState,
@@ -20,6 +21,8 @@ import {
 export interface PluginSettingsSnapshot {
   /** 让前端能把「仅 Windows」类能力与启停状态分开显示。 */
   platform: NodeJS.Platform;
+  /** Docker / 容器运行时：Computer Use 必须 fail-closed。 */
+  container: boolean;
   enabled: PluginEnabledMap;
 }
 
@@ -45,6 +48,7 @@ export async function loadPluginSettings(): Promise<void> {
 export function getPluginSettings(): PluginSettingsSnapshot {
   return {
     platform: process.platform,
+    container: isContainerRuntime(),
     enabled: getPluginEnabledSnapshot(),
   };
 }
@@ -59,7 +63,11 @@ export function setPluginEnabled(id: unknown, value: unknown): Promise<PluginSet
   if (!isPluginId(id)) return Promise.reject(new Error(`未知插件：${String(id)}`));
   if (typeof value !== "boolean") return Promise.reject(new Error("enabled 必须是布尔值"));
   if (id === "computer" && value && !isPluginSupported(id)) {
-    return Promise.reject(new Error("Computer Use 仅支持 Windows 桌面环境"));
+    return Promise.reject(new Error(
+      isContainerRuntime()
+        ? "Computer Use 在 Docker 容器部署中不可用，请在 Windows 本机桌面版中使用"
+        : "Computer Use 仅支持 Windows 桌面环境",
+    ));
   }
 
   // 串行化读-改-写：两个插件并发切换时不能互相覆盖。

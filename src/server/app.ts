@@ -124,32 +124,81 @@ function rawGate(gate: RawGate): MiddlewareHandler {
   };
 }
 
-/** 控制面（全局供应商/插件/MCP/技能/备份/用户管理/诊断）只允许管理员操作。 */
-function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
-  if (pathname.startsWith("/api/users")) return true;
-  if (method === "GET" || method === "HEAD") {
-    return pathname === "/api/models"
-      || pathname.startsWith("/api/memory/config")
-      || pathname.startsWith("/api/backup")
-      || pathname === "/api/tracing"
-      || pathname.startsWith("/api/diagnostics");
+/**
+ * 控制面（全局供应商/插件/MCP/技能/备份/用户管理/诊断）只允许管理员操作。
+ *
+ * 之前用 `startsWith("/api/xxx/")` 做前缀匹配，导致「挂载点不带尾斜杠」的
+ * `PUT /api/routing`、`POST /api/subagents`、`POST /api/restore` 全部漏网
+ * （审核报告 P0-1）。这里改成「方法 + 路径模板」精确表：`:id` 只匹配单段，
+ * `:rest*` 匹配零或多段，避免前缀比较把 `/api/routing<anything>` 一并放进来。
+ */
+interface AdminApiRule {
+  readonly methods: readonly string[];
+  /** 以 `/` 分隔的模板；段值 `:id` 表示任意非空单段。 */
+  readonly segments: readonly string[];
+}
+
+const ADMIN_API_RULES: readonly AdminApiRule[] = [
+  // 用户体系：全部方法
+  { methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"], segments: ["api", "users"] },
+  { methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"], segments: ["api", "users", ":id"] },
+  { methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"], segments: ["api", "users", ":id", "reset-password"] },
+  { methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"], segments: ["api", "users", ":id", "tokens"] },
+  { methods: ["DELETE"], segments: ["api", "users", ":id", "tokens", ":tokenId"] },
+  // 供应商 / 模型 / 推理 / 激活：GET /api/models 也要管理员（含 Key 掩码与网关探测）
+  { methods: ["GET", "HEAD", "POST"], segments: ["api", "models"] },
+  { methods: ["POST", "PUT", "PATCH", "DELETE"], segments: ["api", "config", ":rest*"] },
+  // 目录选择与远程根：控制面动作
+  { methods: ["POST"], segments: ["api", "fs", "open-remote"] },
+  { methods: ["POST"], segments: ["api", "projects", "pick-directory"] },
+  // 插件 / 技能 / 命令 / MCP：全局共享配置（技能正文会注入所有用户）
+  { methods: ["PATCH"], segments: ["api", "plugins", ":id"] },
+  { methods: ["POST", "PATCH", "DELETE"], segments: ["api", "skills", ":rest*"] },
+  { methods: ["POST", "PUT", "PATCH", "DELETE"], segments: ["api", "commands", ":rest*"] },
+  { methods: ["POST", "PATCH", "PUT", "DELETE"], segments: ["api", "mcp", ":rest*"] },
+  // 路由 / 子代理：进程级全局配置
+  { methods: ["GET", "HEAD", "POST", "PUT"], segments: ["api", "routing"] },
+  { methods: ["POST"], segments: ["api", "routing", "test"] },
+  { methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"], segments: ["api", "subagents"] },
+  { methods: ["PATCH", "DELETE"], segments: ["api", "subagents", ":id"] },
+  // 记忆 / RAG / 外部 Agent / 追踪 / 诊断：全局数据面
+  { methods: ["GET", "HEAD", "PUT", "POST"], segments: ["api", "memory", "config"] },
+  { methods: ["POST"], segments: ["api", "memory", "test"] },
+  { methods: ["POST"], segments: ["api", "memory", "embedding", "test"] },
+  { methods: ["POST"], segments: ["api", "memory", "reindex"] },
+  { methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"], segments: ["api", "rag"] },
+  { methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"], segments: ["api", "rag", ":rest*"] },
+  { methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"], segments: ["api", "external-agents", ":rest*"] },
+  { methods: ["GET", "HEAD", "PUT"], segments: ["api", "tracing"] },
+  { methods: ["GET", "HEAD"], segments: ["api", "diagnostics", ":rest*"] },
+  // 备份与恢复：整体覆盖实例状态
+  { methods: ["GET", "HEAD", "POST"], segments: ["api", "backup"] },
+  { methods: ["POST"], segments: ["api", "restore"] },
+  // 求职 / 房产的凭证与安装：写服务器级数据
+  { methods: ["POST"], segments: ["api", "estate", "install"] },
+  { methods: ["POST"], segments: ["api", "estate", "login"] },
+  { methods: ["POST"], segments: ["api", "estate", "key"] },
+  { methods: ["PUT", "POST"], segments: ["api", "job"] },
+  { methods: ["POST"], segments: ["api", "job", ":rest*"] },
+];
+
+/** 单段通配：`:id` 匹配任意非空段；末尾 `:rest*` 匹配零或多段。 */
+function matchAdminRule(pathname: string, rule: AdminApiRule): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  for (let i = 0; i < rule.segments.length; i++) {
+    const seg = rule.segments[i]!;
+    if (seg === ":rest*") return true;
+    if (i >= parts.length) return false;
+    if (seg === ":id") continue;
+    if (seg !== parts[i]) return false;
   }
-  return pathname === "/api/models"
-    || pathname === "/api/fs/open-remote"
-    || pathname === "/api/projects/pick-directory"
-    || pathname.startsWith("/api/config/")
-    || pathname.startsWith("/api/plugins/")
-    || pathname.startsWith("/api/subagents/")
-    || pathname.startsWith("/api/routing/")
-    || pathname.startsWith("/api/memory/config")
-    || pathname.startsWith("/api/memory/test")
-    || pathname.startsWith("/api/memory/embedding")
-    || pathname.startsWith("/api/memory/reindex")
-    || pathname.startsWith("/api/rag/")
-    || pathname.startsWith("/api/external-agents/")
-    || pathname.startsWith("/api/backup")
-    || pathname === "/api/tracing"
-    || pathname.startsWith("/api/diagnostics");
+  return parts.length === rule.segments.length;
+}
+
+/** 导出给守门测试：每条写路由都必须显式命中一张规则表。 */
+export function isAdminOnlyApi(pathname: string, method: string | undefined): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return ADMIN_API_RULES.some((rule) => rule.methods.includes(m) && matchAdminRule(pathname, rule));
 }
 
 interface RequestLogState {

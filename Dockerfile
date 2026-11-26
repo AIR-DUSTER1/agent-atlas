@@ -172,6 +172,8 @@ RUN apt-get update \
 # 被入侵后替换二进制实现持久化的风险。
 COPY --from=browser /opt/chrome-headless-shell /opt/chrome-headless-shell
 RUN ln -s /opt/chrome-headless-shell/chrome-headless-shell /usr/local/bin/chromium
+# 这些是 Browser Use / 求职采集的无头 Chromium 配置，不包含 Computer Use 二进制；
+# BROWSER_USE_CONTAINER=1 同时作为容器标记，让 Computer Use 始终保持 fail-closed。
 ENV BROWSER_USE_EXECUTABLE_PATH=/opt/chrome-headless-shell/chrome-headless-shell \
     BROWSER_USE_CONTAINER=1 \
     JOB_BROWSER_HEADLESS=1

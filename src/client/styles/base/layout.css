@@ -25,17 +25,23 @@
 .logo-text span { font-size: 11px; color: var(--text-3); }
 
 #new-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  padding: 9px 0;
-  border: 1px dashed var(--border-strong);
+  height: 37px;
+  padding: 0 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--border-strong));
   border-radius: 9px;
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
   color: var(--text-2);
   font-size: 13px;
+  font-family: var(--sans);
+  line-height: 1;
   cursor: pointer;
-  transition: all .15s;
+  transition: border-color .15s, background-color .15s, color .15s;
 }
-#new-chat-btn:hover { border-color: var(--accent); color: var(--text); background: rgba(91,140,255,.08); }
+#new-chat-btn:hover { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 11%, transparent); }
 
 /* ---------- 项目切换器（本地 💻 / 云端 ☁️） ---------- */
 .project-switch { position: relative; margin-top: 8px; }
@@ -136,22 +142,25 @@
   padding-right: 56px;
 }
 .session-item .s-meta {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 6px;
   min-width: 0; overflow: hidden;
-  margin-top: 3px; padding-right: 56px;
+  margin-top: 3px; padding-right: 0;
   font-size: 11px; color: var(--text-3);
+  white-space: nowrap;
+}
+.session-item .s-meta > span:nth-child(2) {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .session-item .s-demo {
   color: var(--accent-soft);
   background: rgba(91,140,255,.12);
   padding: 1px 6px; border-radius: 4px;
-  font-size: 10px;
+  font-size: 10px; flex: 0 0 auto; white-space: nowrap;
 }
 .session-item.stale .s-title { color: var(--text-3); text-decoration: line-through; }
 .s-actions {
-  position: absolute; right: 8px; top: 50%;
+  position: absolute; right: 8px; top: 8px;
   display: flex; align-items: center; gap: 2px;
-  transform: translateY(-50%);
   opacity: 0; pointer-events: none;
   transition: opacity .12s;
 }
@@ -365,8 +374,8 @@
 }
 #project-menu .pm-check { flex: none; min-width: 10px; color: var(--accent); text-align: center; }
 .session-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.session-item .s-pending { display: inline-flex; align-items: center; gap: 3px; color: var(--amber); }
-.session-item .s-running { display: inline-flex; align-items: center; gap: 3px; color: var(--green); }
+.session-item .s-pending { display: inline-flex; align-items: center; gap: 3px; color: var(--amber); flex: 0 0 auto; white-space: nowrap; }
+.session-item .s-running { display: inline-flex; align-items: center; gap: 3px; color: var(--green); flex: 0 0 auto; white-space: nowrap; }
 .session-item .s-running .ui-icon { animation: spin 1.1s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
   .session-item .s-running .ui-icon { animation: none; }

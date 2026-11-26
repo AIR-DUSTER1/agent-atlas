@@ -104,6 +104,13 @@ test("Key 留空表示保持不变，显式空串才清除", () => {
   assert.equal(cleared.systemone.apiKey, "");
 });
 
+
+test("apiKey 留空不传时保持已存 Key（服务端缺省语义）", () => {
+  const withKey = current({ systemone: { baseURL: "http://127.0.0.1:8765", expectedModel: "", apiKey: "k1" } });
+  const next = parseRoutingInput({ backend: "systemone", systemone: { baseURL: "http://127.0.0.1:8765" } }, withKey);
+  assert.equal(next.systemone.apiKey, "k1");
+});
+
 test("未知后端名回落到 openai-compat", () => {
   assert.equal(parseRoutingInput({ backend: "not-a-backend" }, current()).backend, "openai-compat");
 });

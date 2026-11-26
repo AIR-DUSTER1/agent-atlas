@@ -129,7 +129,6 @@ html[data-theme="light"] {
   --content-inverse: var(--text-strong);
   --border-subtle: var(--border-soft);
   --border-default: var(--border);
-  --border-strong: var(--border-strong);
   --border-focus: var(--accent);
 
   /* 状态色 */

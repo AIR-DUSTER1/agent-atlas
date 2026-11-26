@@ -28,9 +28,18 @@ export function isPluginId(value: unknown): value is PluginId {
   return typeof value === "string" && (PLUGIN_IDS as readonly string[]).includes(value);
 }
 
-/** Computer Use 依赖 Windows PowerShell / User32；其他平台即使旧配置写 true 也不得生效。 */
-export function isPluginSupported(id: PluginId, platform: NodeJS.Platform = process.platform): boolean {
-  return id !== "computer" || platform === "win32";
+/** Docker 镜像显式设置 BROWSER_USE_CONTAINER=1；容器内没有可控制的 Windows 桌面。 */
+export function isContainerRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.BROWSER_USE_CONTAINER === "1";
+}
+
+/** Computer Use 只允许 Windows 本机桌面；容器部署即使旧配置写 true 也不得生效。 */
+export function isPluginSupported(
+  id: PluginId,
+  platform: NodeJS.Platform = process.platform,
+  container: boolean = isContainerRuntime(),
+): boolean {
+  return id !== "computer" || (platform === "win32" && !container);
 }
 
 export function isPluginEnabled(id: PluginId): boolean {

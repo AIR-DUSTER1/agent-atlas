@@ -6,11 +6,13 @@
   立场：API Key 只写不读，留空 = 保持不变；保存走 stores/models + model-actions。
 -->
 <script setup lang="ts">
-import { Button, Input, Modal, Select } from "antdv-next";
+import { Button, Input, Select } from "antdv-next";
 import AntdvProvider from "../../../ui/antdv-provider.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useModelsStore } from "../../../stores/settings/models/models.js";
 import { addPendingModelByName, fetchGatewayModelChips, saveProvider } from "./model-actions.js";
+import ModelSelectionPicker from "./model-selection-picker.vue";
+import type { GatewayModel } from "../../../modules/types.js";
 import { setProviderModalStatus } from "./model-status.js";
 
 const store = useModelsStore();
@@ -29,7 +31,6 @@ const keyVisible = ref(false);
 const saving = ref(false);
 const testing = ref(false);
 const fetchingModels = ref(false);
-const pickerQuery = ref("");
 
 const editingProvider = computed(() => store.currentEditingProvider);
 const isCreate = computed(() => store.providerFormMode === "create");
@@ -59,36 +60,35 @@ const keyStateText = computed(() => {
 });
 
 const pendingEmpty = computed(() => store.pendingModels.length === 0);
-
-const pendingNames = computed(() => new Set(store.pendingModels.map((item) => item.name)));
-const pickerModels = computed(() => {
-  const query = pickerQuery.value.trim().toLowerCase();
-  if (!query) return store.gatewayModels;
-  return store.gatewayModels.filter((model) => model.id.toLowerCase().includes(query));
-});
-
-function gatewayMeta(m: { contextWindow: number | null; supportsVision: boolean; supportsReasoning: boolean }): string {
-  return [
-    m.contextWindow ? `上下文 ${m.contextWindow}` : "上下文未知",
-    m.supportsVision ? "多模态" : "",
-    m.supportsReasoning ? "支持推理" : "",
-  ].filter(Boolean).join(" · ");
-}
-
-function isPending(m: { id: string }): boolean {
-  return pendingNames.value.has(m.id);
-}
+const pendingSelectedNames = computed(() => store.pendingModels.map((item) => item.name));
+const pendingExtraModels = computed<GatewayModel[]>(() => store.pendingModels.map((item) => ({
+  id: item.name,
+  contextWindow: item.contextWindow,
+  supportsVision: item.modality === "vision",
+  supportsReasoning: false,
+})));
 
 function closeProviderModal(): void {
   if (store.gatewayPickerContext === "pending") store.closeGatewayPicker();
   store.closeProviderForm();
 }
 
-async function choosePendingModel(m: { id: string; contextWindow: number | null; supportsVision: boolean; supportsReasoning: boolean }): Promise<void> {
-  if (isPending(m)) return;
-  const ok = await addPendingModelByName(m.id, m);
-  // 添加失败时保留弹窗，状态条会说明原因
-  if (ok) store.closeGatewayPicker();
+function applyPendingSelection(selectedModels: GatewayModel[]): void {
+  const wanted = new Set(selectedModels.map((model) => model.id));
+  for (const current of [...store.pendingModels]) {
+    if (!wanted.has(current.name)) store.removePendingModel(current.name);
+  }
+  const existing = new Set(store.pendingModels.map((model) => model.name));
+  for (const model of selectedModels) {
+    if (existing.has(model.id)) continue;
+    store.addPendingModel({
+      name: model.id,
+      modality: model.supportsVision ? "vision" : "text",
+      contextWindow: model.contextWindow ?? null,
+    });
+  }
+  setProviderModalStatus(`✓ 已选择 ${selectedModels.length} 个初始模型，保存供应商时一起提交`, "ok");
+  store.closeGatewayPicker();
 }
 
 function addPendingFromInput(): void {
@@ -126,7 +126,6 @@ async function openPendingPicker(): Promise<void> {
   try {
     await onTest();
     if (store.gatewayModels.length) {
-      pickerQuery.value = "";
       store.openGatewayPicker("pending");
     }
   } finally {
@@ -228,38 +227,18 @@ function toggleKeyVisible(): void {
     </div>
   </div>
 
-  <Modal
-    id="pending-model-picker"
+  <ModelSelectionPicker
     :open="store.gatewayPickerContext === 'pending'"
-    title="从网关选择初始模型"
-    width="720px"
-    centered
-    :footer="null"
+    title="选择初始模型"
+    :models="store.gatewayModels"
+    :extra-models="pendingExtraModels"
+    :selected-names="pendingSelectedNames"
+    modal-id="pending-model-picker"
+    input-id="gmp-search-pending"
+    list-id="gmp-pending-list"
+    description="勾选的模型会加入初始模型清单，保存供应商时一起提交。"
     @cancel="store.closeGatewayPicker()"
-  >
-    <div class="gmp-head">
-      <Input id="gmp-search-pending" v-model:value="pickerQuery" aria-label="筛选网关模型" allow-clear spellcheck="false" placeholder="搜索模型 ID，例如 deepseek / claude / glm">
-        <template #prefix><i class="ui-icon" data-icon="Search" aria-hidden="true"></i></template>
-      </Input>
-      <span class="gmp-count">网关返回 {{ store.gatewayModels.length }} 个 · 已选择 {{ pendingNames.size }} 个</span>
-    </div>
-    <div id="gmp-pending-list" class="gmp-list">
-      <div v-if="!pickerModels.length" class="gmp-empty">
-        {{ store.gatewayModels.length ? "没有匹配的模型，换个关键词试试" : "网关没有返回模型" }}
-      </div>
-      <Button
-        v-for="m in pickerModels"
-        v-else
-        :key="m.id"
-        class="gmp-row"
-        :class="{ added: isPending(m) }"
-        :disabled="isPending(m)"
-        @click="choosePendingModel(m)"
-      >
-        <span class="gmp-row-main"><strong>{{ m.id }}</strong><small>{{ gatewayMeta(m) }}</small></span>
-        <span class="gmp-row-action">{{ isPending(m) ? "已添加" : "添加" }}</span>
-      </Button>
-    </div>
-  </Modal>
+    @apply="applyPendingSelection"
+  />
   </AntdvProvider>
 </template>
