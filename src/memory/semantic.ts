@@ -1,4 +1,4 @@
-import { safeFetch } from "../server/safe-fetch.js";
+import { safeFetch } from "../shared/safe-fetch.js";
 /**
  * memory/semantic.ts — 可选 Embedding 与混合召回
  * ============================================================
@@ -101,6 +101,8 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
       },
       body: JSON.stringify({ model: config.model, input: texts }),
+      // Embedding 地址来自用户显式配置，允许本地/内网自托管服务。
+      allowLocalhost: true,
       signal: AbortSignal.timeout(config.timeoutMs),
     });
   } catch (error) {

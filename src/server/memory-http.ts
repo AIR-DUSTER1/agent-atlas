@@ -206,6 +206,8 @@ export class HttpMemoryProvider implements MemoryProvider {
         ...init,
         headers: this.headers(),
         redirect: "error",
+        // HTTP 记忆是用户显式配置的可信服务，允许 localhost/内网自托管。
+        allowLocalhost: true,
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
     } catch (error) {

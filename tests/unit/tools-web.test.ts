@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { test, after } from "node:test";
 import { browserFetch } from "../../src/tools-web.js";
+import { safeFetch } from "../../src/server/safe-fetch.js";
 
 /** 起一个本地测试服务器，返回 base URL */
 async function startFixture(): Promise<{ base: string; close: () => Promise<void> }> {
@@ -121,6 +122,16 @@ test("相对路径重定向正常跟随", async () => {
   assert.match(String(r.text), /文件系统/);
 });
 
+test("safeFetch 默认手动跟随重定向，maxRedirects=0 时把 3xx 原样交给调用方", async () => {
+  const raw = await safeFetch(`${fixture.base}/redirect-ok`, { allowLocalhost: true, maxRedirects: 0 });
+  assert.equal(raw.status, 302);
+  assert.equal(raw.headers.get("location"), "/doc");
+  await raw.body?.cancel();
+
+  const followed = await safeFetch(`${fixture.base}/redirect-ok`, { allowLocalhost: true });
+  assert.equal(followed.status, 200);
+  assert.match(await followed.text(), /文件系统/);
+});
 test("SSRF：默认拒绝内网/环回地址，allowLocalhost 才放行", async () => {
   // 默认（不传 allowLocalhost）→ 必须拒绝
   const denied = await call(`${fixture.base}/doc`);
