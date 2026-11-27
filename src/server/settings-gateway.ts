@@ -11,6 +11,7 @@
  *  - 探测失败一律抛中文错误（设置页「测试连接」直接展示给用户）。
  */
 
+import { safeFetch } from "./safe-fetch.js";
 import { config, isProtocol, type Protocol } from "../config.js";
 import { getProviderViewForGateway, validBaseURLForGateway } from "./settings.js";
 import { modelInfoCache, type GatewayModelInfo } from "./settings-cache.js";
@@ -76,7 +77,7 @@ export async function fetchModelDetails(opts: { baseURL?: string; apiKey?: strin
 
   // ── Anthropic Messages 原生：GET {base}/v1/models，x-api-key 鉴权 ──
   if (protocol === "anthropic") {
-    const res = await fetch(`${u}/v1/models?limit=100`, {
+    const res = await safeFetch(`${u}/v1/models?limit=100`, {
       headers: { "x-api-key": key ?? "", "anthropic-version": "2023-06-01" },
       signal: AbortSignal.timeout(15_000),
     });
@@ -93,7 +94,7 @@ export async function fetchModelDetails(opts: { baseURL?: string; apiKey?: strin
 
   // ── Gemini 原生：GET {base}/v1beta/models?key=… ──
   if (protocol === "gemini") {
-    const res = await fetch(`${u}/v1beta/models?pageSize=100&key=${encodeURIComponent(key ?? "")}`, {
+    const res = await safeFetch(`${u}/v1beta/models?pageSize=100&key=${encodeURIComponent(key ?? "")}`, {
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`网关返回 HTTP ${res.status}（Gemini 协议：检查地址是否为 {网关} 根路径、Key 是否有效）`);
@@ -107,7 +108,7 @@ export async function fetchModelDetails(opts: { baseURL?: string; apiKey?: strin
   }
 
   // ── OpenAI Chat Completions / Responses API：GET {base}/models ──
-  const res = await fetch(`${u}/models`, {
+  const res = await safeFetch(`${u}/models`, {
     headers: key ? { Authorization: `Bearer ${key}` } : {},
     signal: AbortSignal.timeout(15_000),
   });

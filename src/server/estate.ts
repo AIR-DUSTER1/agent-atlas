@@ -28,6 +28,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { readConfig, mergeConfig } from "./config-store.js";
+import { safeFetch } from "./safe-fetch.js";
 import { writeAudit } from "./audit.js";
 import { recordDependency } from "./observability/dependency-status.js";
 import { incCounter } from "./observability/metrics.js";
@@ -519,7 +520,7 @@ interface ManifestBinaries {
 
 async function pickLatestBinary(os: string, arch: string): Promise<{ url: string; sha256: string; version: string } | null> {
   assertTrustedInstallUrl(BEIKE_MANIFEST_URL, "版本清单地址");
-  const res = await fetch(BEIKE_MANIFEST_URL, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
+  const res = await safeFetch(BEIKE_MANIFEST_URL, { timeoutMs: MANIFEST_TIMEOUT_MS });
   if (!res.ok) throw new Error(`获取贝壳 CLI 版本清单失败：HTTP ${res.status}`);
   const manifest = (await res.json()) as ManifestBinaries;
   const bins = manifest.releases.find((r) => r.version === manifest.latest)?.binaries ?? [];
@@ -534,8 +535,10 @@ async function fetchTrustedRelease(url: string): Promise<Response> {
   let current = url;
   for (let redirects = 0; redirects <= INSTALL_MAX_REDIRECTS; redirects += 1) {
     assertTrustedInstallUrl(current, "二进制下载地址");
-    const res = await fetch(current, {
-      signal: AbortSignal.timeout(BEIKE_INSTALL_TIMEOUT_MS),
+    // safeFetch 默认会跟随并校验重定向，这里用 maxRedirects=0 保留外层显式读 Location 再逐个校验。
+    const res = await safeFetch(current, {
+      timeoutMs: BEIKE_INSTALL_TIMEOUT_MS,
+      maxRedirects: 0,
       redirect: "manual",
     });
     if (res.status < 300 || res.status >= 400) return res;
@@ -545,7 +548,6 @@ async function fetchTrustedRelease(url: string): Promise<Response> {
   }
   throw new Error(`贝壳 CLI 下载重定向超过 ${INSTALL_MAX_REDIRECTS} 次`);
 }
-
 /**
  * 安装互斥（T1-6）：并发点击只保留第一调用，后续调用复用同一个 Promise。
  * 否则两次 tar 解压/写配置会互相踩（.setting/beike 半拆状态）。
@@ -670,7 +672,7 @@ export async function probeBeikeMcpKey(apiKey: string, cliVersion = "0.2.28"): P
   if (!key) return false;
   const version = cliVersion.trim().replace(/^v/i, "").replace(/[^0-9A-Za-z._-]/g, "") || "0.2.28";
   try {
-    const res = await fetch(BEIKE_MCP_URL, {
+    const res = await safeFetch(BEIKE_MCP_URL, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${key}`,

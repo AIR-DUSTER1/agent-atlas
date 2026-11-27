@@ -13,6 +13,7 @@
  */
 
 import { PRODUCT_NAME, PRODUCT_USER_AGENT } from "../product.js";
+import { safeFetch } from "./safe-fetch.js";
 
 const GEOCODE_TIMEOUT_MS = 8_000;         // 单次 Nominatim 请求
 const GEOCODE_MIN_INTERVAL_MS = 1_100;    // 公开服务限约 1 req/s，排队串行
@@ -72,7 +73,7 @@ export function searchLinks(name: string, city: string): GeocodePoint["links"] {
 
 async function nominatimFetch(query: string): Promise<{ lat: number; lng: number; address: string } | null> {
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=zh&q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: { "User-Agent": NOMINATIM_UA, "Accept-Language": "zh" },
     signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
   });

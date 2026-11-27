@@ -1,3 +1,4 @@
+import { safeFetch } from "../server/safe-fetch.js";
 /**
  * memory/semantic.ts — 可选 Embedding 与混合召回
  * ============================================================
@@ -93,7 +94,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   if (!texts.length) return [];
   let response: Response;
   try {
-    response = await fetch(endpoint(), {
+    response = await safeFetch(endpoint(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
