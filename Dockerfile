@@ -106,6 +106,7 @@ ENV NODE_ENV=production \
     SKILLS_DIR=/data/skills \
     AUDIT_FILE=/data/audit.ndjson \
     BACKUP_DIR=/data/backups \
+    JOB_DATA_DIR=/data/job-data \
     BEIKE_INSTALL_DIR=/data/tools/beike \
     BEIKE_USER_HOME=/data/beike-home
 
@@ -116,7 +117,7 @@ COPY --from=builder --chown=node:node /app/package.json /app/tsconfig.json ./
 COPY --from=builder --chown=node:node /app/src ./src
 COPY --from=builder --chown=node:node /app/scripts ./scripts
 # src/client 前端源码不进生产镜像（产物已构建到 src/server/public），构建期删除防误引用。
-RUN mkdir -p /data && chown node:node /data && rm -rf src/client
+RUN mkdir -p /data /data/job-data && chown node:node /data /data/job-data && rm -rf src/client
 
 USER node
 EXPOSE 3000

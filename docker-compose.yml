@@ -36,6 +36,7 @@ services:
       SKILLS_DIR: /data/skills
       AUDIT_FILE: /data/audit.ndjson
       BACKUP_DIR: /data/backups
+      JOB_DATA_DIR: /data/job-data
     volumes:
       - ${AGENT_DATA_DIR:-./data}:/data
     shm_size: 256mb

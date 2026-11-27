@@ -16,6 +16,7 @@
  * 分层约束：本文件属于路由层，**不 import server/***。熔断器由上层（服务端）
  * 注入一个最小接口，单元测试与 CLI 场景下默认直连（无熔断）。
  */
+
 import type { RoutingCandidate, RoutingLimits, RoutingSettings } from "../types.js";
 import { decisionFromProbabilities, type DecisionBackend, type RawDecision } from "./index.js";
 

@@ -494,6 +494,17 @@ export interface RoutingTestResult {
   candidateCount: number;
 }
 
+export type BeikeInstallStatus = "installing" | "succeeded" | "failed";
+
+/** 贝壳 CLI 后台安装任务；POST 启动后通过 GET /api/estate/install 轮询。 */
+export interface BeikeInstallJob {
+  status: BeikeInstallStatus;
+  startedAt: string;
+  finishedAt?: string;
+  version?: string;
+  error?: string;
+}
+
 export interface EstateState {
   installed: boolean;
   version?: string;
@@ -502,6 +513,12 @@ export interface EstateState {
   error?: string;
   keyUrl?: string;
   loginRequired?: boolean;
+  install?: BeikeInstallJob | null;
+}
+
+export interface BeikeInstallResponse {
+  ok: boolean;
+  install: BeikeInstallJob | null;
 }
 
 /** 求职 Agent 内置浏览器与数据目录状态；对应 GET /api/job。 */

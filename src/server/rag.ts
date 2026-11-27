@@ -31,6 +31,7 @@ import { resolve, basename, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { assertAuthorized, PROJECT_ROOT, SKIPPED_DIRS } from "./files.js";
+import { safeFetch } from "./safe-fetch.js";
 import { maskKey } from "./settings.js";
 import { log } from "./logging.js";
 import { recordDependency } from "./observability/dependency-status.js";
@@ -148,7 +149,7 @@ export async function testRagConnection(opts?: { baseURL?: string; apiKey?: stri
   const key = opts?.apiKey !== undefined ? String(opts.apiKey) : rag.apiKey;
   let res: Response;
   try {
-    res = await ragGauge.run(() => fetch(base + "/", {
+    res = await ragGauge.run(() => safeFetch(base + "/", {
       method: "GET",
       headers: key ? { Authorization: `Bearer ${key}` } : {},
       signal: AbortSignal.timeout(10_000),
@@ -215,7 +216,7 @@ export async function searchRag(
   if (!q) throw new Error("检索词不能为空");
   const collection = options.collection?.trim() || rag.collection;
   const res = await ragBreaker.run(() => ragGauge.run(async () => {
-    const response = await fetch(rag.baseURL + "/search", {
+    const response = await safeFetch(rag.baseURL + "/search", {
       method: "POST",
       headers: ragHeaders(),
       body: JSON.stringify({
@@ -243,7 +244,7 @@ export async function searchRag(
 /** 入库：送一批文档给外部服务（切块 / embedding 都由服务端完成） */
 async function ragIngest(documents: Array<{ id: string; name: string; text: string; meta: Record<string, unknown> }>): Promise<{ indexed: number; chunks: number | null }> {
   const res = await ragBreaker.run(() => ragGauge.run(async () => {
-    const response = await fetch(rag.baseURL + "/ingest", {
+    const response = await safeFetch(rag.baseURL + "/ingest", {
       method: "POST",
       headers: ragHeaders(),
       body: JSON.stringify({ collection: rag.collection, documents }),
@@ -300,7 +301,7 @@ export async function upsertCollectionText(input: {
   const content = input.text.trim();
   if (!content) throw new Error("文本内容为空");
   const res = await ragBreaker.run(() => ragGauge.run(async () => {
-    const response = await fetch(rag.baseURL + "/ingest", {
+    const response = await safeFetch(rag.baseURL + "/ingest", {
       method: "POST",
       headers: ragHeaders(),
       body: JSON.stringify({
@@ -321,7 +322,7 @@ export async function deleteRagDoc(id: string): Promise<Record<string, unknown>>
   await ensureLoaded();
   if (rag.docs[id] && isRagConfigured()) {
     try {
-      await fetch(rag.baseURL + "/delete", {
+      await safeFetch(rag.baseURL + "/delete", {
         method: "POST",
         headers: ragHeaders(),
         body: JSON.stringify({ collection: rag.collection, ids: [id] }),
@@ -338,7 +339,7 @@ export async function deleteRagDoc(id: string): Promise<Record<string, unknown>>
 export async function clearRag(): Promise<Record<string, unknown>> {
   await ensureLoaded();
   if (!isRagConfigured()) throw new Error("未配置外部 RAG 服务");
-  await fetch(rag.baseURL + "/reset", {
+  await safeFetch(rag.baseURL + "/reset", {
     method: "POST",
     headers: ragHeaders(),
     body: JSON.stringify({ collection: rag.collection }),

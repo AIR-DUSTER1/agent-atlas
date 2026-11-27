@@ -23,6 +23,7 @@ import {
   resolveBeikeInstallDir,
   resolveBeikeUserHome,
 } from "../../src/server/estate.js";
+import { createBeikeInstallCoordinator } from "../../src/server/estate-install-job.js";
 import { assertAllowedExternalUrl } from "../../src/server/external-open.js";
 import { resolveMapRuntimeConfig, resolveMapStaticServiceConfig } from "../../src/config.js";
 import { buildStaticMapUrl, parseStaticMapQuery } from "../../src/server/map-static.js";
@@ -202,6 +203,50 @@ test("贝壳安装器把 Node 平台映射为官方 manifest 的 os/arch", () =>
   assert.throws(() => beikeManifestTarget("linux", "ia32"), /暂不支持平台/);
 });
 
+test("贝壳 CLI 安装改为后台任务：重复点击复用一次执行，完成后可轮询版本", async () => {
+  let calls = 0;
+  let finish!: (value: { version?: string }) => void;
+  const coordinator = createBeikeInstallCoordinator(() => {
+    calls += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+
+  assert.equal(coordinator.start().status, "installing");
+  assert.equal(coordinator.start().status, "installing");
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  finish({ version: "1.2.3" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const done = coordinator.get();
+  assert.equal(done?.status, "succeeded");
+  assert.equal(done?.version, "1.2.3");
+});
+
+test("贝壳 CLI 后台安装失败保留可轮询错误，不会让长请求返回 504", async () => {
+  const coordinator = createBeikeInstallCoordinator(async () => {
+    throw new Error("下载贝壳 CLI 失败：HTTP 502");
+  });
+  assert.equal(coordinator.start().status, "installing");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const failed = coordinator.get();
+  assert.equal(failed?.status, "failed");
+  assert.match(failed?.error || "", /HTTP 502/);
+});
+test("贝壳 CLI 安装接口只返回 202 后台任务，前端通过短轮询获取结果", async () => {
+  const [route, app, store, panel] = await Promise.all([
+    readFile(new URL("../../src/server/routes/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/server/app.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/stores/estate/estate.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/client/views/estate/estate-panel-vue.vue", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(route, /await installBeike\(\);\s*\/\/ 下载/);
+  assert.match(route, /sendJson\(res, 202, \{ ok: true, install: job \}\)/);
+  assert.match(app, /app\.get\("\/api\/estate\/install"/);
+  assert.match(store, /INSTALL_POLL_MS/);
+  assert.match(store, /api<BeikeInstallResponse>\("\/api\/estate\/install"\)/);
+  assert.match(store, /job\.status === "failed"/);
+  assert.match(panel, /installRunning/);
+});
 test("贝壳安装目录、CLI HOME 与 tar 命令可跨平台覆盖", () => {
   const installDir = resolveBeikeInstallDir({ BEIKE_INSTALL_DIR: "/data/tools/beike" });
   assert.equal(installDir, resolveBeikeInstallDir({ BEIKE_INSTALL_DIR: " /data/tools/beike " }));

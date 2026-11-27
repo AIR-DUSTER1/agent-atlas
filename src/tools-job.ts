@@ -114,6 +114,9 @@ export const jobCollectTool = tool(
         ok: false,
         summary: outcome.summary,
         output: outcome.output,
+        ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+        ...(outcome.retryable === false ? { retryable: false } : {}),
+        ...(outcome.nextAction ? { nextAction: outcome.nextAction } : {}),
         // 未登录中止时把「该去做哪一步」直接给模型，避免它反复重试采集
         ...(outcome.needsLogin?.length ? { needsLogin: outcome.needsLogin } : {}),
       });

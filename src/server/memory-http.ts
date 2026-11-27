@@ -17,6 +17,7 @@ import type {
 import { sameMemoryScope } from "../memory/scope.js";
 import { memorySlot } from "../memory/slot.js";
 import { LocalMemoryProvider } from "../memory/providers/local.js";
+import { safeFetch } from "./safe-fetch.js";
 import { log } from "./logging.js";
 import { configureLocalMemoryRetention } from "../memory/providers/local-store.js";
 import { configureMemoryLifecycle } from "../memory/lifecycle.js";
@@ -201,10 +202,12 @@ export class HttpMemoryProvider implements MemoryProvider {
     this.assertCircuit();
     let response: Response;
     try {
-      response = await fetch(this.url(path), {
+      response = await safeFetch(this.url(path), {
         ...init,
         headers: this.headers(),
         redirect: "error",
+        // HTTP 记忆是用户显式配置的可信服务，允许 localhost/内网自托管。
+        allowLocalhost: true,
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
     } catch (error) {

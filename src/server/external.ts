@@ -97,6 +97,12 @@ export async function loadExternalAgents(): Promise<void> {
   const kept: ExternalAgent[] = [];
   for (const a of list) {
     if (!a || typeof a.url !== "string" || typeof a.path !== "string") continue;
+    // P1-8：加载时强制校验路径在 AGENTS_DIR 内；历史配置被改到外部的一律拒绝加载。
+    try {
+      if (!assertInsideAgentsDir(a.path)) continue;
+    } catch {
+      continue;
+    }
     // clone 缓存目录被手动删掉 → 丢弃注册（与云端项目同策略）
     const exists = await fsp.stat(a.path).then((s) => s.isDirectory()).catch(() => false);
     if (!exists) continue;
@@ -148,6 +154,32 @@ function assertCommandAllowed(command: string, agentPath: string): void {
 }
 
 // ---------------------------------------------------------------------------
+function assertInsideAgentsDir(target: string): boolean {
+  const abs = resolve(target);
+  const base = resolve(AGENTS_DIR);
+  if (process.platform === "win32") {
+    const a = abs.toLowerCase();
+    const b = base.toLowerCase();
+    return a === b || a.startsWith(b + "\\");
+  }
+  return abs === base || abs.startsWith(base + "/");
+}
+
+/** P1-8：第三方清单的 env 只允许普通业务变量，禁止 NODE_OPTIONS / PATH 等可改执行语义的键。 */
+const EXTERNAL_ENV_DENYLIST = new Set([
+  "NODE_OPTIONS", "PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "PYTHONPATH", "BASH_ENV", "ENV",
+  "PWD", "HOME", "SHELL",
+]);
+function envWhitelist(raw: Record<string, string> | undefined): Record<string, string> {
+  if (!raw) return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (EXTERNAL_ENV_DENYLIST.has(key.toUpperCase())) continue;
+    out[key] = String(value);
+  }
+  return out;
+}
+
 // 查询
 // ---------------------------------------------------------------------------
 export function listExternalAgents(): ExternalAgent[] {
@@ -234,7 +266,9 @@ export async function addExternalAgent(input: {
   }
 
   // clone
-  const name = input.name?.trim() || slugFromUrl(url);
+  // P1-8：目录名与加载/删除路径都必须是 AGENTS_DIR 内的安全相对名，不能被 name 里的 .. / 分隔符穿透。
+  const rawName = input.name?.trim() || slugFromUrl(url);
+  const name = slugFromUrl(rawName);
   const target = join(AGENTS_DIR, `${name}-${randomUUID().slice(0, 6)}`);
   await cloneRepo(url, target);
 
@@ -291,6 +325,7 @@ export async function updateExternalAgent(id: string, input: {
 }): Promise<ExternalAgent> {
   const a = agents.find((x) => x.id === id);
   if (!a) throw new Error("外部 Agent 不存在");
+  if (!assertInsideAgentsDir(a.path)) throw new Error("外部 Agent 路径非法");
   if (input.name?.trim()) a.name = input.name.trim();
   if (input.command !== undefined) {
     if (!input.command.trim()) throw new Error("启动命令不能为空");
@@ -317,6 +352,7 @@ export async function deleteExternalAgent(id: string): Promise<void> {
   const a = agents.find((x) => x.id === id);
   if (!a) throw new Error("外部 Agent 不存在");
   await fsp.rm(a.path, { recursive: true, force: true }).catch(() => {});
+  if (!assertInsideAgentsDir(a.path)) throw new Error("外部 Agent 路径非法，已拒绝删除");
   agents = agents.filter((x) => x.id !== id);
   await persist();
   writeAudit("external.delete", { id, name: a.name, url: a.url });
@@ -345,7 +381,7 @@ export async function* runExternalAgent(agent: ExternalAgent, message: string, s
     return;
   }
 
-  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(agent.env ?? {}), EXTERNAL_AGENT: "1" };
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...envWhitelist(agent.env), EXTERNAL_AGENT: "1" };
   if (agent.passCredentials) {
     Object.assign(childEnv, {
       AGENT_API_KEY: config.apiKey,

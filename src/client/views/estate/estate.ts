@@ -221,10 +221,9 @@ export function renderEstateInToolCard(part: ToolPart, card: HTMLElement): void 
       fix.disabled = true;
       fix.textContent = "安装中…（约 1-2 分钟）";
       try {
-        const res = await api<EstateState>("/api/estate/install", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-        });
-        state.estate = { ...(state.estate || { installed: false }), ...res };
+        const { useEstateStore } = await import("../../stores/estate/estate.js");
+        await useEstateStore().install();
+        const res = state.estate || { installed: false };
         refreshPluginCards();
         fix.textContent = `✓ 安装完成${res.version ? " " + res.version : ""}，请重新发送刚才的问题`;
       } catch (err) {

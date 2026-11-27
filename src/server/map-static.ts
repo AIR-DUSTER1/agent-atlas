@@ -10,6 +10,7 @@
 import type { ServerResponse } from "node:http";
 import { config } from "../config.js";
 import { log } from "./logging.js";
+import { safeFetch } from "./safe-fetch.js";
 
 const AMAP_STATIC_ENDPOINT = "https://restapi.amap.com/v3/staticmap";
 const TENCENT_STATIC_ENDPOINT = "https://apis.map.qq.com/ws/staticmap/v2/";
@@ -155,7 +156,7 @@ export async function handleStaticMap(res: ServerResponse, url: URL): Promise<vo
   }
 
   try {
-    const upstream = await fetch(buildStaticMapUrl(input, key), {
+    const upstream = await safeFetch(buildStaticMapUrl(input, key), {
       headers: { Accept: "image/png,image/jpeg,image/webp" },
       signal: AbortSignal.timeout(STATIC_MAP_REQUEST_TIMEOUT_MS),
     });

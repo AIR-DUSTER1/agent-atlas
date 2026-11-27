@@ -184,10 +184,10 @@ onMounted(() => {
       <span>{{ fixHintText }}</span>
     </div>
 
-    <div class="field-label">数据目录 <em class="key-state">留空使用应用默认目录</em></div>
+    <div class="field-label">数据目录 <em class="key-state">留空使用服务端默认目录，容器为 /data/job-data</em></div>
     <label class="field">
       <span class="field-label">登录态、岗位清单与 Excel 产出</span>
-      <Input id="job-data-dir" v-model:value="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用 .setting/job-data" />
+      <Input id="job-data-dir" v-model:value="store.dataDirInput" type="text" spellcheck="false" placeholder="留空使用服务端默认目录（容器为 /data/job-data）" />
     </label>
     <div class="kb-actions">
       <Button id="job-save-btn" :disabled="store.saving" @click="save" type="primary">保存并重新探测</Button>

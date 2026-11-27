@@ -232,8 +232,24 @@ test("main 合并 CI 验收入口与镜像 smoke 路径保持一致", async () =
   assert.match(listed.stdout, /version:main-guard/);
 });
 
+test("依赖审查覆盖 main/dev PR，且不重复挂在高成本 CI 上", async () => {
+  const [ciWorkflow, dependencyWorkflow] = await Promise.all([
+    readFile(".github/workflows/ci.yml", "utf8"),
+    readFile(".github/workflows/dependency-review.yml", "utf8"),
+  ]);
+  assert.match(dependencyWorkflow, /pull_request:\s*\r?\n\s*branches:\s*\[main, dev\]/);
+  assert.match(dependencyWorkflow, /actions\/dependency-review-action@[0-9a-f]{40}/);
+  assert.match(dependencyWorkflow, /fail-on-severity:\s*high/);
+  assert.match(dependencyWorkflow, /fail-on-scopes:\s*runtime, development/);
+  assert.doesNotMatch(ciWorkflow, /^\s{2}dependency-review:/m, "dependency-review 不应重复挂在高成本 CI 工作流");
+});
+
 test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
-  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const [ciWorkflow, dependencyWorkflow] = await Promise.all([
+    readFile(".github/workflows/ci.yml", "utf8"),
+    readFile(".github/workflows/dependency-review.yml", "utf8"),
+  ]);
+  const workflow = `${ciWorkflow}\n${dependencyWorkflow}`;
   const refs = [...workflow.matchAll(/uses:\s*([^\s#]+)(?:\s*#\s*(\S+))?/g)].map((match) => ({
     ref: match[1] ?? "",
     version: match[2] ?? "",
@@ -245,8 +261,8 @@ test("CI 外部 Action 全部固定到完整 commit SHA", async () => {
   }
   assert.ok(refs.some((item) => item.ref === "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"));
   assert.doesNotMatch(workflow, /aquasecurity\/trivy-action@0\.28\.0/);
-  assert.match(workflow, /fetch-depth: 0/);
-  assert.match(workflow, /name: Main merge version advance/);
-  assert.match(workflow, /VERSION_BASE_REF:.*github\.event\.pull_request\.base\.sha/);
-  assert.match(workflow, /npm run version:main-guard/);
+  assert.match(ciWorkflow, /fetch-depth: 0/);
+  assert.match(ciWorkflow, /name: Main merge version advance/);
+  assert.match(ciWorkflow, /VERSION_BASE_REF:.*github\.event\.pull_request\.base\.sha/);
+  assert.match(ciWorkflow, /npm run version:main-guard/);
 });

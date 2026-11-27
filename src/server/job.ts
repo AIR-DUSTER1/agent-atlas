@@ -5,7 +5,7 @@
  * 设计立场：不依赖外部 skill、Python 或平台 CLI；登录态和交付物全部落在应用数据目录。
  */
 import { promises as fsp } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig, mergeConfig } from "./config-store.js";
 import { writeJobHtmlReport } from "./job-html.js";
@@ -22,7 +22,9 @@ import { writeAudit } from "./audit.js";
 import { recordDependency } from "./observability/dependency-status.js";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DATA_DIR = join(MODULE_DIR, "..", "..", ".setting", "job-data");
+/** 本地默认目录；容器通过 JOB_DATA_DIR 指向持久化 /data 卷。 */
+const FALLBACK_DATA_DIR = join(MODULE_DIR, "..", "..", ".setting", "job-data");
+const DEFAULT_DATA_DIR = resolve(process.env.JOB_DATA_DIR?.trim() || FALLBACK_DATA_DIR);
 const MAX_RESULT_CHARS = 26_000;
 const MAX_MANIFEST_BYTES = 20_000_000;
 const MANIFEST_NAME = "最新岗位清单.json";
@@ -44,8 +46,10 @@ export {
 export async function loadJob(): Promise<void> {
   const cfg = await readConfig();
   const source = (cfg.job ?? {}) as Record<string, unknown>;
+  const storedDataDir = typeof source.dataDir === "string" ? source.dataDir.trim() : "";
   saved = {
-    dataDir: typeof source.dataDir === "string" && source.dataDir.trim() ? source.dataDir.trim() : "",
+    // 旧容器配置可能仍指向只读 /app；启动时自动丢弃，回退到 JOB_DATA_DIR。
+    dataDir: storedDataDir ? sanitizeStoredJobDataDir(storedDataDir) : "",
     lastCity: typeof source.lastCity === "string" ? source.lastCity : "",
   };
   loaded = true;
@@ -54,14 +58,40 @@ export async function loadJob(): Promise<void> {
 const ensureLoaded = (): Promise<void> => (loaded ? Promise.resolve() : loadJob());
 async function persistJob(): Promise<void> { await mergeConfig({ job: saved }); }
 
-export function resolveJobDataDir(): string {
-  if (!saved.dataDir) return DEFAULT_DATA_DIR;
-  const absolute = resolve(saved.dataDir);
-  if (absolute !== DEFAULT_DATA_DIR && !absolute.startsWith(DEFAULT_DATA_DIR.endsWith(sep) ? DEFAULT_DATA_DIR : DEFAULT_DATA_DIR + sep)) {
-    throw new Error("求职数据目录必须是「应用数据目录下的相对路径」：当前值会写入应用目录之外，被拒绝。请改回相对路径（例如 job-data / custom/job）");
+/** 求职数据目录唯一根内解析；相对路径按根解析，绝对路径也必须落在根内。 */
+export function resolveJobDataDirPath(raw: string, root = DEFAULT_DATA_DIR): string {
+  const base = resolve(root);
+  const value = raw.trim();
+  const target = value
+    ? (isAbsolute(value) ? resolve(value) : resolve(base, value))
+    : base;
+  const rel = relative(base, target);
+  const outside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  if (outside) {
+    throw new Error(
+      `求职数据目录必须位于应用数据目录「${base}」内；当前值「${raw}」会写到目录之外。` +
+      "请留空使用默认目录，或填写根目录内的相对路径（例如 custom/job）。",
+    );
   }
-  return absolute;
-}export interface JobStatus {
+  return target;
+}
+
+/** 读取旧配置时容错：无效目录直接回退默认根，避免容器升级后继续卡死。 */
+export function sanitizeStoredJobDataDir(raw: string, root = DEFAULT_DATA_DIR): string {
+  const value = raw.trim();
+  if (!value) return "";
+  try {
+    resolveJobDataDirPath(value, root);
+    return value;
+  } catch {
+    return "";
+  }
+}
+
+export function resolveJobDataDir(): string {
+  return resolveJobDataDirPath(saved.dataDir ?? "");
+}
+export interface JobStatus {
   installed: boolean;
   hasOverride: boolean;
   browserOK: boolean;
@@ -102,7 +132,9 @@ export async function saveJobConfig(input: { dataDir?: unknown }): Promise<JobSt
   await ensureLoaded();
   if (input.dataDir !== undefined) {
     if (typeof input.dataDir !== "string") throw new Error("数据目录必须是字符串");
-    saved.dataDir = input.dataDir.trim();
+    const nextDataDir = input.dataDir.trim();
+    if (nextDataDir) resolveJobDataDirPath(nextDataDir);
+    saved.dataDir = nextDataDir;
   }
   await persistJob();
   writeAudit("job.updated", { dataDir: saved.dataDir });
@@ -170,6 +202,10 @@ export interface CliOutcome {
   xlsxPath?: string;
   /** 未登录导致中止时，需要用户去登录的平台中文名（供工具层给模型直接指向动作）。 */
   needsLogin?: string[];
+  errorCode?: "JOB_DATA_DIR_UNWRITABLE" | "JOB_COLLECT_FAILED";
+  /** false 表示确定性配置/环境错误，原样重试不会成功。 */
+  retryable?: boolean;
+  nextAction?: string;
 }
 
 function normalizeCollectInput(input: CollectInput): { profile: JobSearchProfile; pages: number; platforms: JobPlatform[] } {
@@ -215,7 +251,24 @@ export async function collectJobs(input: CollectInput): Promise<CliOutcome> {
     );
   } catch (err) {
     recordDependency("job", "down", "岗位采集失败");
-    return { ok: false, summary: `采集失败：${err instanceof Error ? err.message : String(err)}` };
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err && typeof err === "object" ? (err as NodeJS.ErrnoException).code ?? "" : "";
+    const fsFailure = ["ENOENT", "EACCES", "EPERM", "EROFS"].includes(code) || /mkdir.*(?:ENOENT|EACCES|EPERM|EROFS)/i.test(message);
+    if (fsFailure) {
+      return {
+        ok: false,
+        errorCode: "JOB_DATA_DIR_UNWRITABLE",
+        retryable: false,
+        summary: `采集失败：求职数据目录不可写（${message}）。这不是岗位参数或登录问题。`,
+        nextAction: "请在「设置 → 插件 → 求职岗位」把数据目录改为服务端可写目录；Docker 应使用 /data/job-data。不要原样重试 job_collect。",
+      };
+    }
+    return {
+      ok: false,
+      errorCode: "JOB_COLLECT_FAILED",
+      retryable: true,
+      summary: `采集失败：${message}`,
+    };
   }
   // 必需平台未登录时采集器直接中止（不返回岗位），这里要把「该去登录」讲清楚，
   // 而不是让用户以为是站点改版或没岗位。
