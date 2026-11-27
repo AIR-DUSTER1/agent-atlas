@@ -82,7 +82,7 @@ import {
   handleClearRag, handleDeleteRagDoc, handleGetRag, handleIngest, handleRagSearch,
   handleSaveRagConfig, handleTestRag,
 } from "./routes/rag.js";
-import { handleEstateExport, handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
+import { handleEstateExport, handleGetBeikeInstall, handleGetEstate, handleSaveBeikeKey, handleStartBeikeInstall, handleStartBeikeLogin } from "./routes/estate.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
@@ -650,7 +650,8 @@ export function createApp(): Hono<AppEnv> {
   });
   app.get("/api/estate", withBody(async (c) => { await handleGetEstate(c.env.outgoing); }));
   app.get("/api/estate/exports/:exportId", withBody(async (c) => { await handleEstateExport(c.env.outgoing, c.req.param("exportId") as string); }));
-  app.post("/api/estate/install", jsonRaw, withBody(async (c) => { await handleInstallBeike(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/estate/install", withBody(async (c) => { handleGetBeikeInstall(c.env.outgoing); }));
+  app.post("/api/estate/install", jsonRaw, withBody(async (c) => { handleStartBeikeInstall(c.env.outgoing); }));
   app.post("/api/estate/login", jsonRaw, withBody(async (c) => { await handleStartBeikeLogin(c.env.outgoing, c.env.incoming); }));
   app.post("/api/estate/key", jsonRaw, withBody(async (c) => { await handleSaveBeikeKey(c.env.outgoing, c.env.incoming); }));
   app.get("/api/job", withBody(async (c) => { await handleGetJob(c.env.outgoing); }));

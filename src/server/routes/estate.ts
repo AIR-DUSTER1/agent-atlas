@@ -2,11 +2,14 @@
  * routes/estate.ts — 房产 Agent（贝壳 CLI）路由：状态 / 安装 / 系统浏览器登录 / 保存 Key
  * ============================================================
  * getEstatePublic 会真正探测一次 beike --version（毫秒级），必须 await 再回 200；
- * installBeike 是几十秒级的下载解压，失败回 500。
+ * CLI 安装是分钟级任务：POST 只启动后台任务并返回 202，GET /api/estate/install 轮询状态。
  */
 import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { getEstatePublic, installBeike, saveBeikeKey, startBeikeLogin } from "../estate.js";
+import { createBeikeInstallCoordinator } from "../estate-install-job.js";
 import { readEstateExport } from "../estate-workbook.js";
+
+const beikeInstall = createBeikeInstallCoordinator(installBeike);
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -15,26 +18,25 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
 
 export async function handleGetEstate(res: import("node:http").ServerResponse): Promise<void> {
   try {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(await getEstatePublic()));
+    sendJson(res, 200, { ...(await getEstatePublic()), install: beikeInstall.get() });
   } catch (err) {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ installed: false, error: err instanceof Error ? err.message : String(err) }));
+    sendJson(res, 200, {
+      installed: false,
+      error: err instanceof Error ? err.message : String(err),
+      install: beikeInstall.get(),
+    });
   }
 }
 
-export async function handleInstallBeike(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
-  try {
-    const status = await installBeike(); // 下载 ~32MB + 解压，可能要几十秒
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: true, ...status }));
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) respondBadRequest(res, req, err);
-    else {
-      res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
-    }
-  }
+/** GET /api/estate/install —— 只读轮询后台安装状态，不再持有长请求。 */
+export function handleGetBeikeInstall(res: import("node:http").ServerResponse): void {
+  sendJson(res, 200, { ok: true, install: beikeInstall.get() });
+}
+
+/** POST /api/estate/install —— 启动后台安装并立即返回，避免反向代理 504。 */
+export function handleStartBeikeInstall(res: import("node:http").ServerResponse): void {
+  const job = beikeInstall.start();
+  sendJson(res, 202, { ok: true, install: job });
 }
 
 export async function handleSaveBeikeKey(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {

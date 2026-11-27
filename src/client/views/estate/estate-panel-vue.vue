@@ -27,6 +27,7 @@ const status2Color = ref("");
 
 const st = computed(() => store.estate);
 const keyHref = computed(() => safeHref(st.value.keyUrl || ""));
+const installRunning = computed(() => installing.value || st.value.install?.status === "installing");
 
 /** 打开弹窗时回填（watch estateOpen）。 */
 watch(() => store.estateOpen, (open) => {
@@ -34,23 +35,37 @@ watch(() => store.estateOpen, (open) => {
   if (!open) return;
   keyValue.value = "";
   keyVisible.value = false;
-  void store.load().then(() => renderPanel());
+  void store.load().then(async () => {
+    renderPanel();
+    // 页面刷新或重新打开时，如果后台安装仍在运行，继续轮询而不是重复启动。
+    if (st.value.install?.status === "installing") await install();
+  });
   requestAnimationFrame(() => document.getElementById("estate-check")?.focus());
 });
 
 function renderPanel(): void {
   const s = st.value;
-  if (s.installed) {
+  if (s.install?.status === "installing") {
+    status1Text.value = "正在后台下载并安装贝壳 CLI…";
+    status1Kind.value = "";
+  } else if (s.install?.status === "failed" && !s.installed) {
+    status1Text.value = `✗ 安装失败：${s.install.error || "未知错误"}`;
+    status1Kind.value = "err";
+  } else if (s.installed) {
     status1Text.value = `✓ 已安装贝壳 CLI${s.version ? " " + s.version : ""}${s.viaPATH ? "（来自系统 PATH）" : s.path ? "：" + s.path : ""}`;
     status1Kind.value = "ok";
   } else {
     status1Text.value = s.error ? `✗ ${s.error}` : "未检测到贝壳 CLI：点下方按钮下载当前平台的官方二进制（约 32MB）";
     status1Kind.value = "err";
   }
-  status2Text.value = s.loginRequired
-    ? "登录已失效：打开官方登录页，重新获取并保存 Key 后才能继续找房"
-    : s.installed ? "CLI 就绪后即可登录并保存 Key 开始找房" : "请先安装 CLI";
-  status2Color.value = s.installed && !s.loginRequired ? "" : "var(--amber)";
+  status2Text.value = s.install?.status === "installing"
+    ? "安装任务已在服务端后台运行；可以关闭页面，稍后回来点「重新检测」查看结果"
+    : s.loginRequired
+      ? "登录已失效：打开官方登录页，重新获取并保存 Key 后才能继续找房"
+      : s.installed ? "CLI 就绪后即可登录并保存 Key 开始找房" : "请先安装 CLI";
+  status2Color.value = s.install?.status === "installing"
+    ? "var(--amber)"
+    : s.installed && !s.loginRequired ? "" : "var(--amber)";
 }
 
 async function reload(): Promise<void> {
@@ -67,8 +82,9 @@ async function install(): Promise<void> {
     refreshPluginCards();
     renderPanel();
   } catch (err) {
-    setEstateStatus(`✗ 安装失败：${(err as Error).message}`, "err");
-    status2Text.value = "安装失败，请检查安装目录写入权限，或设置 BEIKE_CLI_PATH 指向已安装的官方二进制";
+    const message = (err as Error).message;
+    setEstateStatus(`✗ 安装失败：${message}`, "err");
+    status2Text.value = `安装失败：${message}。可检查服务端外网访问、安装目录写入权限，或设置 BEIKE_CLI_PATH 指向已安装的官方二进制`;
     status2Color.value = "var(--red)";
   } finally {
     installing.value = false;
@@ -170,8 +186,8 @@ function close(): void {
     <div id="estate-status" class="estate-status" :class="status1Kind">{{ status1Text || "探测中…" }}</div>
     <div class="kb-actions">
       <Button id="estate-check" class="ghost-btn" @click="reload">重新检测</Button>
-      <Button id="estate-install" :disabled="installing" @click="install" type="primary">
-        <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> 安装 CLI（自动下载官方二进制）
+      <Button id="estate-install" :disabled="installRunning" @click="install" type="primary">
+        <i class="ui-icon" data-icon="Download" aria-hidden="true"></i> {{ installRunning ? "安装中…（服务端后台执行）" : "安装 CLI（自动下载官方二进制）" }}
       </Button>
     </div>
     <p class="settings-note">安装会按官方 manifest 选择当前平台的二进制并做 sha256 校验：Windows 为 <code>beike.exe</code>，Linux / macOS 为 <code>beike</code>。默认写入 <code>.setting/beike/</code>；容器使用持久化目录。也可通过 <code>BEIKE_CLI_PATH</code> 或系统 PATH 使用已授权版本。</p>

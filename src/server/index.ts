@@ -83,7 +83,7 @@ import {
 } from "./routes/memory.js";
 import { handleStats } from "./routes/stats.js";
 import { handleCreateBackup, handleListBackups, handleRestoreBackup } from "./routes/backup.js";
-import { handleEstateExport, handleGetEstate, handleInstallBeike, handleSaveBeikeKey, handleStartBeikeLogin } from "./routes/estate.js";
+import { handleEstateExport, handleGetBeikeInstall, handleGetEstate, handleSaveBeikeKey, handleStartBeikeInstall, handleStartBeikeLogin } from "./routes/estate.js";
 import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
