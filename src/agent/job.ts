@@ -79,6 +79,7 @@ export const jobProfile: AgentProfile = {
     "- 用户提到具体公司名时，先确认是想看这家公司的在招岗位还是想投递，避免误解。",
     "- 采集结果为空时不要重复采集，先怀疑未登录或风控。",
     "- job_collect 返回 needsLogin 时不要换参数重试，直接把登录动作说清楚；用户要求强采才传 skipLoginCheck。",
+    "- job_collect 返回 retryable=false 或 JOB_DATA_DIR_UNWRITABLE 时不要重试：这是数据目录/权限配置错误，直接告诉用户按 nextAction 修复。",
     "- 出现“结构变化/临时选择器”时用 job_diagnose 获取命中率与候选证据；不要在诊断前声称已修复。",
     "- 用户要写招呼语但画像不存在或为空时：先 job_greet action=init 并请用户补全，不要凭对话记忆替用户编画像。",
   ].join("\n"),

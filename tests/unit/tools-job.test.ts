@@ -6,14 +6,15 @@
  */
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { jobTools } from "../../src/tools-job.js";
 import { jobApprovals } from "../../src/agent/approvals.js";
 import { jobProfile } from "../../src/agent/job.js";
 import {
-  JOB_SUPPORTED_CITIES, exportJobGreetTargets, initJobGreetProfile, readManifest, saveJobGreetings,
+  JOB_SUPPORTED_CITIES, exportJobGreetTargets, initJobGreetProfile, readManifest, resolveJobDataDirPath,
+  sanitizeStoredJobDataDir, saveJobGreetings,
 } from "../../src/server/job.js";
 import { writeJobHtmlReport } from "../../src/server/job-html.js";
 import { writeJobWorkbook } from "../../src/server/job-workbook.js";
@@ -440,6 +441,32 @@ test("卡片解析：绝对投递链接不能被空 base 丢掉，结构自愈�
   assert.equal(parsed.applyUrl, "https://example.com/job_detail/1");
 });
 
+test("求职数据目录：相对路径按根解析，根外绝对路径和 .. 穿越都被拒绝", async () => {
+  const root = await mkdtemp(join(tmpdir(), "job-data-root-"));
+  try {
+    assert.equal(resolveJobDataDirPath("", root), resolve(root));
+    assert.equal(resolveJobDataDirPath("custom/job", root), resolve(root, "custom/job"));
+    assert.equal(resolveJobDataDirPath(resolve(root, "absolute-job"), root), resolve(root, "absolute-job"));
+    assert.throws(() => resolveJobDataDirPath("../escape", root), /必须位于应用数据目录/);
+    assert.throws(() => resolveJobDataDirPath("/app/setting", root), /必须位于应用数据目录/);
+    assert.equal(sanitizeStoredJobDataDir("/app/setting", root), "");
+    assert.equal(sanitizeStoredJobDataDir("custom/job", root), "custom/job");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("生产容器把求职数据目录固定到可写 /data 卷", async () => {
+  const [dockerfile, compose, production] = await Promise.all([
+    readFile(new URL("../../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../../docker-compose.production.yml", import.meta.url), "utf8"),
+  ]);
+  assert.match(dockerfile, /JOB_DATA_DIR=\/data\/job-data/);
+  assert.match(compose, /JOB_DATA_DIR:\s*\/data\/job-data/);
+  assert.match(production, /JOB_DATA_DIR:\s*\/data\/job-data/);
+});
+
 test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚本或子进程 CLI", async () => {
   const [server, browser] = await Promise.all([
     readFile(new URL("../../src/server/job.ts", import.meta.url), "utf8"),
@@ -449,6 +476,7 @@ test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚
   assert.doesNotMatch(source, /scripts\/main\.py|pythonBin|runControlled\(|job-hunter 技能根目录/);
   assert.match(source, /launchPersistentContext/);
   assert.match(source, /collectNativeJobs/);
+  assert.match(source, /process\.env\.JOB_DATA_DIR/);
   const [html, view] = await Promise.all([
     readClientIndexHtml(),
     // M4 4.4：求职面板迁往 Vue 组件，id/文案契约在组件模板上断言
@@ -456,5 +484,6 @@ test("架构约束：求职执行服务不再引用 skill 根目录、Python 脚
   ]);
   assert.doesNotMatch(html, /job-skill-dir|job-python-bin|技能根目录|Python 解释器/);
   assert.match(view, /job-data-dir/);
+  assert.match(view, /\/data\/job-data/);
   assert.match(view, /无需 Python \/ Skill/);
 });

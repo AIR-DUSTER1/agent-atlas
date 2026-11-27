@@ -258,6 +258,7 @@ DATABASE_ADMIN_URL=postgresql://agent:ADMIN_PASSWORD@postgres:5432/agentatlas
 | `BROWSER_USE_EXECUTABLE_PATH` | 指定浏览器路径；桌面端未设置时自动探测，生产镜像默认指向内置 Chrome Headless Shell |
 | `BROWSER_USE_CONTAINER` | 仅隔离容器内设为 `1`，追加 `--no-sandbox` / `--disable-gpu`；桌面端不要设置 |
 | `MEMORY_STORE_DIR` | 长期记忆 v3 目录；默认 `.setting/memory-store`，测试与容器可覆盖 |
+| `JOB_DATA_DIR` | 求职数据根目录；本地留空为 `.setting/job-data`，容器默认 `/data/job-data` |
 | `JOB_BROWSER_HEADLESS` | 求职采集无头模式；显式 `1` / `0` 覆盖，Linux 无显示服务器时自动无头 |
 | `BEIKE_INSTALL_DIR` | 贝壳 CLI 自动安装目录；容器默认 `/data/tools/beike` |
 | `BEIKE_USER_HOME` | 贝壳 CLI 的 HOME；Key 保存到 `<HOME>/.beike/BEIKE_MCP_API_KEY`，容器默认 `/data/beike-home` |

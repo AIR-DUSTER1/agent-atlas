@@ -24,7 +24,7 @@
 - [ ] **P0** 已成功创建一份 v2 备份并通过 manifest/SHA-256 校验。
 - [ ] **P0** 已完成一次“备份 → 隔离副本 → 恢复 → 数据检查”演练。
 - [ ] **P0** `DATA_KEY` 已有离线/密钥系统副本。
-- [ ] **P1** 配置、journal、checkpoint、memory、audit、skills 全部落在 `/data`。
+- [ ] **P1** 配置、journal、checkpoint、memory、audit、skills 与 `job-data` 全部落在 `/data`。
 - [ ] **P1** 备份保留最近 N 份与最近 N 天每日最后一份，并至少保留一份异机副本。
 - [ ] **P1** 升级前自动备份，升级后运行 `data:check`。
 - [ ] **P2** 定期验证恢复后的旧会话可读、审批状态正确、长期记忆可召回。
@@ -56,6 +56,7 @@
 - [ ] **P1** `stop_grace_period` 大于应用 10 秒排空超时。
 - [ ] **P1** 根文件系统只读、`cap_drop: ALL`、`no-new-privileges`。
 - [ ] **P1** 默认镜像内置 Chrome Headless Shell；已确认 `BROWSER_USE_EXECUTABLE_PATH` 可执行，并设置内存、`pids_limit: 512` 和 256 MiB `/tmp`。
+- [ ] **P1** 启用求职插件时 `JOB_DATA_DIR=/data/job-data`，目录位于持久卷且 `node` 用户可写。
 - [ ] **P1** 默认镜像 rootfs 不超过 700 MiB；明确关闭 Browser Use 时才使用 `--target minimal`。
 - [ ] **P1** 启用 Browser Use 时已配置出站网络策略；应用默认拒绝私网，仍需在网络层阻断云元数据、管理网段和不需要的内网目标。
 - [ ] **P1** 启用贝壳插件时确认 `BEIKE_INSTALL_DIR` 与 `BEIKE_USER_HOME` 位于持久化 `/data`，或 `BEIKE_CLI_PATH` 指向挂载的已授权 Linux 二进制。

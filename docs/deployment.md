@@ -56,6 +56,7 @@ agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
       ├── checkpoints.ndjson       # LangGraph 持久检查点
       ├── memory-store/            # 跨会话记忆 v3（事件 / 快照 / 向量索引）
       ├── skills/                  # 用户技能文档
+      ├── job-data/                # 求职登录态、岗位清单与 Excel/HTML 交付
       ├── audit.ndjson             # 安全审计
       ├── audit-archive*/          # 审计归档与哈希清单
       └── backups/                 # 校验清单 v2 + 保留策略
@@ -63,7 +64,7 @@ agentatlas 容器（非 root、只读根文件系统、PRODUCTION=1）
 
 生产镜像固定设置 `BROWSER_USE_CONTAINER=1`。因此 Docker / 容器部署中 **Computer Use 始终禁用**：旧配置即使写成启用也会在启动时收敛为关闭，API 启用请求会被拒绝，设置页显示“Docker 部署不可用”。需要在 Windows 桌面直接控制本机时，请使用桌面版而不是容器版。
 
-`BROWSER_USE_EXECUTABLE_PATH`、`BROWSER_USE_CONTAINER`、`JOB_BROWSER_HEADLESS` 是无头 Chromium 的 Browser Use / 求职采集参数，不是 Computer Use 运行时；它们本身不增加镜像层。Computer Use 工具实现也没有额外 npm 或原生依赖。若完全不需要无头浏览器，可使用 `--target minimal` 构建瘦镜像，但 Browser Use 和求职网页采集也会失去浏览器运行时；Computer Use 在任何容器目标中都不可用。
+`BROWSER_USE_EXECUTABLE_PATH`、`BROWSER_USE_CONTAINER`、`JOB_BROWSER_HEADLESS` 是无头 Chromium 的 Browser Use / 求职采集参数，不是 Computer Use 运行时。`JOB_DATA_DIR` 控制求职登录态和交付物落盘目录，生产镜像与 Compose 固定为可写的 `/data/job-data`；它们本身不增加镜像层。Computer Use 工具实现也没有额外 npm 或原生依赖。若完全不需要无头浏览器，可使用 `--target minimal` 构建瘦镜像，但 Browser Use 和求职网页采集也会失去浏览器运行时；Computer Use 在任何容器目标中都不可用。
 
 ## 多用户生产拓扑
 
