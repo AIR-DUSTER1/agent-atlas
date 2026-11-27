@@ -240,6 +240,7 @@ test("依赖审查覆盖 main/dev PR，且不重复挂在高成本 CI 上", asyn
   assert.match(dependencyWorkflow, /pull_request:\s*\r?\n\s*branches:\s*\[main, dev\]/);
   assert.match(dependencyWorkflow, /actions\/dependency-review-action@[0-9a-f]{40}/);
   assert.match(dependencyWorkflow, /fail-on-severity:\s*high/);
+  assert.match(dependencyWorkflow, /fail-on-scopes:\s*runtime, development/);
   assert.doesNotMatch(ciWorkflow, /^\s{2}dependency-review:/m, "dependency-review 不应重复挂在高成本 CI 工作流");
 });
 
