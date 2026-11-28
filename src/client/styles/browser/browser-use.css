@@ -73,6 +73,15 @@
   border-radius: 7px; background: var(--bg-input); color: var(--text-2);
   font: 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 地址栏可编辑态：悬停给文本光标提示，编辑输入框继承同一外观但允许完整输入 */
+.browser-dock-url-editable { cursor: text; }
+.browser-dock-url-editable:hover { color: var(--text); border-color: var(--border); }
+.browser-dock-url-editable:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input.browser-dock-url-input {
+  white-space: nowrap; overflow: visible; text-overflow: unset;
+  -webkit-user-select: text; user-select: text;
+}
+input.browser-dock-url-input:focus { outline: none; border-color: var(--accent); }
 .browser-dock-owner { flex: none; color: var(--accent); font-size: 10.5px; }
 
 .browser-dock-canvas {

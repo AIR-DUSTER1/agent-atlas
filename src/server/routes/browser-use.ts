@@ -7,7 +7,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   closeBrowserSession, getBrowserPageState, getBrowserScreenshot, getBrowserUsePublicStatus,
+  openBrowser,
 } from "../browser-use.js";
+import { parsedJsonOf, BodyTooLargeError, respondBadRequest } from "../http-body.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
@@ -55,6 +57,28 @@ export async function handleBrowserClose(
   try {
     sendJson(res, 200, { ok: await closeBrowserSession(rawSessionId) });
   } catch (err) {
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * POST /api/browser/sessions/:id/navigate —— 用户在右侧画面地址栏手动导航。
+ * 复用 browser_open 的同一条路径（openBrowser）：会话不存在则创建、URL 过统一
+ * SSRF 防线（内网地址默认拒绝）、导航计入审计。
+ */
+export async function handleBrowserNavigate(
+  res: ServerResponse,
+  req: IncomingMessage,
+  rawSessionId: string,
+): Promise<void> {
+  try {
+    const body = parsedJsonOf<{ url?: unknown }>(req)!;
+    const url = typeof body.url === "string" ? body.url.trim() : "";
+    if (!url) throw new Error("请输入要访问的网址");
+    const result = await openBrowser(rawSessionId, url, false);
+    sendJson(res, 200, { ok: true, url: result.state.url, title: result.state.title });
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
     sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
   }
 }

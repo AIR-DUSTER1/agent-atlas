@@ -137,6 +137,29 @@ test("求职采集实时画面：dock 支持 job 源且不抢占 Browser Use 会
   const jobStore = await readClientFiles(["stores/job/job.ts"]);
   assert.match(jobStore, /notifyJobLiveProgress/);
 });
+
+test("地址栏可手动导航：点击编辑 + 双源端点 + 服务端 SSRF 防线", async () => {
+  // 用户在右侧画面输入网址 → 导航被看的浏览器。服务端浏览器替用户访问内网
+  // 地址是真实的 SSRF 读取向量（截图会回传给用户），URL 必须过统一防线。
+  const dockVue = await readClientFiles(["views/browser/browser-dock-vue.vue"]);
+  assert.match(dockVue, /browser-dock-url-input/);
+  assert.match(dockVue, /__agentatlasBrowserDockCommands\?\.navigate\?\./, "Vue 只发命令意图，不发请求");
+  // 默认态必须保留只读 span 文本契约（e2e 断言 #browser-dock-url 的 toHaveText）
+  assert.match(dockVue, /id="browser-dock-url"\s+class="browser-dock-url browser-dock-url-editable"/);
+
+  const dock = await readClientFiles(["views/browser/browser-use.ts"]);
+  assert.match(dock, /\/api\/job\/browser\/navigate/);
+  assert.match(dock, /\/api\/browser\/sessions\/\$\{encodeURIComponent\(dockSessionId\)\}\/navigate/);
+
+  const jobBrowser = await readFile(new URL("../../src/server/job-browser.ts", import.meta.url), "utf8");
+  assert.match(jobBrowser, /export async function navigateJobLivePage/);
+  assert.match(jobBrowser, /assertAllowedHttpUrl\(rawUrl, false\)/, "job 导航 URL 必须过 SSRF 防线");
+  assert.match(jobBrowser, /await goto\(page, url, 1_500\)/, "手动导航共享采集的风控节奏");
+
+  const browserUseRoute = await readFile(new URL("../../src/server/routes/browser-use.ts", import.meta.url), "utf8");
+  assert.match(browserUseRoute, /handleBrowserNavigate/);
+  assert.match(browserUseRoute, /await openBrowser\(rawSessionId, url, false\)/, "复用 browser_open 同路径：会话不存在则创建，URL 过防线并计审计");
+});
 test("消息流有回到底部按钮与未读累计", async () => {
   const source = await readClientSource();
   assert.match(source, /function distanceFromBottom/);

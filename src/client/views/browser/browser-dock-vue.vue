@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useBrowserDockStore } from "../../stores/browser/browser-dock.js";
 
 const store = useBrowserDockStore();
@@ -40,6 +40,33 @@ function onError(): void {
 
 function close(): void {
   window.__agentatlasBrowserDockCommands?.close?.();
+}
+
+// ---------------------------------------------------------------------------
+// 地址栏点击编辑：默认只读 span（e2e 文本契约），点击换成 input，回车提交导航。
+// ---------------------------------------------------------------------------
+const editing = ref(false);
+const editingUrl = ref("");
+
+function startEdit(): void {
+  editingUrl.value = url.value === "about:blank" ? "" : url.value;
+  editing.value = true;
+  void nextTick(() => {
+    const input = document.querySelector<HTMLInputElement>(".browser-dock-url-input");
+    input?.focus();
+    input?.select();
+  });
+}
+
+function cancelEdit(): void {
+  editing.value = false;
+}
+
+function submitNavigate(): void {
+  const value = editingUrl.value.trim();
+  editing.value = false;
+  if (!value) return;
+  window.__agentatlasBrowserDockCommands?.navigate?.(value);
 }
 
 const listener = (): void => {
@@ -81,7 +108,30 @@ onUnmounted(() => {
     </header>
     <div class="browser-dock-toolbar">
       <span class="browser-dock-dot" aria-hidden="true"></span>
-      <span id="browser-dock-url" class="browser-dock-url">{{ url }}</span>
+      <!-- 地址栏点击进入编辑（默认仍是 span，e2e 依赖 #browser-dock-url 文本契约）。
+           提交走 dock commands：job 源导航采集浏览器，Browser Use 会话导航对应会话；
+           URL 服务端统一过 SSRF 防线，内网地址会被明确拒绝。 -->
+      <input
+        v-if="editing"
+        v-model="editingUrl"
+        class="browser-dock-url browser-dock-url-input"
+        type="text"
+        aria-label="浏览器地址，输入网址后回车跳转"
+        @keydown.enter.prevent="submitNavigate"
+        @keydown.esc.prevent="cancelEdit"
+        @blur="cancelEdit"
+      />
+      <span
+        v-else
+        id="browser-dock-url"
+        class="browser-dock-url browser-dock-url-editable"
+        title="点击编辑地址并跳转"
+        role="button"
+        tabindex="0"
+        aria-label="浏览器地址，点击编辑并跳转"
+        @click="startEdit"
+        @keydown.enter.prevent="startEdit"
+      >{{ url }}</span>
       <span class="browser-dock-owner">AI 控制</span>
     </div>
     <div class="browser-dock-canvas">

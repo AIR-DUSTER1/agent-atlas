@@ -17,7 +17,8 @@ import {
   type CollectionFilterOutcome, type JobPlatform, type JobRecord, type JobSearchProfile,
 } from "./job-model.js";
 import { checkJobListHealth } from "./job-health.js";
-import { attachJobLivePage, beginJobLive, endJobLive, updateJobLive } from "./job-live.js";
+import { attachJobLivePage, beginJobLive, endJobLive, getJobLivePage, updateJobLive } from "./job-live.js";
+import { assertAllowedHttpUrl } from "../url-guard.js";
 import { cleanJd } from "./job-jdtext.js";
 
 const PROFILE_DIR_NAME = ".profile";
@@ -54,8 +55,7 @@ class PlatformBlockedError extends Error {
  */
 const REQUIRED_LOGIN: readonly JobPlatform[] = ["boss", "zhilian"];
 
-/** 各平台未登录时会缺什么——预检报告里用来说明「为什么值得先登录」。 */
-const LOGIN_VALUE_HINT: Record<JobPlatform, string> = {
+/** 各平台未登录时会缺什么——预检报告里用来说明「为什么值得先登录」。 */const LOGIN_VALUE_HINT: Record<JobPlatform, string> = {
   boss: "未登录时薪资全部为空，部分岗位不出现",
   zhilian: "未登录时薪资显示为 **-**，字段大量缺失",
   liepin: "未登录时字段不全，且易触发短信验证",
@@ -219,6 +219,21 @@ export async function goto(page: Page, url: string, settleMs = 2_000): Promise<v
   await humanPause();
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
   if (settleMs) await page.waitForTimeout(settleMs);
+}
+
+/**
+ * 用户在右侧画面地址栏手动导航（与采集/登录共用同一页面）。
+ * 直连 page 而不走 enqueue：整个采集批次都占着队列，排队会等到采集结束才生效，
+ * 失去「手动导航」的意义。共享 humanPause 风控节奏；采集中的平台批次被这次导航
+ * 打断只会变成该平台的警告（可接受降级）。URL 过统一 SSRF 防线 —— 服务端浏览
+ * 器替用户访问内网地址是真实的 SSRF 读取向量。
+ */
+export async function navigateJobLivePage(rawUrl: string): Promise<string> {
+  const url = assertAllowedHttpUrl(rawUrl, false).href;
+  const page = getJobLivePage();
+  if (!page) throw new Error("当前没有正在进行的采集或登录，没有可导航的页面");
+  await goto(page, url, 1_500);
+  return url;
 }
 
 function blockedReason(url: string): string {

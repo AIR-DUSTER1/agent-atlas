@@ -99,6 +99,11 @@ export function attachJobLivePage(page: Page | null): void {
   livePage = page;
 }
 
+/** 用户手动导航需要拿到当前页面；仅限采集/登录进行中（live 挂着）时非空。 */
+export function getJobLivePage(): Page | null {
+  return livePage && !livePage.isClosed() ? livePage : null;
+}
+
 /** 画面轮询入口；无采集/登录进行中时返回 null（前端据此收起面板）。 */
 export function getJobLiveState(): JobLiveState | null {
   return live ? { ...live } : null;

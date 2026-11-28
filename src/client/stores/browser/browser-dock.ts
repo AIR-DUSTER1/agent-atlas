@@ -33,9 +33,11 @@ export interface BrowserDockSnapshot {
   emptyDetail: string;
 }
 
-/** 组件侧的关闭命令入口（由 legacy 轮询器注册，Vue 只负责触发）。 */
+/** 组件侧的命令入口（由 legacy 轮询器注册，Vue 只负责触发）。 */
 export interface BrowserDockCommands {
   close?: () => void;
+  /** 地址栏手动导航：job 源走采集画面端点，Browser Use 会话走会话导航端点。 */
+  navigate?: (url: string) => void;
 }
 
 declare global {

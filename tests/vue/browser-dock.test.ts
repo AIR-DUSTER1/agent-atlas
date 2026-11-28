@@ -114,10 +114,51 @@ describe("Browser Use 画面", () => {
   it("截图 load 成功后加上 ready 类（CSS 靠它显示画面）", async () => {
     window.__agentatlasBrowserDock = snapshot();
     mountPanel();
+    // 先让初始快照的 src 变化跑完 watch 调度（src 变化会重置 ready），再发 load
+    await flushPromises();
     const screen = document.getElementById("browser-dock-screen")!;
     expect(screen.classList.contains("ready")).toBe(false);
     screen.dispatchEvent(new Event("load"));
     await flushPromises();
     expect(screen.classList.contains("ready")).toBe(true);
+  });
+
+  it("地址栏点击进入编辑，回车只发导航命令意图", async () => {
+    const navigate = vi.fn();
+    window.__agentatlasBrowserDockCommands = { navigate };
+    window.__agentatlasBrowserDock = snapshot();
+    mountPanel();
+    const urlSpan = document.getElementById("browser-dock-url") as HTMLElement;
+    expect(urlSpan.classList.contains("browser-dock-url-editable")).toBe(true);
+
+    urlSpan.dispatchEvent(new Event("click", { bubbles: true }));
+    await flushPromises();
+    const input = document.querySelector<HTMLInputElement>(".browser-dock-url-input")!;
+    expect(input).toBeTruthy();
+    expect(input.value).toBe("https://example.com/");
+
+    input.value = "https://example.org/target";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flushPromises();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("https://example.org/target");
+    // 提交后回到只读 span（显示旧地址，直到下一帧快照带来新地址）
+    expect(document.getElementById("browser-dock-url")).toBeTruthy();
+    expect(document.querySelector(".browser-dock-url-input")).toBeNull();
+  });
+
+  it("编辑中按 Esc 或失焦取消，不发导航", async () => {
+    const navigate = vi.fn();
+    window.__agentatlasBrowserDockCommands = { navigate };
+    window.__agentatlasBrowserDock = snapshot();
+    mountPanel();
+    (document.getElementById("browser-dock-url") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+    await flushPromises();
+    const input = document.querySelector<HTMLInputElement>(".browser-dock-url-input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flushPromises();
+    expect(document.querySelector(".browser-dock-url-input")).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

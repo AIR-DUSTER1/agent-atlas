@@ -83,9 +83,9 @@ import {
   handleSaveRagConfig, handleTestRag,
 } from "./routes/rag.js";
 import { handleEstateExport, handleGetBeikeInstall, handleGetEstate, handleSaveBeikeKey, handleStartBeikeInstall, handleStartBeikeLogin } from "./routes/estate.js";
-import { handleGetJob, handleJobBrowserScreenshot, handleJobBrowserView, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import { handleGetJob, handleJobBrowserNavigate, handleJobBrowserScreenshot, handleJobBrowserView, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
-  handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
+  handleBrowserClose, handleBrowserNavigate, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
 } from "./routes/browser-use.js";
 import { handleChat, handleResume } from "./routes/chat.js";
 import { handleStaticMap } from "./map-static.js";
@@ -666,6 +666,8 @@ export function createApp(): Hono<AppEnv> {
   app.get("/api/browser/sessions/:id", guarded(async (c, sessionId) => { handleBrowserState(c.env.outgoing, sessionId); }));
   app.get("/api/browser/sessions/:id/screenshot", guarded(async (c, sessionId) => { handleBrowserScreenshot(c.env.outgoing, sessionId); }));
   app.post("/api/browser/sessions/:id", jsonRaw, guarded(async (c, sessionId) => { await handleBrowserClose(c.env.outgoing, c.env.incoming, sessionId); }));
+  app.post("/api/browser/sessions/:id/navigate", jsonRaw, guarded(async (c, sessionId) => { await handleBrowserNavigate(c.env.outgoing, c.env.incoming, sessionId); }));
+  app.post("/api/job/browser/navigate", jsonRaw, withBody(async (c) => { await handleJobBrowserNavigate(c.env.outgoing, c.env.incoming); }));
 
   // ── 15m. 结论地图静态代理（批次 3 时留在 dispatch，随批次 10 一并收编）──
   app.get("/api/map/static", withBody(async (c) => {

@@ -282,8 +282,35 @@ function closeDockSession(): void {
   }).catch(() => {});
 }
 
+/**
+ * 地址栏手动导航：job 源走采集画面导航端点（共享采集浏览器的风控节奏），
+ * Browser Use 会话走会话导航端点（openBrowser 同路径：URL 过服务端 SSRF 防线，
+ * 会话已关闭时会重新创建并打开）。
+ */
+async function navigateDock(rawUrl: string): Promise<void> {
+  const url = rawUrl.trim();
+  if (!url) return;
+  if (jobMode) {
+    await api("/api/job/browser/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    return;
+  }
+  if (!dockSessionId) return;
+  await api(`/api/browser/sessions/${encodeURIComponent(dockSessionId)}/navigate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
 export function bindBrowserDock(): void {
-  window.__agentatlasBrowserDockCommands = { close: closeDockSession };
+  window.__agentatlasBrowserDockCommands = {
+    close: closeDockSession,
+    navigate: (url: string) => { void navigateDock(url).catch(() => {}); },
+  };
   // 面板挂载一次（幂等）：启动即挂上空态，首次 openBrowserDock 直接可见。
   void import("./browser-dock-vue.js")
     .then((m) => m.mountBrowserDockVue())

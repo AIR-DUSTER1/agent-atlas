@@ -17,6 +17,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { diagnoseJobs, doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
+import { navigateJobLivePage } from "../job-browser.js";
 import { getJobLiveScreenshot, pollJobLiveView } from "../job-live.js";
 import { bumpConfigVersion } from "../sessions.js";
 
@@ -105,6 +106,20 @@ export function handleJobBrowserScreenshot(res: ServerResponse): void {
     "Content-Length": String(frame.length),
   });
   res.end(frame);
+}
+
+/** POST /api/job/browser/navigate —— 用户在地址栏手动导航（SSRF 防线 + 风控节奏）。 */
+export async function handleJobBrowserNavigate(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  try {
+    const body = parsedJsonOf<{ url?: unknown }>(req)!;
+    const url = typeof body.url === "string" ? body.url.trim() : "";
+    if (!url) throw new Error("请输入要访问的网址");
+    const finalUrl = await navigateJobLivePage(url);
+    sendJson(res, 200, { ok: true, url: finalUrl });
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { respondBadRequest(res, req, err); return; }
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export async function handleJobDiagnose(res: ServerResponse, req: IncomingMessage): Promise<void> {
