@@ -45,7 +45,10 @@ function stepMeta(step: WorkflowPlanStep): string {
 }
 
 function isActive(step: WorkflowPlanStep): boolean {
-  return Boolean(store.plan) && step.id === store.plan!.activeStepId && step.status === "in_progress";
+  // 回合已结束时不再显示「进行中」的旋转/高亮（假进度）：displayStatus 为 ended
+  // 说明会话已停止生成而模型从未收口流程。
+  return Boolean(store.plan) && store.displayStatus === "running"
+    && step.id === store.plan!.activeStepId && step.status === "in_progress";
 }
 
 function onToggle(event: Event): void {
@@ -70,7 +73,7 @@ function onToggle(event: Event): void {
         <strong>执行流程</strong>
         <span id="workflow-active">{{ store.activeText }}</span>
       </span>
-      <span id="workflow-status" class="workflow-status" :class="`status-${store.plan?.status}`">{{ store.statusLabel }}</span>
+      <span id="workflow-status" class="workflow-status" :class="`status-${store.displayStatus}`">{{ store.statusLabel }}</span>
       <span id="workflow-count" class="workflow-count">{{ store.completedCount }}/{{ store.steps.length }} 步</span>
       <span
         id="workflow-meter"
@@ -82,7 +85,7 @@ function onToggle(event: Event): void {
         :aria-valuenow="store.percent"
         :aria-valuetext="`已完成 ${store.completedCount} 个步骤，共 ${store.steps.length} 个`"
       >
-        <span id="workflow-meter-fill" class="workflow-meter-fill" :class="`status-${store.plan?.status}`" :style="{ width: `${store.percent}%` }"></span>
+        <span id="workflow-meter-fill" class="workflow-meter-fill" :class="`status-${store.displayStatus}`" :style="{ width: `${store.percent}%` }"></span>
       </span>
       <span id="workflow-percent" class="workflow-percent">{{ store.percent }}%</span>
       <span class="workflow-chevron" aria-hidden="true"><i class="ui-icon" data-icon="ChevronRight"></i></span>

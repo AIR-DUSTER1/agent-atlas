@@ -82,6 +82,51 @@ test("多个会话可并行生成，切换会话不再被全局流状态拦截",
   assert.match(vue, /class="s-running"/);
   assert.match(events, /const visible = sid === state\.currentId/);
 });
+
+test("后台跑完自动重放消息区：running 翻转触发 reloadSessionTranscript", async () => {
+  // 真实事故：job_collect 采完 3-5 分钟，本浏览器的消息区还冻结在断开那一刻 ——
+  // 工具条停在「运行中」、审批卡停在旧状态。轮询发现 running true→false 必须强制重放。
+  const sessions = await readClientFiles(["views/sessions.ts"]);
+  const navigation = await readClientFiles(["views/navigation.ts"]);
+  assert.match(sessions, /prev && !next && !state\.streams\[session\.id\] && !state\.approvalResuming\[session\.id\]/);
+  assert.match(sessions, /reloadSessionTranscript\(session\.id\)/);
+  // 强制重放必须清本地缓存，否则 hydrateFromServer 走 hadLocal 分支不重建 DOM
+  assert.match(navigation, /export async function reloadSessionTranscript/);
+  assert.match(navigation, /transcript\(sid\)\.length = 0/);
+  assert.match(navigation, /delete state\.usage\[sid\]/);
+});
+
+test("执行流程面板：回合结束后不再显示「执行中」假进度", async () => {
+  // 真实事故：模型创建流程后从未调用 updates（planProgress 只在失败时收口），
+  // 面板永远停在 01 运行中。store 必须结合会话运行态降级为「已结束 · 未完成」。
+  const store = await readClientFiles(["stores/chat/workflow-plan.ts"]);
+  const vue = await readClientFiles(["views/chat/workflow-plan-vue.vue"]);
+  assert.match(store, /已结束 · 未完成/);
+  assert.match(store, /displayStatus\(\): "running" \| "completed" \| "failed" \| "ended"/);
+  assert.match(store, /notifyRunStateChange/);
+  assert.match(vue, /status-\$\{store\.displayStatus\}/);
+  assert.match(vue, /store\.displayStatus === "running"/, "回合结束后进行中步骤不再有活动态高亮");
+  // 运行态变化要有触发点进 store（core state 非响应式，不触发 getter 就永远不重算）
+  const turn = await readClientFiles(["stream/turn.ts"]);
+  assert.match(turn, /notifyRunStateChange\(\)/);
+});
+
+test("求职采集实时画面：dock 支持 job 源且不抢占 Browser Use 会话", async () => {
+  const dock = await readClientFiles(["views/browser/browser-use.ts"]);
+  const events = await readClientFiles(["stream/events.ts"]);
+  assert.match(dock, /export function notifyJobLiveProgress/);
+  assert.match(dock, /if \(dockSessionId\) return;/, "已在看 Browser Use 时 job 源不得抢占");
+  assert.match(dock, /refreshJobView/);
+  assert.match(dock, /\/api\/job\/browser\/view/);
+  assert.match(dock, /\/api\/job\/browser\/screenshot/);
+  assert.match(dock, /jobIdlePolls >= 2/, "连续无活动才收起，防止阶段空窗闪退");
+  assert.match(dock, /采集浏览器启动后（登录预检 → 逐平台采集）画面会在这里实时更新/);
+  // chat 流收到 job_progress 必须驱动画面打开
+  assert.match(events, /case "job_progress":[\s\S]*notifyJobLiveProgress/);
+  // 设置页登录也走同一画面（无头容器里扫码全靠它）
+  const jobStore = await readClientFiles(["stores/job/job.ts"]);
+  assert.match(jobStore, /notifyJobLiveProgress/);
+});
 test("消息流有回到底部按钮与未读累计", async () => {
   const source = await readClientSource();
   assert.match(source, /function distanceFromBottom/);

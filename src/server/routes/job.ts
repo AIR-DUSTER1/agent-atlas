@@ -6,6 +6,8 @@
  * POST   /api/job/login      打开内置浏览器完成平台扫码（长请求，最长 5 分钟）
  * POST   /api/job/doctor     内置执行器自检
  * POST   /api/job/diagnose   站点结构诊断；apply=true 时固化真实验证过的候选
+ * GET    /api/job/browser/view        采集/登录实时状态（供右侧画面轮询）
+ * GET    /api/job/browser/screenshot  采集页面截图（JPEG，1.2s 轮询）
  *
  * 设计立场：
  *  - 登录是**交互步骤**，必须停下来等用户扫码，所以不封装成 Agent 工具，
@@ -15,6 +17,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { diagnoseJobs, doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
+import { getJobLiveScreenshot, getJobLiveState } from "../job-live.js";
 import { bumpConfigVersion } from "../sessions.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -77,6 +80,30 @@ export async function handleJobDoctor(res: ServerResponse, req: IncomingMessage)
   } catch (err) {
     sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 采集实时画面（与 Browser Use 右侧画面同模式：前端 1.2s 只读轮询）
+// ---------------------------------------------------------------------------
+
+/** GET /api/job/browser/view —— 采集/登录是否进行中 + 当前平台/条数/动作。 */
+export function handleJobBrowserView(res: ServerResponse): void {
+  sendJson(res, 200, { view: getJobLiveState() });
+}
+
+/** GET /api/job/browser/screenshot —— 当前采集页面截图（JPEG）；无画面时 404。 */
+export async function handleJobBrowserScreenshot(res: ServerResponse): Promise<void> {
+  const frame = await getJobLiveScreenshot();
+  if (!frame) {
+    sendJson(res, 404, { error: "采集画面尚未就绪（没有正在进行的采集或登录）" });
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "no-store",
+    "Content-Length": String(frame.length),
+  });
+  res.end(frame);
 }
 
 export async function handleJobDiagnose(res: ServerResponse, req: IncomingMessage): Promise<void> {

@@ -21,6 +21,9 @@ export const useWorkflowPlanStore = defineStore("workflowPlan", {
     planKey: "",
     /** 用户是否手动展开过当前流程（流程更新不抢回折叠态）。 */
     userOpened: false,
+    /** 运行态变化序号：core state 不是响应式对象，「已结束 · 未完成」要靠
+     *  这个计数器在运行结束/切换时触发 getter 重算（见 notifyRunStateChange）。 */
+    runningTick: 0,
   }),
   getters: {
     steps(): WorkflowPlanSnapshot["steps"] {
@@ -43,12 +46,35 @@ export const useWorkflowPlanStore = defineStore("workflowPlan", {
     statusLabel(): string {
       const plan = this.plan;
       if (!plan) return "";
-      return plan.status === "completed" ? "已完成" : plan.status === "failed" ? "未完成" : "执行中";
+      if (plan.status === "completed") return "已完成";
+      if (plan.status === "failed") return "未完成";
+      // 回合已经结束但模型从未把流程推进/收口（planProgress 只在工具失败时收口）：
+      // 不能继续显示「执行中」转圈 —— 那是假进度。真实事故：房产 Agent 创建 3 步
+      // 流程后全程未汇报，面板永远停在 01 运行中。
+      if (!this.sessionRunning) return "已结束 · 未完成";
+      return "执行中";
+    },
+    /** 会话当前是否真的在生成（服务端 running 标志 + 本地流）。
+     *  runningTick 只是为了建立响应式依赖：core state 变化不会自动触发重算。 */
+    sessionRunning(): boolean {
+      void this.runningTick;
+      const sid = state.currentId;
+      if (!sid) return false;
+      const s = state.sessions.find((x) => x.id === sid);
+      return Boolean(s?.running) || Boolean(state.streams[sid]);
+    },
+    /** 展示层状态：plan.running 但会话已结束 → 显示为 ended（不转圈、中性色）。 */
+    displayStatus(): "running" | "completed" | "failed" | "ended" {
+      const plan = this.plan;
+      if (!plan) return "running";
+      if (plan.status === "running" && !this.sessionRunning) return "ended";
+      return plan.status;
     },
     activeText(): string {
       const plan = this.plan;
       if (!plan) return "";
       if (plan.status !== "running") return this.statusLabel;
+      if (!this.sessionRunning) return "回合结束，流程未全部完成";
       return this.activeStepTitle ? `正在执行 · ${this.activeStepTitle}` : "准备下一步";
     },
   },
@@ -79,6 +105,11 @@ export const useWorkflowPlanStore = defineStore("workflowPlan", {
     },
     toggleOpen(open: boolean): void {
       this.userOpened = open;
+    },
+    /** 运行态变化时调用（流开始/结束、后台轮询发现 running 翻转、会话切换）：
+     *  让「执行中 vs 已结束」的判定重新读取 core state。 */
+    notifyRunStateChange(): void {
+      this.runningTick++;
     },
   },
 });

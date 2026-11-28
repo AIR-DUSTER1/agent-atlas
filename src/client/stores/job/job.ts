@@ -60,6 +60,10 @@ export const useJobStore = defineStore("job", {
     },
     async login(platform: string): Promise<{ ok: boolean; summary: string }> {
       this.loggingInPlatform = platform;
+      // 登录浏览器现在也进实时画面（无头容器里扫码全靠它）：立刻打开右侧画面轮询
+      void import("../../views/browser/browser-use.js")
+        .then((m) => m.notifyJobLiveProgress())
+        .catch(() => {});
       try {
         const result = await api<{ ok: boolean; summary: string }>("/api/job/login", {
           method: "POST",

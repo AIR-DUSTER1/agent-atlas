@@ -180,6 +180,9 @@
 .workflow-status.status-running { color: var(--accent); background: rgba(91,140,255,.12); }
 .workflow-status.status-completed { color: var(--green); background: rgba(57,178,126,.12); }
 .workflow-status.status-failed { color: var(--red-soft); background: rgba(229,96,79,.12); }
+/* ended = 回合已结束但模型从未收口流程（假进度兜底）：中性灰，不再像「还在跑」 */
+.workflow-status.status-ended { color: var(--text-3); background: var(--track); }
+.workflow-meter-fill.status-ended { background: var(--text-3); }
 .workflow-count, .workflow-percent {
   flex: none;
   color: var(--text-3);

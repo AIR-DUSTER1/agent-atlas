@@ -278,3 +278,25 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
     }
   } catch { /* 服务端也没有记录（会话从未对话过 / 服务重启过）→ 保持现状 */ }
 }
+
+/**
+ * 后台生成结束后强制重放：清掉本地缓存的事件流，从服务端重新拉取并整屏重建。
+ *
+ * 为什么必须强制：后台跑完时本浏览器的消息区还冻结在断开那一刻 —— 工具条停在
+ * 「运行中」、审批卡停在旧状态，而 hydrateFromServer 对已有本地缓存的会话只补
+ * usage/流程不重建 DOM（hadLocal 分支）。只有 running true→false 这一瞬间主动
+ * 清缓存重放，用户才能不手动刷新就看到采集结果。旧画面保留到新数据就绪才切换，
+ * 不会白屏。清了缓存的非当前会话，下次 selectSession 自然走完整回放分支。
+ */
+export async function reloadSessionTranscript(sid: string): Promise<void> {
+  const s = state.sessions.find((x) => x.id === sid);
+  if (!s || s.stale || state.streams[sid]) return;
+  transcript(sid).length = 0;
+  delete state.usage[sid];
+  delete state.workflowPlans[sid];
+  if (state.currentId === sid) {
+    updateContextBar();
+    renderWorkflowPlan();
+  }
+  await hydrateFromServer(s);
+}

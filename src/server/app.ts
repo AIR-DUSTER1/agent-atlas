@@ -83,7 +83,7 @@ import {
   handleSaveRagConfig, handleTestRag,
 } from "./routes/rag.js";
 import { handleEstateExport, handleGetBeikeInstall, handleGetEstate, handleSaveBeikeKey, handleStartBeikeInstall, handleStartBeikeLogin } from "./routes/estate.js";
-import { handleGetJob, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
+import { handleGetJob, handleJobBrowserScreenshot, handleJobBrowserView, handleJobDiagnose, handleJobDoctor, handleJobLogin, handleSaveJob } from "./routes/job.js";
 import {
   handleBrowserClose, handleBrowserScreenshot, handleBrowserState, handleBrowserStatus,
 } from "./routes/browser-use.js";
@@ -660,6 +660,8 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/job/login", jsonRaw, withBody(async (c) => { await handleJobLogin(c.env.outgoing, c.env.incoming); }));
   app.post("/api/job/doctor", jsonRaw, withBody(async (c) => { await handleJobDoctor(c.env.outgoing, c.env.incoming); }));
   app.post("/api/job/diagnose", jsonRaw, withBody(async (c) => { await handleJobDiagnose(c.env.outgoing, c.env.incoming); }));
+  app.get("/api/job/browser/view", withBody(async (c) => { handleJobBrowserView(c.env.outgoing); }));
+  app.get("/api/job/browser/screenshot", withBody(async (c) => { await handleJobBrowserScreenshot(c.env.outgoing); }));
   app.get("/api/browser/status", withBody(async (c) => { handleBrowserStatus(c.env.outgoing); }));
   app.get("/api/browser/sessions/:id", guarded(async (c, sessionId) => { handleBrowserState(c.env.outgoing, sessionId); }));
   app.get("/api/browser/sessions/:id/screenshot", guarded(async (c, sessionId) => { handleBrowserScreenshot(c.env.outgoing, sessionId); }));

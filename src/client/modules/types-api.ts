@@ -98,6 +98,15 @@ export type AgentEvent =
       reason: string;
       at: number;
     }
+  /** 求职采集阶段性进度：驱动右侧采集实时画面（browser-dock 的 job 源）。 */
+  | {
+      type: "job_progress";
+      phase: "login" | "collecting" | "done";
+      platform?: string;
+      collected?: number;
+      message: string;
+      at: number;
+    }
   | { type: "token"; text: string; node?: string }
   | { type: "tool_call"; id: string; name?: string; argsFragment: string }
   | { type: "tool_result"; id: string; content: string; isError?: boolean }

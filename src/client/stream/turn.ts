@@ -308,6 +308,11 @@ export function syncComposerState(sid: string | null = state.currentId): void {
   stopBtn.classList.toggle("hidden", !streaming);
   sendBtn.disabled = Boolean(session.stale) || compacting;
   setStatus(streaming || compacting ? "busy" : "idle");
+  // 执行流程面板的「执行中 vs 已结束」依赖运行态；这里是流生命周期与后台轮询
+  // 的公共汇合点，顺手通知面板重算（store 动态加载，不进 1:1 静态链）。
+  void import("../stores/chat/workflow-plan.js")
+    .then(({ useWorkflowPlanStore }) => { useWorkflowPlanStore().notifyRunStateChange(); })
+    .catch(() => {});
 }
 
 /**

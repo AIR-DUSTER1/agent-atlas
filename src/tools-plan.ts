@@ -34,7 +34,9 @@ export const updateWorkflowPlanTool = tool(
     name: WORKFLOW_PLAN_TOOL_NAME,
     description:
       "创建或更新当前任务的可见执行流程。复杂任务开始时用 steps 创建 2-8 步；" +
-      "每个步骤开始/完成后用 updates 推进状态。简单问答不要调用。此工具必须单独调用，不能与其他业务工具同批。",
+      "创建后必须持续汇报：步骤开始时 updates 标 in_progress，完成后标 completed 并附证据，" +
+      "做不了的步骤标 skipped/failed 并说明原因；全部步骤不再是 pending/in_progress 才算收口。" +
+      "长期不汇报会让用户看到假进度。简单问答不要调用。此工具必须单独调用，不能与其他业务工具同批。",
     schema: planSchema,
   },
 );

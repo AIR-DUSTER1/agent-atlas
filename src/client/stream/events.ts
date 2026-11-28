@@ -295,6 +295,13 @@ export function handleEvent(ev: AgentEvent, ablock: AssistantBlock, sid: string 
     case "token": sealStreamingParts(ablock, ["thinking"]); appendToken(ablock, ev.text, visible); break;
     case "reasoning": sealStreamingParts(ablock, ["text"]); appendReasoning(ablock, ev, visible); break;
     case "model_retry": upsertModelRetry(ablock, ev, visible); break;
+    case "job_progress":
+      // 求职采集进度：打开/保活右侧实时画面（事件本身不渲染消息卡 —— 画面与
+      // 状态文本都在 browser-dock 里；事件仍随轮次入档，回放时被忽略是无害的）。
+      void import("../views/browser/browser-use.js")
+        .then((m) => m.notifyJobLiveProgress())
+        .catch(() => {});
+      break;
     case "tool_call": upsertToolCall(ablock, ev, visible); break;
     case "tool_result": sealStreamingParts(ablock); fillToolResult(ablock, ev, sid, visible); break;
     case "node": addNodeChip(ablock, ev.name, visible); break;

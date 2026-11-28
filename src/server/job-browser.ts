@@ -17,6 +17,7 @@ import {
   type CollectionFilterOutcome, type JobPlatform, type JobRecord, type JobSearchProfile,
 } from "./job-model.js";
 import { checkJobListHealth } from "./job-health.js";
+import { attachJobLivePage, beginJobLive, endJobLive, updateJobLive } from "./job-live.js";
 import { cleanJd } from "./job-jdtext.js";
 
 const PROFILE_DIR_NAME = ".profile";
@@ -108,6 +109,7 @@ export async function checkJobLoginStatus(
   if (!platforms.length) return { platforms: {}, needsLogin: [], details: [] };
   return withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
     const page = context.pages()[0] ?? await context.newPage();
+    attachJobLivePage(page); // 预检探针也进实时画面：用户能看到「在检查哪个平台」
     const result: Record<string, boolean> = {};
     const details: string[] = [];
     for (const platform of platforms) {
@@ -497,56 +499,74 @@ export async function collectNativeJobs(
   pages: number,
   options: CollectNativeOptions = {},
 ): Promise<CollectNativeResult> {
-  // 登录预检单独开一次浏览器会话：采集本身要复用同一登录态，但预检的探针会
-  // 把页面导航到「需登录页」，混在采集循环里会污染当前页状态。
-  const login = options.skipLoginCheck ? null : await checkJobLoginStatus(dataDir, platforms);
-  if (login?.needsLogin.length) {
-    // 必需平台未登录：直接中止，不浪费 3-5 分钟去采一批薪资全空的数据
-    return {
-      jobs: [],
-      warnings: [
-        ...login.details,
-        "未登录时采出来的薪资与排序不可信，已中止。请到「设置 → 插件 → 求职岗位」登录后再采集；确需强采可传 skipLoginCheck。",
-      ],
-      login,
-      filter: { kept: [], droppedIrrelevant: 0, droppedCity: 0, jdCleaned: 0 },
-    };
-  }
-  return withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
-    const page = context.pages()[0] ?? await context.newPage();
-    const runtime = await loadJobSelectorRuntime(dataDir);
-    const jobs: JobRecord[] = [];
-    const warnings: string[] = runtime.warning ? [runtime.warning] : [];
-    if (login?.details.length) warnings.push(...login.details);
-    for (const platform of platforms) {
-      try {
-        const batch = platform === "boss" ? await collectBoss(page, runtime, profile, pages)
-          : platform === "zhilian" ? await collectZhilian(page, runtime, profile, pages)
-            : platform === "job51" ? await collect51Job(page, runtime, profile, pages)
-              : await collectLiepin(page, runtime, profile, pages);
-        jobs.push(...batch.jobs);
-        warnings.push(...batch.warnings);
-        if (!batch.jobs.length && !batch.warnings.length) warnings.push(`${JOB_PLATFORM_LABELS[platform]}返回 0 条`);
-      } catch (err) {
-        warnings.push(err instanceof Error ? err.message : String(err));
+  // 实时画面从这里开始登记：无头容器里用户只能靠右侧画面/进度知道采集进行到哪。
+  // finally 收口保证异常路径也不会留下悬挂的 live 状态。
+  beginJobLive("collecting", "预检", "登录预检中");
+  let endMessage = "采集结束";
+  try {
+    // 登录预检单独开一次浏览器会话：采集本身要复用同一登录态，但预检的探针会
+    // 把页面导航到「需登录页」，混在采集循环里会污染当前页状态。
+    const login = options.skipLoginCheck ? null : await checkJobLoginStatus(dataDir, platforms);
+    if (login?.needsLogin.length) {
+      // 必需平台未登录：直接中止，不浪费 3-5 分钟去采一批薪资全空的数据
+      endMessage = `已中止：${login.needsLogin.map((platform) => JOB_PLATFORM_LABELS[platform]).join("、")}未登录`;
+      return {
+        jobs: [],
+        warnings: [
+          ...login.details,
+          "未登录时采出来的薪资与排序不可信，已中止。请到「设置 → 插件 → 求职岗位」登录后再采集；确需强采可传 skipLoginCheck。",
+        ],
+        login,
+        filter: { kept: [], droppedIrrelevant: 0, droppedCity: 0, jdCleaned: 0 },
+      };
+    }
+    const result = await withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
+      const page = context.pages()[0] ?? await context.newPage();
+      attachJobLivePage(page);
+      const runtime = await loadJobSelectorRuntime(dataDir);
+      const jobs: JobRecord[] = [];
+      const warnings: string[] = runtime.warning ? [runtime.warning] : [];
+      if (login?.details.length) warnings.push(...login.details);
+      for (const platform of platforms) {
+        updateJobLive({ platform: JOB_PLATFORM_LABELS[platform], collected: jobs.length, message: "正在采集" });
+        try {
+          const batch = platform === "boss" ? await collectBoss(page, runtime, profile, pages)
+            : platform === "zhilian" ? await collectZhilian(page, runtime, profile, pages)
+              : platform === "job51" ? await collect51Job(page, runtime, profile, pages)
+                : await collectLiepin(page, runtime, profile, pages);
+          jobs.push(...batch.jobs);
+          warnings.push(...batch.warnings);
+          if (!batch.jobs.length && !batch.warnings.length) warnings.push(`${JOB_PLATFORM_LABELS[platform]}返回 0 条`);
+        } catch (err) {
+          warnings.push(err instanceof Error ? err.message : String(err));
+        }
+        updateJobLive({ collected: jobs.length, message: `${JOB_PLATFORM_LABELS[platform]}已采完，休息片刻` });
+        await sleep(PLATFORM_GAP_MS);
       }
-      await sleep(PLATFORM_GAP_MS);
-    }
-    // 先过滤（相关性/城市/方向）再打分：避免给注定丢弃的岗位白算分。
-    // 过滤同时会清洗 JD，保证快照与 Excel 里不含页面 UI 文案。
-    const filter = applyCollectionFilters(dedupeJobs(jobs), profile);
-    if (filter.droppedIrrelevant || filter.droppedCity) {
-      warnings.push(
-        `过滤掉 ${filter.droppedIrrelevant + filter.droppedCity} 条不相关岗位` +
-        `（关键词 ${filter.droppedIrrelevant} / 城市 ${filter.droppedCity}）`,
-      );
-    }
-    const scored = filter.kept.map((job) => {
-      const outsourcing = detectOutsourcing(job.title, job.company, job.jdText, job.companyIndustry);
-      return scoreJob({ ...job, ...outsourcing }, profile);
+      // 先过滤（相关性/城市/方向）再打分：避免给注定丢弃的岗位白算分。
+      // 过滤同时会清洗 JD，保证快照与 Excel 里不含页面 UI 文案。
+      updateJobLive({ message: "过滤与打分中" });
+      const filter = applyCollectionFilters(dedupeJobs(jobs), profile);
+      if (filter.droppedIrrelevant || filter.droppedCity) {
+        warnings.push(
+          `过滤掉 ${filter.droppedIrrelevant + filter.droppedCity} 条不相关岗位` +
+          `（关键词 ${filter.droppedIrrelevant} / 城市 ${filter.droppedCity}）`,
+        );
+      }
+      const scored = filter.kept.map((job) => {
+        const outsourcing = detectOutsourcing(job.title, job.company, job.jdText, job.companyIndustry);
+        return scoreJob({ ...job, ...outsourcing }, profile);
+      });
+      return { jobs: scored, warnings, login, filter };
     });
-    return { jobs: scored, warnings, login, filter };
-  });
+    endMessage = `采集完成：共 ${result.jobs.length} 条`;
+    return result;
+  } catch (err) {
+    endMessage = `采集异常：${err instanceof Error ? err.message : String(err)}`;
+    throw err;
+  } finally {
+    endJobLive(endMessage);
+  }
 }
 
 const LOGIN_URLS: Record<JobPlatform, string> = {
@@ -570,26 +590,36 @@ async function loginDomHit(context: BrowserContext, platform: JobPlatform, runti
 }
 
 export async function loginNativeJob(platform: JobPlatform, dataDir: string): Promise<{ ok: boolean; output: string }> {
-  return withPersistentBrowser(dataDir, false, async (context) => {
-    const page = context.pages()[0] ?? await context.newPage();
-    const runtime = await loadJobSelectorRuntime(dataDir);
-    page.setDefaultTimeout(15_000);
-    const before = (await context.cookies()).length;
-    await page.goto(LOGIN_URLS[platform], { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-    await page.bringToFront().catch(() => {});
-    const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      await page.waitForTimeout(2_000);
-      if (await loginDomHit(context, platform, runtime)) {
-        return { ok: true, output: `${JOB_PLATFORM_LABELS[platform]}登录成功，登录态已保存到本地浏览器资料。` };
+  // headless 跟随 JOB_HEADLESS 自动判定：桌面端保持可见窗口；NAS 容器没有显示
+  // 服务，写死 false 会直接起不来（真实事故）—— 无头 + 右侧实时画面让用户照样
+  // 能看到二维码扫码登录。
+  beginJobLive("login", JOB_PLATFORM_LABELS[platform], "等待扫码登录");
+  try {
+    return await withPersistentBrowser(dataDir, JOB_HEADLESS, async (context) => {
+      const page = context.pages()[0] ?? await context.newPage();
+      attachJobLivePage(page);
+      const runtime = await loadJobSelectorRuntime(dataDir);
+      page.setDefaultTimeout(15_000);
+      const before = (await context.cookies()).length;
+      await page.goto(LOGIN_URLS[platform], { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await page.bringToFront().catch(() => {});
+      const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(2_000);
+        updateJobLive({ message: "等待扫码/登录中" });
+        if (await loginDomHit(context, platform, runtime)) {
+          return { ok: true, output: `${JOB_PLATFORM_LABELS[platform]}登录成功，登录态已保存到本地浏览器资料。` };
+        }
+        const cookies = await context.cookies();
+        if (cookies.length > before && !/login|passport|signin|verify|captcha/i.test(page.url())) {
+          return { ok: true, output: `${JOB_PLATFORM_LABELS[platform]}登录 cookie 已保存。` };
+        }
       }
-      const cookies = await context.cookies();
-      if (cookies.length > before && !/login|passport|signin|verify|captcha/i.test(page.url())) {
-        return { ok: true, output: `${JOB_PLATFORM_LABELS[platform]}登录 cookie 已保存。` };
-      }
-    }
-    return { ok: false, output: `${JOB_PLATFORM_LABELS[platform]}登录等待超时，请重新点击登录按钮。` };
-  });
+      return { ok: false, output: `${JOB_PLATFORM_LABELS[platform]}登录等待超时，请重新点击登录按钮。` };
+    });
+  } finally {
+    endJobLive(`登录流程结束`);
+  }
 }
 
 function extractSection(text: string): string {

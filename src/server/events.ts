@@ -14,6 +14,7 @@
  *   node        → 节点执行步骤小徽章（agent / tools / researcher/agent …）
  *   reasoning   → 供应商原生思考过程（前端默认折叠）
  *   model_retry → 模型请求自动重试进度（前端默认折叠）
+ *   job_progress → 求职采集的阶段性进度（登录预检/各平台开始完成/条数），驱动右侧实时画面
  *   token       → 助手正文流式文本（打字机效果）
  *   tool_call   → 工具调用卡片（参数随流式增量到达，边收边渲染）
  *   tool_result → 工具卡片填入结果，状态从「运行中」变「完成」
@@ -82,6 +83,19 @@ export type AgentEvent =
       totalAttempts: number;
       phase: "retry" | "success" | "failed";
       reason: string;
+      at: number;
+    }
+  /**
+   * 求职采集的阶段性进度（job-live.ts 按 threadId 发布，SSE 层在模型退避间隙
+   * 排出）。同时驱动右侧采集实时画面的展开/状态文本；采集本身可能长达 3-5
+   * 分钟，没有它画面就是一条黑盒「运行中」。
+   */
+  | {
+      type: "job_progress";
+      phase: "login" | "collecting" | "done";
+      platform?: string;
+      collected?: number;
+      message: string;
       at: number;
     }
   /** 助手文本的流式增量片段 */

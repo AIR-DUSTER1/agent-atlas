@@ -25,6 +25,23 @@ let pollInFlight = false;
 /** 上一次发布的快照：同会话的字段增量合并，字段未变就不推送。 */
 let lastSnapshot: BrowserDockSnapshot | null = null;
 
+// ---------------------------------------------------------------------------
+// 求职采集实时画面（job 源）：采集/登录浏览器是无头的，右侧画面是用户唯一
+// 能「看着采集」的窗口。job 模式与 Browser Use 会话模式互斥 —— 已在看
+// Browser Use 时不抢占；采集结束时连续两次探到无活动才收起（防轮询间隙闪退）。
+// ---------------------------------------------------------------------------
+interface JobLiveView {
+  phase: "login" | "collecting";
+  platform: string;
+  collected: number;
+  message: string;
+  url: string;
+  startedAt: number;
+}
+let jobMode = false;
+let jobIdlePolls = 0;
+let jobBoundSession: string | null = null;
+
 function publish(partial: Partial<BrowserDockSnapshot> & { visible: boolean }): void {
   const base: BrowserDockSnapshot = {
     sessionId: dockSessionId ?? "",
@@ -92,7 +109,44 @@ function applyPageState(page: BrowserPageState): void {
   });
 }
 
+function applyJobView(view: JobLiveView): void {
+  const label = view.phase === "login" ? "平台登录" : "岗位采集";
+  const title = view.platform && view.platform !== "预检" ? `${label} · ${view.platform}` : label;
+  publish({
+    visible: true,
+    title,
+    url: view.url || "about:blank",
+    meta: `已采集 ${view.collected} 条 · ${new Date(view.startedAt).toLocaleTimeString()} 开始`,
+    stateText: view.message,
+    stateTone: "busy",
+    // 每轮都换 v 强制刷新（截图端点无 updatedAt 概念，画面就是要逐帧看）。
+    screenshotSrc: `/api/job/browser/screenshot?v=${Date.now()}`,
+    emptyVisible: false,
+  });
+}
+
+async function refreshJobView(): Promise<void> {
+  if (pollInFlight) return;
+  pollInFlight = true;
+  try {
+    const data = await api<{ view: JobLiveView | null }>("/api/job/browser/view");
+    if (!data.view) {
+      // 连续两轮无活动才收起：采集两个阶段之间（预检 → 正式采集）短暂空窗不闪退。
+      if (++jobIdlePolls >= 2) { jobMode = false; hideDockShell(); }
+      return;
+    }
+    jobIdlePolls = 0;
+    showDockShell();
+    applyJobView(data.view);
+  } catch {
+    if (++jobIdlePolls >= 3) { jobMode = false; hideDockShell(); }
+  } finally {
+    pollInFlight = false;
+  }
+}
+
 async function refreshBrowserDock(): Promise<void> {
+  if (jobMode) return refreshJobView();
   if (!dockSessionId || pollInFlight) return;
   if (state.currentId !== dockSessionId) { hideDockShell(); return; }
   pollInFlight = true;
@@ -120,6 +174,7 @@ async function refreshBrowserDock(): Promise<void> {
 /** 工具调用了 Browser Use：绑定当前会话并打开右侧画面。 */
 export function openBrowserDock(sessionId: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return;
+  jobMode = false; // Browser Use 会话优先：采集画面让位，不能两个源打架
   dockSessionId = sessionId;
   lastUpdatedAt = 0;
   publish({
@@ -134,6 +189,38 @@ export function openBrowserDock(sessionId: string): void {
     emptyDetail: "浏览器画面会在这里实时更新",
   });
   if (state.currentId !== sessionId) { hideDockShell(); return; }
+  $("main")?.classList.add("browser-open");
+  void refreshBrowserDock();
+  startPolling();
+}
+
+/**
+ * 求职采集 / 平台登录有活动：打开或保活 job 源画面。
+ * 调用方：chat 流的 job_progress 事件、设置页登录按钮。
+ * 已在看 Browser Use 时不抢占（那个会话结束时画面自然空出来）。
+ */
+export function notifyJobLiveProgress(): void {
+  if (dockSessionId) return;
+  if (jobMode) { jobIdlePolls = 0; return; }
+  openJobBrowserDock();
+}
+
+/** 打开 job 源画面并开始轮询；绑定发起时的会话（切走即收起）。 */
+export function openJobBrowserDock(): void {
+  jobMode = true;
+  jobIdlePolls = 0;
+  jobBoundSession = state.currentId;
+  publish({
+    visible: true,
+    title: "岗位采集",
+    url: "about:blank",
+    stateText: "连接采集画面",
+    stateTone: "busy",
+    screenshotSrc: "",
+    emptyVisible: true,
+    emptyTitle: "等待采集画面",
+    emptyDetail: "采集浏览器启动后（登录预检 → 逐平台采集）画面会在这里实时更新",
+  });
   $("main")?.classList.add("browser-open");
   void refreshBrowserDock();
   startPolling();
@@ -173,9 +260,12 @@ export function renderBrowserInToolCard(part: ToolPart, card: HTMLElement): void
 /** 关闭命令入口：Vue 的关闭按钮只触发命令，服务端清理仍在这里。 */
 function closeDockSession(): void {
   const sessionId = dockSessionId;
+  const wasJob = jobMode;
+  jobMode = false;
   dockSessionId = null;
   hideDockShell();
-  if (!sessionId) return;
+  // job 源没有服务端会话要清理：采集还在后台继续，画面只是观察窗口。
+  if (wasJob || !sessionId) return;
   void api(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -192,6 +282,12 @@ export function bindBrowserDock(): void {
 
   document.addEventListener("agentatlas:session-selected", (event) => {
     const sessionId = (event as CustomEvent<{ sessionId?: unknown }>).detail?.sessionId;
+    if (jobMode) {
+      // job 画面绑定发起采集的会话：切到别的会话就收起（回原会话且采集仍在跑时，
+      // 下一条 job_progress 或手动操作会再打开）。
+      if (sessionId !== jobBoundSession) { jobMode = false; hideDockShell(); }
+      return;
+    }
     if (typeof sessionId !== "string" || sessionId !== dockSessionId) { hideDockShell(); return; }
     showDockShell();
     void refreshBrowserDock();
