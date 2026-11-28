@@ -80,6 +80,16 @@ export interface ConclusionExport {
   count: number;
 }
 
+/**
+ * 户型图空态文案：必须区分「查了但贝壳没给图」与「根本没查」。
+ * 把没查过的房源写成「未上传」是冤枉房源；反过来，查过还写「未获取」
+ * 会让人以为是我们漏了数据而不是房源本身没有。
+ */
+export function floorPlanCellLabel(property: Pick<ConclusionProperty, "images" | "floorPlanQueried">): string {
+  if (property.images.length > 0) return "";
+  return property.floorPlanQueried ? "该房源未上传户型图" : "未查询户型图";
+}
+
 export interface EstateConclusionMedia {
   mapEmbedUrl: string;
   mapTitle: string;

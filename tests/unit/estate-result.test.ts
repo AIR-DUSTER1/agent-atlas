@@ -289,3 +289,13 @@ test("正文里的转义 URL 必须能提取（\/ 与 \u002f 两种写法）", (
   assert.equal(images.length, 2, `应提取 2 张图，实际 ${JSON.stringify(images)}`);
   assert.match(images[0]!, /^https:\/\/ke-image\.ljcdn\.com\/frame\/plan\.jpeg/);
 });
+
+test("户型图空态文案：已查询但无图与未查询必须分开表述", async () => {
+  const { floorPlanCellLabel } = await import("../../src/client/modules/conclusion-media.js");
+  // material 查过、贝壳没返回户型图 → 如实说房源未上传
+  assert.equal(floorPlanCellLabel({ images: [], floorPlanQueried: true }), "该房源未上传户型图");
+  // 根本没查 material → 不能冤枉房源说它没上传
+  assert.equal(floorPlanCellLabel({ images: [], floorPlanQueried: false }), "未查询户型图");
+  // 有图时不需要任何占位文案
+  assert.equal(floorPlanCellLabel({ images: [{ src: "https://ke-image.ljcdn.com/a.jpg", alt: "户型图" }], floorPlanQueried: true }), "");
+});
