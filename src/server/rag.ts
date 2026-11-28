@@ -16,6 +16,12 @@
  *   POST {baseURL}/delete   → { collection, ids:[...] }           （可选，删除单个文档）
  *   鉴权：请求头 Authorization: Bearer <key>（Key 可留空）
  *
+ *   信任模型：baseURL 只能由管理员在知识库面板配置（/api/rag/* 在
+ *   ADMIN_API_RULES 内），与记忆 embedding（memory/semantic.ts）、记忆外部
+ *   Provider（server/memory-http.ts）同级，因此这里的 safeFetch 统一开
+ *   allowLocalhost，允许接入本机 / 内网自建的 Milvus 等 RAG 服务
+ *   （safe-fetch.ts 设计注释明示「本地 RAG/记忆」属于可信内部服务）。
+ *
  * 本地持久化：.web-config.json 的 `rag` 键（走 config-store 的 mergeConfig，
  * 与 providers / projects / externalAgents 共存互不覆盖）：
  *   { baseURL, apiKey, collection, topK, docs: { id → 入库登记 } }
@@ -152,6 +158,7 @@ export async function testRagConnection(opts?: { baseURL?: string; apiKey?: stri
     res = await ragGauge.run(() => safeFetch(base + "/", {
       method: "GET",
       headers: key ? { Authorization: `Bearer ${key}` } : {},
+      allowLocalhost: true, // RAG 地址仅管理员可配：放行本机/内网自建服务（见文件头信任模型）
       signal: AbortSignal.timeout(10_000),
     }));
     recordDependency("rag", "ok", "RAG 服务可达");
@@ -219,6 +226,7 @@ export async function searchRag(
     const response = await safeFetch(rag.baseURL + "/search", {
       method: "POST",
       headers: ragHeaders(),
+      allowLocalhost: true,
       body: JSON.stringify({
         collection,
         query: q,
@@ -247,6 +255,7 @@ async function ragIngest(documents: Array<{ id: string; name: string; text: stri
     const response = await safeFetch(rag.baseURL + "/ingest", {
       method: "POST",
       headers: ragHeaders(),
+      allowLocalhost: true,
       body: JSON.stringify({ collection: rag.collection, documents }),
       signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
     });
@@ -304,6 +313,7 @@ export async function upsertCollectionText(input: {
     const response = await safeFetch(rag.baseURL + "/ingest", {
       method: "POST",
       headers: ragHeaders(),
+      allowLocalhost: true,
       body: JSON.stringify({
         collection: input.collection,
         documents: [{ id: input.id, name: input.name, text: content, meta: { source: input.source } }],
@@ -325,6 +335,7 @@ export async function deleteRagDoc(id: string): Promise<Record<string, unknown>>
       await safeFetch(rag.baseURL + "/delete", {
         method: "POST",
         headers: ragHeaders(),
+        allowLocalhost: true,
         body: JSON.stringify({ collection: rag.collection, ids: [id] }),
         signal: AbortSignal.timeout(15_000),
       });
@@ -342,6 +353,7 @@ export async function clearRag(): Promise<Record<string, unknown>> {
   await safeFetch(rag.baseURL + "/reset", {
     method: "POST",
     headers: ragHeaders(),
+    allowLocalhost: true,
     body: JSON.stringify({ collection: rag.collection }),
     signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
   }).then(async (res) => {
