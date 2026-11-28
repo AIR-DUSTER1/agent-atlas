@@ -10,6 +10,7 @@
  */
 import { buildMapLinks, buildPointMapEmbed, type GeocodePoint } from "./estate-geo.js";
 import { buildListingUrl, isRentCode } from "../shared/estate-listing-url.js";
+import { beikeText, unescapeBeikeText } from "../shared/beike-payload.js";
 
 const MAX_ESTATE_IMAGES = 12;
 const MAX_SEARCH_LISTINGS = 50;
@@ -51,7 +52,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function collectStrings(value: unknown, output: string[], depth = 0): void {
   if (depth > MAX_STRING_DEPTH || value == null) return;
   if (typeof value === "string") {
-    output.push(value);
+    // 正文里的图片/VR 地址常以 `https:\/\/…` 转义形态出现；先还原再交给
+    // 下游正则，否则 IMAGE_URL_RE 的「不含反斜杠」前缀会整条跳过。
+    output.push(unescapeBeikeText(value));
     return;
   }
   if (Array.isArray(value)) {
@@ -241,10 +244,13 @@ export interface EstateSearchListing {
   detailUrl?: string;
 }
 
+/**
+ * 把贝壳结果值还原成「可跑字段正则」的文本。
+ * 信封 `{data, ok}` 只取正文并反转义：整只信封 stringify 会把正文里的引号
+ * 二次转义成 `\"`，导致所有 `"字段"\s*:\s*"值"` 正则失配（价格/房型/小区全空）。
+ */
 function rawText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value == null) return "";
-  try { return JSON.stringify(value); } catch { return ""; }
+  return beikeText(value);
 }
 
 function firstField(raw: string, names: string[]): string {

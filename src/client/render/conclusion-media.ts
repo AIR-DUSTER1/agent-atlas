@@ -272,7 +272,10 @@ function renderImageCell(property: ConclusionProperty): HTMLElement {
       cell.appendChild(h("span", { class: "conclusion-image-more" }, `另有 ${property.images.length - 1} 张`));
     }
   } else {
-    cell.appendChild(h("span", { class: "conclusion-empty" }, "未获取户型图"));
+    // 必须区分两种空：查过 material 但贝壳没给图 = 该房源未上传户型图；
+    // 根本没查 = 未查询。把没查过的房源写成「未上传」是冤枉房源。
+    cell.appendChild(h("span", { class: "conclusion-empty" },
+      property.floorPlanQueried ? "该房源未上传户型图" : "未查询户型图"));
   }
   return cell;
 }

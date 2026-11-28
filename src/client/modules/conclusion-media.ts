@@ -7,6 +7,7 @@
  * 用户可见标题。模型文字里的原始 ID 也由本模块提供确定性脱敏。
  */
 import type { AssistantPart } from "./types.js";
+import { beikeText, unescapeBeikeText } from "../../shared/beike-payload.js";
 
 const MAX_CONCLUSION_IMAGES = 6;
 const MAX_CONCLUSION_PROPERTIES = 12;
@@ -55,6 +56,12 @@ export interface ConclusionProperty {
   decoration?: string;
   address?: string;
   images: ConclusionImage[];
+  /**
+   * 本轮是否真的为这套房源查过户型图（house_lookup action=material）。
+   * 结论表据此区分「查了但贝壳没有图 = 该房源未上传户型图」与
+   * 「根本没查 = 未查询」，避免把没查过的房源写成「未上传」冤枉房源。
+   */
+  floorPlanQueried?: boolean;
   location?: ConclusionPoint;
   vrUrl?: string;
   /** 城市中文名（来自 detail payload）；用于拼详情页链接，未收录城市时不生成。 */
@@ -241,10 +248,9 @@ function rentCodeForRaw(raw: string, houseId: string): string {
   }
 }
 
+/** 贝壳结果值 → 可跑字段正则的文本（信封只取 data 并反转义，见 shared/beike-payload）。 */
 function rawText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value == null) return "";
-  try { return JSON.stringify(value); } catch { return ""; }
+  return beikeText(value);
 }
 
 function field(raw: string, names: string[]): string {
@@ -535,6 +541,8 @@ function mergeProperty(
   // 导致「在贝壳查看该房源」永远拼不出来。
   if (patch.listingKind) row.listingKind = patch.listingKind;
   if (patch.location) row.location = patch.location;
+  // 一旦查过 material 就永久记为已查询：后续同房源的空结果不能把它降级成「未查询」。
+  if (patch.floorPlanQueried) row.floorPlanQueried = true;
 }
 
 function conclusionExportFrom(payload: Record<string, unknown>): ConclusionExport | null {
@@ -664,7 +672,14 @@ export function collectEstateConclusionMedia(parts: AssistantPart[], answerText 
       const materialImages = Array.isArray(payload.images) ? payload.images : rawImages(raw);
       for (const image of materialImages) addPropertyImage(image, houseId);
       const vrUrl = safeVrUrl(payload.vr) || vrUrlFrom(payload);
-      if (houseId && vrUrl) mergeProperty(propertyRows, propertyOrder, houseId, { vrUrl });
+      // 记「查过户型图」：即使这次一张图都没返回，也要让结论表能说清是
+      // 「贝壳没给图（该房源未上传户型图）」而不是「我们没查」。
+      if (houseId) {
+        mergeProperty(propertyRows, propertyOrder, houseId, {
+          floorPlanQueried: true,
+          ...(vrUrl ? { vrUrl } : {}),
+        });
+      }
       continue;
     }
 
