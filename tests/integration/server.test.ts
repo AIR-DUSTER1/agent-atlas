@@ -442,7 +442,7 @@ test("resume：没有待确认事项时 choice 返回 400，不误当审批处�
     body: JSON.stringify({ sessionId: mk.body.id, choice: "A" }),
   });
   assert.equal(res.status, 400);
-  assert.match(res.body.error, /没有待确认/);
+  assert.match(res.body.error, /没有待审批或待确认/);
 });
 
 test("权限模式：切换成功 / 坏值 400 / 未知会话 404，列表回显当前模式", async () => {
@@ -524,6 +524,35 @@ test("审批：interrupt 后保留 pending，批准能恢复并执行工具", as
     transcript.body.records.some((record: { continuation?: boolean }) => record.continuation === true),
     "审批恢复轮需标记 continuation，前端才能并入同一头像"
   );
+});
+
+test("审批：决定受理即落档；重复批准得到明确 400 而不是静默二次 resume", async () => {
+  const mk = await json("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "agent" }),
+  });
+  const sessionId = mk.body.id;
+  const first = await readSse("/api/chat", { sessionId, message: "帮我发邮件给 test@example.com，主题是测试" });
+  assert.equal(first.events.find((event) => event.type === "interrupt")?.payload?.type, "approval");
+
+  // 真实事故回归：重操作工具（job_collect 3-5 分钟）执行期间 journal 里这条审批
+  // 若仍是 pending，刷新/切会话回来会把已批准的卡重放成「待确认」诱导二次批准。
+  // 受理即落档（recordDecision 提前到 resume 受理处）后，pending 立即清空。
+  const resumed = await readSse("/api/resume", { sessionId, decision: "approve" });
+  assert.ok(resumed.events.some((event) => event.type === "tool_result"));
+
+  const after = await json("/api/sessions");
+  assert.equal(after.body.find((item: { id: string }) => item.id === sessionId)?.pendingApproval, false);
+
+  const again = await json("/api/resume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId, decision: "approve" }),
+  });
+  assert.equal(again.status, 400, "没有 pending 时再发 approve 必须明确拒绝");
+  assert.match(again.body.error, /没有待审批或待确认的操作/);
+  assert.match(again.body.error, /过期状态|刷新页面/, "错误信息必须引导用户刷新而不是干等");
 });
 
 test("文件搜索接口：最多 20 条，跳过依赖目录", async () => {

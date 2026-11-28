@@ -28,6 +28,7 @@ import { incCounter, incGauge } from "../observability/metrics.js";
 import { requireUserIdentity } from "../security/device.js";
 import { runWithModelSlot, acquireModelSlot } from "../runtime/model-gate.js";
 import { clearModelRetryRecords, drainModelRetryRecords } from "../../model-retry.js";
+import { clearJobProgress, drainJobProgress } from "../job-live.js";
 import { scheduleMemoryDistillation } from "../memory-distillation.js";
 import { personalizationContextText, readMemoryConfig } from "../memory-config.js";
 import {
@@ -70,9 +71,21 @@ const GOAL_MODE_NOTE =
 
 const MODEL_RETRY_POLL_MS = 250;
 
-/** 把模型重试队列转成 SSE 事件；先观察再发送，前端可实时看到供应商失败与重试进度。 */
-function drainRetryEvents(session: Session): AgentEvent[] {
-  return drainModelRetryRecords(session.id).map((record) => ({ type: "model_retry" as const, ...record }));
+/**
+ * 把「模型还在退避等待 / 工具长时间执行」期间产生的旁路事件转成 SSE 帧先推给
+ * 前端：模型重试进度 + 求职采集进度（job_collect 3-5 分钟，没有它画面是黑盒）。
+ * 先观察再发送，前端可实时看到供应商失败与重试进度。
+ */
+function drainSideChannelEvents(session: Session): AgentEvent[] {
+  const retryEvents = drainModelRetryRecords(session.id).map((record) => ({
+    type: "model_retry" as const,
+    ...record,
+  }));
+  const jobEvents = drainJobProgress(session.threadId).map((record) => ({
+    type: "job_progress" as const,
+    ...record,
+  }));
+  return [...retryEvents, ...jobEvents];
 }
 
 /** 自主审批自动放行也属于 hitl 决定：安全日志必须能追溯，不能只留在会话事件里。 */
@@ -170,7 +183,7 @@ async function streamToClient(
       ]);
       if (retryTimer) clearTimeout(retryTimer);
       // 模型退避等待时 graph 不会有下一条事件；重试队列由这里先行推给前端。
-      for (const retryEvent of drainRetryEvents(session)) {
+      for (const retryEvent of drainSideChannelEvents(session)) {
         observeTaskEvent(session, retryEvent);
         collected.push(retryEvent);
         if (!res.writableEnded) writeEvent(res, retryEvent);
@@ -223,7 +236,7 @@ async function streamToClient(
     }
   } catch (err) {
     // 最终失败的重试明细可能还没被 250ms 轮询取走；错误帧前必须先补齐。
-    for (const retryEvent of drainRetryEvents(session)) {
+    for (const retryEvent of drainSideChannelEvents(session)) {
       observeTaskEvent(session, retryEvent);
       collected.push(retryEvent);
       if (!res.writableEnded) writeEvent(res, retryEvent);
@@ -236,6 +249,7 @@ async function streamToClient(
     }
   } finally {
     clearModelRetryRecords(session.id);
+    clearJobProgress(session.threadId);
     clearInterval(heartbeat);
     controller.signal.removeEventListener("abort", notifyAbort);
     unregisterSse();
@@ -473,13 +487,15 @@ export async function handleResume(
       return;
     }
     resumeValue = choice.slice(0, 2_000);
+  } else if (!pending) {
+    // 决定已在第一次 resume 受理时落档（受理即 decided）。此时再发 approve/reject
+    // 是过期审批卡或双击：必须明确拒绝，不能静默当成新 resume（同一图不是挂起态，
+    // 重复 resume 可能重复执行高风险工具）。真实事故：job_collect 跑 3-5 分钟，
+    // 用户刷新后看到重放的待确认卡再次批准，旧逻辑会等 5 秒槽位然后报「收尾」。
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "当前没有待审批或待确认的操作。若页面仍显示审批卡，是过期状态，请刷新页面后继续。" }));
+    return;
   } else {
-    // 没有待处理事项却发送 choice：说明前端状态已过期，明确拒绝而不是静默当审批拒绝
-    if (!pending && typeof body.choice === "string" && body.choice.trim()) {
-      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "当前没有待确认的选项，请重新发起请求" }));
-      return;
-    }
     resumeValue = body.decision === "approve" ? "approve" : "reject";
   }
 
@@ -547,6 +563,16 @@ async function handleResumeInner(
     });
   }
 
+  // 决定受理即落档（approved/rejected/answered）：不能等恢复流跑完才记 —— 重操作
+  // 工具（job_collect 3-5 分钟）执行期间 journal 里这条审批仍是 pending，任何
+  // transcript 重载（刷新/切会话回来）都会把已批准的卡重放成「待确认」，诱导用户
+  // 再次批准。journalDecided 幂等；恢复过程若产生新 interrupt，recordApproval 会
+  // 写入新 pending，不受影响。
+  recordDecision(
+    session,
+    clarification ? "answered" : resumeValue === "approve" ? "approved" : "rejected"
+  );
+
   const recordUser = clarification
     ? `（需求澄清：${resumeValue.slice(0, 60)}）`
     : `（人工审批：${resumeValue === "approve" ? "批准" : "拒绝"} ${approval?.type === "approval" ? approval.toolName : "操作"}）`;
@@ -561,11 +587,7 @@ async function handleResumeInner(
       session,
       (signal) => mockRun({ decision: resumeValue as "approve" | "reject", approval: approved, turnIndex: session.turns, signal }),
       (events) => {
-        // T2-3：决定已做出 → journal 记 decided（一次性转移），再把本轮入档。
-        // 若恢复过程中又产生新 interrupt（例如连续两个高风险工具），保留新 pending。
-        if (!events.some((event) => event.type === "interrupt")) {
-          recordDecision(session, resumeValue === "approve" ? "approved" : "rejected");
-        }
+        // 决定已在受理时落档（见 handleResumeInner 的受理即 decided）；这里只入档本轮。
         completeTurnRecord(session, events);
       }
     );
@@ -599,12 +621,7 @@ async function handleResumeInner(
       }
     ),
     (events) => {
-      if (!events.some((event) => event.type === "interrupt")) {
-        recordDecision(
-          session,
-          clarification ? "answered" : resumeValue === "approve" ? "approved" : "rejected"
-        );
-      }
+      // 决定已在受理时落档；恢复过程产生新 interrupt 时 recordApproval 已写入新 pending。
       completeTurnRecord(session, events);
     }
   );

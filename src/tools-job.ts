@@ -20,9 +20,10 @@ import {
   collectJobs, diagnoseJobs, enrichJobs, exportJobGreetTargets, initJobGreetProfile, queryJobs,
   readManifest, saveJobGreetings,
   JOB_GREETING_MAX_LEN, JOB_PLATFORMS, JOB_SUPPORTED_CITIES, MAX_JOBS_IN_RESULT, jobIdentity,
-  type JobRecord,
+  type CliOutcome, type JobRecord,
 } from "./server/job.js";
 import { isPluginEnabled } from "./plugin-state.js";
+import { setJobLiveThread } from "./server/job-live.js";
 
 /** 统一收尾：把结果压成模型可读的 JSON 字符串，超长截断并标注。 */
 function payload(value: unknown): string {
@@ -76,9 +77,13 @@ function summarizeJob(job: JobRecord): Record<string, unknown> {
 // 1. job_collect：四平台采集 + 打分 + 导出 Excel（重操作 → 审批）
 // ---------------------------------------------------------------------------
 export const jobCollectTool = tool(
-  async ({ keywords, city, salaryMin, salaryMax, years, pages, platforms, skipLoginCheck }) => {
+  async ({ keywords, city, salaryMin, salaryMax, years, pages, platforms, skipLoginCheck }, config?) => {
     const off = pluginOff();
     if (off) return badArgs(off);
+    // threadId 与 Browser Use 同一透传约定（configurable.thread_id）：采集期间的
+    // job_progress 进度事件要发进当前会话的聊天流，采集结束必须清掉。
+    const threadId = typeof config?.configurable?.thread_id === "string" ? config.configurable.thread_id : null;
+    setJobLiveThread(threadId);
     // 四个关键字段都先做「缺什么」检查，再谈有效性：先告诉模型该问用户什么，
     // 比只说「city 不能为空」有用得多。
     const missing: string[] = [];
@@ -99,16 +104,25 @@ export const jobCollectTool = tool(
       );
     }
 
-    const outcome = await collectJobs({
-      keywords: keywords!,
-      city: city!.trim() as (typeof JOB_SUPPORTED_CITIES)[number],
-      salaryMin: salaryMin!,
-      salaryMax: salaryMax!,
-      years: years!,
-      ...(typeof pages === "number" ? { pages } : {}),
-      ...(platforms?.length ? { platforms } : {}),
-      ...(skipLoginCheck === true ? { skipLoginCheck: true } : {}),
-    });
+    // threadId 与 Browser Use 同一透传约定（configurable.thread_id）：采集期间的
+    // job_progress 进度事件要发进当前会话的聊天流；job-browser 的 endJobLive 在
+    // collectJobs 返回前触发，此刻线程还挂着，最后一条「采集完成」不会丢。
+    let outcome: CliOutcome;
+    try {
+      setJobLiveThread(threadId);
+      outcome = await collectJobs({
+        keywords: keywords!,
+        city: city!.trim() as (typeof JOB_SUPPORTED_CITIES)[number],
+        salaryMin: salaryMin!,
+        salaryMax: salaryMax!,
+        years: years!,
+        ...(typeof pages === "number" ? { pages } : {}),
+        ...(platforms?.length ? { platforms } : {}),
+        ...(skipLoginCheck === true ? { skipLoginCheck: true } : {}),
+      });
+    } finally {
+      setJobLiveThread(null);
+    }
     if (!outcome.ok) {
       return payload({
         ok: false,

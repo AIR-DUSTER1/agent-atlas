@@ -166,9 +166,17 @@ async function refreshRunningState(): Promise<void> {
   for (const session of state.sessions) {
     if (session.stale) continue;
     const next = runningIds.has(session.id);
-    if (Boolean(session.running) !== next) {
+    const prev = Boolean(session.running);
+    if (prev !== next) {
       session.running = next;
       changed = true;
+      // 后台跑完（本浏览器没有挂着流）：消息区还冻结在断开那一刻 —— 工具条停在
+      // 「运行中」、审批卡停在旧状态。这是刷新恢复链路的收尾一步：强制重放一次
+      // 服务端记录，用户不用手动刷新就能看到最终结果（真实事故：job_collect
+      // 采完 3-5 分钟后画面永远停在「运行中」）。
+      if (prev && !next && !state.streams[session.id] && !state.approvalResuming[session.id]) {
+        void import("./navigation.js").then((m) => m.reloadSessionTranscript(session.id)).catch(() => {});
+      }
     }
   }
   if (changed) {
