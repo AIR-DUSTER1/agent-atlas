@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { Button } from "antdv-next";
 import AntdvProvider from "../../ui/antdv-provider.vue";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useBrowserDockStore } from "../../stores/browser/browser-dock.js";
 
 const store = useBrowserDockStore();
@@ -28,6 +28,7 @@ const meta = computed(() => snapshot.value?.meta ?? "会话隔离 · 空闲 10 �
 
 /** 画面地址变化即重置 ready（不等 load 事件回来）。 */
 const screenshotSrc = computed(() => snapshot.value?.screenshotSrc ?? "");
+watch(screenshotSrc, () => { screenReady.value = false; });
 
 function onLoad(): void {
   screenReady.value = true;
@@ -43,7 +44,9 @@ function close(): void {
 
 const listener = (): void => {
   store.apply(window.__agentatlasBrowserDock ?? null);
-  screenReady.value = false;
+  // 不能在这里无条件重置 screenReady：状态文本变化（帧没变、src 不动）也会推
+  // 快照，img 不会重新触发 load —— 图会被隐藏且再也不恢复（真实事故：采集
+  // 画面一直闪）。重置只跟随 screenshotSrc 的 watch。
 };
 
 onMounted(() => {

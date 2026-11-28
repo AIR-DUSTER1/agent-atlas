@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  beginJobLive, clearJobProgress, drainJobProgress, endJobLive, getJobLiveScreenshot,
+  absorbJobFrame, beginJobLive, clearJobProgress, drainJobProgress, endJobLive, getJobLiveScreenshot,
   getJobLiveState, resetJobLiveForTest, setJobLiveThread, updateJobLive,
 } from "../../src/server/job-live.js";
 
@@ -63,7 +63,16 @@ test("进度队列按 threadId 隔离；线程清空后不再发布；end 收尾
   clearJobProgress("thread-B");
 });
 
-test("无页面时截图返回 null/上一帧，绝不抛错（轮询方是 1.2s 定时器）", async () => {
+test("帧去重：内容相同 frameId 不动（前端不换 src 不闪），变化才递增并缓存", () => {
   resetJobLiveForTest();
-  assert.equal(await getJobLiveScreenshot(), null, "无 live page 时返回上一帧（null）");
+  const frameA = Buffer.from("jpeg-frame-A");
+  const frameB = Buffer.from("jpeg-frame-B");
+
+  assert.equal(getJobLiveScreenshot(), null, "无任何帧时返回 null（端点回 404）");
+
+  assert.equal(absorbJobFrame(frameA), 1);
+  assert.equal(absorbJobFrame(frameA), 1, "同内容重复吸收不得推进帧号 —— 否则画面每秒重载闪烁");
+  assert.equal(absorbJobFrame(frameB), 2);
+  assert.equal(absorbJobFrame(frameA), 3, "内容回退到旧画面也是一次真实变化");
+  assert.ok(getJobLiveScreenshot()?.equals(frameA), "截图端点服务的是最新缓存帧");
 });

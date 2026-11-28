@@ -17,7 +17,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parsedJsonOf, respondBadRequest, BodyTooLargeError } from "../http-body.js";
 import { diagnoseJobs, doctorJob, getJobPublic, saveJobConfig, startLogin, JOB_PLATFORMS, type JobPlatform } from "../job.js";
-import { getJobLiveScreenshot, getJobLiveState } from "../job-live.js";
+import { getJobLiveScreenshot, pollJobLiveView } from "../job-live.js";
 import { bumpConfigVersion } from "../sessions.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -86,14 +86,15 @@ export async function handleJobDoctor(res: ServerResponse, req: IncomingMessage)
 // 采集实时画面（与 Browser Use 右侧画面同模式：前端 1.2s 只读轮询）
 // ---------------------------------------------------------------------------
 
-/** GET /api/job/browser/view —— 采集/登录是否进行中 + 当前平台/条数/动作。 */
-export function handleJobBrowserView(res: ServerResponse): void {
-  sendJson(res, 200, { view: getJobLiveState() });
+/** GET /api/job/browser/view —— 采集/登录是否进行中 + 当前平台/条数/动作/帧号。 */
+export async function handleJobBrowserView(res: ServerResponse): Promise<void> {
+  const view = await pollJobLiveView();
+  sendJson(res, 200, { view });
 }
 
-/** GET /api/job/browser/screenshot —— 当前采集页面截图（JPEG）；无画面时 404。 */
-export async function handleJobBrowserScreenshot(res: ServerResponse): Promise<void> {
-  const frame = await getJobLiveScreenshot();
+/** GET /api/job/browser/screenshot —— 当前缓存帧（JPEG）；尚无任何帧时 404。 */
+export function handleJobBrowserScreenshot(res: ServerResponse): void {
+  const frame = getJobLiveScreenshot();
   if (!frame) {
     sendJson(res, 404, { error: "采集画面尚未就绪（没有正在进行的采集或登录）" });
     return;

@@ -37,10 +37,14 @@ interface JobLiveView {
   message: string;
   url: string;
   startedAt: number;
+  /** 帧序号：服务端只在画面内容真正变化时递增；不变就不换 img src，
+   *  否则 <img> 每次轮询重载（先清空再等加载）会导致画面一直闪烁。 */
+  frameId: number;
 }
 let jobMode = false;
 let jobIdlePolls = 0;
 let jobBoundSession: string | null = null;
+let lastJobFrameId = -1;
 
 function publish(partial: Partial<BrowserDockSnapshot> & { visible: boolean }): void {
   const base: BrowserDockSnapshot = {
@@ -112,6 +116,11 @@ function applyPageState(page: BrowserPageState): void {
 function applyJobView(view: JobLiveView): void {
   const label = view.phase === "login" ? "平台登录" : "岗位采集";
   const title = view.platform && view.platform !== "预检" ? `${label} · ${view.platform}` : label;
+  // 只有帧号前进了才换 src：img 元素换 src 会先清空再等加载，内容没变也换
+  // 就是一直闪（真实事故）。帧没变时省略 screenshotSrc，publish 的 carried
+  // 合并保住旧值，img 完全不动。
+  const frameChanged = view.frameId !== lastJobFrameId;
+  if (frameChanged) lastJobFrameId = view.frameId;
   publish({
     visible: true,
     title,
@@ -119,8 +128,7 @@ function applyJobView(view: JobLiveView): void {
     meta: `已采集 ${view.collected} 条 · ${new Date(view.startedAt).toLocaleTimeString()} 开始`,
     stateText: view.message,
     stateTone: "busy",
-    // 每轮都换 v 强制刷新（截图端点无 updatedAt 概念，画面就是要逐帧看）。
-    screenshotSrc: `/api/job/browser/screenshot?v=${Date.now()}`,
+    ...(frameChanged ? { screenshotSrc: `/api/job/browser/screenshot?v=${view.frameId}` } : {}),
     emptyVisible: false,
   });
 }
@@ -210,6 +218,7 @@ export function openJobBrowserDock(): void {
   jobMode = true;
   jobIdlePolls = 0;
   jobBoundSession = state.currentId;
+  lastJobFrameId = -1; // 重开强制拉一帧新画面（期间可能已错过多次变化）
   publish({
     visible: true,
     title: "岗位采集",

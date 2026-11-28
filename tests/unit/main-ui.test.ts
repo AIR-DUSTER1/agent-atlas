@@ -121,6 +121,16 @@ test("求职采集实时画面：dock 支持 job 源且不抢占 Browser Use 会
   assert.match(dock, /\/api\/job\/browser\/screenshot/);
   assert.match(dock, /jobIdlePolls >= 2/, "连续无活动才收起，防止阶段空窗闪退");
   assert.match(dock, /采集浏览器启动后（登录预检 → 逐平台采集）画面会在这里实时更新/);
+  // 防闪烁双闸：服务端只在内容变化时推进 frameId；前端只在 frameId 变化时换
+  // img src（时间戳当 v 会让 img 每次轮询重载，画面必然一直闪 —— 真实事故）。
+  assert.match(dock, /view\.frameId !== lastJobFrameId/);
+  assert.match(dock, /frameChanged \? \{ screenshotSrc/);
+  assert.match(dock, /lastJobFrameId = -1;/, "重开面板强制拉一帧新画面");
+  // Vue 端 screenReady 重置必须跟随 src 变化，不能跟着快照推送走（状态文本
+  // 变化时 img 不触发 load，无条件重置会把画面隐藏且不再恢复）。
+  const dockVue = await readClientFiles(["views/browser/browser-dock-vue.vue"]);
+  assert.match(dockVue, /watch\(screenshotSrc, \(\) => \{ screenReady\.value = false; \}\)/);
+  assert.doesNotMatch(dockVue, /store\.apply\(window\.__agentatlasBrowserDock \?\? null\);\s*screenReady\.value = false/);
   // chat 流收到 job_progress 必须驱动画面打开
   assert.match(events, /case "job_progress":[\s\S]*notifyJobLiveProgress/);
   // 设置页登录也走同一画面（无头容器里扫码全靠它）
