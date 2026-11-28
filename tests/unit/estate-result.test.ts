@@ -247,3 +247,55 @@ test("服务端与前端两份 VR 正向正则必须一致（禁止分裂出两�
     assert.doesNotMatch(re, barePanorama, `${name} 的 VR 正向正则不得把「全景」当独立顶层分支`);
   }
 });
+
+test("信封 {data, ok} 直传时价格/房型/小区必须取到（真实事故回归）", () => {
+  // 真实事故（2026-11，青岛租房）：线上结论表所有房源都显示「价格待补」。
+  // 根因：CLI 成功输出是信封 {data:"<正文文本>", ok:true}，正文里的业务字段
+  // 本身就是 JSON 字面量。旧 rawText 对整只信封 JSON.stringify，引号被二次转义为
+  // \"租赁价格\"，所有 `"字段"\s*:\s*"值"` 正则失配 —— 价格 / 房型 / 面积 / 小区
+  // 全空，只剩 hasVr 这种布尔提示，标题退化成「房源 <id>」。
+  const body = [
+    "<参考数据>",
+    "<租赁房源>",
+    "<100001>",
+    JSON.stringify({ 基础信息: { 小区名: "金水苑小区", 房型: "2室1厅", 出租面积: "82㎡", 租赁价格: "1950元/月" } }),
+    "</100001>",
+  ].join("\n");
+  const envelope = { data: body, ok: true };
+
+  const rows = extractEstateSearchListings(envelope);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.price, "1950元/月", "价格必须从信封正文里取到");
+  assert.equal(rows[0]?.layout, "2室1厅");
+  assert.equal(rows[0]?.area, "82㎡");
+  assert.equal(rows[0]?.community, "金水苑小区");
+  assert.equal(rows[0]?.title, "金水苑小区 · 2室1厅 · 82㎡");
+
+  // 同样的信封形态在 detail 归一里也必须生效。
+  const detail = normalizeEstateDetail({ data: body, ok: true }, "100001", "青岛", "rent");
+  assert.equal(detail.action, "detail");
+  assert.equal((detail.presentation as { images: number }).images, 0);
+});
+
+test("正文里的转义 URL 必须能提取（\/ 与 \u002f 两种写法）", () => {
+  // 正文常把 https:\/\/… 或 \u002f 形态的地址塞进字符串；collectStrings 若原样下传，
+  // IMAGE_URL_RE 的「不含反斜杠」前缀会整条跳过，户型图就会凭空消失。
+  const body = [
+    "<参考数据>",
+    JSON.stringify({ 房源图片: { 户型图片: "https:\/\/ke-image.ljcdn.com\/frame\/plan.jpeg!m_fit" } }),
+    JSON.stringify({ 另一张: "https:\u002f\u002fke-image.ljcdn.com\u002fframe\u002fplan2.jpeg!m_fit" }),
+  ].join("\n");
+  const images = extractEstateImageUrls({ data: body, ok: true });
+  assert.equal(images.length, 2, `应提取 2 张图，实际 ${JSON.stringify(images)}`);
+  assert.match(images[0]!, /^https:\/\/ke-image\.ljcdn\.com\/frame\/plan\.jpeg/);
+});
+
+test("户型图空态文案：已查询但无图与未查询必须分开表述", async () => {
+  const { floorPlanCellLabel } = await import("../../src/client/modules/conclusion-media.js");
+  // material 查过、贝壳没返回户型图 → 如实说房源未上传
+  assert.equal(floorPlanCellLabel({ images: [], floorPlanQueried: true }), "该房源未上传户型图");
+  // 根本没查 material → 不能冤枉房源说它没上传
+  assert.equal(floorPlanCellLabel({ images: [], floorPlanQueried: false }), "未查询户型图");
+  // 有图时不需要任何占位文案
+  assert.equal(floorPlanCellLabel({ images: [{ src: "https://ke-image.ljcdn.com/a.jpg", alt: "户型图" }], floorPlanQueried: true }), "");
+});

@@ -12,7 +12,7 @@
   <img alt="Hono" src="https://img.shields.io/badge/Hono-4.x-E36002">
   <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3.x-42B883">
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6.x-646CFF">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.23-F59E0B">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.9.0--beta.24-F59E0B">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2EA043">
 </p>
 
@@ -45,7 +45,7 @@ agentatlas 是一个基于 **LangGraph.js + TypeScript** 构建的本地优先 A
 | 多 Agent | 通用、房产、求职三类独立 Agent；主 Agent 可向子代理动态授予模型、提示词和工具子集 |
 | 工具系统 | 文件读写、终端、代码检索、RAG、Browser Use、Computer Use、MCP 与业务工具 |
 | 模型供应商 | 多供应商、多模型配置，支持 OpenAI Chat、Responses、Anthropic 与 Gemini 协议 |
-| 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新恢复、上下文压缩、检查点和本地 / HTTP 长期记忆；上下文条精简展示占比、请求量、缓存与输出均速 |
+| 会话与记忆 | 个性化默认上下文、SSE 流式输出、多会话并行、刷新后后台生成继续并恢复「生成中」与停止按钮、上下文压缩、检查点和本地 / HTTP 长期记忆；上下文条精简展示占比、请求量、缓存与输出均速 |
 | 安全与运维 | 高风险审批、审计日志、设备静默认证、用户名密码登录与多用户管理、本地访问密码锁、按设备隔离会话、配置加密、用量统计、备份恢复、Prometheus 指标与可选 LangSmith 链路追踪 |
 
 ## 界面预览
@@ -329,15 +329,15 @@ curl -N -X POST http://127.0.0.1:3000/api/chat \
 
 ## 版本与发布
 
-当前为 `0.9.0-beta.23` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
+当前为 `0.9.0-beta.24` 开发预览。`package.json.version` 是唯一产品版本源，前端、健康探针、诊断和镜像都使用自动生成的构建身份，不再手工维护日期版本。
 
 ```text
-0.9.0-beta.23 · 构建标识由当前提交自动生成
+0.9.0-beta.24 · 构建标识由当前提交自动生成
 ```
 
 - 每次合并到 `main` 都必须提升版本：beta/rc 线路递增 `N`，alpha 不得直接进入 `main`。
 - `0.7.x` 是同一功能线的小功能点/修复；`0.x.0` 是新的大功能组，可能包含破坏性调整；`x.0.0` 才是正式主版本。
-- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.23` 形式。
+- 当前阶段不创建 Git tag；达到发布条件后使用 `v0.9.0-beta.24` 形式。
 - `/healthz`、`/readyz` 与 `/api/version` 会返回版本、渠道、提交和 buildId。
 - 生产镜像使用不可变 digest，不使用 `latest`。
 - 版本规则由 `npm run version:check` 与 `npm run version:main-guard` 执行；开发规范维护在 `.plans/development-docs/versioning.md`（不提交）。

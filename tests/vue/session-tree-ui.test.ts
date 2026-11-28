@@ -123,6 +123,18 @@ describe("会话树", () => {
     expect(second.querySelector(".s-pending")).not.toBeNull();
   });
 
+  it("页面刷新后本地无流：服务端 running=true 也要显示「生成中」", async () => {
+    // 真实场景：生成中刷新页面 → state.streams 清空，只有 /api/sessions 的
+    // running 字段还在。侧栏必须靠它还原标记，否则看起来像没人跑。
+    state.streams = {};
+    state.sessions[0]!.running = true;
+    await mountPanel();
+    const item = [...document.querySelectorAll("#session-list .session-item")]
+      .find((el) => el.textContent?.includes("会话甲")) as HTMLElement;
+    expect(item.querySelector(".s-running")).not.toBeNull();
+    state.sessions[0]!.running = false;
+  });
+
   it("搜索时分组头不可折叠（static）并强制展开", async () => {
     state.projCollapsed = ["p1"];
     await mountPanel();

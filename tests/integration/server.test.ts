@@ -507,6 +507,8 @@ test("审批：interrupt 后保留 pending，批准能恢复并执行工具", as
   const sessions = await json("/api/sessions");
   const pending = sessions.body.find((item: { id: string }) => item.id === sessionId);
   assert.equal(pending?.pendingApproval, true, "interrupt 后 done 不能清掉待审批状态");
+  // 待审批不算「生成中」：图已经停下等人，界面上不该同时挂着停止按钮。
+  assert.equal(pending?.running, false, "interrupt 结束后 running 必须为 false");
 
   const resumed = await readSse("/api/resume", { sessionId, decision: "approve" });
   const result = resumed.events.find((event) => event.type === "tool_result");

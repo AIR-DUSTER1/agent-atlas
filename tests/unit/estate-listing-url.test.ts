@@ -66,8 +66,9 @@ test("mergeProperty 的字段白名单必须覆盖 ConclusionProperty 的全部�
   assert.ok(whitelist, "未找到 mergeProperty 的字符串字段白名单");
   const listed = new Set([...whitelist.matchAll(/"(\w+)"/g)].map((m) => m[1] as string));
 
-  // images / location / hasVr / listingKind 有各自的赋值分支或必填，不在字符串白名单里
-  const handledElsewhere = new Set(["houseId", "images", "location", "hasVr", "listingKind"]);
+  // images / location / hasVr / listingKind / floorPlanQueried 有各自的赋值分支或必填，
+  // 不在字符串白名单里（floorPlanQueried 是布尔，用 trim 文本判断会永远丢掉 true）
+  const handledElsewhere = new Set(["houseId", "images", "location", "hasVr", "listingKind", "floorPlanQueried"]);
   const missing = declared.filter((key) => !listed.has(key) && !handledElsewhere.has(key));
   assert.deepEqual(
     missing,
@@ -76,4 +77,19 @@ test("mergeProperty 的字段白名单必须覆盖 ConclusionProperty 的全部�
   );
   // listingKind 必须真的有分支处理（只出白名单不算）
   assert.match(source, /if \(patch\.listingKind\) row\.listingKind = patch\.listingKind/);
+});
+
+test("floorPlanQueried 必须有真实赋值分支（否则「未上传户型图」永远判不出来）", async () => {
+  // 结论表要区分「查过 material 但贝壳没图」与「根本没查」。前者只能由
+  // material 分支显式打标记，白名单里出现字符串键不算数（布尔字段必须单独赋值）。
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../../src/client/modules/conclusion-media.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /if \(patch\.floorPlanQueried\) row\.floorPlanQueried = true/);
+  // material 分支必须无条件打标记（不能只在有图/有 VR 时打）
+  const materialBranch = source.match(/if \(action === "material"\) \{([\s\S]*?)\n    \}/)?.[1] ?? "";
+  assert.ok(materialBranch, "未找到 material 分支");
+  assert.match(materialBranch, /floorPlanQueried: true/, "material 分支必须标记已查询户型图");
 });

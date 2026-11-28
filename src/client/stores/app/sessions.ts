@@ -136,7 +136,8 @@ export const useSessionsStore = defineStore("sessions", {
           time: sessionTimeLabel(session.createdAt),
           active: session.id === state.currentId,
           stale: Boolean(session.stale),
-          running: Boolean(state.streams[session.id]),
+          // 本浏览器正在收流，或服务端仍在生成（刷新后靠后者还原「生成中」）。
+          running: Boolean(state.streams[session.id]) || Boolean(session.running),
           pending: Boolean(session.pendingApproval),
         };
       }

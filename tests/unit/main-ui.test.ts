@@ -71,10 +71,14 @@ test("多个会话可并行生成，切换会话不再被全局流状态拦截",
 
   assert.match(turn, /state\.streams\[sid\]/);
   assert.match(turn, /syncComposerState\(sid\)/);
-  assert.match(turn, /state\.streams\[state\.currentId\]\?\.ctrl\.abort\(\)/);
+  // 停止必须同时通知服务端：断连只 detach 不取消，只 abort 本地流会让后台继续跑。
+  assert.match(turn, /const local = state\.streams\[sid\]/);
+  assert.match(turn, /local\.ctrl\.abort\(\)/);
+  assert.match(turn, /\/api\/sessions\/\$\{sid\}\/stop/);
   assert.match(navigation, /export function selectSession\(sid: string\): void \{\s*closeComposerMenu\(\);/);
   assert.doesNotMatch(navigation, /当前正在生成回复，请先停止或等待完成/);
-  assert.match(store, /running: Boolean\(state\.streams\[session\.id\]\)/);
+  // 侧栏「生成中」= 本地流 或 服务端 running（刷新后只剩后者）。
+  assert.match(store, /Boolean\(state\.streams\[session\.id\]\) \|\| Boolean\(session\.running\)/);
   assert.match(vue, /class="s-running"/);
   assert.match(events, /const visible = sid === state\.currentId/);
 });

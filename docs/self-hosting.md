@@ -59,13 +59,13 @@ docker compose build
 
 ```bash
 docker build \
-  --build-arg IMAGE_VERSION=0.9.0-beta.23 \
+  --build-arg IMAGE_VERSION=0.9.0-beta.24 \
   --build-arg GIT_COMMIT=<commit> \
   --build-arg BUILD_TIME=<ISO-8601> \
   --build-arg RELEASE_CHANNEL=beta \
-  -t registry.example.com/agentatlas:0.9.0-beta.23 .
-docker push registry.example.com/agentatlas:0.9.0-beta.23
-docker image inspect registry.example.com/agentatlas:0.9.0-beta.23 \
+  -t registry.example.com/agentatlas:0.9.0-beta.24 .
+docker push registry.example.com/agentatlas:0.9.0-beta.24
+docker image inspect registry.example.com/agentatlas:0.9.0-beta.24 \
   --format '{{index .RepoDigests 0}}'
 ```
 

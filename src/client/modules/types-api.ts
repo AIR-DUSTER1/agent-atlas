@@ -299,6 +299,11 @@ export interface Session {
   title: string;
   createdAt: number;
   pendingApproval?: boolean;
+  /**
+   * 服务端仍在生成该会话。刷新页面后 state.streams 全丢，只能靠这个字段
+   * 还原侧栏「生成中」；本地正在收流时以 state.streams 为准（两者取或）。
+   */
+  running?: boolean;
   permissionMode?: PermissionModeId;
   /** 服务端已无此会话（重启后仅本地残留）：只读 */
   stale?: boolean;

@@ -122,7 +122,67 @@ export async function loadSessionList(): Promise<void> {
     ...keepStale,
   ];
   renderSessions();
+  syncRunningPoll();
 }
+
+/**
+ * 生成态轮询间隔。为什么需要轮询：后台生成时本浏览器可能已经和那条 SSE 断开
+ * （刷新 / 网络抖动），收不到 done 就永远不知道什么时候结束；只有服务端知道。
+ * 3s 是「侧栏标记不显得卡」与「空闲时零请求」之间的折中 —— 没有运行中的会话
+ * 时定时器直接停掉，不会常驻轮询。
+ */
+const RUNNING_POLL_MS = 3_000;
+let runningPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 本浏览器或服务端还有会话在生成 —— 决定要不要继续轮询。 */
+function hasRunningSession(): boolean {
+  return state.sessions.some((s) => s.running || state.streams[s.id]);
+}
+
+/** 只有确实存在后台生成时才挂轮询；全部结束后立即摘掉，避免空闲流量。 */
+function syncRunningPoll(): void {
+  const needed = hasRunningSession();
+  if (needed && !runningPollTimer) {
+    runningPollTimer = setInterval(() => { void refreshRunningState(); }, RUNNING_POLL_MS);
+  } else if (!needed && runningPollTimer) {
+    clearInterval(runningPollTimer);
+    runningPollTimer = null;
+  }
+}
+
+/**
+ * 只同步「是否仍在生成」，不整表替换会话：整表替换会打断本地标题、pending 状态
+ * 与滚动位置，而这些都不该因为一次轮询而抖动。
+ */
+async function refreshRunningState(): Promise<void> {
+  let list: Session[];
+  try {
+    list = await api<Session[]>("/api/sessions");
+  } catch {
+    return; // 网络抖动：下一轮再试，不打断界面
+  }
+  const runningIds = new Set(list.filter((s) => s.running).map((s) => s.id));
+  let changed = false;
+  for (const session of state.sessions) {
+    if (session.stale) continue;
+    const next = runningIds.has(session.id);
+    if (Boolean(session.running) !== next) {
+      session.running = next;
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderSessions();
+    if (state.currentId) void import("../../stream/turn.js").then((m) => m.syncComposerState(state.currentId)).catch(() => {});
+  }
+  syncRunningPoll();
+}
+
+/** 代码外显式刷新一次后台生成态（发消息开始 / 结束后调用，别等轮询周期）。 */
+export function scheduleRunningCheck(): void {
+  syncRunningPoll();
+}
+
 
 /** 历史回放中的 interrupt 只代表运行时中断：审批/澄清恢复 pending 时再次可操作 */
 export function markInterruptsResolved(sid: string): boolean {
