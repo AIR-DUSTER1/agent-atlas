@@ -38,10 +38,15 @@ npm run typecheck
 node --import tsx --test --test-concurrency=1 tests/integration/server.test.ts tests/security/http.test.ts tests/unit/architecture.test.ts
 ```
 
-按改动补充 persistence、auth、stream、observability、release-check 测试。涉及部署面时使用 `$agentatlas-release-ops`。
+按改动补充 persistence、auth、stream、observability、release-check 测试见
+`references/verification-matrix.md`。涉及部署面时使用 `$agentatlas-release-ops`。
+
+## 按需深入（渐进式披露）
+
+- 选测试矩阵 / 补集成回归 → `references/verification-matrix.md`。
+- 认证、TLS、Cookie、备份与迁移的完整契约以 `docs/security-and-tls.md` 与部署文档为权威。
 
 ## 收尾
 
 - 更新 README 的外部契约和 `.plans/development-docs/agent-wiki.md`。
-- 新接口必须在临时端口做成功与失败路径手测，不消耗真实模型配额。
 - 任何新增例外必须有测试和书面理由，不得静默加入放行列表。

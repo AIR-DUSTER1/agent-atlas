@@ -4,6 +4,22 @@
 > 本文件只收录本项目**实际用到或已评估**的组件；需要新组件时先跑
 > `npx antdv info <C> --ver 1.5.2`，再把结论补进来，不要凭记忆加。
 
+## 场景选型速查
+
+| 场景 | 用 | 不要用 |
+|---|---|---|
+| 提交/取消按钮 | `Button`（`htmlType="submit"`） | 手写 `<button class="btn">` |
+| 单行 / 多行文本 | `Input` / `Input.TextArea` | 手写 `ui-config-control` |
+| 密码 | `Input.Password`（自带切换 + `aria-pressed`） | 手写密码框+眼睛按钮 |
+| 开关 | `Switch`（原生 `role="switch"` + `aria-checked`） | 手写 role=switch 的 checkbox |
+| 互斥选项 ≤4 | `Segmented` | `Select`（浮层成本不划算） |
+| 下拉 | 无 `selectOption` 断言才用 `Select` | 有原生 select 断言时用 `<select>` |
+| 服务端/区块错误 | `Alert` | 手写 `<p class="error">` |
+| 字段校验错误 | 自建 `<p role="alert">` | `FormItem` 的 `help` |
+| 空态 / 标签 | `Empty` / `Tag` | 手写 `.empty` / `.chip` |
+| 二次确认 | `Popconfirm` 或项目 `uiConfirm` | `window.confirm` |
+| 弹窗 | 项目既有 `#*-modal` 骨架 | `Modal`（会破坏遮罩与焦点契约） |
+
 ## 国际化与主题
 
 ```ts

@@ -14,6 +14,9 @@ export const SKILLS_DIR = join(PROJECT_ROOT, ".agents", "skills");
 export const AGENTS_MAX_BYTES = 18_000;
 export const SKILL_MAX_BYTES = 8_000;
 export const SKILL_MAX_LINES = 120;
+/** 渐进式披露：references/ 深表的单文件预算。超过说明该拆第二层或回流 SKILL 精选。 */
+export const REFERENCE_MAX_BYTES = 20_000;
+export const REFERENCE_MAX_LINES = 300;
 
 export const EXPECTED_SKILLS = {
   "agentatlas-agent-runtime": ".plans/development-docs/agent-orchestration.md",
@@ -140,6 +143,33 @@ export async function validateProjectSkills(root = PROJECT_ROOT): Promise<Projec
     }
     if (bytes > SKILL_MAX_BYTES) issues.push(`${name}/SKILL.md 过大：${bytes} > ${SKILL_MAX_BYTES}`);
     if (lines > SKILL_MAX_LINES) issues.push(`${name}/SKILL.md 行数过多：${lines} > ${SKILL_MAX_LINES}`);
+
+    // 渐进式披露契约：SKILL.md 只留路由与红线，深表进 references/；
+    // SKILL.md 必须声明按需深入段并显式引用每个 references 文件（防孤儿），
+    // 被引用的文件必须存在（防死链），references 文件自身有大小预算（防转移膨胀）。
+    if (!text.includes("按需深入")) issues.push(`${name}/SKILL.md 缺少「按需深入」渐进式披露段`);
+    const refsDir = join(skillDir, "references");
+    const refEntries = await readdir(refsDir, { withFileTypes: true }).catch(() => []);
+    const refFiles = refEntries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+      .map((entry) => entry.name);
+    for (const refName of refFiles) {
+      if (!text.includes(refName)) {
+        issues.push(`${name}/references/${refName} 未被 SKILL.md 引用（孤儿深表，路由不到等于死内容）`);
+      }
+      const refPath = join(refsDir, refName);
+      const refText = await readRequired(refPath, issues);
+      if (refText === null) continue;
+      const refInfo = await stat(refPath).catch(() => null);
+      const refBytes = refInfo?.size ?? Buffer.byteLength(refText, "utf8");
+      const refLines = refText.split(/\r?\n/).length - (refText.endsWith("\n") ? 1 : 0);
+      if (refBytes > REFERENCE_MAX_BYTES) issues.push(`${name}/references/${refName} 过大：${refBytes} > ${REFERENCE_MAX_BYTES} bytes`);
+      if (refLines > REFERENCE_MAX_LINES) issues.push(`${name}/references/${refName} 行数过多：${refLines} > ${REFERENCE_MAX_LINES}`);
+    }
+    for (const refMatch of text.matchAll(/references\/([\w.-]+\.md)/g)) {
+      const refName = refMatch[1] ?? "";
+      if (!refFiles.includes(refName)) issues.push(`${name}/SKILL.md 引用了不存在的 references/${refName}`);
+    }
 
     const yamlPath = join(skillDir, "agents", "openai.yaml");
     const yaml = await readRequired(yamlPath, issues);

@@ -27,6 +27,9 @@ agentatlas 是 LangGraph.js（TypeScript）实现的本地优先 Agent 工作台
 - 本文件始终生效；Skill 只补充任务流程，不得覆盖 L0 红线。
 - 一个任务跨越多个领域时可以组合 Skill，但不得复制出第三套规则。
 - 新增规则先分类：常驻红线、领域 Skill、用户/运维契约、开发计划或自动测试；禁止把长篇流程继续塞回本文件。
+- Skill 本体采用渐进式披露：`SKILL.md` 只留路由、红线与流程骨架，深表放
+  `.agents/skills/<name>/references/*.md` 并在 SKILL.md 显式引用（`npm run skills:check`
+  校验引用存在、无孤儿文件与大小预算）。
 
 ## 3. 技术栈红线
 

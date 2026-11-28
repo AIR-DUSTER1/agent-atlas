@@ -26,27 +26,17 @@ description: "准备 agentatlas 版本发布、Docker 镜像、部署、升级�
 
 ## 验证顺序
 
-```bash
-# main 合并前：单一入口复刻 GitHub CI
-git fetch origin main
-npm run ci:verify
+`main` 合并前的单一入口是 `git fetch origin main && npm run ci:verify`——它完整复刻
+GitHub CI；排查局部失败时可单独运行门禁命令，但**不能替代 ci:verify**（完整命令块见
+`references/ci-evidence.md`）。Docker daemon 不可用时，明确报告阻断项，不得用静态检查冒充镜像验收。
 
-# 仅排查局部失败时可单独运行下列命令，但不能替代 ci:verify
-npm run skills:check
-npm run version:check
-VERSION_BASE_REF=origin/main npm run version:main-guard
-npm run typecheck
-npm run test:vue
-npm test
-npm run e2e
-npm run image:smoke
-```
+## 按需深入（渐进式披露）
 
-按发布影响补充 SBOM、覆盖率、备份恢复和镜像 digest 记录。Docker daemon 不可用时，明确报告阻断项，不得用静态检查冒充镜像验收。
+- 排查单个门禁失败 / 准备交付证据清单 → `references/ci-evidence.md`。
+- 版本递增细则与镜像发布流程以 `.plans/development-docs/versioning.md`、
+  `docs/deployment.md`、`docs/production-checklist.md` 为权威。
 
 ## 交付证据
 
-- 记录版本、buildId、commit、镜像标签与 digest。
-- 记录真实执行过的命令和结果，不只引用文档。
-- 版本或部署行为变化时更新 `.plans/development-docs/versioning.md`、部署文档和 `.plans/development-docs/readiness-snapshot.md`。
-- 若只完成代码改动而未发布，明确说明“未 push、未 tag、未部署”。
+记录版本、buildId、commit、镜像标签与 digest，以及真实执行过的命令和结果——
+完整清单见 `references/ci-evidence.md`。若只完成代码改动而未发布，明确说明"未 push、未 tag、未部署"。

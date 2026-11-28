@@ -36,14 +36,13 @@ npm run typecheck
 node --import tsx --test --test-concurrency=1 tests/unit/tool-isolation.test.ts tests/unit/tool-risk.test.ts tests/unit/permission.test.ts tests/unit/workflow.test.ts
 ```
 
-再按领域补充：
+按改动领域补充测试见 `references/verification.md`。交付前仍要执行 `AGENTS.md` §7 的完整质量门。
 
-- 子代理/路由：`tests/integration/subagents.test.ts`、`tests/unit/routing-*.test.ts`
-- 记忆：`tests/unit/memory*.test.ts`
-- 房产/求职：`tests/unit/tools-job.test.ts`、领域结果与审批测试
-- SSE/HTTP 契约：`tests/integration/server.test.ts`、`tests/unit/stream.test.ts`
+## 按需深入（渐进式披露）
 
-交付前仍要执行 `AGENTS.md` §7 的完整质量门。
+- 选测试矩阵 / 确认改动该跑哪些领域回归 → `references/verification.md`。
+- 领域编排细节（图接线、记忆 slot、路由打分的完整设计）以
+  `.plans/development-docs/agent-orchestration.md` 为权威，本技能只留红线与流程。
 
 ## 收尾
 

@@ -15,11 +15,9 @@ description: "修改 agentatlas Web 前端、HTML 片段、CSS、设置页、可
 
 ## 页面目录规范（工程规范 §4.1）
 
-- **一个页面一个目录**：`views/<page>/`。页面专属的 SFC、legacy 桥、Vue 挂载模块同目录。
-- `views/` 根目录不得有文件；`src/client/apps/` 与 `src/client/pages/` 均已退役不得回流。
-- 设置页分区必须在 `views/settings/<view>/`，且与 `stores/settings.ts` 的分区 key 一一对应。
-- 跨页共享上移到 `core/` / `modules/` / `ui/` / `stores/`；叶子页面之间不得互相 import。
-- 守门：`tests/unit/view-layout.test.ts`（6 条），`npm test` 已包含。
+一个页面一个目录：`views/<page>/`，页面专属 SFC / legacy 桥 / 挂载模块同目录；
+叶子页面不得互相 import；守门 `tests/unit/view-layout.test.ts` 已并入 `npm test`。
+完整规则（目录归属、退役目录、设置页分区对应关系）见 `references/page-structure.md`。
 
 ## 不可破坏的边界
 
@@ -51,6 +49,12 @@ node --import tsx --test --test-concurrency=1 tests/unit/view-layout.test.ts tes
 ```
 
 涉及交互时运行相关 Playwright 用例；页面、设置或消息渲染改动通常需要 `npm run e2e`。
+
+## 按需深入（渐进式披露）
+
+- 新建 / 移动页面目录、设置页分区、判断代码该落在哪一层 →
+  `references/page-structure.md`（完整目录归属规则与守门清单）。
+- antdv 组件选型与 API → `$antdv` Skill；工程规范 §4.1 / §5 是页面组织的权威文档。
 
 ## 收尾
 
