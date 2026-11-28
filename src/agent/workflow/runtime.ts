@@ -14,6 +14,7 @@ import type { AgentProfile } from "../profile.js";
 import type { dispatchToAgent } from "../../tools-team.js";
 import { createMemoryTools } from "../../tools-memory.js";
 import { updateWorkflowPlanTool } from "../../tools-plan.js";
+import { USE_SKILL_TOOL_NAME, useSkillTool } from "../../tools-skill.js";
 import { WORKFLOW_PLAN_TOOL_NAME } from "../../workflow-plan.js";
 import { withModelRetries } from "./model-adapter.js";
 import {
@@ -68,12 +69,17 @@ export function createWorkflowRuntime(
   const baseTools = planningEnabled && !hasPlanTool
     ? [...profile.tools, updateWorkflowPlanTool]
     : profile.tools;
+  // use_skill 是平台级能力（读用户技能文档，无副作用）：与流程工具同模式由
+  // 运行时注入，不进各 Profile 的 allowlist —— 子代理继承 profile.tools 缩小
+  // 集，天然不会多拿到它。技能正文按需取用（渐进式披露第三层）。
+  const hasUseSkillTool = baseTools.some((item) => item.name === USE_SKILL_TOOL_NAME);
+  const toolsWithSkills = hasUseSkillTool ? baseTools : [...baseTools, useSkillTool];
   const tools = options?.userId
     ? [
-        ...baseTools.filter((item) => item.name !== "memory_save" && item.name !== "memory_recall"),
+        ...toolsWithSkills.filter((item) => item.name !== "memory_save" && item.name !== "memory_recall"),
         ...createMemoryTools(profile.id, options.userId).memoryTools,
       ]
-    : baseTools;
+    : toolsWithSkills;
   const modelOptions = { sessionId: options?.sessionId, runtime: options?.modelRuntime };
   const agentModel = models?.agent
     ?? withModelRetries(createChatModel(0, modelOptions).bindTools(tools) as unknown as WorkflowChatModel, options?.sessionId);

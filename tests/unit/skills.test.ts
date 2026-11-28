@@ -20,7 +20,7 @@ process.env.SKILLS_DIR = skillsDir;
 await mkdir(skillsDir, { recursive: true });
 
 const {
-  listSkills, matchSkills, skillsNoteForPrompt, skillNoteForMessage,
+  listSkills, matchSkills, skillsNoteForPrompt, skillNoteForMessage, getSkillBodyById,
   saveSkill, deleteSkill, resetSkillsCache, SKILLS_DIR, importSkillFiles, setSkillEnabled,
 } = await import("../../src/skills.js");
 
@@ -206,7 +206,9 @@ triggers: 开关测试
   assert.match(raw, /enabled: false/);
   skills = await listSkills();
   assert.equal(matchSkills(skills, "执行开关测试").length, 0, "禁用后不得自动匹配");
-  assert.equal(await skillNoteForMessage("执行开关测试"), null, "禁用后不得注入上下文");
+  const noteAfterDisable = await skillNoteForMessage("执行开关测试");
+  assert.ok(noteAfterDisable, "目录仍会列出其它技能（渐进式披露第一层）");
+  assert.doesNotMatch(String(noteAfterDisable), /启停测试|启停时应该加载/, "禁用技能不得出现在目录或正文");
 
   const edited = await saveSkill({ id: "toggle-me", body: "禁用状态下编辑正文" });
   assert.equal(edited.skill.enabled, false, "编辑禁用技能不得意外重新启用");
@@ -276,6 +278,105 @@ test("删除技能：存在则删，不存在返回 removed=false", async () => 
   await writeSkill("temp.md", "临时");
   assert.equal((await deleteSkill("temp")).removed, true);
   assert.equal((await deleteSkill("temp")).removed, false);
+});
+
+/* ---------------------------------------------------------------------------
+ * 渐进式披露（目录常驻 + 命中自动注入 + use_skill 按需取用）
+ * ------------------------------------------------------------------------- */
+
+/** 前面的测试在共享目录里留了大量 bulk/multi 噪声技能（101 个 bulk 会按字母序
+ *  吃光目录预算）——渐进式披露测试必须用受控夹具，先清场再写已知技能。 */
+async function resetCatalogFixture(): Promise<void> {
+  for (const skill of await listSkills()) await deleteSkill(skill.id);
+  await writeSkill("git-commit.md", `---
+name: 写提交信息
+description: 本仓库的提交信息风格
+triggers: 提交信息, commit, 提交
+---
+
+# 写提交信息
+- 一行中文短句
+`);
+  await writeSkill("estate-help.md", `---
+name: 房产查询指南
+description: 用 house_search 与 house_lookup 查询房源并生成结论表
+---
+房产正文`);
+  resetSkillsCache();
+}
+
+test("渐进式披露：目录常驻，未命中也有目录且无正文段", async () => {
+  await resetCatalogFixture();
+  const note = await skillNoteForMessage("完全无关的消息内容");
+  assert.ok(note, "有技能时目录恒在（第一层固定小开销，取代旧机制的纯零开销）");
+  assert.match(String(note), /【技能目录】/);
+  assert.match(String(note), /use_skill/);
+  assert.match(String(note), /标识 git-commit/, "目录行必须带标识供 use_skill 取用");
+  assert.match(String(note), /本仓库的提交信息风格/, "description 是目录行的摘要来源");
+  assert.doesNotMatch(String(note), /【已加载技能】/, "未命中不得注入正文");
+});
+
+test("渐进式披露：命中时目录标注〔已自动加载〕并带正文段", async () => {
+  await resetCatalogFixture();
+  const note = await skillNoteForMessage("帮我写个提交信息");
+  assert.ok(note);
+  assert.match(String(note), /【技能目录】/);
+  assert.match(String(note), /〔已自动加载〕/, "已注入正文的技能必须在目录标注，模型不要重复取");
+  assert.match(String(note), /【已加载技能】/);
+  assert.match(String(note), /一行中文短句/);
+});
+
+test("getSkillBodyById：存在取全文、大小写不敏感、穿越标识与禁用返回 null、超长截断", async () => {
+  await resetCatalogFixture();
+  const found = await getSkillBodyById("git-commit");
+  assert.ok(found);
+  assert.equal(found.name, "写提交信息");
+  assert.match(found.body, /一行中文短句/);
+  assert.ok((await getSkillBodyById("GIT-COMMIT")) !== null, "标识大小写不敏感");
+  assert.equal(await getSkillBodyById("no-such-skill"), null);
+  assert.equal(await getSkillBodyById("../escape"), null, "路径穿越式标识直接拒绝");
+  assert.equal(await getSkillBodyById(123), null, "非字符串标识拒绝");
+
+  await writeSkill("body-clamp.md", `---\nname: 截断测试\n---\n${"x".repeat(5_000)}`);
+  const clamped = await getSkillBodyById("body-clamp");
+  assert.ok(clamped);
+  assert.match(clamped.body, /技能正文过长已截断/, "工具层取用也必须受单技能字符上限约束");
+});
+
+test("目录封顶：技能过多时截断并提示整理，注记总长有硬上限", async () => {
+  await resetCatalogFixture();
+  for (let index = 0; index < 40; index += 1) {
+    await writeSkill(`catalog-fill-${index}.md`, `---\nname: 目录填充 ${index}\ndescription: ${"描".repeat(100)}\n---\n正文`);
+  }
+  resetSkillsCache();
+  const note = await skillNoteForMessage("无关消息");
+  assert.ok(note);
+  assert.match(String(note), /因目录超长未列出/);
+  assert.ok(String(note).length < 5_000, "目录注记必须有硬上限，不随技能数无限膨胀");
+});
+
+test("use_skill 工具：按标识取全文；不存在时给中文引导而不是编造", async () => {
+  await resetCatalogFixture();
+  const { useSkillTool } = await import("../../src/tools-skill.js");
+  const hit = await useSkillTool.invoke({ id: "git-commit" });
+  const data = JSON.parse(String(hit)) as { ok: boolean; name: string; body: string };
+  assert.equal(data.ok, true);
+  assert.equal(data.name, "写提交信息");
+  assert.match(data.body, /一行中文短句/);
+
+  const miss = await useSkillTool.invoke({ id: "no-such" });
+  const missData = JSON.parse(String(miss)) as { ok: boolean; error: string };
+  assert.equal(missData.ok, false);
+  assert.match(missData.error, /技能目录/);
+});
+
+test("use_skill 由运行时注入（平台级能力），profile 自带同名工具时去重", async () => {
+  // 与 update_workflow_plan 同模式：平台级只读工具由 runtime 补进模型工具集，
+  // 不进各 Profile 的 allowlist —— 子代理继承 profile.tools 缩小集，不会多拿到。
+  const src = await readFile(new URL("../../src/agent/workflow/runtime.ts", import.meta.url), "utf8");
+  assert.match(src, /USE_SKILL_TOOL_NAME, useSkillTool/);
+  assert.match(src, /hasUseSkillTool/);
+  assert.match(src, /\[\.\.\.baseTools, useSkillTool\]/);
 });
 
 test("skill-creator 标准目录：发现、编辑、启停、删除都写回 SKILL.md", async () => {

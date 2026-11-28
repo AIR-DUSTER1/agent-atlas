@@ -1,16 +1,21 @@
 /**
  * ============================================================
- * skills.ts — 技能库（按需加载的领域指南）
+ * skills.ts — 技能库（渐进式披露的领域指南）
  * ============================================================
- * 职责：扫描 `.setting/skills/*.md`，按当前用户消息命中触发词、名称或标识挑选技能，
- * 输出可拼进 system 注记的文本。
+ * 职责：扫描 `.setting/skills/*.md`，按「渐进式披露」三层把技能供给模型：
+ *   1) 技能目录常驻 —— 每轮 system 注记带全部启用技能的紧凑目录（名称 + 标识 +
+ *      一句话描述），模型随时知道有什么可用；目录有总字符预算封顶，不随技能数膨胀；
+ *   2) 关键词命中自动注入 —— trigger / 名称 / 标识命中时正文直接进上下文
+ *      （强相关零模型成本），每轮最多 2 个、每个有字符上限；
+ *   3) 模型主动取用 —— 目录里有、但没自动加载的长尾，由模型调 use_skill 工具
+ *      按标识取全文（tools-skill.ts）。
  * 设计立场：
  *  - **技能是文档，不是代码**：只有 markdown 正文 + 少量 frontmatter 元数据，
  *    永不执行 —— 这是它敢做成「用户可自由编辑」的前提；
- *  - **按需注入**：命中 trigger / 技能名称 / 标识才进上下文，未命中零开销（不占 token）。
- *    这与「把全部指南写进系统提示词」的本质区别就在这里；
- *  - **每轮最多 2 个、每个有字符上限**：不限制技能目录总数，但本轮注入必须可控；
- *  - 关键词匹配宁少勿多（宁可漏命中让人手动点，也不要每轮都误命中）；
+ *  - **目录常驻 + 正文按需**：旧机制「未命中零开销」的代价是模型看不见目录，
+ *    关键词漏命中就等于技能不存在（技能一多必然膨胀成漏网）；改为小体积目录
+ *    常驻、正文只在需要时进上下文，skill 数量增长只增加目录行，不增加正文开销；
+ *  - 关键词匹配宁少勿多：自动注入漏了还有目录 + use_skill 兜底，不会误灌；
  *  - frontmatter 解析只支持极小子集（name / description / triggers），
  *    不引 YAML 库 —— 坏格式按「无 frontmatter 的纯正文」降级，不报错。
  */
@@ -36,6 +41,11 @@ const MAX_SKILL_CHARS = 4_000;
 const MAX_SKILL_FILE_BYTES = 200_000;
 /** 技能名长度上限 */
 const MAX_NAME_CHARS = 60;
+/** 技能目录（常驻注记）的总字符预算：目录是每轮固定开销，必须封顶——
+ *  技能数量膨胀只允许吃到这里，超出按序截断并提示整理 description。 */
+const MAX_CATALOG_CHARS = 3_000;
+/** 目录单行里描述/摘要的最大长度 */
+const MAX_CATALOG_DESC_CHARS = 80;
 /** 一次上传最多处理的文件数；前端同样限制，服务端仍做最终校验。 */
 const MAX_IMPORT_FILES = 20;
 /** 一次上传的 JSON 请求体上限，给聊天和附件请求留出共享 2MB 限额的余量。 */
@@ -269,7 +279,7 @@ export function matchSkills(skills: Skill[], userText: string): SkillMatch[] {
     .map(({ skill, hits }) => ({ skill, hits }));
 }
 
-/** 把命中的技能拼成 system 注记；未命中返回 null（零开销） */
+/** 把命中的技能拼成 system 注记；未命中返回 null（只含正文，不含目录） */
 export function skillsNoteForPrompt(matched: SkillMatch[]): string | null {
   if (!matched.length) return null;
   const blocks = matched.map(({ skill, hits }) => {
@@ -285,11 +295,72 @@ export function skillsNoteForPrompt(matched: SkillMatch[]): string | null {
   ].join("\n\n");
 }
 
-/** 一步到位：按用户消息挑技能并生成注记（agent 节点每轮调用一次） */
+/* ---------------------------------------------------------------------------
+ * 渐进式披露第一层：技能目录（常驻、封顶）
+ * ------------------------------------------------------------------------- */
+
+/** 目录单行的摘要：优先 description；没有则从正文提取纯文本前缀 */
+function catalogSummary(skill: Skill): string {
+  const base = skill.description || skill.body
+    .replace(/[#>*`|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return base.length > MAX_CATALOG_DESC_CHARS ? `${base.slice(0, MAX_CATALOG_DESC_CHARS)}…` : base;
+}
+
+/**
+ * 技能目录注记：所有启用技能的紧凑清单（名称 + 标识 + 一句话描述）。
+ * 已被本轮自动加载的技能标注〔已自动加载〕，模型不再重复取正文。
+ * 超出 MAX_CATALOG_CHARS 时按序截断并给出整理提示——目录必须封顶。
+ */
+export function skillCatalogNoteForPrompt(skills: Skill[], loadedIds: ReadonlySet<string> = new Set()): string | null {
+  const enabled = skills.filter((skill) => skill.enabled);
+  if (!enabled.length) return null;
+  const lines: string[] = [];
+  let consumed = 0;
+  let overflow = false;
+  for (const skill of enabled) {
+    const loaded = loadedIds.has(skill.id) ? "〔已自动加载〕" : "";
+    const line = `- ${skill.name}（标识 ${skill.id}）：${catalogSummary(skill)}${loaded}`;
+    if (consumed + line.length > MAX_CATALOG_CHARS) { overflow = true; break; }
+    lines.push(line);
+    consumed += line.length + 1;
+  }
+  if (overflow) {
+    lines.push(`…（其余 ${enabled.length - lines.length} 个技能因目录超长未列出；请精简 description 或关闭不常用技能）`);
+  }
+  return [
+    "【技能目录】以下是本项目可用的技能指南。与用户消息强相关的技能已自动加载全文；",
+    "其余技能确实相关时调用 use_skill(标识) 读取全文并遵循，无关时不要调用。",
+    ...lines,
+  ].join("\n");
+}
+
+/** 按标识取技能全文（use_skill 工具的后端）：标识大小写不敏感，禁用/不存在返回 null */
+export async function getSkillBodyById(idInput: unknown): Promise<{ id: string; name: string; body: string } | null> {
+  if (typeof idInput !== "string") return null;
+  const id = idInput.trim();
+  if (!isValidSkillId(id)) return null;
+  const skills = await listSkills();
+  const skill = skills.find((item) => item.id.toLowerCase() === id.toLowerCase());
+  if (!skill || !skill.enabled) return null;
+  const body = skill.body.length > MAX_SKILL_CHARS
+    ? `${skill.body.slice(0, MAX_SKILL_CHARS)}\n…（技能正文过长已截断）`
+    : skill.body;
+  return { id: skill.id, name: skill.name, body };
+}
+
+/**
+ * 一步到位：目录（常驻层）+ 命中正文（自动注入层）拼成一条 system 注记。
+ * 有技能时目录恒在（渐进式披露的固定小开销）；完全没有技能时返回 null。
+ */
 export async function skillNoteForMessage(userText: string): Promise<string | null> {
   const skills = await listSkills();
   if (!skills.length) return null;
-  return skillsNoteForPrompt(matchSkills(skills, userText));
+  const matched = matchSkills(skills, userText);
+  const catalog = skillCatalogNoteForPrompt(skills, new Set(matched.map(({ skill }) => skill.id)));
+  const loaded = skillsNoteForPrompt(matched);
+  return [catalog, loaded].filter(Boolean).join("\n\n") || null;
 }
 
 /* ---------------------------------------------------------------------------
