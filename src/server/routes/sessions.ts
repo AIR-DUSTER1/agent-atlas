@@ -12,6 +12,7 @@ import { getActiveProjectId } from "../projects.js";
 import { compactSession } from "../compaction.js";
 import { isPermissionMode, PERMISSION_MODES } from "../../agent/permission.js";
 import { writeAudit } from "../audit.js";
+import { isSessionRunning, stopRun } from "../run-registry.js";
 
 export async function handleSessions(res: import("node:http").ServerResponse, req: import("node:http").IncomingMessage): Promise<void> {
   const identity = requireUserIdentity(req, res);
@@ -23,6 +24,9 @@ export async function handleSessions(res: import("node:http").ServerResponse, re
       id: s.id, kind: s.kind, agentProfileId: s.agentProfileId, demo: s.demo, agentId: s.agentId, projectId: s.projectId, title: s.title, createdAt: s.createdAt,
       permissionMode: s.permissionMode,
       pendingApproval: Boolean(s.pendingApproval),
+      // 生成状态只能由服务端给：页面刷新后前端 state.streams 全丢，
+      // 只按本地内存判断会让「后台仍在生成的会话」看起来像空闲。
+      running: isSessionRunning(s.id),
     }))));
     return;
   }
@@ -74,8 +78,35 @@ export async function handleDeleteSession(
     return;
   }
   await closeBrowserSession(session.threadId).catch(() => {});
+  // 删除正在生成的会话：先中止后台运行，否则它跑完后会往已删除的会话里写 journal。
+  stopRun(id);
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ ok: deleteSession(id) }));
+}
+
+/** POST /api/sessions/:id/stop —— 显式停止该会话正在进行的生成。
+ *  刷新页面不再等于取消，所以「停止」必须是独立且可寻址的动作：
+ *  前端断连后仍能靠它中止后台运行，而不是等 detach 兜底超时。 */
+export async function handleStopSession(
+  res: import("node:http").ServerResponse,
+  req: import("node:http").IncomingMessage,
+  id: string,
+): Promise<void> {
+  const identity = requireUserIdentity(req, res);
+  if (!identity) return;
+  const session = getSessionForUser(id, identity.userId);
+  if (!session) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "会话不存在或不属于当前用户" }));
+    return;
+  }
+  const stopped = stopRun(id);
+  // 停止是「改世界」之外但审计价值高的动作：只记会话与结果，不落对话正文。
+  writeAudit("sessions.stop", { sessionId: id, stopped });
+  res.writeHead(stopped ? 200 : 409, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(stopped
+    ? { ok: true, stopped: true }
+    : { error: "该会话当前没有正在进行的生成", stopped: false }));
 }
 
 /** POST /api/sessions/:id/compact —— 压缩当前会话上下文（模型摘要 + 重建线程） */
@@ -114,7 +145,13 @@ export async function handleTranscript(
     return;
   }
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ records: getTurnHistory(session), pendingApproval: Boolean(session.pendingApproval) }));
+  res.end(JSON.stringify({
+    records: getTurnHistory(session),
+    pendingApproval: Boolean(session.pendingApproval),
+    // 刷新后前端 local stream 已丢：回放历史的同时告诉它这一轮还在后台跑，
+    // 否则界面会显示「已完成」而服务端仍在生成。
+    running: isSessionRunning(session.id),
+  }));
 }
 
 /** POST /api/sessions/:id/permission —— 切换会话权限模式（只读 / 审批 / 自主 / 自动）

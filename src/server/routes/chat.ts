@@ -19,6 +19,7 @@ import {
 import { getActiveId, getActiveModality, getContextWindowForActive } from "../settings.js";
 import { createContextWindowBudget } from "../../context-window.js";
 import { lifecycle } from "../lifecycle.js";
+import { beginRun, detachRun, endRun } from "../run-registry.js";
 import { writeAudit } from "../audit.js";
 import { log } from "../logging.js";
 import type { AgentEvent } from "../events.js";
@@ -116,13 +117,15 @@ async function streamToClient(
   // 登记 SSE 连接：优雅退出时 lifecycle 先写 shutdown 帧再 abort，客户端能区分
   // 「服务在重启」与「网络断了」；卸载放在 finally，避免已结束连接被反复通知。
   const unregisterSse = lifecycle.registerSse(res, () => controller.abort());
+  beginRun(session.id, controller);
   // 客户端断开检测：ServerResponse 的 close 在「响应未写完就断连」时才是真正的中止信号
-  // （req 的 close 在请求体读完时就会触发，不能用来判断断连）
+  // （req 的 close 在请求体读完时就会触发，不能用来判断断连）。
+  // 刷新页面也会走到这里 —— 但那不是「取消」，只是没人看了：只 detach 不 abort，
+  // 生成继续跑完并照常入档，用户刷新回来还能看到侧栏「生成中」与最终结果。
   res.on("close", () => {
-    if (!res.writableEnded) {
-      clientGone = true;
-      controller.abort();
-    }
+    if (res.writableEnded) return;
+    clientGone = true;
+    detachRun(session.id, controller);
   });
 
   const turn = session.turnHistory.at(-1);
@@ -205,7 +208,9 @@ async function streamToClient(
           }
         : event;
       collected.push(publicEvent);
-      writeEvent(res, publicEvent);
+      // detach 之后没人读这条流了：继续写只会堆在捕获器里（内存白白增长），
+      // 事件仍进 collected，最终照常入档，刷新回来的历史是完整的。
+      if (!clientGone) writeEvent(res, publicEvent);
       if (event.type === "interrupt") {
         recordApproval(session, event.payload);
         sawInterrupt = true;
@@ -227,13 +232,16 @@ async function streamToClient(
       incCounter("agent_model_errors_total", { model: getActiveModelLabel() || "mock", reason: "stream" });
       const message = friendlyModelError(err);
       collected.push({ type: "error", message });
-      writeEvent(res, { type: "error", message });
+      if (!clientGone) writeEvent(res, { type: "error", message });
     }
   } finally {
     clearModelRetryRecords(session.id);
     clearInterval(heartbeat);
     controller.signal.removeEventListener("abort", notifyAbort);
     unregisterSse();
+    // 运行态必须先撤登记：侧栏「生成中」与 /api/sessions 的 running 都读这张表，
+    // 晚一步用户在收尾窗口里会看到「已完成但还显示生成中」。
+    endRun(session.id, controller);
     incGauge("agent_sse_active_streams", { kind: session.kind }, -1);
     endTaskSegment(session);
     const turnStatus = controller.signal.aborted
@@ -250,7 +258,8 @@ async function streamToClient(
     // 任务累计用量：本轮只有一条，且放在 done 之前 —— 下游（外部评测适配器）
     // 取这一条就是权威口径，不必再猜「哪条 usage 是最终值」。
     // 中止/出错时也发：已消耗的 token 是事实，不该因为半路失败就消失。
-    if (!clientGone) {
+    // detach（刷新/断连）后同样入档：这一轮没有观察者，但历史记录必须完整。
+    {
       const snapshot = taskSnapshot(session);
       if (snapshot) {
         const taskEvent: AgentEvent = {
@@ -264,7 +273,7 @@ async function streamToClient(
         };
         observeTaskEvent(session, taskEvent);
         collected.push(taskEvent);
-        writeEvent(res, taskEvent);
+        if (!clientGone) writeEvent(res, taskEvent);
       }
     }
     // 被中止的部分轮也入档：历史回放时能看到「说了半截 + 停止」的真实经过

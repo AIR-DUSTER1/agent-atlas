@@ -191,6 +191,7 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
         };
       }>;
       pendingApproval?: boolean;
+      running?: boolean;
     }>(`/api/sessions/${s.id}/transcript`);
     if (state.currentId !== s.id) return;
 
@@ -257,6 +258,16 @@ export async function hydrateFromServer(s: Session | undefined): Promise<void> {
         // 否则服务端已处理但界面仍显示可提交，或服务端仍 pending 却显示已答复。
         if (hadLocal && (resolved || reopened) && !state.streams[s.id]) renderAll();
       }
+    }
+    if (typeof data.running === "boolean" && !state.streams[s.id]) {
+      // 服务端仍在生成而本浏览器没有流（刷新过）：把「生成中」补回侧栏与输入区，
+      // 这样用户看得见后台在跑，也能用停止按钮真的把它停下。
+      if (Boolean(s.running) !== data.running) {
+        s.running = data.running;
+        renderSessions();
+        if (state.currentId === s.id) syncComposerState(s.id);
+      }
+      void import("./sessions.js").then((m) => m.scheduleRunningCheck()).catch(() => {});
     }
     saveLocal();
     if (state.currentId === s.id) {

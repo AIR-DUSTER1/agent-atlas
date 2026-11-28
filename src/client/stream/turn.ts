@@ -19,7 +19,7 @@ import { mountBlock, refreshAssistantCopy, remountAssistantParts, renderAll } fr
 import { closeComposerMenu } from "../composer/menu.js";
 import { renderAttachChips } from "../views/chat/attachments.js";
 import { updateContextBar } from "../views/chat/composer-bar.js";
-import { renderSessions } from "../views/app/sessions.js";
+import { renderSessions, scheduleRunningCheck } from "../views/app/sessions.js";
 import { clearWorkflowPlan, renderWorkflowPlan } from "../views/chat/workflow-plan.js";
 import { showChatState } from "../views/app/navigation.js";
 import { mountTyping } from "../render/parts.js";
@@ -185,6 +185,7 @@ async function streamTurn(
   state.streams[sid] = markRaw(stream);
   syncComposerState(sid);
   renderSessions();
+  scheduleRunningCheck();
   const wasNear = nearBottomImpl();
   let sawDone = false;
 
@@ -287,6 +288,9 @@ export function finalize(
   }
   if (sid === state.currentId) syncComposerState(sid);
   renderSessions();
+  // 本地流结束后服务端可能还在收尾（写 journal / task_usage）：让轮询接手，
+  // 等 /api/sessions 报 running=false 才真正摘掉「生成中」。
+  scheduleRunningCheck();
   saveLocal();
 }
 
@@ -294,8 +298,11 @@ export function finalize(
 export function syncComposerState(sid: string | null = state.currentId): void {
   const session = state.sessions.find((item) => item.id === sid);
   if (!session || !sid || sid !== state.currentId) return;
-  const streaming = Boolean(state.streams[sid]);
+  // 服务端仍在生成（页面刷新后本地流已丢）也必须显示「停止」：否则用户看着
+  // 侧栏「生成中」却只能干等，唯一的按钮还是「发送」。
+  const streaming = Boolean(state.streams[sid]) || Boolean(session.running);
   const compacting = Boolean(state.compacting[sid]);
+  // 后台运行时输入框不锁（可以排队提问），但要能停下来。
   inputEl.disabled = Boolean(session.stale) || compacting;
   sendBtn.classList.toggle("hidden", streaming);
   stopBtn.classList.toggle("hidden", !streaming);
@@ -303,8 +310,48 @@ export function syncComposerState(sid: string | null = state.currentId): void {
   setStatus(streaming || compacting ? "busy" : "idle");
 }
 
+/**
+ * 停止生成。必须同时做两件事：
+ *  - 有本地流就 abort 它（界面立刻停下，不用等服务端往返）；
+ *  - **始终**请求服务端停止。断连在服务端只表示「没人看了」，不会中止生成
+ *    （这样刷新页面不会误杀回答）—— 于是「取消」必须是一条独立的显式指令，
+ *    否则用户点了停止，后台那轮还在继续烧配额。
+ */
 export function stopStreaming(): void {
-  if (state.currentId) state.streams[state.currentId]?.ctrl.abort();
+  const sid = state.currentId;
+  if (!sid) return;
+  const local = state.streams[sid];
+  if (local) {
+    local.ctrl.abort();
+  } else {
+    // 没有本地流（刷新过 / 后台生成中）：先让界面进入「停止中」，别让用户重复点。
+    syncComposerState(sid);
+  }
+  void import("../core/api.js")
+    .then(({ api }) => api<{ ok?: boolean; error?: string }>(`/api/sessions/${sid}/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }))
+    .then(() => {
+      const session = state.sessions.find((item) => item.id === sid);
+      if (session) session.running = false;
+      renderSessions();
+      syncComposerState(sid);
+      if (!local) toast("已请求停止生成", "success");
+    })
+    .catch((err: unknown) => {
+      // 409 = 服务端本来就没在跑（本地状态过期）：顺手把标记校正掉，不报错打扰。
+      const message = err instanceof Error ? err.message : String(err);
+      const session = state.sessions.find((item) => item.id === sid);
+      if (/没有正在进行的生成/.test(message)) {
+        if (session) session.running = false;
+        renderSessions();
+        syncComposerState(sid);
+        return;
+      }
+      if (!local) toast(`停止失败：${message}`, "error");
+    });
 }
 
 /** 新建会话（含 demo / external / estate 三种归属） */

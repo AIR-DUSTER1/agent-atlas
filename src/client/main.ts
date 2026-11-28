@@ -390,6 +390,9 @@ async function init(): Promise<void> {
   if (state.projects.length === 0) showWelcomeState("agent-picker");
   else if (first) selectSession(first.id);
   else showWelcomeState();
+  // 刷新回来时服务端可能还在跑上一轮（断连只 detach 不取消）：
+  // 接管生成态并启动轮询，让侧栏「生成中」与停止按钮立刻恢复。
+  void import("./views/app/sessions.js").then((m) => m.scheduleRunningCheck()).catch(() => {});
   document.documentElement.dataset.appReady = "true";
 
 

@@ -66,7 +66,7 @@ import {
 } from "./routes/users.js";
 import {
   handleCleanupSessions, handleCompactSession, handleDeleteSession, handleExportSession,
-  handleSessionPermission, handleSessions, handleTranscript,
+  handleSessionPermission, handleSessions, handleStopSession, handleTranscript,
 } from "./routes/sessions.js";
 import { handleListPlugins, handleSetPluginEnabled } from "./routes/plugins.js";
 import { handleGetRouting, handleSaveRouting, handleTestRouting } from "./routes/routing.js";
@@ -571,6 +571,7 @@ export function createApp(): Hono<AppEnv> {
   app.post("/api/sessions/cleanup", jsonRaw, withBody(async (c) => { await handleCleanupSessions(c.env.outgoing, c.env.incoming); }));
   app.delete("/api/sessions/:id", withBody(async (c) => { await handleDeleteSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.post("/api/sessions/:id/compact", jsonRaw, withBody(async (c) => { await handleCompactSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
+  app.post("/api/sessions/:id/stop", jsonRaw, withBody(async (c) => { await handleStopSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.post("/api/sessions/:id/permission", jsonRaw, withBody(async (c) => { await handleSessionPermission(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.get("/api/sessions/:id/transcript", withBody(async (c) => { await handleTranscript(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
   app.get("/api/sessions/:id/export", withBody(async (c) => { await handleExportSession(c.env.outgoing, c.env.incoming, c.req.param("id") as string); }));
